@@ -145,7 +145,9 @@ contextBridge.exposeInMainWorld("workhorse", {
   detectClaudeLogin: (input?: { recheck?: boolean }) =>
     ipcRenderer.invoke("claude:detect-login", input ?? {}) as Promise<import("./claude-login").ClaudeLoginDetectResult>,
   claudeSetupToken: () =>
-    ipcRenderer.invoke("claude:setup-token") as Promise<{ ok: boolean; message?: string }>,
+    ipcRenderer.invoke("claude:setup-token") as Promise<{ ok: boolean; message?: string; reason?: import("./claude-auth").SetupTokenReason }>,
+  claudeStoreToken: (token: string) =>
+    ipcRenderer.invoke("claude:store-token", token) as Promise<{ ok: boolean; message?: string }>,
   claudePrompt: (input: GrokPromptInput) => ipcRenderer.invoke("claude:prompt", input),
   claudeAnswerPermission: (requestId: string, answer: PermissionAnswer) =>
     ipcRenderer.invoke("claude:answer-permission", { requestId, answer }),

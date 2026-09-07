@@ -10115,3 +10115,34 @@ html.pane-dragging * {
 .bot-offered-failed {
   color: var(--danger);
 }
+
+.claude-sign-in {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.claude-sign-in .actions {
+  align-items: center;
+  gap: 8px;
+}
+
+.claude-sign-in-paste {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.claude-sign-in-paste code {
+  align-self: flex-start;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: var(--panel-2, rgba(255, 255, 255, 0.06));
+  font-size: 12px;
+  user-select: all;
+}
+
+.claude-sign-in-paste input {
+  flex: 1;
+  min-width: 220px;
+}

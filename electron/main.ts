@@ -16,7 +16,8 @@ import { detectCodexLogin } from "./codex-login";
 import { archiveWorkhorseWorkerThreads, detectCodexRuntime, listCodexNativeThreads } from "./codex-app-server";
 import { codexCapabilitySummary } from "./codex-capabilities";
 import { detectClaudeLogin, resolveClaudeCliBinary } from "./claude-login";
-import { forgetClaudeRefusalWithoutToken, markClaudeTokenRejected, setStoredClaudeTokenReader } from "./claude-stored-token";
+import { forgetClaudeRefusalWithoutToken, markClaudeTokenRejected, resetClaudeTokenRejection, setStoredClaudeTokenReader } from "./claude-stored-token";
+import { claudeTokenComplaint, looksLikeClaudeToken } from "../src/lib/claude-token";
 import { detectCursorLogin } from "./cursor-login";
 import { runClaudeSetupToken } from "./claude-auth";
 import { detectCustomLogin, fillEmptyCustomBotKeys, hydrateDetectedCustomCredentials, openClawKeyForBaseUrl } from "./custom-login";
@@ -1925,9 +1926,32 @@ app.whenReady().then(async () => {
     if (input && typeof input === "object" && input.recheck === true) forgetClaudeRefusalWithoutToken();
     return detectClaudeLogin();
   });
+  /** Store a Claude token and let the next detect see it. Never logs the value. */
+  const keepClaudeToken = (token: string): { ok: boolean; message?: string } => {
+    try {
+      credentialStore().put(token, CLAUDE_TOKEN_ID);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Could not store the token.";
+      mainLog.record("claude-auth", `store failed ${message}`);
+      return { ok: false, message };
+    }
+    // A stored token is a different token, so whatever refusal the desk was
+    // holding no longer describes the login it has.
+    resetClaudeTokenRejection();
+    mainLog.record("claude-auth", "token stored");
+    return { ok: true };
+  };
+  ipcMain.handle("claude:store-token", (_event, raw: unknown) => {
+    const token = typeof raw === "string" ? raw.trim() : "";
+    if (!looksLikeClaudeToken(token)) {
+      return { ok: false, message: claudeTokenComplaint(token) ?? "That is not a Claude token." };
+    }
+    return keepClaudeToken(token);
+  });
   ipcMain.handle("claude:setup-token", async (event) => {
     const cli = resolveClaudeCliBinary();
-    if (!cli) return { ok: false, message: "Claude Code CLI not found." };
+    if (!cli) return { ok: false, reason: "failed" as const, message: "Claude Code CLI not found." };
+    mainLog.record("claude-auth", "setup-token started");
     const result = await runClaudeSetupToken({
       cli,
       onOutput: (data) => {
@@ -1936,12 +1960,12 @@ app.whenReady().then(async () => {
         }
       },
     });
-    if (!result.ok || !result.token) return { ok: false, message: result.message ?? "Sign-in failed." };
-    try {
-      credentialStore().put(result.token, CLAUDE_TOKEN_ID);
-    } catch (error) {
-      return { ok: false, message: error instanceof Error ? error.message : "Could not store the token." };
+    if (!result.ok || !result.token) {
+      mainLog.record("claude-auth", `setup-token ${result.reason ?? "failed"}: ${result.message ?? ""}`.trim());
+      return { ok: false, reason: result.reason ?? "failed", message: result.message ?? "Sign-in failed." };
     }
+    const kept = keepClaudeToken(result.token);
+    if (!kept.ok) return { ok: false, reason: "failed" as const, message: kept.message };
     // Nothing to apply: the reader registered at startup reads the vault live,
     // so the next detect and the next Claude launch both see this token.
     return { ok: true };

@@ -1,5 +1,8 @@
 import { spawn } from "node:child_process";
+import fs from "node:fs";
 import { deskToolEnv } from "./desk-path";
+import { ptyRunner, stripTerminalCodes, wantsEnter, type PtyRunnerInput } from "./claude-pty";
+import { CLAUDE_OAUTH_TOKEN_PATTERN } from "../src/lib/claude-token";
 
 /**
  * `claude auth login` writes the shared credential store, so using it here
@@ -7,12 +10,19 @@ import { deskToolEnv } from "./desk-path";
  * long-lived token for a second client instead, which Workhorse keeps in its
  * own vault and passes as CLAUDE_CODE_OAUTH_TOKEN. The two then coexist.
  */
-export const CLAUDE_OAUTH_TOKEN_PATTERN = /\bsk-ant-[A-Za-z0-9_-]{20,}\b/;
+export { CLAUDE_OAUTH_TOKEN_PATTERN };
 
-export type SetupTokenResult = { ok: boolean; token?: string; message?: string };
+/**
+ * Why a sign-in did not finish. `needs_terminal` is the one the card acts on:
+ * this desk cannot make a terminal, so the person runs the command in their
+ * own and pastes the token back.
+ */
+export type SetupTokenReason = "needs_terminal" | "timed_out" | "failed";
+
+export type SetupTokenResult = { ok: boolean; token?: string; message?: string; reason?: SetupTokenReason };
 
 export function findClaudeOauthToken(output: string): string | null {
-  const match = output.match(CLAUDE_OAUTH_TOKEN_PATTERN);
+  const match = stripTerminalCodes(output).match(CLAUDE_OAUTH_TOKEN_PATTERN);
   return match ? match[0] : null;
 }
 
@@ -20,7 +30,12 @@ export type SetupTokenInput = {
   cli: string;
   onOutput?: (chunk: string) => void;
   spawnFn?: typeof spawn;
+  /** How long the whole flow may take, browser approval included. */
   timeoutMs?: number;
+  /** How long a silent start is allowed before this is called no terminal at all. */
+  quietMs?: number;
+  /** Injected so tests never look at this machine for a Python. */
+  pty?: PtyRunnerInput;
 };
 
 /**
@@ -33,47 +48,118 @@ export function setupTokenEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.Pro
   return deskToolEnv(base, { NO_BROWSER: "" });
 }
 
-/** Runs the token flow, streaming its output so the sign-in stays visible. */
+/**
+ * What the flow may show. The terminal it runs prints the token, and the
+ * renderer has no use for it: the desk stores it and the card reads the
+ * result. So the stream is stripped, redacted, and emitted a whole line at a
+ * time — a half-written token cannot be redacted, and must not be sent.
+ */
+export function sanitizeSetupTokenOutput(text: string): string {
+  return stripTerminalCodes(text).replace(new RegExp(CLAUDE_OAUTH_TOKEN_PATTERN, "g"), "[token hidden]");
+}
+
+export const NEEDS_TERMINAL_MESSAGE =
+  "Signing in needs a terminal this desk cannot make. Run the command below in your own terminal, then paste the token here.";
+
+/**
+ * Runs the token flow under a pseudo-terminal, streaming its output so the
+ * sign-in stays visible.
+ *
+ * Without a terminal the CLI prints nothing whatsoever and waits, so a desk
+ * that cannot make one says so at once instead of holding a spinner for five
+ * minutes. A start that stays silent is treated the same way: whatever the
+ * reason, there is nothing for the person to act on, and the paste path is.
+ */
 export function runClaudeSetupToken(input: SetupTokenInput): Promise<SetupTokenResult> {
   const spawnFn = input.spawnFn ?? spawn;
+  const runner = ptyRunner([input.cli, "setup-token"], {
+    existsSync: (filePath: string) => fs.existsSync(filePath),
+    realpathSync: (filePath: string) => fs.realpathSync(filePath),
+    ...input.pty,
+  });
+  if (!runner) {
+    return Promise.resolve({ ok: false, reason: "needs_terminal", message: NEEDS_TERMINAL_MESSAGE });
+  }
   return new Promise((resolve) => {
     let child;
     try {
-      child = spawnFn(input.cli, ["setup-token"], {
-        stdio: ["ignore", "pipe", "pipe"],
+      child = spawnFn(runner.command, runner.args, {
+        stdio: ["pipe", "pipe", "pipe"],
         env: setupTokenEnv(),
       });
     } catch (error) {
-      resolve({ ok: false, message: error instanceof Error ? error.message : String(error) });
+      resolve({ ok: false, reason: "failed", message: error instanceof Error ? error.message : String(error) });
       return;
     }
     let seen = "";
+    let shown = "";
     let settled = false;
+    let answeredPrompt = false;
+    /** Whole lines only, so a token split across two chunks is never emitted. */
+    const show = (final: boolean) => {
+      if (!input.onOutput) return;
+      const safe = sanitizeSetupTokenOutput(seen);
+      const upto = final ? safe.length : safe.lastIndexOf("\n") + 1;
+      if (upto <= shown.length) return;
+      input.onOutput(safe.slice(shown.length, upto));
+      shown = safe.slice(0, upto);
+    };
+    const timers: NodeJS.Timeout[] = [];
     const finish = (result: SetupTokenResult) => {
       if (settled) return;
       settled = true;
+      for (const timer of timers) clearTimeout(timer);
+      show(true);
       resolve(result);
+    };
+    const stop = (result: SetupTokenResult) => {
+      try {
+        child.kill();
+      } catch {
+        /* it may already be gone */
+      }
+      finish(result);
     };
     const read = (chunk: Buffer | string) => {
       const text = chunk.toString();
       seen += text;
-      input.onOutput?.(text);
+      // The prompt only appears when the CLI could not open the browser
+      // itself. Answering it here keeps the flow moving without the person
+      // having to reach a terminal the desk is holding.
+      if (!answeredPrompt && wantsEnter(seen)) {
+        answeredPrompt = true;
+        try {
+          child.stdin?.write("\n");
+        } catch {
+          /* the child may have gone */
+        }
+      }
+      show(false);
     };
     child.stdout?.on("data", read);
     child.stderr?.on("data", read);
-    child.once("error", (error: Error) => finish({ ok: false, message: error.message }));
-    const timer = setTimeout(
-      () => {
-        child.kill();
-        finish({ ok: false, message: "Sign-in timed out." });
-      },
-      input.timeoutMs ?? 5 * 60_000,
+    child.once("error", (error: Error) => finish({ ok: false, reason: "failed", message: error.message }));
+    timers.push(
+      setTimeout(() => {
+        // Escapes are not words. A terminal that has only drawn is a terminal
+        // that has said nothing, and the person still has nothing to act on.
+        if (stripTerminalCodes(seen).trim()) return;
+        stop({ ok: false, reason: "needs_terminal", message: NEEDS_TERMINAL_MESSAGE });
+      }, input.quietMs ?? 25_000),
+    );
+    timers.push(
+      setTimeout(() => {
+        // The person may have approved it a moment before the clock ran out.
+        // A token that was printed is a sign-in that worked.
+        const late = findClaudeOauthToken(seen);
+        stop(late ? { ok: true, token: late } : { ok: false, reason: "timed_out", message: "Sign-in timed out." });
+      }, input.timeoutMs ?? 5 * 60_000),
     );
     child.once("exit", (code: number | null) => {
-      clearTimeout(timer);
       const token = findClaudeOauthToken(seen);
       if (token) finish({ ok: true, token });
-      else finish({ ok: false, message: `Sign-in ended without a token${code ? ` (${code})` : ""}.` });
+      else if (!seen.trim()) finish({ ok: false, reason: "needs_terminal", message: NEEDS_TERMINAL_MESSAGE });
+      else finish({ ok: false, reason: "failed", message: `Sign-in ended without a token${code ? ` (${code})` : ""}.` });
     });
   });
 }

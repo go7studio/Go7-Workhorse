@@ -5,9 +5,11 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { buildClaudeLaunchSpec, claudeSpawnArgs } from "../electron/claude-launch";
 import { detectClaudeLogin } from "../electron/claude-login";
-import { claudeTokenProblem, markClaudeTokenRejected, resetClaudeTokenRejection, setStoredClaudeTokenReader, storedClaudeToken } from "../electron/claude-stored-token";
+import { claudeTokenProblem, forgetClaudeRefusalWithoutToken, markClaudeTokenRejected, resetClaudeTokenRejection, setStoredClaudeTokenReader, storedClaudeToken } from "../electron/claude-stored-token";
 import { claudeAuthFailure } from "../src/lib/claude-auth-failure";
-import { normalizeSettings } from "../src/lib/settings";
+import { normalizeSettings, vendorLaunchGate } from "../src/lib/settings";
+import { deskCallCatalog } from "../src/lib/watch";
+import { routingCandidatesForDesk } from "../src/lib/routing";
 import { codexSpawnArgs } from "../electron/codex-launch";
 import { cursorSpawnArgs } from "../electron/cursor-launch";
 import { VENDOR_LOGIN_ENV_NAMES, withDeskToolEnv, withoutWorkhorsePrivateEnv } from "../electron/desk-path";
@@ -246,4 +248,62 @@ test("a login the vendor refused is not a login until a different token is store
   const store = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8").replace(/\r\n/g, "\n");
   assert.equal((store.match(/if \(claudeAuthFailure\(error\)\) refreshClaudeLogin\(\);/g) ?? []).length, 2, "both Claude prompt paths re-detect on a refusal");
   assert.match(store, /authProblem: \(detected as \{ authProblem\?: string \}\)\.authProblem,/, "the reason reaches settings.llms.claude");
+});
+
+/**
+ * Gate findings on the first cut: the card said Sign in again while routing
+ * and Link still offered the vendor, because the store never writes
+ * `connected` from detection; and a refusal of the CLI login (no desk token)
+ * stayed until a restart.
+ */
+test("a vendor with no usable login is not callable, and Recheck clears a refusal of the CLI login", () => {
+  const refused = "OAuth session expired and could not be refreshed";
+  // No usable login is a launch gate, whatever binaries are on disk.
+  assert.deepEqual(vendorLaunchGate({ launchable: true, needsAuth: true, authProblem: refused }), {
+    launchable: false,
+    launchBlocker: `The desk's login was refused: ${refused}. Sign in again`,
+  });
+  assert.deepEqual(vendorLaunchGate({ needsAuth: true }), { launchable: false, launchBlocker: "Not signed in. Sign in, then Recheck" });
+  assert.deepEqual(vendorLaunchGate({ launchable: true, needsAuth: false }), { launchable: true, launchBlocker: undefined });
+  assert.deepEqual(vendorLaunchGate({}), {}, "a detect that reports nothing still returns nothing");
+
+  const settings = normalizeSettings({
+    llms: {
+      claude: { connected: true, enabled: true, available: false, needsAuth: true, authProblem: refused, launchable: false, launchBlocker: `The desk's login was refused: ${refused}. Sign in again` },
+      codex: { connected: true, enabled: true, available: true, launchable: true },
+    },
+  });
+  // The call catalog Link and canCall read says no, and why.
+  const rows = deskCallCatalog({ settings, usage: [], plans: {}, permits: {} });
+  const claude = rows.find((row) => row.provider === "claude");
+  assert.equal(claude?.canCall, false, "a refused login is not a callable vendor");
+  assert.equal(claude?.status, "not_connected");
+  assert.match(claude?.reason ?? "", /login was refused: OAuth session expired and could not be refreshed\. Sign in again/);
+  const codex = rows.find((row) => row.provider === "codex");
+  assert.notEqual(codex?.reason ?? "", claude?.reason, "the gate is per vendor");
+  // Routing carries the gate on every Claude candidate, so Auto never picks it and the miss names it.
+  const candidates = routingCandidatesForDesk(settings).filter((candidate) => candidate.provider === "claude");
+  assert.ok(candidates.length > 0, "the vendor still appears, so the miss can name it");
+  assert.ok(candidates.every((candidate) => candidate.launchable === false && /login was refused/.test(candidate.launchBlocker ?? "")));
+  assert.ok(routingCandidatesForDesk(settings).filter((candidate) => candidate.provider === "codex").every((candidate) => candidate.launchable !== false));
+
+  // Recheck clears a refusal of the CLI login (no desk token); one keyed to a
+  // desk token stays until a different token is stored.
+  try {
+    markClaudeTokenRejected("not logged in", null);
+    forgetClaudeRefusalWithoutToken();
+    assert.equal(claudeTokenProblem(null), null, "Recheck after `claude login` is the person's word");
+    markClaudeTokenRejected(refused, "token-one");
+    forgetClaudeRefusalWithoutToken();
+    assert.equal(claudeTokenProblem("token-one"), refused, "a refused desk token does not clear on Recheck");
+  } finally {
+    resetClaudeTokenRejection();
+  }
+  const main = readFileSync(path.join(ROOT, "electron", "main.ts"), "utf8").replace(/\r\n/g, "\n");
+  const detectHandler = main.slice(main.indexOf('ipcMain.handle("claude:detect-login"'), main.indexOf('ipcMain.handle("claude:setup-token"'));
+  assert.match(detectHandler, /input\.recheck === true\) forgetClaudeRefusalWithoutToken\(\);/, "only Recheck's word clears it, not the desk's own re-detect");
+  const settingsUi = readFileSync(path.join(ROOT, "src", "ui", "Settings.tsx"), "utf8").replace(/\r\n/g, "\n");
+  assert.match(settingsUi, /store\.refreshClaudeLogin\(\{ recheck: true \}\)/, "the Recheck button says so");
+  const preload = readFileSync(path.join(ROOT, "electron", "preload.ts"), "utf8").replace(/\r\n/g, "\n");
+  assert.match(preload, /ipcRenderer\.invoke\("claude:detect-login", input \?\? \{\}\)/);
 });

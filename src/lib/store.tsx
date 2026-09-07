@@ -497,7 +497,7 @@ export type Store = AppState & {
   probeMcpServer: (serverName: string) => Promise<import("./types").McpProbeResult>;
   refreshGrokLogin: () => void;
   refreshCodexLogin: () => void;
-  refreshClaudeLogin: () => void;
+  refreshClaudeLogin: (options?: { recheck?: boolean }) => void;
   refreshCursorLogin: () => void;
   refreshCustomLogin: () => void;
   cycleTheme: () => void;
@@ -2111,10 +2111,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     })();
   }, [refreshVendorModels]);
 
-  const refreshClaudeLogin = useCallback(() => {
+  const refreshClaudeLogin = useCallback((options?: { recheck?: boolean }) => {
     void (async () => {
       const detected = window.workhorse?.detectClaudeLogin
-        ? await window.workhorse.detectClaudeLogin()
+        ? await window.workhorse.detectClaudeLogin(options?.recheck ? { recheck: true } : undefined)
         : { connected: false, accessDefaults: undefined };
       setState((current) => ({
         ...current,

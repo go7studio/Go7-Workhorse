@@ -374,7 +374,7 @@ function StockBotDetail({
                   ? store.refreshCodexLogin()
                   : id === "cursor"
                     ? store.refreshCursorLogin()
-                    : store.refreshClaudeLogin()
+                    : store.refreshClaudeLogin({ recheck: true })
             }
           >
             Recheck

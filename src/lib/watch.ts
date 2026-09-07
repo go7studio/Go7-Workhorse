@@ -719,6 +719,9 @@ function deskCallRow(input: {
   kind: "vendor" | "custom";
   connected: boolean;
   enabled: boolean;
+  /** From the vendor link: a vendor that cannot start is not callable, and the blocker says why. */
+  launchable?: boolean;
+  launchBlocker?: string;
   leftover?: number;
   usedPercent?: number;
   period?: GrokPlanUsage["period"];
@@ -741,6 +744,12 @@ function deskCallRow(input: {
     code = "disabled";
     canCall = false;
     reason = `${input.name} is turned off in Settings → LLMs.`;
+  } else if (input.launchable === false) {
+    // Attached and on, but the desk cannot start it: a missing binary or a
+    // login the vendor refused. Not callable, and the row says which.
+    code = "not_connected";
+    canCall = false;
+    reason = input.launchBlocker?.trim() || `${input.name} cannot start on this desk.`;
   } else if (
     (input.blockSpent || input.holding) &&
     input.leftover != null &&
@@ -821,6 +830,8 @@ export function deskCallCatalog(input: {
           kind: "vendor",
           connected,
           enabled,
+          launchable: link?.launchable,
+          launchBlocker: link?.launchBlocker,
           leftover: composer?.leftover,
           usedPercent: composer?.usedPercent,
           period: composer?.period,
@@ -842,6 +853,8 @@ export function deskCallCatalog(input: {
           kind: "vendor",
           connected,
           enabled,
+          launchable: link?.launchable,
+          launchBlocker: link?.launchBlocker,
           leftover: api?.leftover,
           usedPercent: api?.usedPercent,
           period: api?.period,
@@ -866,6 +879,8 @@ export function deskCallCatalog(input: {
         kind: "vendor",
         connected: Boolean(link?.connected),
         enabled: Boolean(link?.connected && link?.enabled !== false),
+        launchable: link?.launchable,
+        launchBlocker: link?.launchBlocker,
         leftover: status?.leftover,
         usedPercent: status?.usedPercent,
         period: status?.period,

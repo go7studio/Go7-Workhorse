@@ -47,3 +47,12 @@ export function claudeTokenProblem(current: string | null = storedClaudeToken())
 export function resetClaudeTokenRejection(): void {
   rejected = null;
 }
+
+/**
+ * Recheck's word. A refusal remembered with no desk token of its own is the
+ * CLI login's, and the person may have signed that in again; one keyed to a
+ * desk token stays until a different token is stored.
+ */
+export function forgetClaudeRefusalWithoutToken(): void {
+  if (rejected && rejected.token === null) rejected = null;
+}

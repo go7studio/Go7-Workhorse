@@ -16,7 +16,7 @@ import { detectCodexLogin } from "./codex-login";
 import { archiveWorkhorseWorkerThreads, detectCodexRuntime, listCodexNativeThreads } from "./codex-app-server";
 import { codexCapabilitySummary } from "./codex-capabilities";
 import { detectClaudeLogin, resolveClaudeCliBinary } from "./claude-login";
-import { markClaudeTokenRejected, setStoredClaudeTokenReader } from "./claude-stored-token";
+import { forgetClaudeRefusalWithoutToken, markClaudeTokenRejected, setStoredClaudeTokenReader } from "./claude-stored-token";
 import { detectCursorLogin } from "./cursor-login";
 import { runClaudeSetupToken } from "./claude-auth";
 import { detectCustomLogin, fillEmptyCustomBotKeys, hydrateDetectedCustomCredentials, openClawKeyForBaseUrl } from "./custom-login";
@@ -1919,7 +1919,12 @@ app.whenReady().then(async () => {
   ipcMain.handle("codex:capabilities", (_event, projectRoot: unknown) =>
     codexCapabilitySummary(typeof projectRoot === "string" ? projectRoot : undefined),
   );
-  ipcMain.handle("claude:detect-login", () => detectClaudeLogin());
+  ipcMain.handle("claude:detect-login", (_event, input?: { recheck?: unknown }) => {
+    // Only the person's Recheck clears a refusal of the CLI login; the desk's
+    // own re-detect after a refused call must not.
+    if (input && typeof input === "object" && input.recheck === true) forgetClaudeRefusalWithoutToken();
+    return detectClaudeLogin();
+  });
   ipcMain.handle("claude:setup-token", async (event) => {
     const cli = resolveClaudeCliBinary();
     if (!cli) return { ok: false, message: "Claude Code CLI not found." };

@@ -459,7 +459,7 @@ test("the bridge types every vendor detect by its real result type", () => {
   assert.match(bridge, /detectGrokLogin: \(\) => Promise<import\("\.\.\/electron\/grok-login"\)\.GrokLoginDetectResult>/);
   assert.match(
     bridge,
-    /detectClaudeLogin: \(\) => Promise<import\("\.\.\/electron\/claude-login"\)\.ClaudeLoginDetectResult>/,
+    /detectClaudeLogin: \((?:input\?: \{ recheck\?: boolean \})?\) => Promise<import\("\.\.\/electron\/claude-login"\)\.ClaudeLoginDetectResult>/,
   );
   for (const vendor of ["detectGrokLogin", "detectClaudeLogin", "detectCodexLogin", "detectCursorLogin"]) {
     assert.doesNotMatch(

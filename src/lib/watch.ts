@@ -690,7 +690,8 @@ export function leftoverByWatchKey(
   return Object.fromEntries(statuses.map((status) => [status.key, status.leftover]));
 }
 
-export type DeskCallStatus = "ok" | "disabled" | "not_connected" | "spent" | "day_bank";
+/** `cannot_start`: attached and on, but a missing binary or a refused login stops every launch. */
+export type DeskCallStatus = "ok" | "disabled" | "not_connected" | "cannot_start" | "spent" | "day_bank";
 
 export type DeskCallRow = {
   id: string;
@@ -746,8 +747,10 @@ function deskCallRow(input: {
     reason = `${input.name} is turned off in Settings → LLMs.`;
   } else if (input.launchable === false) {
     // Attached and on, but the desk cannot start it: a missing binary or a
-    // login the vendor refused. Not callable, and the row says which.
-    code = "not_connected";
+    // login the vendor refused. Not callable, and the row says which. Its own
+    // code, so the roster still lists the vendor instead of hiding it as
+    // unattached.
+    code = "cannot_start";
     canCall = false;
     reason = input.launchBlocker?.trim() || `${input.name} cannot start on this desk.`;
   } else if (
@@ -981,6 +984,7 @@ export function spawnIsNoGo(row: DeskCallRow | undefined): string | null {
   if (!row) return "That vendor is not on this desk. Skip it.";
   if (row.canCall) return null;
   if (row.status === "disabled") return "That vendor is not on this desk. Skip it.";
+  if (row.status === "cannot_start") return row.reason || "That vendor cannot start on this desk. Skip it.";
   if (row.status === "day_bank") {
     return `${row.name} is a no-go — daily bank spent. Skip it. Do not ask the user to Allow.`;
   }

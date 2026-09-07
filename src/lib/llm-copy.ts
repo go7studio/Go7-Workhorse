@@ -27,10 +27,14 @@ export function llmDetailCopy(id: Exclude<ProviderId, "custom">, link: LlmLink):
   // line says that instead of promising a launch that will throw.
   // No usable login outranks a missing binary: it is the one thing the person
   // fixes from this card, and the vendor's own reason says why.
-  if (link.needsAuth && link.authProblem) {
-    return `${VENDOR_NAMES[id]} refused the desk's login: ${link.authProblem}. ${id === "claude" ? "Log in with Claude mints a new one." : "Sign in again, then Recheck."}`;
+  if (link.needsAuth) {
+    if (link.authProblem) {
+      return `${VENDOR_NAMES[id]} refused the desk's login: ${link.authProblem}. ${id === "claude" ? "Log in with Claude mints a new one." : "Sign in again, then Recheck."}`;
+    }
+    if (id === "claude") return "Not signed in. Log in with Claude mints a token for this desk.";
+    if (id === "cursor") return "Sign in to Cursor Agent, then Recheck.";
+    return "Not signed in. Sign in, then Recheck.";
   }
-  if (id === "cursor" && link.needsAuth && !link.connected) return "Sign in to Cursor Agent, then Recheck.";
   if (link.launchable === false && link.launchBlocker) return `${link.launchBlocker}. Install it, then Recheck.`;
   const found = link.available ?? link.connected;
   if (id === "grok") {

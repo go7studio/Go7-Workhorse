@@ -8,7 +8,7 @@ import { detectClaudeLogin } from "../electron/claude-login";
 import { claudeTokenProblem, forgetClaudeRefusalWithoutToken, markClaudeTokenRejected, resetClaudeTokenRejection, setStoredClaudeTokenReader, storedClaudeToken } from "../electron/claude-stored-token";
 import { claudeAuthFailure } from "../src/lib/claude-auth-failure";
 import { normalizeSettings, vendorLaunchGate } from "../src/lib/settings";
-import { deskCallCatalog } from "../src/lib/watch";
+import { deskCallCatalog, formatDeskRoster } from "../src/lib/watch";
 import { routingCandidatesForDesk } from "../src/lib/routing";
 import { codexSpawnArgs } from "../electron/codex-launch";
 import { cursorSpawnArgs } from "../electron/cursor-launch";
@@ -256,7 +256,7 @@ test("a login the vendor refused is not a login until a different token is store
  * `connected` from detection; and a refusal of the CLI login (no desk token)
  * stayed until a restart.
  */
-test("a vendor with no usable login is not callable, and Recheck clears a refusal of the CLI login", () => {
+test("a vendor with no usable login is not callable, and Recheck clears a refusal of the CLI login", async () => {
   const refused = "OAuth session expired and could not be refreshed";
   // No usable login is a launch gate, whatever binaries are on disk.
   assert.deepEqual(vendorLaunchGate({ launchable: true, needsAuth: true, authProblem: refused }), {
@@ -277,10 +277,22 @@ test("a vendor with no usable login is not callable, and Recheck clears a refusa
   const rows = deskCallCatalog({ settings, usage: [], plans: {}, permits: {} });
   const claude = rows.find((row) => row.provider === "claude");
   assert.equal(claude?.canCall, false, "a refused login is not a callable vendor");
-  assert.equal(claude?.status, "not_connected");
+  assert.equal(claude?.status, "cannot_start", "its own code: attached and on, but nothing can launch");
   assert.match(claude?.reason ?? "", /login was refused: OAuth session expired and could not be refreshed\. Sign in again/);
   const codex = rows.find((row) => row.provider === "codex");
   assert.notEqual(codex?.reason ?? "", claude?.reason, "the gate is per vendor");
+  // The Link roster keeps the vendor and says why, instead of hiding it as unattached.
+  const roster = formatDeskRoster(rows);
+  assert.match(roster, /- Claude — .*login was refused: OAuth session expired and could not be refreshed\. Sign in again/);
+  assert.doesNotMatch(roster.split("\n").find((line) => line.startsWith("- Claude")) ?? "", /you can call this/);
+  // The card copy for every unsigned state names the way in, and never says Install.
+  const { llmDetailCopy } = await import("../src/lib/llm-copy");
+  const unsigned = { connected: true, enabled: true, available: false, needsAuth: true, launchable: false, launchBlocker: "Not signed in. Sign in, then Recheck" };
+  assert.equal(llmDetailCopy("claude", unsigned), "Not signed in. Log in with Claude mints a token for this desk.");
+  assert.equal(llmDetailCopy("cursor", unsigned), "Sign in to Cursor Agent, then Recheck.");
+  assert.equal(llmDetailCopy("codex", unsigned), "Not signed in. Sign in, then Recheck.");
+  for (const id of ["claude", "cursor", "codex", "grok"] as const) assert.doesNotMatch(llmDetailCopy(id, unsigned), /Install/);
+  assert.equal(llmDetailCopy("claude", { connected: true, enabled: true, available: true, launchable: false, launchBlocker: "claude-agent-acp is not on PATH" }), "claude-agent-acp is not on PATH. Install it, then Recheck.", "a missing binary still says Install");
   // Routing carries the gate on every Claude candidate, so Auto never picks it and the miss names it.
   const candidates = routingCandidatesForDesk(settings).filter((candidate) => candidate.provider === "claude");
   assert.ok(candidates.length > 0, "the vendor still appears, so the miss can name it");

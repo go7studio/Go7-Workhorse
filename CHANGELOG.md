@@ -8,6 +8,13 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.6.67](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.66...v0.6.67) (2026-09-07)
+
+
+### Bug Fixes
+
+* steer redirect, Mission spawn bible, Workshop grant ([#281](https://github.com/go7studio/Go7-Workhorse/issues/281)) ([a4db24b](https://github.com/go7studio/Go7-Workhorse/commit/a4db24b1c298abc9bfc4e1ac434a8cffc2301be0))
+
 ## [0.6.66](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.65...v0.6.66) (2026-09-07)
 
 

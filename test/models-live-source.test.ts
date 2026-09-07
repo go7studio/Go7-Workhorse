@@ -73,8 +73,13 @@ test("the same model advertised with a window tag or a dotted version is one row
   const fresh = claudeAdvertisedRows(MODEL_CATALOG.claude, ["claude-fable-5-2[1m]", "claude-fable-5.2"]);
   const added = fresh.filter((row) => !MODEL_CATALOG.claude.some((seed) => seed.id === row.id));
   assert.deepEqual(added.map((row) => row.id), ["claude-fable-5-2"], "one row, spelled without the tag the launcher drops anyway");
-  assert.equal(advertisedModelKey("Claude-Fable-5.1[1m]"), "claude-fable-5-1");
+  assert.equal(advertisedModelKey("Claude-Fable-5.1[1m]"), "fable-5-1");
+  assert.equal(advertisedModelKey("fable-5-1"), advertisedModelKey("claude-fable-5-1"), "the bare family form is the same id without the vendor word");
+  assert.equal(advertisedModelKey("claude-fable-5-1[2m]"), "fable-5-1", "any bracketed window tag folds, not only [1m]");
   assert.equal(advertisedModelKey("us.anthropic.claude-fable-5-1"), "us.anthropic.claude-fable-5-1", "a foreign prefix stays its own key");
+  const bare = claudeAdvertisedRows(MODEL_CATALOG.claude, ["fable-5-1", "claude-fable-5-1[2m]", "opus[2m]"]);
+  assert.equal(bare.length, MODEL_CATALOG.claude.length, "neither the bare form nor a [2m] tag doubles a seed row; an alias with any tag adds nothing");
+  assert.deepEqual(claudeAdvertisedRows(MODEL_CATALOG.claude, ["fable-5-2", "claude-fable-5-2[1m]"]).slice(MODEL_CATALOG.claude.length).map((row) => row.id), ["fable-5-2"], "an unknown model advertised bare and prefixed is one row, in the spelling that came first");
 });
 
 test("a harness may name a model the way people write it", () => {
@@ -135,6 +140,7 @@ test("the Link helper lists what the desk lists: the desk saves what it serves, 
   const helper = read("electron/workhorse-mcp.ts");
   assert.match(helper, /function queryCapacity\(args: Record<string, unknown>\): string \{\n  refreshLinkVendorCatalog\(\);/, "capacity reads overlay first");
   assert.match(helper, /function deskRoster\(\) \{\n  refreshLinkVendorCatalog\(\);/, "roster reads overlay first");
+  assert.match(helper, /if \(lists\) applyVendorCatalog\(lists\);\n    else resetVendorCatalog\(\);/, "a missing or torn file resets the overlay to the seed, not the last good read");
   assert.doesNotMatch(helper, /listVendorModels|models_cache/, "the helper never reads a vendor home itself");
   const main = read("electron/main.ts");
   assert.match(main, /rememberDeskCatalog\(app\.getPath\("userData"\), lists\);/, "the desk saves what it serves");

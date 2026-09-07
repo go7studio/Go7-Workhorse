@@ -14,7 +14,7 @@ import {
 } from "../src/lib/bot-setup";
 import { applyCreateWorkhorseProject, normalizeProject } from "../src/lib/project";
 import { normalizeSettings } from "../src/lib/settings";
-import { applyVendorCatalog } from "../src/lib/models";
+import { applyVendorCatalog, resetVendorCatalog } from "../src/lib/models";
 import { passGrantedAccess, releasedHelper } from "../src/lib/permissions";
 import type { AttachmentKind, ChatImage, CustomLlm, MissionIteration, Session, SessionEnvironment, UsageEvent, WatchDayMarks, WatchPermits, SandboxProfile } from "../src/lib/types";
 import {
@@ -1562,7 +1562,11 @@ function refreshLinkVendorCatalog(): void {
   try {
     const userData = spawnUserDataDir();
     const lists = userData ? readDeskCatalog(userData) : undefined;
+    // A missing or torn file is the seed, not the last good read: this helper
+    // lives for the desk's whole session, and a row the desk dropped must not
+    // stay listed here because a later write was cut short.
     if (lists) applyVendorCatalog(lists);
+    else resetVendorCatalog();
   } catch {
     /* the seed still lists the stock rows */
   }

@@ -62,6 +62,10 @@ test("the 1-10 table orders the mid-field the 1-5 scale collapsed", () => {
   assert.equal(intelligence("claude", "claude-opus-5"), 10);
   assert.equal(intelligence("codex", "gpt-5.6-sol"), 10);
   assert.equal(intelligence("codex", "gpt-6-astra"), 10, "GPT-6 Astra sits with Sol, ahead of the 5.6 rows it would otherwise miss");
+  assert.equal(intelligence("custom", "openai/gpt-6-astra"), 10, "a host path to the same model is the same tier");
+  assert.notEqual(intelligence("custom", "mygpt-6"), 10, "the tier starts at a token boundary");
+  assert.notEqual(intelligence("codex", "gpt-60"), 10);
+  assert.equal(intelligence("codex", "gpt-6.1-mini"), 5, "mini is judged first");
   assert.equal(intelligence("grok", "grok-4.6"), 10);
   assert.equal(intelligence("cursor", "cursor-grok-4.6-high"), 10);
   // The understudy

@@ -401,8 +401,9 @@ export function routingProfileForModel(
   const FABLE = ["coding", "writing", "visual"] as const;
   if (lightMini) {
     base = profile(5, 5, 1);
-  } else if (/gpt-6(?:$|[-.])/.test(slug)) {
+  } else if (/(?:^|[^a-z0-9])gpt-6(?:$|[-.])/.test(slug)) {
     // GPT-6 Astra: Codex's newest flagship, rated with Sol until someone rates it.
+    // A host path such as "openai/gpt-6-astra" counts; "mygpt-6" does not.
     base = profile(10, 2, 5, { strengths: CODE });
   } else if (slug.includes("5.6-sol")) {
     base = profile(10, 2, 5, { strengths: CODE });

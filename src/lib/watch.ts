@@ -1262,13 +1262,23 @@ export type CustomMeterBeat<T> = {
   /** The connections as they stand when an answer lands. Read, never closed over. */
   liveBots: () => { id: string; enabled?: boolean }[];
   /**
-   * The latest lastTriedAt for a bot, read at the moment an answer lands. Two
-   * beats may run in parallel because the leftover loop never awaits the
-   * previous round — when that happens, the older beat must not write past a
-   * newer one. The store passes its ref so the helper can compare against the
-   * live figure, not the snapshot `health` captured at beat start.
+   * Reserve a synchronous per-bot generation at the moment this beat
+   * dispatches its ask, and return the generation that belongs to THIS
+   * beat. Two beats dispatched before either answer lands each get a
+   * distinct generation: the second beat's reserve bumps the counter, so
+   * the first beat's answer sees a live figure strictly greater than its
+   * own and drops its writes.
+   *
+   * The order does not depend on when React commits. `reserve` runs
+   * synchronously from the beat's microtask, and the counter lives outside
+   * React state, so a stale answer from a slow older beat cannot slip past
+   * a fresh answer from a faster newer one — which is exactly the race the
+   * lastTriedAt-based check let through (the lastTriedAt ref only updates
+   * on render).
    */
-  liveLastTriedAt: (id: string) => number | undefined;
+  reserve: (id: string) => number;
+  /** Read the live per-bot generation at the moment an answer lands. */
+  liveGeneration: (id: string) => number | undefined;
   writePlan: (id: string, plan: GrokPlanUsage | undefined) => void;
   markKnown: (id: string) => void;
   writeHealth: (id: string, answered: boolean) => void;
@@ -1286,6 +1296,15 @@ export async function runCustomMeterBeat<
 >(beat: CustomMeterBeat<T>): Promise<void> {
   await Promise.all(
     customBotsToMeter(beat.bots, beat.health, beat.now).map(async (bot) => {
+      // Reserve a synchronous generation the moment we know this beat is
+      // for real, BEFORE we await the host. Two beats dispatched before
+      // either answer lands each get a distinct generation because
+      // `reserve` bumps the counter synchronously. The answer-time check
+      // below compares against the live counter, which is updated the
+      // moment any beat dispatches — not the moment React happens to
+      // commit a render — so a slow older beat cannot slip past a fresh
+      // newer beat that was dispatched while it was waiting on its host.
+      const myGeneration = beat.reserve(bot.id);
       let plan: GrokPlanUsage | undefined;
       let answered = false;
       let replied = false;
@@ -1296,14 +1315,15 @@ export async function runCustomMeterBeat<
       } catch {
         // A thrown call is a miss, same as a host that answered nothing.
       }
+      // The slot check happens AFTER the await so a bot that was switched
+      // off, deleted, or had its key wiped during the ask drops its answer
+      // instead of landing a stale reading on an off slot.
       if (!customSlotTakesAnswer(beat.liveBots(), bot.id)) return;
-      // Two beats can run in parallel because the loop never awaits the
-      // previous round. A slower older beat must not overwrite a newer one:
-      // its `now` is older than the live lastTriedAt already on file, so the
-      // four writes below would replace a fresher reading with a stale one and
-      // move lastTriedAt backwards. Drop the answer and stay quiet.
-      const live = beat.liveLastTriedAt(bot.id);
-      if (live !== undefined && live > beat.now) return;
+      const liveGeneration = beat.liveGeneration(bot.id);
+      if (liveGeneration !== undefined && liveGeneration > myGeneration) {
+        // A newer beat has dispatched since we did. Our answer is stale.
+        return;
+      }
       // Same rule as the stock meters: an answer replaces an answer, and a
       // failure leaves whatever was last known in place. Writing here on a
       // throw is what would turn a live bot's meter into unknown mid-wave.

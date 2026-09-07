@@ -131,6 +131,10 @@ function desk(bots: CustomBot[]) {
   let plans: Record<string, GrokPlanUsage | undefined> = {};
   let known: Record<string, boolean> = {};
   let health: Record<string, CustomMeterHealth | undefined> = {};
+  // Synchronous per-bot generation counter, the same shape the real store
+  // wires into `runCustomMeterBeat`. The desk test only cares that it
+  // exists so the beat's new interface compiles.
+  const generations: Record<string, number> = {};
   const seen: string[] = [];
   const applyDrops = (id: string, keepPlan = false) => {
     const drops = customSlotDrops(id, keepPlan);
@@ -187,7 +191,12 @@ function desk(bots: CustomBot[]) {
             },
           }),
         liveBots: () => state.settings.customBots,
-        liveLastTriedAt: (id) => health[id]?.lastTriedAt,
+        reserve: (id) => {
+          const next = (generations[id] ?? 0) + 1;
+          generations[id] = next;
+          return next;
+        },
+        liveGeneration: (id) => generations[id],
         writePlan: (id, plan) => {
           plans = { ...plans, [id]: planAfterRefresh(plans[id], plan) };
         },

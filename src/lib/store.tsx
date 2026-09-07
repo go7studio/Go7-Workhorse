@@ -1158,6 +1158,20 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   // called from the routing paths. Mirrors customMeterHealth, like plansRef.
   const meterHealthRef = useRef<Record<string, CustomMeterHealth | undefined>>({});
   /**
+   * Synchronous per-bot generation counter for the custom meter beat.
+   *
+   * `meterHealthRef.current` only updates on render, so two overlapping
+   * beats whose answers land in the same React batch both read the OLD
+   * `lastTriedAt` and the older beat overwrites the newer one. The
+   * generation counter is bumped inside `reserve` at dispatch time and
+   * read inside `liveGeneration` at answer time, so a beat dispatched
+   * after another one already started waiting on its host sees a live
+   * figure strictly greater than its own reservation and drops the stale
+   * write. Lives outside React state on purpose: the whole point is to
+   * make the order not depend on when React happens to commit.
+   */
+  const meterGenerationRef = useRef<Record<string, number>>({});
+  /**
    * Meter freshness on the routing paths (MASTER-AUDIT Repair 16).
    *
    * Nothing refreshed deskPlans except boot, the Usage pane and the setup
@@ -8253,9 +8267,19 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       // question was asked: a delete or a switch-off in the gap wins.
       liveBots: () => stateRef.current.settings.customBots,
       // Two leftover beats can run in parallel; an older one must not write
-      // past a newer one, so the helper compares its beat `now` to the live
-      // lastTriedAt at the moment the answer lands.
-      liveLastTriedAt: (id) => meterHealthRef.current[id]?.lastTriedAt,
+      // past a newer one. The live `lastTriedAt` ref only updates on render,
+      // so the previous check — comparing a beat's `now` against it — read
+      // a stale value whenever two answers landed in the same React batch
+      // and let the slower older beat overwrite the faster newer one. The
+      // per-bot generation counter lives outside React state and is bumped
+      // synchronously at dispatch, so the second beat's `reserve` makes
+      // the first beat's answer-time check fire and drop the stale write.
+      reserve: (id) => {
+        const current = meterGenerationRef.current[id] ?? 0;
+        meterGenerationRef.current[id] = current + 1;
+        return current + 1;
+      },
+      liveGeneration: (id) => meterGenerationRef.current[id],
       writePlan: (id, plan) =>
         setCustomPlans((current) => ({ ...current, [id]: planAfterRefresh(current[id], plan) })),
       markKnown: (id) => setCustomPlanKnown((current) => ({ ...current, [id]: true })),

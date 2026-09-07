@@ -4,14 +4,20 @@
  * `refreshCustomPlans` is `void runCustomMeterBeat(...)` — the loop does not
  * await the previous beat before starting the next, and `runCustomMeterBeat`
  * itself ran the per-bot asks inside `Promise.all`. A bot whose host was slow
- * last time could land its older answer after the next beat's newer one, and
- * the writers were stateless, so the stale reading replaced the fresh one and
- * `lastTriedAt` moved backwards.
+ * last time could land its older answer after the next beat's newer one,
+ * and the writers were stateless, so the stale reading replaced the fresh
+ * one and `lastTriedAt` moved backwards.
  *
- * The fix: each beat reads `liveLastTriedAt` against the desk's live health
- * ref at the moment its answer lands. When a newer beat has already written a
- * later `lastTriedAt`, the older beat's answer is discarded and lastTriedAt
- * never moves backwards.
+ * The first fix compared the incoming `now` against `liveLastTriedAt`. The
+ * reviewer's probe found that the `lastTriedAt` ref only updates on render,
+ * so two answers that land in the same React batch both read the OLD value,
+ * both pass the check, and both write — and the older beat's write wins
+ * because it lands last. The fix is a synchronous per-bot generation:
+ * `reserve` bumps a counter the moment a beat dispatches its ask, and
+ * `liveGeneration` reads it the moment an answer lands. The counter lives
+ * outside React state, so the order does not depend on when React commits.
+ * A slow older beat that was reserved first sees `liveGeneration > myGen`
+ * the moment a faster newer beat dispatches, and drops its writes.
  *
  * Pure helpers only — no React, no Electron, no real fetch.
  */
@@ -55,24 +61,49 @@ function planWith(usedPercent: number): GrokPlanUsage {
   };
 }
 
-/** A store-shaped surface that two beats share, exactly like the real one. */
+/**
+ * A store-shaped surface that two beats share, exactly like the real one.
+ *
+ * `lastTriedAtRef` is what a `useRef` would see in a mounted store: the
+ * ref is only refreshed when `flush()` is called, modelling React's
+ * commit phase. `generationRef` is the new synchronous counter: it is
+ * bumped inside `reserve` at dispatch time and read inside
+ * `liveGeneration` at answer time. The test does NOT call `flush()`
+ * between two overlapping beats' writes on purpose, so the
+ * `liveLastTriedAt` check (had the helper still used one) would see a
+ * stale value and let both beats through — exactly the race the reviewer
+ * probed.
+ */
 function makeSharedDesk(initial: {
   plans: Record<string, GrokPlanUsage | undefined>;
   health: Record<string, ReturnType<typeof customMeterHealthAfter>>;
   known: Record<string, boolean>;
 }) {
   let plans = { ...initial.plans };
-  let health = { ...initial.health };
+  let committedHealth = { ...initial.health };
   let known = { ...initial.known };
+  // What the useRef-shaped reader sees. Only updated by `flush()`.
+  const lastTriedAtRef: Record<string, number | undefined> = {};
+  for (const [id, value] of Object.entries(committedHealth)) {
+    lastTriedAtRef[id] = value?.lastTriedAt;
+  }
+  // Synchronous counter, updated at dispatch time and read at answer time.
+  // The whole point: not depending on React's render cadence.
+  const generationRef: Record<string, number> = {};
 
   function startBeat(now: number, ask: (bot: CustomBot) => Promise<GrokPlanUsage | undefined>) {
     const beat: CustomMeterBeat<CustomBot> = {
       bots: [bot],
-      health,
+      health: committedHealth,
       now,
       ask,
       liveBots: () => [bot],
-      liveLastTriedAt: (id) => health[id]?.lastTriedAt,
+      reserve: (id) => {
+        const next = (generationRef[id] ?? 0) + 1;
+        generationRef[id] = next;
+        return next;
+      },
+      liveGeneration: (id) => generationRef[id],
       writePlan: (id, plan) => {
         plans = { ...plans, [id]: planAfterRefresh(plans[id], plan) };
       },
@@ -80,19 +111,39 @@ function makeSharedDesk(initial: {
         known = { ...known, [id]: true };
       },
       writeHealth: (id, answered) => {
-        health = { ...health, [id]: customMeterHealthAfter(health[id], answered, now) };
+        // Schedules the write, mirroring React's setState.
+        committedHealth = {
+          ...committedHealth,
+          [id]: customMeterHealthAfter(committedHealth[id], answered, now),
+        };
       },
     };
     return runCustomMeterBeat(beat);
   }
 
+  function flush() {
+    // Commit pending writes to the render-lazy ref, mirroring React's
+    // commit phase. Tests call this only when they want to model React
+    // having committed between beats — i.e., to prove that even without
+    // the synchronous generation guard the older-lastTriedAt check
+    // could catch the race. The fix does not depend on this; it works
+    // without a flush.
+    for (const [id, value] of Object.entries(committedHealth)) {
+      lastTriedAtRef[id] = value?.lastTriedAt;
+    }
+  }
+
   return {
     startBeat,
+    flush,
     get plans() {
       return plans;
     },
     get health() {
-      return health;
+      return committedHealth;
+    },
+    get lastTriedAtRef() {
+      return lastTriedAtRef;
     },
     get known() {
       return known;
@@ -196,4 +247,38 @@ test("customBotsToMeter still honours the existing backoff rule", () => {
     [bot.id],
     "back to asking at +60s",
   );
+});
+
+test("the React-not-committed race: two writes without a flush between, the older beat still drops", async () => {
+  // This is the reviewer\'s probe. The reviewer launched two beats against the
+  // same bot: an older one (now=100, slow host, 80%) and a newer one
+  // (now=200, fast host, 20%). With the OLD `liveLastTriedAt` check, the
+  // ref only updates when React commits. Both answers land in the same React
+  // batch (no flush), so both reads see the OLD `lastTriedAt` (undefined),
+  // both beats pass the check, and the older beat\'s write — landing last
+  // — overwrites the newer one with the stale 80%. The fix uses a
+  // synchronous per-bot generation: the second beat\'s `reserve` bumps the
+  // counter the moment it dispatches, and the first beat\'s answer-time
+  // `liveGeneration` reads that bumped value and drops its writes.
+  const desk = makeSharedDesk({ plans: {}, health: {}, known: {} });
+  const slowAsk = (value: number, delayMs: number) => async () => {
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+    return planWith(value);
+  };
+  // Beat A: older, slower host, returns 80%.
+  const beatA = desk.startBeat(NOW + 100, slowAsk(80, 200));
+  // Beat B: newer, faster host, returns 20%.
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  const beatB = desk.startBeat(NOW + 200, slowAsk(20, 30));
+  await Promise.all([beatA, beatB]);
+  // Deliberately do NOT call flush(): the model is that both writes land in
+  // the same React batch and React has not committed yet. This is exactly
+  // what the reviewer\'s probe reproduced.
+  // Flush once at the end so observers can read the final committed state.
+  desk.flush();
+
+  assert.equal(desk.plans[bot.id]?.usedPercent, 20, "the newer beat\'s 20% wins, not the older beat\'s stale 80%");
+  assert.equal(desk.health[bot.id]?.lastTriedAt, NOW + 200, "lastTriedAt is the newer beat\'s now, never the older");
+  assert.equal(desk.lastTriedAtRef[bot.id], NOW + 200, "the committed lastTriedAt ref matches the newer beat");
+  assert.equal(desk.known[bot.id], true, "the bot remains known after the dropped older beat");
 });

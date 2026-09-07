@@ -361,6 +361,7 @@ export function parseClaudePlanUsage(raw: unknown): ClaudePlanUsage | undefined 
   };
 }
 
+type NodeGetJson = (url: string, headers: Record<string, string>) => Promise<{ status: number; json: unknown }>;
 function nodeGetJson(url: string, headers: Record<string, string>): Promise<{ status: number; json: unknown }> {
   return new Promise((resolve, reject) => {
     const req = https.get(url, { headers }, (res) => {
@@ -379,8 +380,13 @@ function nodeGetJson(url: string, headers: Record<string, string>): Promise<{ st
   });
 }
 
-let cachedPlan: { at: number; plan: ClaudePlanUsage | undefined } | null = null;
+let cachedPlan: { at: number; plan: ClaudePlanUsage } | null = null;
 const CACHE_MS = 180_000;
+
+/** Tests reset the cache between cases so a real fetch never leaks across runs. */
+export function clearClaudePlanCache(): void {
+  cachedPlan = null;
+}
 
 /**
  * What the usage ring's own answer says about the login behind it.
@@ -399,6 +405,8 @@ export function judgeClaudeRingStatus(status: number, token: string | null = nul
 export async function fetchClaudePlanUsage(input?: ClaudePlanTokenInput & {
   fetchImpl?: typeof fetch;
   token?: string;
+  /** Tests inject a transport to exercise the cache path without a real socket. */
+  nodeGet?: NodeGetJson;
 }): Promise<ClaudePlanUsage | undefined> {
   try {
     const token = input?.token?.trim() || (await resolveClaudePlanToken(input));
@@ -421,13 +429,16 @@ export async function fetchClaudePlanUsage(input?: ClaudePlanTokenInput & {
       judgeClaudeRingStatus(response.status, token);
       return parseClaudePlanUsage(await response.json());
     }
+    // A real fetch with a cached undefined from a previous call would silently
+    // shadow every retry for 180s and strand the ring on "unknown" while the
+    // login behind it still works. Cache only what we can actually answer with.
     if (cachedPlan && Date.now() - cachedPlan.at < CACHE_MS) return cachedPlan.plan;
-    const { status, json } = await nodeGetJson("https://api.anthropic.com/api/oauth/usage", headers);
-    if (status === 429 && cachedPlan?.plan) return cachedPlan.plan;
+    const { status, json } = await (input?.nodeGet ?? nodeGetJson)("https://api.anthropic.com/api/oauth/usage", headers);
+    if (status === 429 && cachedPlan) return cachedPlan.plan;
     judgeClaudeRingStatus(status, token);
     if (status < 200 || status >= 300) return undefined;
     const plan = parseClaudePlanUsage(json);
-    cachedPlan = { at: Date.now(), plan };
+    if (plan) cachedPlan = { at: Date.now(), plan };
     return plan;
   } catch {
     return undefined;

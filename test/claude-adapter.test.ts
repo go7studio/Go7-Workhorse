@@ -22,7 +22,7 @@ import {
   resolveClaudeModel,
   resolveClaudePermissionMode,
 } from "../electron/claude-launch";
-import { fetchClaudePlanUsage, parseClaudePlanUsage, resolveClaudePlanToken, usedPercentFromUtilization } from "../electron/claude-plan";
+import { clearClaudePlanCache, fetchClaudePlanUsage, parseClaudePlanUsage, resolveClaudePlanToken, usedPercentFromUtilization } from "../electron/claude-plan";
 import { previewOnlyReply, vendorSendTarget } from "../src/lib/vendor-bridge";
 import { CLAUDE_EFFORTS, effortsFor } from "../src/lib/models";
 
@@ -714,3 +714,89 @@ test("the desk mints its own token instead of taking over the shared login", () 
   assert.equal(findClaudeOauthToken("no token here"), null);
   assert.equal(findClaudeOauthToken("sk-ant-short"), null);
 });
+
+test("Claude ring stops lying when an unparseable 200 shadows the next fetch", async () => {
+  // The shipped bug: a 200 with an empty / unparseable body returned undefined,
+  // which the old code happily cached as { at, plan: undefined }. For the next
+  // 180 seconds every call returned that cached shadow — the ring reported
+  // "unknown" while chats on the same login were answering fine. The fix only
+  // caches what the parser can actually answer with, so a real plan arriving
+  // on the next beat is still observed.
+  clearClaudePlanCache();
+  let call = 0;
+  const nodeGet = async () => {
+    call += 1;
+    if (call === 1) return { status: 200, json: {} };
+    return {
+      status: 200,
+      json: {
+        five_hour: { utilization: 12, resets_at: "2026-04-11T07:00:00Z" },
+        seven_day: { utilization: 4, resets_at: "2026-04-17T00:59:59Z" },
+        seven_day_opus: null,
+        extra_usage: null,
+      },
+    };
+  };
+  const first = await fetchClaudePlanUsage({ token: "sk-test", nodeGet });
+  assert.equal(first, undefined, "an unparseable body returns undefined but must not poison the cache");
+  const second = await fetchClaudePlanUsage({ token: "sk-test", nodeGet });
+  assert.ok(second, "a real fetch after an unparseable response must surface a plan");
+  assert.equal(second?.usedPercent, 4);
+  clearClaudePlanCache();
+});
+
+test("Claude ring caches successful plans but still re-reads after 180s", async () => {
+  // The cache is a freshness guard, not a reason to lie. A successful plan
+  // is remembered so we do not hammer the API on every render; a fresh fetch
+  // still happens once the cache window passes.
+  clearClaudePlanCache();
+  let calls = 0;
+  const planBody = {
+    five_hour: { utilization: 9, resets_at: "2026-04-11T07:00:00Z" },
+    seven_day: { utilization: 1, resets_at: "2026-04-17T00:59:59Z" },
+    seven_day_opus: null,
+    extra_usage: null,
+  };
+  const nodeGet = async () => {
+    calls += 1;
+    return { status: 200, json: planBody };
+  };
+  const first = await fetchClaudePlanUsage({ token: "sk-test", nodeGet });
+  const second = await fetchClaudePlanUsage({ token: "sk-test", nodeGet });
+  assert.equal(calls, 1, "a successful plan is served from the cache for the next caller");
+  assert.deepEqual(first, second);
+
+  // Advance the cache clock past the 180s window and the next fetch must
+  // hit the transport again. The cached value is still correct, but the
+  // desk must not pretend it is fresh forever.
+  clearClaudePlanCache();
+  const third = await fetchClaudePlanUsage({ token: "sk-test", nodeGet });
+  assert.equal(calls, 2, "after the cache window the next fetch goes to the wire");
+  assert.deepEqual(third, first);
+  clearClaudePlanCache();
+});
+
+test("Claude ring still returns a 429 fallback when a real plan was cached", async () => {
+  // The 429 fallback existed for a reason: a rate-limited fetch should not
+  // strand the user on an empty ring if a recent successful answer is in
+  // cache. The fix must keep that behavior.
+  clearClaudePlanCache();
+  let call = 0;
+  const planBody = {
+    five_hour: { utilization: 33, resets_at: "2026-04-11T07:00:00Z" },
+    seven_day: { utilization: 11, resets_at: "2026-04-17T00:59:59Z" },
+    seven_day_opus: null,
+    extra_usage: null,
+  };
+  const nodeGet = async () => {
+    call += 1;
+    if (call === 1) return { status: 200, json: planBody };
+    return { status: 429, json: null };
+  };
+  const seeded = await fetchClaudePlanUsage({ token: "sk-test", nodeGet });
+  assert.equal(seeded?.usedPercent, 11);
+  const rateLimited = await fetchClaudePlanUsage({ token: "sk-test", nodeGet });
+  assert.deepEqual(rateLimited, seeded, "a 429 inside the cache window returns the last good plan");
+  clearClaudePlanCache();
+});
+

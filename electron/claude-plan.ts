@@ -8,7 +8,7 @@ import { readClaudeDesktopOauth } from "./claude-desktop-auth";
 import { storedClaudeToken } from "./claude-stored-token";
 import { oauthNotExpired, resolveClaudeCliBinary } from "./claude-login";
 import { deskHelperEnv } from "./desk-path";
-import { markClaudeTokenRejected } from "./claude-stored-token";
+import { clearClaudeTokenRejection, markClaudeTokenRejected } from "./claude-stored-token";
 
 /**
  * `security` is the desk asking macOS for one keychain item. It is not a
@@ -382,6 +382,20 @@ function nodeGetJson(url: string, headers: Record<string, string>): Promise<{ st
 let cachedPlan: { at: number; plan: ClaudePlanUsage | undefined } | null = null;
 const CACHE_MS = 180_000;
 
+/**
+ * What the usage ring's own answer says about the login behind it.
+ *
+ * The desk already asks Anthropic for this on its own beat, with the same
+ * login every chat uses, and used to throw a 401 away with every other bad
+ * status — so a dead token stayed invisible until a chat failed. A refusal is
+ * recorded and a success clears one, which keeps a single blip from stranding
+ * a good login. Every other status says nothing about the login.
+ */
+export function judgeClaudeRingStatus(status: number, token: string | null = null): void {
+  if (status === 401 || status === 403) markClaudeTokenRejected(`Anthropic refused the desk's login (${status}).`, token);
+  else if (status >= 200 && status < 300) clearClaudeTokenRejection(token);
+}
+
 export async function fetchClaudePlanUsage(input?: ClaudePlanTokenInput & {
   fetchImpl?: typeof fetch;
   token?: string;
@@ -400,20 +414,17 @@ export async function fetchClaudePlanUsage(input?: ClaudePlanTokenInput & {
     // Anthropic 429s /api/oauth/usage and the Usage ring stays on "…".
     if (input?.fetchImpl) {
       const response = await input.fetchImpl("https://api.anthropic.com/api/oauth/usage", { headers });
-      if (!response.ok) return undefined;
+      if (!response.ok) {
+        judgeClaudeRingStatus(response.status, token);
+        return undefined;
+      }
+      judgeClaudeRingStatus(response.status, token);
       return parseClaudePlanUsage(await response.json());
     }
     if (cachedPlan && Date.now() - cachedPlan.at < CACHE_MS) return cachedPlan.plan;
     const { status, json } = await nodeGetJson("https://api.anthropic.com/api/oauth/usage", headers);
     if (status === 429 && cachedPlan?.plan) return cachedPlan.plan;
-    // The desk already asks Anthropic for the usage ring on its own beat, with
-    // the same login every chat uses. A refusal here is the earliest the desk
-    // can know the login is dead — hours before the person clicks anything —
-    // so it is recorded rather than thrown away with every other bad status.
-    if (status === 401 || status === 403) {
-      markClaudeTokenRejected(`Anthropic refused the desk's login (${status}).`);
-      return undefined;
-    }
+    judgeClaudeRingStatus(status, token);
     if (status < 200 || status >= 300) return undefined;
     const plan = parseClaudePlanUsage(json);
     cachedPlan = { at: Date.now(), plan };

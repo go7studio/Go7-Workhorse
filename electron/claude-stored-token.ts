@@ -94,6 +94,18 @@ export function claudeTokenProblem(current: string | null = storedClaudeToken())
   return rejected && rejected.fingerprint === claudeTokenFingerprint(current) ? rejected.reason : null;
 }
 
+/**
+ * The login just worked. A refusal is a claim about a token, and this is the
+ * same claim answered the other way, so it goes: otherwise one blip — a proxy,
+ * a clock, an incident at the vendor — would leave a good login reading Sign
+ * in again for good, since nothing else clears it.
+ */
+export function clearClaudeTokenRejection(current: string | null = storedClaudeToken()): void {
+  if (!rejected || rejected.fingerprint !== claudeTokenFingerprint(current)) return;
+  rejected = null;
+  keep();
+}
+
 export function resetClaudeTokenRejection(): void {
   rejected = null;
   keep();

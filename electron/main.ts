@@ -436,6 +436,9 @@ function credentialStore(): CredentialStore {
  */
 function useStoredClaudeToken(): void {
   setStoredClaudeTokenReader(() => credentialStore().get(CLAUDE_TOKEN_ID) ?? null);
+  // The Link helper loads this file too, and has no card to show. The note is
+  // the desk's, so only the desk keeps it.
+  if (isMcpHelper) return;
   // A refused login is worth remembering across restarts: without this the
   // card reads On again on every start, and the person is told nothing until a
   // chat fails. The file holds a hash of the refused token, never the token.
@@ -450,8 +453,15 @@ function useStoredClaudeToken(): void {
     },
     write: (text) => {
       try {
-        if (text) fs.writeFileSync(file, text);
-        else fs.rmSync(file, { force: true });
+        if (!text) {
+          fs.rmSync(file, { force: true });
+          return;
+        }
+        // Written whole, then moved into place: a reader must never meet half
+        // a note, and the desk is not the only process under this userData.
+        const scratch = `${file}.${process.pid}.tmp`;
+        fs.writeFileSync(scratch, text);
+        fs.renameSync(scratch, file);
       } catch {
         /* the desk still knows within this run */
       }

@@ -210,6 +210,8 @@ test("store send() does not cross-talk vendors", () => {
   const store = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
   const main = readFileSync(path.join(ROOT, "electron", "main.ts"), "utf8");
   const settings = readFileSync(path.join(ROOT, "src", "ui", "Settings.tsx"), "utf8");
+  // The card copy lives in its own module now, so tests can call it instead of reading JSX.
+  const cardCopy = readFileSync(path.join(ROOT, "src", "lib", "llm-copy.ts"), "utf8");
   assert.match(store, /vendorSendTarget\(session\.provider\)/);
   assert.match(store, /codexPrompt/);
   assert.match(store, /grokPrompt/);
@@ -243,7 +245,7 @@ test("store send() does not cross-talk vendors", () => {
   assert.doesNotMatch(main, /spawn\(["']grok/);
   assert.match(settings, /refreshCodexLogin/);
   assert.match(settings, />\s*Recheck\s*</);
-  assert.match(settings, /Codex not found/);
+  assert.match(cardCopy, /Codex not found/);
 });
 
 test("buildCodexLaunchSpec never spawns grok and maps model sandbox mode MCP", () => {

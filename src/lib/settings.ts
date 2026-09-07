@@ -183,11 +183,13 @@ function link(raw: unknown): LlmLink {
   // fields here left routing's launch gate reading an undefined it could never
   // be given, so a connected-but-unlaunchable vendor kept taking work.
   const blocker = typeof record.launchBlocker === "string" ? record.launchBlocker.trim() : "";
+  const authProblem = typeof record.authProblem === "string" ? record.authProblem.trim() : "";
   return {
     connected: Boolean(record.connected),
     enabled: record.enabled !== false,
     ...(typeof record.available === "boolean" ? { available: record.available } : {}),
     ...(typeof record.needsAuth === "boolean" ? { needsAuth: record.needsAuth } : {}),
+    ...(authProblem ? { authProblem } : {}),
     ...(typeof record.launchable === "boolean" ? { launchable: record.launchable } : {}),
     ...(blocker ? { launchBlocker: blocker } : {}),
     ...(name ? { name } : {}),

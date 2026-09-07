@@ -6,10 +6,11 @@ import { isGrokBotUrl } from "../lib/custom-http-identity";
 import { formatWindow, modelsFor } from "../lib/models";
 import { PROVIDERS } from "../lib/providers";
 import { agentSystemsFromInboundSelect, inboundParentSelectValue, vendorEnabled, vendorLabel, vendorTint } from "../lib/settings";
+import { llmCardHint, llmDetailCopy } from "../lib/llm-copy";
 import { APP_VERSION } from "../lib/app-info";
 import { useStore } from "../lib/store";
 import { SETTINGS_THEME_CHOICES } from "../lib/theme";
-import type { AgentRuntimeId, DeskExportKind, LlmLink, PermissionMode, ProviderId, SandboxProfile, SettingsSection } from "../lib/types";
+import type { AgentRuntimeId, DeskExportKind, PermissionMode, ProviderId, SandboxProfile, SettingsSection } from "../lib/types";
 import type { AgentRuntimeStatus } from "../lib/external-catalog";
 import { BotForm } from "./BotForm";
 import { ContextMeter } from "./ContextMeter";
@@ -37,45 +38,6 @@ const SECTIONS: { id: SettingsSection; label: string }[] = [
 ];
 
 const DESK_STOCK: Exclude<ProviderId, "custom">[] = ["grok", "codex", "claude", "cursor"];
-
-function llmCardHint(id: Exclude<ProviderId, "custom">, link: LlmLink): string {
-  if (!vendorEnabled(link)) return "Disabled";
-  // Installed but signed out is a different problem from missing, and the
-  // only one the person can fix from here.
-  if (link.needsAuth && !link.connected) return "Needs auth";
-  if (link.available === false) return "Not found";
-  if (id === "grok" || id === "codex" || id === "claude" || id === "cursor") return "Local login";
-  return "Marked";
-}
-
-function llmDetailCopy(id: Exclude<ProviderId, "custom">, link: LlmLink): string {
-  if (link.connected && link.enabled === false) {
-    return "Disabled for new chats.";
-  }
-  // A vendor that is signed in and cannot start reads as ready everywhere else
-  // on this row. The reason is one line the detector already wrote, so the meta
-  // line says that instead of promising a launch that will throw.
-  if (link.launchable === false && link.launchBlocker) return `${link.launchBlocker}. Install it, then Recheck.`;
-  const found = link.available ?? link.connected;
-  if (id === "grok") {
-    return found ? "Local Grok ready." : "Grok not found.";
-  }
-  if (id === "codex") {
-    return found
-      ? "Local Codex ready."
-      : "Codex not found.";
-  }
-  if (id === "claude") {
-    return found
-      ? "Local Claude ready."
-      : "Claude not found.";
-  }
-  if (id === "cursor") {
-    if (link.needsAuth && !link.connected) return "Sign in to Cursor Agent, then Recheck.";
-    return found || link.connected ? "Local Cursor Agent ready." : "Cursor ACP binary or login not found.";
-  }
-  return found ? "Marked for a future adapter" : "Not connected";
-}
 
 type LlmFocus = Exclude<ProviderId, "custom"> | `bot:${string}` | null;
 

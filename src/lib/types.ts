@@ -709,6 +709,8 @@ export type LlmLink = {
   available?: boolean;
   /** Installed, but the login is missing or expired. */
   needsAuth?: boolean;
+  /** The vendor refused the desk's login with this reason. Sign in again clears it. */
+  authProblem?: string;
   /**
    * Whether the desk can start this vendor. Connected says a login artifact is
    * on disk; launchable says the binary the launch shells out to is somewhere

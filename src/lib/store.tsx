@@ -7,6 +7,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { claudeAuthFailure } from "./claude-auth-failure";
 import { StoreContext, StoreRuntimeContext, useStore } from "./store-context";
 export { useStore, useStoreReader, useStoreSelector } from "./store-context";
 import { commandContinuesToVendor, commandsForSession, matchCommand } from "./commands";
@@ -2125,6 +2126,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               ...current.settings.llms.claude,
               available: Boolean(detected.connected),
               needsAuth: Boolean((detected as { needsAuth?: boolean }).needsAuth),
+              authProblem: (detected as { authProblem?: string }).authProblem,
               accessDefaults: keepVendorAccessDefaults(
                 current.settings.llms.claude.accessDefaults,
                 detected.accessDefaults,
@@ -3128,7 +3130,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             throw new Error("Claude agent runs in the Workhorse desktop window.");
           }
           if (options?.replaceUserId) vendorSessionId = undefined;
-          const result = await window.workhorse.claudePrompt({ ...promptInput, vendorSessionId });
+          const result = await window.workhorse.claudePrompt({ ...promptInput, vendorSessionId }).catch((error: unknown) => {
+            // The card must not keep saying On while the vendor refuses the login.
+            if (claudeAuthFailure(error)) refreshClaudeLogin();
+            throw error;
+          });
           const reply = typeof result?.text === "string" ? result.text.trim() : "";
           vendorSessionId =
             typeof result?.vendorSessionId === "string" && result.vendorSessionId
@@ -3913,7 +3919,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           }
           if (live === "claude") {
             if (!window.workhorse?.claudePrompt) throw new Error("Claude agent runs in the Workhorse desktop window.");
-            const result = await window.workhorse.claudePrompt(promptInput);
+            const result = await window.workhorse.claudePrompt(promptInput).catch((error: unknown) => {
+              if (claudeAuthFailure(error)) refreshClaudeLogin();
+              throw error;
+            });
             return typeof result?.text === "string" ? result.text.trim() : "";
           }
           if (live === "codex") {

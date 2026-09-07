@@ -16,7 +16,7 @@ import { detectCodexLogin } from "./codex-login";
 import { archiveWorkhorseWorkerThreads, detectCodexRuntime, listCodexNativeThreads } from "./codex-app-server";
 import { codexCapabilitySummary } from "./codex-capabilities";
 import { detectClaudeLogin, resolveClaudeCliBinary } from "./claude-login";
-import { setStoredClaudeTokenReader } from "./claude-stored-token";
+import { markClaudeTokenRejected, setStoredClaudeTokenReader } from "./claude-stored-token";
 import { detectCursorLogin } from "./cursor-login";
 import { runClaudeSetupToken } from "./claude-auth";
 import { detectCustomLogin, fillEmptyCustomBotKeys, hydrateDetectedCustomCredentials, openClawKeyForBaseUrl } from "./custom-login";
@@ -96,6 +96,7 @@ import {
   rememberFolderBookmark,
 } from "./folder-access";
 import { normalizeSettings } from "../src/lib/settings";
+import { claudeAuthFailure } from "../src/lib/claude-auth-failure";
 import { customBotEnabled, customBotModels } from "../src/lib/custom-bots";
 import { routingProfileForModel } from "../src/lib/routing";
 import type { AdaptiveCandidate } from "../src/lib/learning-policy";
@@ -2176,15 +2177,23 @@ app.whenReady().then(async () => {
       cwd: requireSessionCwd(raw.cwd),
       unlistedModel: !claudeModelListed(raw.model),
     };
-    const result = await claudeHost.prompt(input, (payload) => {
-      if (payload.type === "vendor-models") rememberVendorModels(app.getPath("userData"), payload.provider, payload.models);
-      try {
-        sendToDesk(event.sender, "claude:event", payload);
-      } catch (error) {
-        console.error("workhorse claude event send failed", error);
-      }
-    });
-    return result;
+    try {
+      return await claudeHost.prompt(input, (payload) => {
+        if (payload.type === "vendor-models") rememberVendorModels(app.getPath("userData"), payload.provider, payload.models);
+        try {
+          sendToDesk(event.sender, "claude:event", payload);
+        } catch (error) {
+          console.error("workhorse claude event send failed", error);
+        }
+      });
+    } catch (error) {
+      // A refused login is a Settings problem, not a chat problem. Remember it
+      // so the Claude card reads Sign in again and shows the button, instead
+      // of On with the button hidden while every call fails.
+      const problem = claudeAuthFailure(error);
+      if (problem) markClaudeTokenRejected(problem);
+      throw error;
+    }
   });
   ipcMain.handle("claude:answer-permission", (_event, payload: { requestId: string; answer: PermissionAnswer }) => {
     return claudeHost.answerPermission(payload.requestId, payload.answer);

@@ -8,6 +8,13 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.6.64](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.63...v0.6.64) (2026-09-07)
+
+
+### Features
+
+* show this chat spend and a Crew total on the left ([539ef92](https://github.com/go7studio/Go7-Workhorse/commit/539ef92163b42648828acc2a92d15512ba1e5642))
+
 ## [0.6.63](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.62...v0.6.63) (2026-09-07)
 
 

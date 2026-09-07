@@ -15,6 +15,7 @@ import { closeOpenTurn, normalizeLedger } from "./session-ledger";
 import { normalizePortableCheckpoint } from "./portable-compaction";
 import { normalizeRoutingDecision } from "./routing";
 import { normalizeCrewModes } from "./workhorse-rules";
+import { normalizeSpawnAllowlist } from "./spawn-allowlist";
 import type { ChatMessage, CustomBot, EffortLevel, PermissionMode, ProviderId, SandboxProfile, Session } from "./types";
 
 export type BrainStamp = {
@@ -331,6 +332,7 @@ export function normalizeSession(raw: unknown, liveRunIds?: ReadonlySet<string>)
       const modes = normalizeCrewModes(raw.crewModes ?? raw.crewMode);
       return modes.length > 0 ? modes : undefined;
     })(),
+    spawnAllowlist: normalizeSpawnAllowlist((record as { spawnAllowlist?: unknown }).spawnAllowlist),
   };
 }
 

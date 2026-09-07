@@ -15,6 +15,7 @@ type GrokPromptBridgeInput = {
   mcpServers?: import("./lib/types").McpServerConfig[];
   preface?: string;
   crewModes?: import("./lib/types").CrewMode[];
+  spawnNames?: string[];
 };
 
 type GrokBridgeEvent =
@@ -196,6 +197,7 @@ type WorkhorseBridge = {
   cursorCancel?: (sessionId: string) => Promise<void>;
   onCursorEvent?: (handler: (event: GrokBridgeEvent) => void) => () => void;
   cursorPlanUsage?: () => Promise<import("./lib/types").GrokPlanUsage | null | undefined>;
+  cursorLedgerEvents?: (input?: { startDate?: number; endDate?: number }) => Promise<import("./lib/usage").CursorLedgerJoinRow[] | null | undefined>;
   detectCustomLogin: () => Promise<{
     connected: boolean;
     source: "openclaw" | "env" | "none";
@@ -241,6 +243,7 @@ type WorkhorseBridge = {
     hidden?: boolean;
     role?: import("./lib/workhorse-rules").DeskRole;
     crewModes?: import("./lib/types").CrewMode[];
+    spawnNames?: string[];
     customBotId?: string;
     config: {
       baseUrl: string;

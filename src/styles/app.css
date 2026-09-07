@@ -4429,6 +4429,22 @@ html.pane-dragging * {
   background: var(--bg-active);
 }
 
+.project-folder.drop-before {
+  box-shadow: 0 -2px 0 var(--accent);
+}
+
+.project-folder.drop-after {
+  box-shadow: 0 2px 0 var(--accent);
+}
+
+.project-folder.dragging-project {
+  opacity: 0.42;
+}
+
+.project-folder.dragging-project .project-head .row {
+  cursor: grabbing;
+}
+
 .project-folder {
   margin: 1px 0 4px;
 }
@@ -4456,6 +4472,7 @@ html.pane-dragging * {
   flex: 1;
   min-width: 0;
   width: auto;
+  cursor: grab;
 }
 
 .project-head .row,
@@ -8734,6 +8751,51 @@ html.pane-dragging * {
   border: 0;
   border-top: 1px solid var(--line);
   margin: 4px 6px;
+}
+
+.composer-crew-chip-group {
+  display: inline-flex;
+  align-items: center;
+  height: 32px;
+  border-radius: 999px;
+  background: var(--bg-hover);
+  flex-shrink: 0;
+  animation: crew-chip-in 220ms var(--ease);
+}
+
+.composer-crew-chip-group .composer-crew-chip {
+  background: transparent;
+  animation: none;
+}
+
+.composer-crew-gear {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 32px;
+  margin-right: 2px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-tertiary);
+}
+
+.composer-crew-gear:hover,
+.composer-crew-gear[aria-expanded="true"] {
+  color: var(--text);
+}
+
+.composer-spawn-menu {
+  left: 40px;
+  width: min(260px, calc(100% - 48px));
+}
+
+.composer-spawn-menu .plus-row[aria-checked="true"] {
+  background: color-mix(in srgb, var(--peer) 14%, transparent);
+}
+
+.composer-spawn-menu .plus-row[aria-checked="true"]:hover {
+  background: color-mix(in srgb, var(--peer) 22%, transparent);
 }
 
 .composer-crew {

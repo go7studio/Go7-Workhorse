@@ -778,7 +778,10 @@ test("available LLMs include a keyed custom bot when stock vendors are a no-go",
   assert.doesNotMatch(roster, /No custom\/MiniMax bot is attached/);
   assert.doesNotMatch(roster, /no custom bot is attached to this desk/i);
   assert.doesNotMatch(roster, /Nothing is callable right now/);
-  assert.match(readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8"), /formatDeskRoster\(catalog\)/);
+  assert.match(
+    readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8"),
+    /formatDeskRoster\(filterCatalogBySpawnAllowlist\(catalog/,
+  );
   assert.match(readFileSync(path.join(ROOT, "electron", "workhorse-mcp.ts"), "utf8"), /action: "list"/);
 });
 

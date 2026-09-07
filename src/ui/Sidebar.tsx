@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import horseMark from "../../assets/app-icons/go7-workhorse-transparent.png";
 import { APP_VERSION } from "../lib/app-info";
 import {
@@ -37,6 +37,7 @@ type SidebarStore = Pick<
   | "startSession"
   | "selectProject"
   | "moveSession"
+  | "reorderProjects"
   | "selectSession"
   | "renameSession"
   | "forkFrom"
@@ -165,20 +166,37 @@ function LooseChats({ store, index }: { store: SidebarStore; index: SidebarChatI
   );
 }
 
+function projectDragTypes(event: { dataTransfer: DataTransfer }): string[] {
+  return [...event.dataTransfer.types];
+}
+
+function dropPlaceFromPointer(event: { currentTarget: EventTarget & Element; clientY: number }): "before" | "after" {
+  const rect = event.currentTarget.getBoundingClientRect();
+  return event.clientY < rect.top + rect.height / 2 ? "before" : "after";
+}
+
 function ProjectFolder({
   project,
   open,
   dropOver,
+  projectDropPlace,
+  dragging,
   onToggle,
   onDropTarget,
+  onProjectDropTarget,
+  onProjectDrag,
   store,
   index,
 }: {
   project: Project;
   open: boolean;
   dropOver: boolean;
+  projectDropPlace: "before" | "after" | null;
+  dragging: boolean;
   onToggle: () => void;
   onDropTarget: (id: string | null) => void;
+  onProjectDropTarget: (id: string | null, place: "before" | "after" | null) => void;
+  onProjectDrag: (id: string | null) => void;
   store: SidebarStore;
   index: SidebarChatIndex;
 }) {
@@ -187,6 +205,7 @@ function ProjectFolder({
   const [showMore, setShowMore] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
   const [openCrew, setOpenCrew] = useState<Record<string, boolean>>({});
+  const draggedAt = useRef(0);
   useEffect(() => {
     const id = store.activeSessionId;
     if (!id) return;
@@ -205,10 +224,46 @@ function ProjectFolder({
     if (open) setOpenCrew({});
     onToggle();
   };
+  const skipClickAfterDrag = () => Date.now() - draggedAt.current < 400;
 
   return (
-    <div className={`project-folder${open ? " open" : ""}${selected ? " selected" : ""}${pinned ? " has-pin" : ""}${live ? " live" : ""}${dropOver ? " drop-over" : ""}`}>
-      <div className="project-head">
+    <div
+      className={`project-folder${open ? " open" : ""}${selected ? " selected" : ""}${pinned ? " has-pin" : ""}${live ? " live" : ""}${dropOver ? " drop-over" : ""}${projectDropPlace === "before" ? " drop-before" : ""}${projectDropPlace === "after" ? " drop-after" : ""}${dragging ? " dragging-project" : ""}`}
+    >
+      <div
+        className="project-head"
+        onDragOver={(event) => {
+          const types = projectDragTypes(event);
+          if (types.includes("text/workhorse-project")) {
+            event.preventDefault();
+            event.dataTransfer.dropEffect = "move";
+            onProjectDropTarget(project.id, dropPlaceFromPointer(event));
+            return;
+          }
+          if (!types.includes("text/workhorse-chat")) return;
+          event.preventDefault();
+          onDropTarget(project.id);
+        }}
+        onDragLeave={(event) => {
+          if (event.currentTarget.contains(event.relatedTarget as Node)) return;
+          onDropTarget(null);
+          onProjectDropTarget(null, null);
+        }}
+        onDrop={(event) => {
+          event.preventDefault();
+          const projectId = event.dataTransfer.getData("text/workhorse-project");
+          onDropTarget(null);
+          onProjectDropTarget(null, null);
+          if (projectId) {
+            if (projectId !== project.id) {
+              store.reorderProjects(projectId, project.id, dropPlaceFromPointer(event));
+            }
+            return;
+          }
+          const id = event.dataTransfer.getData("text/workhorse-chat");
+          if (id) store.moveSession(id, project.id);
+        }}
+      >
         <button
           className="twist"
           type="button"
@@ -236,7 +291,16 @@ function ProjectFolder({
         <button
           className={selected && !store.activeSessionId ? "row active" : "row"}
           type="button"
+          draggable
+          onDragStart={(event) => {
+            event.dataTransfer.setData("text/workhorse-project", project.id);
+            event.dataTransfer.effectAllowed = "move";
+            draggedAt.current = Date.now();
+            onProjectDrag(project.id);
+          }}
+          onDragEnd={() => onProjectDrag(null)}
           onClick={() => {
+            if (skipClickAfterDrag()) return;
             if (open) {
               toggleFolder();
               return;
@@ -245,18 +309,6 @@ function ProjectFolder({
             if (last) store.selectSession(last.id);
             else store.selectProject(project.id);
             toggleFolder();
-          }}
-          onDragOver={(event) => {
-            if (![...event.dataTransfer.types].includes("text/workhorse-chat")) return;
-            event.preventDefault();
-            onDropTarget(project.id);
-          }}
-          onDragLeave={() => onDropTarget(null)}
-          onDrop={(event) => {
-            event.preventDefault();
-            const id = event.dataTransfer.getData("text/workhorse-chat");
-            onDropTarget(null);
-            if (id) store.moveSession(id, project.id);
           }}
         >
           <span>
@@ -400,6 +452,8 @@ export function Sidebar() {
   const [query, setQuery] = useState("");
   const [openIds, setOpenIds] = useState<string[]>(() => (store.activeProjectId ? [store.activeProjectId] : []));
   const [dropId, setDropId] = useState<string | null>(null);
+  const [projectDrop, setProjectDrop] = useState<{ id: string; place: "before" | "after" } | null>(null);
+  const [draggingProjectId, setDraggingProjectId] = useState<string | null>(null);
   const [showArchivedProjects, setShowArchivedProjects] = useState(false);
   const index = useMemo(() => buildSidebarChatIndex(store.sessions), [store.sessions]);
   const liveProjects = useMemo(() => store.projects.filter((item) => !item.archivedAt), [store.projects]);
@@ -416,6 +470,24 @@ export function Sidebar() {
       current.includes(store.activeProjectId!) ? current : [...current, store.activeProjectId!],
     );
   }, [store.activeProjectId]);
+
+  const folderDrag = (item: Project) => ({
+    dropOver: dropId === item.id,
+    projectDropPlace: projectDrop?.id === item.id && draggingProjectId !== item.id ? projectDrop.place : null,
+    dragging: draggingProjectId === item.id,
+    onDropTarget: setDropId,
+    onProjectDropTarget: (id: string | null, place: "before" | "after" | null) => {
+      if (!id || !place || id === draggingProjectId) {
+        setProjectDrop((current) => (current ? null : current));
+        return;
+      }
+      setProjectDrop((current) => (current?.id === id && current.place === place ? current : { id, place }));
+    },
+    onProjectDrag: (id: string | null) => {
+      setDraggingProjectId(id);
+      if (!id) setProjectDrop(null);
+    },
+  });
 
   return (
     <aside className="sidebar">
@@ -493,13 +565,12 @@ export function Sidebar() {
             store={store}
             index={index}
             open={openIds.includes(item.id)}
-            dropOver={dropId === item.id}
             onToggle={() =>
               setOpenIds((current) =>
                 current.includes(item.id) ? current.filter((id) => id !== item.id) : [...current, item.id],
               )
             }
-            onDropTarget={setDropId}
+            {...folderDrag(item)}
           />
         ))}
         {archivedProjects.length > 0 && (
@@ -519,13 +590,12 @@ export function Sidebar() {
                   store={store}
                   index={index}
                   open={openIds.includes(item.id)}
-                  dropOver={dropId === item.id}
                   onToggle={() =>
                     setOpenIds((current) =>
                       current.includes(item.id) ? current.filter((id) => id !== item.id) : [...current, item.id],
                     )
                   }
-                  onDropTarget={setDropId}
+                  {...folderDrag(item)}
                 />
               ))}
           </>

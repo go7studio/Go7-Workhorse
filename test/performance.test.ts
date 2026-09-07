@@ -345,6 +345,7 @@ test("the composer ignores streamed prose but sees the chip, the queue, and the 
   assert.equal(sameComposerSession(talking, { ...talking, queue: [] }), false);
   assert.equal(sameComposerSession(talking, { ...talking, composerDraft: "half a line" }), false);
   assert.equal(sameComposerSession(talking, { ...talking, crewModes: ["orchestrate"] }), false);
+  assert.equal(sameComposerSession(talking, { ...talking, spawnAllowlist: ["claude"] }), false);
   assert.equal(sameComposerSession(null, null), true);
   assert.equal(sameComposerSession(talking, null), false);
 });

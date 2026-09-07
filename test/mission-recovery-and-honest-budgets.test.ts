@@ -34,11 +34,11 @@ test("a helper told to run small is told when it is given more", () => {
   assert.match(nestedHelperBudgetNote(90_000, 40_000), /lowered from 90,000 to 40,000/, "a cut is named too");
 });
 
-test("the timeout clamp rides spawn; spend is not a nested token ceiling", () => {
+test("neither timeout nor spend is a nested spawn clamp", () => {
   const mcp = read("electron/workhorse-mcp.ts");
-  const clamp = mcp.slice(mcp.indexOf("const clampNote = isNested"), mcp.indexOf("const clampNote = isNested") + 600);
-  assert.match(clamp, /nestedTimeoutNote\(input\.timeoutSeconds\)/);
-  assert.doesNotMatch(clamp, /nestedHelperBudgetNote\(input\.tokenBudget/, "spend is on the meter, not a spawn clamp");
+  assert.doesNotMatch(mcp, /const clampNote = isNested/);
+  assert.doesNotMatch(mcp, /nestedTimeoutNote\(input\.timeoutSeconds\)/);
+  assert.doesNotMatch(mcp, /nestedHelperBudgetNote\(input\.tokenBudget/, "spend is on the meter, not a spawn clamp");
 });
 
 const DEAD = ["interrupted", "failed", "timed-out", "cancelled", "budget-exceeded"];

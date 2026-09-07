@@ -634,6 +634,8 @@ export type Session = {
   routingDecision?: RoutingDecision;
   /** Composer + pins. Orchestrate and Mission can be on together. */
   crewModes?: CrewMode[];
+  /** This-chat Orchestrate bot list. Empty means all bots. */
+  spawnAllowlist?: string[];
 };
 
 export type PermissionRequest = {

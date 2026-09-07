@@ -63,7 +63,6 @@ import { spawnDispatchStarted } from "../electron/custom-host";
 import {
   handleWorkhorseRpc,
   nestedTimeoutNote,
-  NESTED_HELPER_TIMEOUT_SECONDS,
   parseCreateProjectLive,
   parseRenameProjectLive,
   setWorkhorseDeskAsk,
@@ -169,7 +168,7 @@ import { applyPermissionAnswer, autoAllowPermission, classifyElevation, deskClam
 import { detectClaudeAccessDefaults, detectCursorAccessDefaults, detectGrokAccessDefaults } from "../electron/vendor-access";
 import { normalizePermissionGrants } from "../src/lib/permission-grants";
 import { appendUserMessage, applyComposerDrafts, applyDeleteDeskChat, applyDeleteLooseDeskChats, applyRenameDeskChat, archiveChat, autoRenameChat, canPlaceInProject, deleteChat, deleteChatGuard, deleteWorkerChats, dropDrafts, dropQueuedPrompt, enqueuePrompt, findListedChat, forkChat, omitQueuedUserMessages, forkTitle, formatLastTalked, hasComposerDraft, hiddenProjectChatCount, isDraftChat, isLooseDeleteScope, lastProjectChat, lastTalkedAt, lastUserMessage, listedChats, defaultInboundParentId, messagesThrough, moveChat, openDraft, activeProjectChat, pinnedCollapsedChat, PROJECT_CHAT_LIMIT, renameChat, resolveListedChat, rewindToUserMessage, shiftQueuedPrompt, visibleProjectChats, workersFoldOpen } from "../src/lib/chats";
-import { applyArchiveProject, applyCreateWorkhorseProject, applyDeleteProject, applyProjectChatFate, applyRenameDeskProject, emptyProject, findProjectByQuery, projectForSpawn, renameTookOnDesk, visibleProjectNames } from "../src/lib/project";
+import { applyArchiveProject, applyCreateWorkhorseProject, applyDeleteProject, applyProjectChatFate, applyRenameDeskProject, applyReorderProjects, emptyProject, findProjectByQuery, projectForSpawn, renameTookOnDesk, visibleProjectNames } from "../src/lib/project";
 import { agentSystemsFromInboundSelect, applyUpdateStockBot, DEFAULT_SETTINGS, deskInk, deskLabel, firstAttachedChoice, hasAttachedLlm, inboundParentSelectValue, keepVendorAccessDefaults, normalizeDeskAccess, normalizeSettings, vendorAttachedForSession, vendorEnabled, vendorLabel, vendorTint } from "../src/lib/settings";
 import { customBotEnabled } from "../src/lib/custom-bots";
 import { COUNT_MS, COUNT_SNAP, countAt, countMotion, countToward, shouldSnapCount } from "../src/lib/count";
@@ -3854,6 +3853,23 @@ test("create-project binds the exact name and does not attach the folder to anot
   assert.equal(findListedChat([loose], "create me a project"), undefined);
   const moved = moveChat([loose], "sess_loose", named.id);
   assert.equal(moved?.find((item) => item.id === "sess_loose")?.projectId, named.id);
+});
+
+test("a project drag sits it before or after another, and never mixes live with archived", () => {
+  const a = { ...emptyProject("A"), id: "a" };
+  const archived = { ...emptyProject("X"), id: "x", archivedAt: 9 };
+  const b = { ...emptyProject("B"), id: "b" };
+  const c = { ...emptyProject("C"), id: "c" };
+  const list = [a, archived, b, c];
+  assert.deepEqual(applyReorderProjects(list, "c", "b", "before")?.map((item) => item.id), ["a", "x", "c", "b"]);
+  assert.deepEqual(applyReorderProjects(list, "c", "a", "before")?.map((item) => item.id), ["c", "a", "x", "b"]);
+  assert.deepEqual(applyReorderProjects(list, "a", "b", "after")?.map((item) => item.id), ["x", "b", "a", "c"]);
+  assert.equal(applyReorderProjects(list, "a", "a", "before"), null);
+  assert.equal(applyReorderProjects(list, "a", "x", "before"), null);
+  assert.equal(applyReorderProjects(list, "c", "b", "after"), null);
+  const sidebar = readFileSync(path.join(ROOT, "src", "ui", "Sidebar.tsx"), "utf8");
+  assert.match(sidebar, /text\/workhorse-project/);
+  assert.match(readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8"), /applyReorderProjects/);
 });
 
 test("delete-chat refuses the calling chat and fails closed on ambiguous titles", () => {
@@ -8552,12 +8568,14 @@ test("vendor preface lists extra folders and references, not cwd", () => {
       projectName: "Walk Test",
       sidebar: "Grok 4.6 · Medium · Ask",
       preview: "Hey — I'm here and ready.",
+      crew: "Crew on this chat: Wanda · skies (idle)",
     },
   });
   assert.match(withDesk, /Title: Preview Query/);
   assert.match(withDesk, /Project: Walk Test/);
   assert.match(withDesk, /Sidebar subtitle/);
   assert.match(withDesk, /Preview \(last message snippet\): Hey — I'm here and ready\./);
+  assert.match(withDesk, /Crew on this chat: Wanda · skies \(idle\)/);
   assert.match(readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8"), /buildSessionPreface/);
   assert.match(readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8"), /visibleText: firstUserText\(\{ messages: working \}\) \|\| originalText \|\| images\[0\]\?\.name \|\| "Image"/);
   for (const host of ["grok-host.ts", "codex-host.ts", "claude-host.ts", "cursor-host.ts"]) {
@@ -10371,52 +10389,26 @@ test("the desk reads each vendor app's own config and never asks the vendor for 
   );
 });
 
-test("a nested helper's clamped runtime is said out loud, not swallowed", () => {
+test("a nested helper is not given a runtime kill", () => {
   /*
-   * The tool schema offers 30-3600 seconds. The nested path silently cut every
-   * request down to two minutes, so a caller could ask for an hour, get two
-   * minutes, and read the early stop as a crash rather than as the limit it is.
-   * The clamp stays — a helper is a bounded check — but it now says so.
+   * Nested helpers used to be clamped to two minutes, then stopped. A helper
+   * that is still working is not a crash. timeoutSeconds on spawn is ignored
+   * the same way tokenBudget is.
    */
-  assert.equal(NESTED_HELPER_TIMEOUT_SECONDS, 120);
-  const note = nestedTimeoutNote(3600);
-  assert.match(note, /nested helpers run at most 120 s/);
-  assert.match(note, /3600 s asked for/, "the note says which number was overridden");
-
-  // Only a request that actually exceeded the ceiling earns a note. Anything at
-  // or under it was honoured, so saying so would be noise.
-  assert.equal(nestedTimeoutNote(120), "");
-  assert.equal(nestedTimeoutNote(30), "");
-  assert.equal(nestedTimeoutNote(undefined), "");
-  assert.equal(nestedTimeoutNote(Number.NaN), "");
-
-  // The note rides back with the spawn result and does not disturb the report.
-  const report = "Mission status: complete. Checked the two call sites.";
-  assert.equal(withSpawnNote(report, ""), report);
-  const carried = withSpawnNote(report, note);
-  assert.ok(carried.startsWith(report), "the worker's own report comes first, unaltered");
-  assert.match(carried, /nested helpers run at most 120 s/);
-  assert.equal(withSpawnNote(carried, note), carried, "a retried spawn does not stack the note twice");
-
-  // Both spawn return paths carry it: the first answer and the one after a
-  // vendor grant. A note on only one of them is a note that goes missing
-  // exactly when a vendor had to be asked twice.
   const mcp = readFileSync(path.join(ROOT, "electron", "workhorse-mcp.ts"), "utf8");
-  // The timeout clamp speaks. Spend is not a stop, so a nested token ceiling
-  // is not assigned and has no note to carry.
-  assert.match(mcp, /const clampNote = isNested/);
-  assert.match(mcp, /nestedTimeoutNote\(input\.timeoutSeconds\)/);
-  assert.doesNotMatch(mcp, /nestedHelperBudgetNote\(input\.tokenBudget/);
-  assert.match(mcp, /return withSpawnNote\(recordSpawnAccess\(first\), clampNote\);/, "the plain spawn result carries the note");
-  assert.match(
-    mcp,
-    /return withSpawnNote\(recordSpawnAccess\(await postBridge\("\/spawn"/,
-    "the granted retry carries it too",
-  );
-  assert.match(
+  assert.doesNotMatch(mcp, /const clampNote = isNested/);
+  assert.doesNotMatch(
     mcp,
     /timeoutSeconds: Math\.min\(NESTED_HELPER_TIMEOUT_SECONDS, Math\.max\(30, input\.timeoutSeconds \?\? NESTED_HELPER_TIMEOUT_SECONDS\)\)/,
-    "the clamp itself is kept, and reads from the one named ceiling",
+    "the nested path does not stamp a two-minute kill",
+  );
+  assert.match(mcp, /timeoutSeconds: undefined/);
+  assert.doesNotMatch(mcp, /nestedHelperBudgetNote\(input\.tokenBudget/);
+  assert.match(mcp, /return recordSpawnAccess\(first\)/, "the spawn result is not wrapped in a timeout clamp note");
+  assert.match(
+    mcp,
+    /return recordSpawnAccess\(await postBridge\("\/spawn"/,
+    "the granted retry is not wrapped either",
   );
 });
 

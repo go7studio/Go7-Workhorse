@@ -425,7 +425,7 @@ const TOOLS = [
         skills: { type: "array", items: { type: "string" }, description: "Exact installed skill names. Leave unset unless the user named skills." },
         tools: { type: "array", items: { type: "string" }, description: "Tools the task requires" },
         files: { type: "array", items: { type: "string" }, description: "Files to attach to the worker" },
-        timeoutSeconds: { type: "number", description: "Optional 30-3600 second runtime limit. The desk stops the worker when it passes this; the run ends timed-out." },
+        timeoutSeconds: { type: "number", description: "Ignored. The desk does not stop a worker on a runtime limit. The worker runs until it finishes or is cancelled." },
         tokenBudget: { type: "number", description: "Ignored. The desk does not stop a worker on a token ceiling. This chat's billed spend is on the meter." },
         isolation: { type: "string", description: "worktree (default) or shared. Independent writers default to a worktree. Nested bounded helpers are always shared." },
         planStepId: { type: "string", description: "Optional executable plan step id" },
@@ -463,7 +463,7 @@ const TOOLS = [
         permission: { type: "string", description: "Seat this pass's worker runs under: ask, accept-edits, or always-approve. Capped at the desk default (Settings › LLMs), not at your own seat. Omit and this pass keeps the seat the previous pass ran under." },
         sandbox: { type: "string", description: "Sandbox this pass's worker runs under: off, workspace, read-only, or strict. Same ceiling as permission. Omit and this pass keeps the previous pass's sandbox, so a mission does not lose access halfway." },
         route: { type: "string", description: "Omit to keep the prior brain; auto, quick, balanced, or deep opts into routing" },
-        timeoutSeconds: { type: "number", description: "Optional 30-3600 second runtime limit. The desk stops the worker when it passes this; the run ends timed-out." },
+        timeoutSeconds: { type: "number", description: "Ignored. The desk does not stop a worker on a runtime limit. The worker runs until it finishes or is cancelled." },
         tokenBudget: { type: "number", description: "Ignored. The desk does not stop a worker on a token ceiling. This chat's billed spend is on the meter." },
         isolation: { type: "string", description: "worktree or shared" },
         folder: { type: "string", description: "Optional absolute working folder" },
@@ -530,7 +530,7 @@ const TOOLS = [
         worker: {
           type: "string",
           description:
-            "Name of a worker you already used (Wren, Dexter). Sends this slice back to that worker with everything it learned — use it when this slice continues that work. Leave empty and a new worker starts with a clear head.",
+            "Name of a worker already on this chat (Wren, Wanda). Pass it to continue the same topic with what that worker learned. Leave empty to mint a new name for a new topic — a new worker starts with a clear head. Do not name an idle worker just to save a start. A busy worker still gets a colleague.",
         },
         provider: { type: "string", description: "Explicit user override only: grok, codex, claude, cursor, or custom" },
         model: { type: "string", description: "Explicit user override only, such as gpt-5.6-terra" },
@@ -548,7 +548,7 @@ const TOOLS = [
         exclude: { type: "array", items: { type: "string" }, description: "Provider, model, or bot terms this worker and its descendants must avoid" },
         files: { type: "array", items: { type: "string" }, description: "Files to attach to the worker" },
         effort: { type: "string", description: "Explicit user override only. Omit to keep a reused worker's thinking level; otherwise the desk derives it from task depth" },
-        timeoutSeconds: { type: "number", description: "Optional 30-3600 second runtime limit. The desk stops the worker when it passes this; the run ends timed-out." },
+        timeoutSeconds: { type: "number", description: "Ignored. The desk does not stop a worker on a runtime limit. The worker runs until it finishes or is cancelled." },
         tokenBudget: { type: "number", description: "Ignored. The desk does not stop a worker on a token ceiling. This chat's billed spend is on the meter." },
         isolation: { type: "string", description: "worktree (default) or shared. Independent writers default to a worktree. Nested bounded helpers are always shared." },
         seed: {
@@ -2151,7 +2151,7 @@ async function spawnAgent(
   const spawnInput = isNested
     ? {
         ...inheritedInput,
-        timeoutSeconds: Math.min(NESTED_HELPER_TIMEOUT_SECONDS, Math.max(30, input.timeoutSeconds ?? NESTED_HELPER_TIMEOUT_SECONDS)),
+        timeoutSeconds: undefined,
         tokenBudget: undefined,
         isolation: nestedPolicy.isolation,
         route: input.route ?? "quick",
@@ -2166,10 +2166,6 @@ async function spawnAgent(
         tokenBudget: undefined,
         isolation: resolveWorkerIsolation({ isolation: input.isolation }),
       };
-  // The schema offers 30-3600 s; a nested helper is held to a two-minute
-  // check. Clamping in silence let a caller ask for an hour, get two minutes,
-  // and read the early stop as a crash. Say so in the result instead.
-  const clampNote = isNested ? nestedTimeoutNote(input.timeoutSeconds) : "";
   const skillQueries = spawnInput.skills?.filter((skill) => skill.trim()) ?? [];
   const requestedSkills = skillQueries.length > 0
     ? resolveRequestedSkills(listDeskSkills(projectFoldersFromState()), skillQueries)
@@ -2245,7 +2241,7 @@ async function spawnAgent(
   if (isVendorDeclinedResult(first)) throw new Error(first.trim());
   const grant = parseVendorGrant(first);
   if (grant?.retrySpawn || grant?.allowed) {
-    return withSpawnNote(recordSpawnAccess(await postBridge("/spawn", {
+    return recordSpawnAccess(await postBridge("/spawn", {
       toSessionId: "",
       fromSessionId: fromId,
       exposureProfile: currentMcpProfile(),
@@ -2282,9 +2278,9 @@ async function spawnAgent(
       files: spawnInput.files,
       attachments,
       ...(spawnInput.traceId?.trim() ? { traceId: spawnInput.traceId.trim() } : {}),
-    } as PeerAsk)), clampNote);
+    } as PeerAsk));
   }
-  return withSpawnNote(recordSpawnAccess(first), clampNote);
+  return recordSpawnAccess(first);
 }
 
 /**

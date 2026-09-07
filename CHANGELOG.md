@@ -8,6 +8,20 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.6.63](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.62...v0.6.63) (2026-09-07)
+
+
+### Features
+
+* bill Cursor chats from the dashboard ledger join ([a38d46d](https://github.com/go7studio/Go7-Workhorse/commit/a38d46d1073f53686ad23daefd7dd94ed80e55b1))
+* continue named workers, spawn picker, project drag, unbounded runs ([004c75b](https://github.com/go7studio/Go7-Workhorse/commit/004c75bf11791125f66654cd848cd93d8f757f86))
+* continue named workers, spawn picker, project drag, unbounded runs ([5d1f497](https://github.com/go7studio/Go7-Workhorse/commit/5d1f4974c14e124a12e3d1a322416c8c0deefe0e))
+
+
+### Bug Fixes
+
+* **ci:** keep spawn wait bound and roster allowlist ([14ca3e2](https://github.com/go7studio/Go7-Workhorse/commit/14ca3e2a413adc60af3318659e5aa5da4ff6898a))
+
 ## [0.6.62](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.61...v0.6.62) (2026-09-06)
 
 

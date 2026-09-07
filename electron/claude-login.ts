@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { claudeDesktopConfigLooksLoggedIn, findClaudeDesktopRoot, readClaudeDesktopOauth } from "./claude-desktop-auth";
-import { storedClaudeToken } from "./claude-stored-token";
+import { claudeTokenProblem, storedClaudeToken } from "./claude-stored-token";
 import { deskHelperEnv, extraDeskDirs, isInsideAsar, runningInElectron } from "./desk-path";
 import { detectClaudeAccessDefaults } from "./vendor-access";
 import type { BotAccessDefaults } from "../src/lib/types";
@@ -39,12 +39,16 @@ export type ClaudeLoginDetectInput = {
   keychainHasLogin?: () => boolean;
   /** Workhorse's own Claude token. Injectable so tests never read the vault. */
   storedToken?: () => string | null;
+  /** Why the current login was refused, if it was. Injectable; defaults to the desk's memory of the last refusal. */
+  tokenProblem?: string | null;
 };
 
 export type ClaudeLoginDetectResult = {
   connected: boolean;
   /** ACP is installed but no usable login. A different problem from "not found". */
   needsAuth: boolean;
+  /** The vendor refused the desk's login with this reason. Sign in again clears it. */
+  authProblem?: string;
   /**
    * Connected says a login exists. Launchable says the desk can actually start
    * the vendor: the ACP server and the CLI it shells out to are both on disk
@@ -376,8 +380,14 @@ export function detectClaudeLogin(input: ClaudeLoginDetectInput = {}): ClaudeLog
   // environment, which is how it reached every other vendor's child; the vault
   // is where it lives now, and reading it here keeps sign-in on this desk
   // working without spreading the token to do it.
+  const stored = (input.storedToken ?? storedClaudeToken)();
+  // A login the vendor refused is not a login, however it got here. The card
+  // then says Sign in again and offers the button, until a different token is
+  // stored; a token that merely exists used to read as On for good.
+  const authProblem = input.tokenProblem === undefined ? claudeTokenProblem(stored) : input.tokenProblem || null;
   const loggedIn =
-    Boolean((input.storedToken ?? storedClaudeToken)()) ||
+    !authProblem &&
+    (Boolean(stored) ||
     hasClaudeLoginArtifact(
       claudeHome,
       homedir,
@@ -387,7 +397,7 @@ export function detectClaudeLogin(input: ClaudeLoginDetectInput = {}): ClaudeLog
       platform,
       Date.now(),
       input.keychainHasLogin ?? macKeychainHasClaudeLogin,
-    );
+    ));
   const connected = Boolean(acpBinary && loggedIn);
   // Same split as Codex: claude-launch.ts reads cliBinary as
   // CLAUDE_CODE_EXECUTABLE and throws CLAUDE_CLI_NOT_INSTALLED without it, so a
@@ -398,6 +408,7 @@ export function detectClaudeLogin(input: ClaudeLoginDetectInput = {}): ClaudeLog
   return {
     connected,
     needsAuth: Boolean(acpBinary) && !loggedIn,
+    ...(authProblem ? { authProblem } : {}),
     launchable: !launchBlocker,
     ...(launchBlocker ? { launchBlocker } : {}),
     binary: acpBinary,

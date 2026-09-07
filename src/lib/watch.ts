@@ -690,7 +690,8 @@ export function leftoverByWatchKey(
   return Object.fromEntries(statuses.map((status) => [status.key, status.leftover]));
 }
 
-export type DeskCallStatus = "ok" | "disabled" | "not_connected" | "spent" | "day_bank";
+/** `cannot_start`: attached and on, but a missing binary or a refused login stops every launch. */
+export type DeskCallStatus = "ok" | "disabled" | "not_connected" | "cannot_start" | "spent" | "day_bank";
 
 export type DeskCallRow = {
   id: string;
@@ -719,6 +720,9 @@ function deskCallRow(input: {
   kind: "vendor" | "custom";
   connected: boolean;
   enabled: boolean;
+  /** From the vendor link: a vendor that cannot start is not callable, and the blocker says why. */
+  launchable?: boolean;
+  launchBlocker?: string;
   leftover?: number;
   usedPercent?: number;
   period?: GrokPlanUsage["period"];
@@ -741,6 +745,14 @@ function deskCallRow(input: {
     code = "disabled";
     canCall = false;
     reason = `${input.name} is turned off in Settings → LLMs.`;
+  } else if (input.launchable === false) {
+    // Attached and on, but the desk cannot start it: a missing binary or a
+    // login the vendor refused. Not callable, and the row says which. Its own
+    // code, so the roster still lists the vendor instead of hiding it as
+    // unattached.
+    code = "cannot_start";
+    canCall = false;
+    reason = input.launchBlocker?.trim() || `${input.name} cannot start on this desk.`;
   } else if (
     (input.blockSpent || input.holding) &&
     input.leftover != null &&
@@ -821,6 +833,8 @@ export function deskCallCatalog(input: {
           kind: "vendor",
           connected,
           enabled,
+          launchable: link?.launchable,
+          launchBlocker: link?.launchBlocker,
           leftover: composer?.leftover,
           usedPercent: composer?.usedPercent,
           period: composer?.period,
@@ -842,6 +856,8 @@ export function deskCallCatalog(input: {
           kind: "vendor",
           connected,
           enabled,
+          launchable: link?.launchable,
+          launchBlocker: link?.launchBlocker,
           leftover: api?.leftover,
           usedPercent: api?.usedPercent,
           period: api?.period,
@@ -866,6 +882,8 @@ export function deskCallCatalog(input: {
         kind: "vendor",
         connected: Boolean(link?.connected),
         enabled: Boolean(link?.connected && link?.enabled !== false),
+        launchable: link?.launchable,
+        launchBlocker: link?.launchBlocker,
         leftover: status?.leftover,
         usedPercent: status?.usedPercent,
         period: status?.period,

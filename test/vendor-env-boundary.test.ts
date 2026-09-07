@@ -5,7 +5,11 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { buildClaudeLaunchSpec, claudeSpawnArgs } from "../electron/claude-launch";
 import { detectClaudeLogin } from "../electron/claude-login";
-import { setStoredClaudeTokenReader, storedClaudeToken } from "../electron/claude-stored-token";
+import { claudeTokenProblem, forgetClaudeRefusalWithoutToken, markClaudeTokenRejected, resetClaudeTokenRejection, setStoredClaudeTokenReader, storedClaudeToken } from "../electron/claude-stored-token";
+import { claudeAuthFailure } from "../src/lib/claude-auth-failure";
+import { normalizeSettings, vendorLaunchGate } from "../src/lib/settings";
+import { deskCallCatalog, formatDeskRoster, spawnIsNoGo } from "../src/lib/watch";
+import { routingCandidatesForDesk } from "../src/lib/routing";
 import { codexSpawnArgs } from "../electron/codex-launch";
 import { cursorSpawnArgs } from "../electron/cursor-launch";
 import { VENDOR_LOGIN_ENV_NAMES, withDeskToolEnv, withoutWorkhorsePrivateEnv } from "../electron/desk-path";
@@ -179,4 +183,141 @@ test("no shell the desk starts for a person or an agent gets the desk's own envi
   assert.equal(shellEnv.WORKHORSE_STATE_PATH, undefined);
   assert.equal(shellEnv.CLAUDE_CODE_OAUTH_TOKEN, undefined);
   assert.equal(shellEnv.HOME, HOME, "the person's own login environment stays");
+});
+
+/**
+ * Seen 2026-09-07: the desk's own setup-token credential expired, every Claude
+ * call failed with "OAuth session expired and could not be refreshed", and the
+ * card still read On · Local login with the sign-in button hidden — detection
+ * counted the dead token as a login and never asked whether it worked.
+ */
+test("a login the vendor refused is not a login until a different token is stored", async () => {
+  const refused = "OAuth session expired and could not be refreshed";
+  const dead = detectClaudeLogin({ ...detect, storedToken: () => CLAUDE_TOKEN, tokenProblem: refused });
+  assert.equal(dead.connected, false, "a refused token is not a login, whatever artifact exists");
+  assert.equal(dead.needsAuth, true, "so the card offers Log in with Claude");
+  assert.equal(dead.authProblem, refused);
+  assert.equal(dead.launchable, true, "the binaries are still there; only the login is the problem");
+  const fine = detectClaudeLogin({ ...detect, storedToken: () => CLAUDE_TOKEN, tokenProblem: null });
+  assert.equal(fine.connected, true);
+  assert.equal(fine.authProblem, undefined);
+
+  // The memory is keyed to the token that was refused: a new token clears it
+  // on its own, and no reader is touched on this machine.
+  try {
+    markClaudeTokenRejected(refused, "token-one");
+    assert.equal(claudeTokenProblem("token-one"), refused);
+    assert.equal(claudeTokenProblem("token-two"), null, "a different token is a fresh start");
+    assert.equal(claudeTokenProblem(null), null);
+    markClaudeTokenRejected("not logged in", null);
+    assert.equal(claudeTokenProblem(null), "not logged in", "a refused CLI login with no desk token is remembered too");
+    assert.equal(claudeTokenProblem("token-three"), null);
+    markClaudeTokenRejected("   ", "token-one");
+    assert.equal(claudeTokenProblem("token-one"), null, "a blank reason is no refusal");
+  } finally {
+    resetClaudeTokenRejection();
+  }
+  assert.equal(claudeTokenProblem("token-one"), null);
+
+  // The classifier is narrow: only a refused login sends the person to sign in.
+  const desk = new Error("Error invoking remote method 'claude:prompt': Error: Internal error: Failed to authenticate: OAuth session expired and could not be refreshed");
+  assert.equal(claudeAuthFailure(desk), refused, "the reason is the vendor's own line, without the plumbing");
+  assert.equal(claudeAuthFailure("Not logged in. Run claude login."), "Not logged in. Run claude login.");
+  assert.equal(claudeAuthFailure(new Error("authentication_error: invalid x-api-key")), "authentication_error: invalid x-api-key");
+  assert.equal(claudeAuthFailure(new Error("Rate limit reached for this hour")), null);
+  assert.equal(claudeAuthFailure(new Error("Prompt is too long: 1,200,000 tokens > 1,000,000")), null);
+  assert.equal(claudeAuthFailure(new Error("read ECONNRESET")), null);
+  assert.equal(claudeAuthFailure(undefined), null);
+
+  // The reason survives settings normalisation and reaches the card.
+  const settings = normalizeSettings({ llms: { claude: { connected: true, needsAuth: true, authProblem: ` ${refused} ` } } });
+  assert.equal(settings.llms.claude.authProblem, refused);
+  assert.equal(normalizeSettings({ llms: { claude: { connected: true, authProblem: "   " } } }).llms.claude.authProblem, undefined);
+  const { llmCardHint, llmDetailCopy } = await import("../src/lib/llm-copy");
+  // On the desk the card stays connected (it exists); detection drops available and raises needsAuth.
+  const link = { connected: true, enabled: true, available: false, needsAuth: true, authProblem: refused };
+  assert.equal(llmCardHint("claude", link), "Sign in again");
+  assert.match(llmDetailCopy("claude", link), /refused the desk's login: OAuth session expired and could not be refreshed\. Log in with Claude mints a new one\./);
+  assert.equal(llmCardHint("claude", { connected: true, enabled: true, available: true }), "Local login", "a working login reads as before");
+
+  // The refusal is remembered where it passes through main, and the renderer
+  // re-detects the moment a call is refused, so no Recheck is needed.
+  const main = readFileSync(path.join(ROOT, "electron", "main.ts"), "utf8").replace(/\r\n/g, "\n");
+  const handler = main.slice(main.indexOf('ipcMain.handle("claude:prompt"'), main.indexOf('ipcMain.handle("claude:answer-permission"'));
+  assert.match(handler, /const problem = claudeAuthFailure\(error\);\n\s+if \(problem\) markClaudeTokenRejected\(problem\);\n\s+throw error;/, "a refused login is remembered, and the error still reaches the chat");
+  const store = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8").replace(/\r\n/g, "\n");
+  assert.equal((store.match(/if \(claudeAuthFailure\(error\)\) refreshClaudeLogin\(\);/g) ?? []).length, 2, "both Claude prompt paths re-detect on a refusal");
+  assert.match(store, /authProblem: \(detected as \{ authProblem\?: string \}\)\.authProblem,/, "the reason reaches settings.llms.claude");
+});
+
+/**
+ * Gate findings on the first cut: the card said Sign in again while routing
+ * and Link still offered the vendor, because the store never writes
+ * `connected` from detection; and a refusal of the CLI login (no desk token)
+ * stayed until a restart.
+ */
+test("a vendor with no usable login is not callable, and Recheck clears a refusal of the CLI login", async () => {
+  const refused = "OAuth session expired and could not be refreshed";
+  // No usable login is a launch gate, whatever binaries are on disk.
+  assert.deepEqual(vendorLaunchGate({ launchable: true, needsAuth: true, authProblem: refused }), {
+    launchable: false,
+    launchBlocker: `The desk's login was refused: ${refused}. Sign in again`,
+  });
+  assert.deepEqual(vendorLaunchGate({ needsAuth: true }), { launchable: false, launchBlocker: "Not signed in. Sign in, then Recheck" });
+  assert.deepEqual(vendorLaunchGate({ launchable: true, needsAuth: false }), { launchable: true, launchBlocker: undefined });
+  assert.deepEqual(vendorLaunchGate({}), {}, "a detect that reports nothing still returns nothing");
+
+  const settings = normalizeSettings({
+    llms: {
+      claude: { connected: true, enabled: true, available: false, needsAuth: true, authProblem: refused, launchable: false, launchBlocker: `The desk's login was refused: ${refused}. Sign in again` },
+      codex: { connected: true, enabled: true, available: true, launchable: true },
+    },
+  });
+  // The call catalog Link and canCall read says no, and why.
+  const rows = deskCallCatalog({ settings, usage: [], plans: {}, permits: {} });
+  const claude = rows.find((row) => row.provider === "claude");
+  assert.equal(claude?.canCall, false, "a refused login is not a callable vendor");
+  assert.equal(claude?.status, "cannot_start", "its own code: attached and on, but nothing can launch");
+  assert.match(claude?.reason ?? "", /login was refused: OAuth session expired and could not be refreshed\. Sign in again/);
+  const codex = rows.find((row) => row.provider === "codex");
+  assert.notEqual(codex?.reason ?? "", claude?.reason, "the gate is per vendor");
+  // The Link roster keeps the vendor and says why, instead of hiding it as unattached.
+  const roster = formatDeskRoster(rows);
+  assert.match(roster, /- Claude — .*login was refused: OAuth session expired and could not be refreshed\. Sign in again/);
+  assert.doesNotMatch(roster.split("\n").find((line) => line.startsWith("- Claude")) ?? "", /you can call this/);
+  // A refused spawn tells the harness to skip, not to ask for Allow.
+  assert.match(spawnIsNoGo(claude) ?? "", /login was refused: .* Sign in again Skip it\. Do not ask the user to Allow\./);
+  // The card copy for every unsigned state names the way in, and never says Install.
+  const { llmDetailCopy } = await import("../src/lib/llm-copy");
+  const unsigned = { connected: true, enabled: true, available: false, needsAuth: true, launchable: false, launchBlocker: "Not signed in. Sign in, then Recheck" };
+  assert.equal(llmDetailCopy("claude", unsigned), "Not signed in. Log in with Claude mints a token for this desk.");
+  assert.equal(llmDetailCopy("cursor", unsigned), "Sign in to Cursor Agent, then Recheck.");
+  assert.equal(llmDetailCopy("codex", unsigned), "Not signed in. Sign in, then Recheck.");
+  for (const id of ["claude", "cursor", "codex", "grok"] as const) assert.doesNotMatch(llmDetailCopy(id, unsigned), /Install/);
+  assert.equal(llmDetailCopy("claude", { connected: true, enabled: true, available: true, launchable: false, launchBlocker: "claude-agent-acp is not on PATH" }), "claude-agent-acp is not on PATH. Install it, then Recheck.", "a missing binary still says Install");
+  // Routing carries the gate on every Claude candidate, so Auto never picks it and the miss names it.
+  const candidates = routingCandidatesForDesk(settings).filter((candidate) => candidate.provider === "claude");
+  assert.ok(candidates.length > 0, "the vendor still appears, so the miss can name it");
+  assert.ok(candidates.every((candidate) => candidate.launchable === false && /login was refused/.test(candidate.launchBlocker ?? "")));
+  assert.ok(routingCandidatesForDesk(settings).filter((candidate) => candidate.provider === "codex").every((candidate) => candidate.launchable !== false));
+
+  // Recheck clears a refusal of the CLI login (no desk token); one keyed to a
+  // desk token stays until a different token is stored.
+  try {
+    markClaudeTokenRejected("not logged in", null);
+    forgetClaudeRefusalWithoutToken();
+    assert.equal(claudeTokenProblem(null), null, "Recheck after `claude login` is the person's word");
+    markClaudeTokenRejected(refused, "token-one");
+    forgetClaudeRefusalWithoutToken();
+    assert.equal(claudeTokenProblem("token-one"), refused, "a refused desk token does not clear on Recheck");
+  } finally {
+    resetClaudeTokenRejection();
+  }
+  const main = readFileSync(path.join(ROOT, "electron", "main.ts"), "utf8").replace(/\r\n/g, "\n");
+  const detectHandler = main.slice(main.indexOf('ipcMain.handle("claude:detect-login"'), main.indexOf('ipcMain.handle("claude:setup-token"'));
+  assert.match(detectHandler, /input\.recheck === true\) forgetClaudeRefusalWithoutToken\(\);/, "only Recheck's word clears it, not the desk's own re-detect");
+  const settingsUi = readFileSync(path.join(ROOT, "src", "ui", "Settings.tsx"), "utf8").replace(/\r\n/g, "\n");
+  assert.match(settingsUi, /store\.refreshClaudeLogin\(\{ recheck: true \}\)/, "the Recheck button says so");
+  const preload = readFileSync(path.join(ROOT, "electron", "preload.ts"), "utf8").replace(/\r\n/g, "\n");
+  assert.match(preload, /ipcRenderer\.invoke\("claude:detect-login", input \?\? \{\}\)/);
 });

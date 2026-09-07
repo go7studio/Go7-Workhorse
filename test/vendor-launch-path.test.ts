@@ -435,7 +435,7 @@ test("the store carries the launch gate onto every vendor link", () => {
  * component was added.
  */
 test("the vendor row says the blocker instead of reporting the vendor ready", () => {
-  const settings = readFileSync(path.join(ROOT, "src", "ui", "Settings.tsx"), "utf8");
+  const settings = readFileSync(path.join(ROOT, "src", "lib", "llm-copy.ts"), "utf8");
   assert.match(
     settings,
     /if \(link\.launchable === false && link\.launchBlocker\) return/,
@@ -459,7 +459,7 @@ test("the bridge types every vendor detect by its real result type", () => {
   assert.match(bridge, /detectGrokLogin: \(\) => Promise<import\("\.\.\/electron\/grok-login"\)\.GrokLoginDetectResult>/);
   assert.match(
     bridge,
-    /detectClaudeLogin: \(\) => Promise<import\("\.\.\/electron\/claude-login"\)\.ClaudeLoginDetectResult>/,
+    /detectClaudeLogin: \((?:input\?: \{ recheck\?: boolean \})?\) => Promise<import\("\.\.\/electron\/claude-login"\)\.ClaudeLoginDetectResult>/,
   );
   for (const vendor of ["detectGrokLogin", "detectClaudeLogin", "detectCodexLogin", "detectCursorLogin"]) {
     assert.doesNotMatch(

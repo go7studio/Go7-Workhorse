@@ -164,7 +164,17 @@ export function keepVendorAccessDefaults(
  * A detect that says launchable clears any stored reason with it.
  */
 export function vendorLaunchGate(detected: unknown): Pick<LlmLink, "launchable" | "launchBlocker"> {
-  const record = (detected ?? {}) as { launchable?: unknown; launchBlocker?: unknown };
+  const record = (detected ?? {}) as { launchable?: unknown; launchBlocker?: unknown; needsAuth?: unknown; authProblem?: unknown };
+  // A vendor with no usable login cannot start either, whatever is on disk:
+  // routing must not pick it and a Link caller must not be told it can call.
+  // The reason names the refusal when there was one.
+  if (record.needsAuth === true) {
+    const problem = typeof record.authProblem === "string" ? record.authProblem.trim() : "";
+    return {
+      launchable: false,
+      launchBlocker: problem ? `The desk's login was refused: ${problem}. Sign in again` : "Not signed in. Sign in, then Recheck",
+    };
+  }
   if (typeof record.launchable !== "boolean") return {};
   // A vendor that can start has no reason it cannot. Carrying one anyway left
   // the row naming a binary the person had just installed.
@@ -183,11 +193,13 @@ function link(raw: unknown): LlmLink {
   // fields here left routing's launch gate reading an undefined it could never
   // be given, so a connected-but-unlaunchable vendor kept taking work.
   const blocker = typeof record.launchBlocker === "string" ? record.launchBlocker.trim() : "";
+  const authProblem = typeof record.authProblem === "string" ? record.authProblem.trim() : "";
   return {
     connected: Boolean(record.connected),
     enabled: record.enabled !== false,
     ...(typeof record.available === "boolean" ? { available: record.available } : {}),
     ...(typeof record.needsAuth === "boolean" ? { needsAuth: record.needsAuth } : {}),
+    ...(authProblem ? { authProblem } : {}),
     ...(typeof record.launchable === "boolean" ? { launchable: record.launchable } : {}),
     ...(blocker ? { launchBlocker: blocker } : {}),
     ...(name ? { name } : {}),

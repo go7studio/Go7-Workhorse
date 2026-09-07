@@ -21,6 +21,16 @@ const TOKEN = "sk-ant-oat01-FAKEFAKEFAKEFAKEFAKEFAKE0123456789";
 const ESC = "\u001b";
 
 /**
+ * Paths are built the way the code builds them. A test that spells "/usr/bin"
+ * by hand passes on a Mac and fails on the Windows runner, which joins with a
+ * backslash — the platform under test is an argument, not the host.
+ */
+const BIN = path.join(path.sep, "usr", "bin");
+const PYTHON = path.join(BIN, "python3");
+const STUB = path.resolve("/usr/bin/python3");
+const DEV_TOOLS_PYTHON = "/Library/Developer/CommandLineTools/usr/bin/python3";
+
+/**
  * Captured from `claude setup-token` 2.1.257 through the desk's own relay on
  * 2026-09-07: the real escape traffic, with no token in it because the flow
  * was stopped before anyone approved it.
@@ -50,7 +60,7 @@ test("the ENTER prompt is recognised even though the CLI writes no spaces", () =
 });
 
 test("a desk that cannot make a terminal says so at once, and never spawns", () => {
-  const noPython = { platform: "darwin" as NodeJS.Platform, pathDirs: ["/usr/bin"], existsSync: () => false };
+  const noPython = { platform: "darwin" as NodeJS.Platform, pathDirs: [BIN], existsSync: () => false };
   assert.equal(ptyRunner(["claude", "setup-token"], noPython), null);
   assert.equal(ptyRunner(["claude"], { platform: "win32", pathDirs: ["C:\\bin"], existsSync: () => true }), null, "Windows has no pty module");
 
@@ -74,24 +84,25 @@ test("the runner picks a real python, never the Mac's install-prompt stub", () =
   const onDisk = (...files: string[]) => (file: string) => files.includes(file);
   const stubOnly = ptyRunner(["claude"], {
     platform: "darwin",
-    pathDirs: ["/usr/bin"],
-    existsSync: onDisk("/usr/bin/python3"),
+    pathDirs: [path.dirname(STUB)],
+    existsSync: onDisk(STUB),
   });
   assert.equal(stubOnly, null, "clicking sign-in must not pop the developer-tools dialog");
 
   const withTools = ptyRunner(["claude", "setup-token"], {
     platform: "darwin",
-    pathDirs: ["/usr/bin"],
-    existsSync: onDisk("/usr/bin/python3", "/Library/Developer/CommandLineTools/usr/bin/python3"),
+    pathDirs: [path.dirname(STUB)],
+    existsSync: onDisk(STUB, DEV_TOOLS_PYTHON),
   });
-  assert.equal(withTools?.command, "/usr/bin/python3", "with the tools installed it is a real python");
+  assert.equal(withTools?.command, STUB, "with the tools installed it is a real python");
 
+  const brewPython = path.join(path.sep, "opt", "homebrew", "bin", "python3");
   const homebrew = ptyRunner(["claude", "setup-token"], {
     platform: "darwin",
-    pathDirs: ["/opt/homebrew/bin", "/usr/bin"],
-    existsSync: onDisk("/opt/homebrew/bin/python3", "/usr/bin/python3"),
+    pathDirs: [path.dirname(brewPython), path.dirname(STUB)],
+    existsSync: onDisk(brewPython, STUB),
   });
-  assert.equal(homebrew?.command, "/opt/homebrew/bin/python3", "a python of its own is preferred, stub or not");
+  assert.equal(homebrew?.command, brewPython, "a python of its own is preferred, stub or not");
   assert.deepEqual(homebrew?.args, ["-c", PTY_RELAY, "claude", "setup-token"], "the child runs inside the relay");
   assert.match(PTY_RELAY, /pty\.fork\(\)/, "a real pseudo-terminal");
   assert.match(PTY_RELAY, /TIOCSWINSZ/, "sized wide so a long token is never wrapped");
@@ -120,8 +131,8 @@ function fakeChild() {
 
 const withPython = {
   platform: "linux" as NodeJS.Platform,
-  pathDirs: ["/usr/bin"],
-  existsSync: (file: string) => file === "/usr/bin/python3",
+  pathDirs: [BIN],
+  existsSync: (file: string) => file === PYTHON,
 };
 
 test("a silent start is called what it is, instead of holding a spinner for five minutes", async () => {
@@ -218,31 +229,33 @@ test("a start that only draws is still a start that said nothing", async () => {
 });
 
 test("a python that is a link to the Mac stub is still the stub", () => {
+  const ownBin = path.join(path.sep, "Users", "someone", "bin");
+  const ownPython = path.join(ownBin, "python3");
   const runner = ptyRunner(["claude", "setup-token"], {
     platform: "darwin",
-    pathDirs: ["/Users/someone/bin"],
-    existsSync: (file) => file === "/Users/someone/bin/python3" || file === "/usr/bin/python3",
-    realpathSync: (file) => (file === "/Users/someone/bin/python3" ? "/usr/bin/python3" : file),
+    pathDirs: [ownBin],
+    existsSync: (file) => file === ownPython || file === STUB,
+    realpathSync: (file) => (file === ownPython ? STUB : file),
   });
   assert.equal(runner, null, "a link to the stub would pop the same dialog");
 
   const real = ptyRunner(["claude", "setup-token"], {
     platform: "darwin",
-    pathDirs: ["/Users/someone/bin"],
-    existsSync: (file) => file === "/Users/someone/bin/python3",
-    realpathSync: (file) => (file === "/Users/someone/bin/python3" ? "/opt/python/3.13/bin/python3" : file),
+    pathDirs: [ownBin],
+    existsSync: (file) => file === ownPython,
+    realpathSync: (file) => (file === ownPython ? path.join(path.sep, "opt", "python", "bin", "python3") : file),
   });
-  assert.equal(real?.command, "/Users/someone/bin/python3", "a link to a real python is a real python");
+  assert.equal(real?.command, ownPython, "a link to a real python is a real python");
 
   const broken = ptyRunner(["claude", "setup-token"], {
     platform: "darwin",
-    pathDirs: ["/Users/someone/bin"],
-    existsSync: (file) => file === "/Users/someone/bin/python3",
+    pathDirs: [ownBin],
+    existsSync: (file) => file === ownPython,
     realpathSync: () => {
       throw new Error("ELOOP");
     },
   });
-  assert.equal(broken?.command, "/Users/someone/bin/python3", "a link it cannot follow is judged by its own path");
+  assert.equal(broken?.command, ownPython, "a link it cannot follow is judged by its own path");
 });
 
 test("a flow that ends with words but no token says so, and one that ends silent asks for a terminal", async () => {

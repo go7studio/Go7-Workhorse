@@ -89,6 +89,7 @@ export type PtyRunnerInput = {
  * A sign-in button must never do that, so the stub counts only when a
  * developer directory that carries the real one is on disk.
  */
+const MAC_PYTHON_STUB = "/usr/bin/python3";
 const MAC_DEVELOPER_PYTHONS = [
   "/Library/Developer/CommandLineTools/usr/bin/python3",
   "/Applications/Xcode.app/Contents/Developer/usr/bin/python3",
@@ -127,7 +128,7 @@ export function ptyRunner(
     }
     const stub =
       platform === "darwin" &&
-      resolved === "/usr/bin/python3" &&
+      resolved === path.resolve(MAC_PYTHON_STUB) &&
       !MAC_DEVELOPER_PYTHONS.some((real) => existsSync(real));
     if (stub) continue;
     return { command: candidate, args: ["-c", PTY_RELAY, ...argv] };

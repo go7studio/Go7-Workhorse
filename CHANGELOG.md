@@ -8,6 +8,18 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.6.65](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.64...v0.6.65) (2026-09-07)
+
+
+### Features
+
+* **models:** Fable 5.1 and GPT-6 Astra reach the picker, routing, and Link ([fa76bfd](https://github.com/go7studio/Go7-Workhorse/commit/fa76bfdef9a66bfe1c17ef309577c5b3be755428))
+
+
+### Bug Fixes
+
+* **llms:** a login Claude refused reads Sign in again and offers the button ([edaf62b](https://github.com/go7studio/Go7-Workhorse/commit/edaf62baecff058fd037946a1e567a64554c8947))
+
 ## [0.6.64](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.63...v0.6.64) (2026-09-07)
 
 

@@ -1008,15 +1008,30 @@ function latestPeerAsk(messages: ChatMessage[] | undefined, fromSessionId?: stri
   return [...(messages ?? [])].reverse().find((message) => isPeerAsk(message, fromSessionId));
 }
 
-function replyToPeer(messages: ChatMessage[] | undefined, peer: ChatMessage): ChatMessage | undefined {
+function isAskedTurnAssistant(message: ChatMessage, peer: ChatMessage): boolean {
+  if (message.role !== "assistant" || message.kind === "tool" || message.kind === "thought") return false;
+  if (peer.correlationId && message.correlationId && message.correlationId !== peer.correlationId) return false;
+  return true;
+}
+
+/** Messages after the asked peer until the next user/peer turn. */
+function askedTurnWindow(messages: ChatMessage[] | undefined, peer: ChatMessage): {
+  turn: ChatMessage[];
+  closedByLaterUser: boolean;
+} {
   const list = messages ?? [];
   const start = list.findIndex((message) => message.id === peer.id);
-  const slice = start >= 0 ? list.slice(start + 1) : list.filter((message) => message.createdAt >= peer.createdAt);
-  return slice.find((message) => {
-    if (message.role !== "assistant" || message.kind === "tool" || message.kind === "thought") return false;
-    if (peer.correlationId && message.correlationId && message.correlationId !== peer.correlationId) return false;
-    return true;
-  });
+  const rest = start >= 0 ? list.slice(start + 1) : list.filter((message) => message.createdAt >= peer.createdAt);
+  const boundary = rest.findIndex((message) => message.role === "user");
+  return {
+    turn: boundary >= 0 ? rest.slice(0, boundary) : rest,
+    closedByLaterUser: boundary >= 0,
+  };
+}
+
+function lastAskedTurnReply(turn: ChatMessage[], peer: ChatMessage): ChatMessage | undefined {
+  const assistants = turn.filter((message) => isAskedTurnAssistant(message, peer));
+  return [...assistants].reverse().find((message) => message.text.trim()) ?? assistants.at(-1);
 }
 
 export function askedChatAllows(session: Pick<Session, "messages">, fromSessionId?: string): boolean {
@@ -1033,6 +1048,16 @@ function askedRunFailed(status: string | undefined): boolean {
   );
 }
 
+function askedRunForPeer(run: Session["agentRun"], peer: ChatMessage): Session["agentRun"] {
+  if (!run) return undefined;
+  if (peer.correlationId && run.correlationId) {
+    return run.correlationId === peer.correlationId ? run : undefined;
+  }
+  if (typeof run.finishedAt === "number" && run.finishedAt < peer.createdAt) return undefined;
+  if (run.startedAt < peer.createdAt) return undefined;
+  return run;
+}
+
 /** Status of the latest asked turn only. Older assistant text is never the new report. */
 export function askedChatStatusSnapshot(
   session: StatusSession,
@@ -1040,23 +1065,24 @@ export function askedChatStatusSnapshot(
 ): Record<string, unknown> | null {
   const peer = latestPeerAsk(session.messages, fromSessionId);
   if (!peer) return null;
-  const reply = replyToPeer(session.messages, peer);
+  const { turn, closedByLaterUser } = askedTurnWindow(session.messages, peer);
+  const reply = lastAskedTurnReply(turn, peer);
   const replyText = reply?.text.trim() ?? "";
   const bounded = replyText ? boundWorkerReport(replyText, { workerId: session.id }) : null;
-  const run = session.agentRun?.status;
-  const live = session.status === "running" || run === "running" || run === "queued";
-  const failed = askedRunFailed(run);
+  const run = askedRunForPeer(session.agentRun, peer);
+  const live = !closedByLaterUser && (session.status === "running" || run?.status === "running");
+  const failed = askedRunFailed(run?.status);
   let next: WorkerFollowNext;
   let how: string;
   let status: string;
   if (failed) {
     next = "failed";
     how = ASKED_FAIL_HOW;
-    status = run ?? "failed";
+    status = run?.status ?? "failed";
   } else if (live) {
     next = "wait";
     how = ASKED_WAIT_HOW;
-    status = run === "queued" ? "queued" : "running";
+    status = "running";
   } else if (!replyText) {
     next = "failed";
     how = ASKED_FAIL_HOW;

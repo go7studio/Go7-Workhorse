@@ -1198,6 +1198,61 @@ test("agent_status follows an asked existing parent through running then termina
     })) as { error?: { code?: number; message?: string } };
     assert.equal(outsider.error?.code, -32000);
     assert.equal(outsider.error?.message, "unknown");
+
+    writeFileSync(
+      statePath,
+      JSON.stringify({
+        settings: {},
+        sessions: [
+          {
+            id: orch,
+            title: "Coordinator",
+            provider: "grok",
+            projectId: null,
+            messages: [{ role: "user", text: "coordinate", createdAt: 1 }],
+          },
+          {
+            id: target,
+            title: "Existing parent",
+            provider: "grok",
+            projectId: null,
+            status: "idle",
+            agentRun: { status: "failed", startedAt: 1, finishedAt: 2, isolation: "shared", error: "old slice failed" },
+            messages: [
+              { id: "old_a", role: "assistant", text: "Old parent report.", createdAt: 1 },
+              {
+                id: "peer_1",
+                role: "user",
+                kind: "peer",
+                peerFromSessionId: orch,
+                text: "Continue the existing work.",
+                createdAt: 10,
+              },
+              { id: "ack", role: "assistant", text: "On it.", createdAt: 11 },
+              { id: "new_a", role: "assistant", text: "Asked turn finished.", createdAt: 12 },
+              { id: "later_user", role: "user", text: "A later human turn.", createdAt: 13 },
+              { id: "later_a", role: "assistant", text: "Unrelated later answer.", createdAt: 14 },
+            ],
+          },
+        ],
+      }),
+    );
+    const bounded = (await handleWorkhorseRpc({
+      jsonrpc: "2.0",
+      id: 6,
+      method: "tools/call",
+      params: { name: "workhorse_agent_status", arguments: { id: target, fromSessionId: orch } },
+    })) as { error?: { message?: string }; result?: { content?: Array<{ text?: string }> } };
+    assert.equal(bounded.error, undefined, bounded.error?.message);
+    const boundedBody = JSON.parse(bounded.result?.content?.[0]?.text ?? "{}") as {
+      next?: string;
+      report?: string;
+      status?: string;
+    };
+    assert.equal(boundedBody.next, "done");
+    assert.equal(boundedBody.status, "completed");
+    assert.equal(boundedBody.report, "Asked turn finished.");
+    assert.doesNotMatch(boundedBody.report ?? "", /On it|Unrelated later answer|Old parent report/);
   } finally {
     setWorkhorseDeskAsk(null as never);
     if (previous.profile === undefined) delete process.env.WORKHORSE_MCP_PROFILE;

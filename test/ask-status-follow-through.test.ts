@@ -190,6 +190,159 @@ test("asked worker from a distinct parent uses the asked turn, not the old worke
   assert.equal(live.snapshot.report, undefined);
 });
 
+test("progress then final uses the last asked-turn answer, not the first assistant", () => {
+  const done = resolveAgentStatus({
+    id: TARGET,
+    fromSessionId: ORCH,
+    sessions: [
+      askedParent({
+        status: "idle",
+        messages: [
+          { id: "old_a", role: "assistant", text: OLD_REPORT, createdAt: 1 },
+          {
+            id: "peer_1",
+            role: "user",
+            kind: "peer",
+            peerFromSessionId: ORCH,
+            correlationId: "corr_ask",
+            text: "Please continue the existing work.",
+            createdAt: 2,
+          },
+          { id: "ack", role: "assistant", text: "On it.", createdAt: 3, correlationId: "corr_ask" },
+          { id: "new_a", role: "assistant", text: NEW_REPORT, createdAt: 4, correlationId: "corr_ask" },
+        ],
+      }),
+    ],
+  });
+  assert.equal(done.ok, true);
+  if (!done.ok) return;
+  assert.equal(done.snapshot.next, "done");
+  assert.equal(done.snapshot.report, NEW_REPORT);
+  assert.doesNotMatch(String(done.snapshot.report), /On it/);
+});
+
+test("progress while still running stays wait and does not promote the ack to report", () => {
+  const running = resolveAgentStatus({
+    id: TARGET,
+    fromSessionId: ORCH,
+    sessions: [
+      askedParent({
+        status: "running",
+        messages: [
+          {
+            id: "peer_1",
+            role: "user",
+            kind: "peer",
+            peerFromSessionId: ORCH,
+            correlationId: "corr_ask",
+            text: "Please continue the existing work.",
+            createdAt: 2,
+          },
+          { id: "ack", role: "assistant", text: "On it.", createdAt: 3, correlationId: "corr_ask" },
+          { id: "new_a", role: "assistant", text: "", createdAt: 4, correlationId: "corr_ask" },
+        ],
+      }),
+    ],
+  });
+  assert.equal(running.ok, true);
+  if (!running.ok) return;
+  assert.equal(running.snapshot.next, "wait");
+  assert.equal(running.snapshot.report, undefined);
+  assert.equal(running.snapshot.partialReport, "On it.");
+});
+
+test("a later running turn does not keep the asked follow-through waiting", () => {
+  const done = resolveAgentStatus({
+    id: TARGET,
+    fromSessionId: ORCH,
+    sessions: [
+      chat({
+        status: "running",
+        messages: [
+          {
+            id: "peer_1",
+            role: "user",
+            kind: "peer",
+            peerFromSessionId: ORCH,
+            correlationId: "corr_ask",
+            text: "Please continue the existing work.",
+            createdAt: 2,
+          },
+          { id: "ack", role: "assistant", text: "On it.", createdAt: 3, correlationId: "corr_ask" },
+          { id: "new_a", role: "assistant", text: NEW_REPORT, createdAt: 4, correlationId: "corr_ask" },
+          { id: "later_peer", role: "user", kind: "peer", peerFromSessionId: "sess_other", text: "Another ask.", createdAt: 5 },
+          { id: "later_a", role: "assistant", text: "Unrelated later answer.", createdAt: 6 },
+        ],
+      }),
+    ],
+  });
+  assert.equal(done.ok, true);
+  if (!done.ok) return;
+  assert.equal(done.snapshot.next, "done");
+  assert.equal(done.snapshot.report, NEW_REPORT);
+});
+
+test("a later user or peer turn cannot supply the asked report", () => {
+  const done = resolveAgentStatus({
+    id: TARGET,
+    fromSessionId: ORCH,
+    sessions: [
+      chat({
+        status: "idle",
+        messages: [
+          {
+            id: "peer_1",
+            role: "user",
+            kind: "peer",
+            peerFromSessionId: ORCH,
+            text: "Please continue the existing work.",
+            createdAt: 2,
+          },
+          { id: "ack", role: "assistant", text: "On it.", createdAt: 3 },
+          { id: "later_user", role: "user", text: "A later human turn.", createdAt: 4 },
+          { id: "later_a", role: "assistant", text: "Unrelated later answer.", createdAt: 5 },
+        ],
+      }),
+    ],
+  });
+  assert.equal(done.ok, true);
+  if (!done.ok) return;
+  assert.equal(done.snapshot.next, "done");
+  assert.equal(done.snapshot.report, "On it.");
+  assert.doesNotMatch(String(done.snapshot.report), /Unrelated later answer/);
+});
+
+test("a stale previous agentRun failure does not fail the current asked turn", () => {
+  const done = resolveAgentStatus({
+    id: TARGET,
+    fromSessionId: ORCH,
+    sessions: [
+      askedParent({
+        status: "idle",
+        agentRun: { status: "failed", startedAt: 1, finishedAt: 2, isolation: "shared", error: "old slice failed" },
+        messages: [
+          { id: "old_a", role: "assistant", text: OLD_REPORT, createdAt: 1 },
+          {
+            id: "peer_1",
+            role: "user",
+            kind: "peer",
+            peerFromSessionId: ORCH,
+            correlationId: "corr_ask",
+            text: "Please continue the existing work.",
+            createdAt: 10,
+          },
+          { id: "new_a", role: "assistant", text: NEW_REPORT, createdAt: 11, correlationId: "corr_ask" },
+        ],
+      }),
+    ],
+  });
+  assert.equal(done.ok, true);
+  if (!done.ok) return;
+  assert.equal(done.snapshot.next, "done");
+  assert.equal(done.snapshot.report, NEW_REPORT);
+  assert.equal(done.snapshot.status, "completed");
+});
+
 test("unknown id and a parent that never asked stay closed", () => {
   const target = askedParent();
   assert.equal(

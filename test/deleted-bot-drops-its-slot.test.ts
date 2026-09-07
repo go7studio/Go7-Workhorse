@@ -187,6 +187,7 @@ function desk(bots: CustomBot[]) {
             },
           }),
         liveBots: () => state.settings.customBots,
+        liveLastTriedAt: (id) => health[id]?.lastTriedAt,
         writePlan: (id, plan) => {
           plans = { ...plans, [id]: planAfterRefresh(plans[id], plan) };
         },

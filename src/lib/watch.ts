@@ -1261,6 +1261,14 @@ export type CustomMeterBeat<T> = {
   ask: (bot: T) => Promise<GrokPlanUsage | undefined>;
   /** The connections as they stand when an answer lands. Read, never closed over. */
   liveBots: () => { id: string; enabled?: boolean }[];
+  /**
+   * The latest lastTriedAt for a bot, read at the moment an answer lands. Two
+   * beats may run in parallel because the leftover loop never awaits the
+   * previous round — when that happens, the older beat must not write past a
+   * newer one. The store passes its ref so the helper can compare against the
+   * live figure, not the snapshot `health` captured at beat start.
+   */
+  liveLastTriedAt: (id: string) => number | undefined;
   writePlan: (id: string, plan: GrokPlanUsage | undefined) => void;
   markKnown: (id: string) => void;
   writeHealth: (id: string, answered: boolean) => void;
@@ -1289,6 +1297,13 @@ export async function runCustomMeterBeat<
         // A thrown call is a miss, same as a host that answered nothing.
       }
       if (!customSlotTakesAnswer(beat.liveBots(), bot.id)) return;
+      // Two beats can run in parallel because the loop never awaits the
+      // previous round. A slower older beat must not overwrite a newer one:
+      // its `now` is older than the live lastTriedAt already on file, so the
+      // four writes below would replace a fresher reading with a stale one and
+      // move lastTriedAt backwards. Drop the answer and stay quiet.
+      const live = beat.liveLastTriedAt(bot.id);
+      if (live !== undefined && live > beat.now) return;
       // Same rule as the stock meters: an answer replaces an answer, and a
       // failure leaves whatever was last known in place. Writing here on a
       // throw is what would turn a live bot's meter into unknown mid-wave.

@@ -8252,6 +8252,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       // Read at the moment the answer lands, not closed over at the moment the
       // question was asked: a delete or a switch-off in the gap wins.
       liveBots: () => stateRef.current.settings.customBots,
+      // Two leftover beats can run in parallel; an older one must not write
+      // past a newer one, so the helper compares its beat `now` to the live
+      // lastTriedAt at the moment the answer lands.
+      liveLastTriedAt: (id) => meterHealthRef.current[id]?.lastTriedAt,
       writePlan: (id, plan) =>
         setCustomPlans((current) => ({ ...current, [id]: planAfterRefresh(current[id], plan) })),
       markKnown: (id) => setCustomPlanKnown((current) => ({ ...current, [id]: true })),

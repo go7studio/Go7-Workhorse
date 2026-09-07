@@ -158,7 +158,91 @@ test("output keeps the flow alive, the prompt is answered, and the token comes b
   const result = await flow;
   assert.deepEqual(result, { ok: true, token: TOKEN });
   assert.deepEqual(child.typed, ["\n"], "the desk answers the prompt on the person's behalf");
-  assert.equal(streamed.length, 3, "every chunk reaches the card as it arrives");
+
+  // What is streamed to the renderer is what a person could read over a
+  // shoulder. The token is not that: the desk stores it and the card reads the
+  // result, so the stream carries the words and never the credential.
+  const streamedText = streamed.join("");
+  assert.doesNotMatch(streamedText, /sk-ant-/, "the minted token never crosses to the renderer");
+  assert.match(streamedText, /\[token hidden\]/, "and its place is marked");
+  assert.match(streamedText.replace(/\s+/g, ""), /Authenticateyouraccount/, "the words do cross");
+  assert.doesNotMatch(streamedText, new RegExp(ESC), "stripped of escapes on the way");
+});
+
+test("a token split across two chunks is never half-shown", async () => {
+  const child = fakeChild();
+  const streamed: string[] = [];
+  const flow = runClaudeSetupToken({
+    cli: "/bin/claude",
+    pty: withPython,
+    quietMs: 200,
+    timeoutMs: 60_000,
+    onOutput: (chunk) => streamed.push(chunk),
+    spawnFn: (() => child) as never,
+  });
+  child.stdout.emit("data", Buffer.from(`token: ${TOKEN.slice(0, 18)}`));
+  await new Promise((done) => setTimeout(done, 20));
+  assert.equal(streamed.join(""), "", "an unfinished line is held back, because half a token cannot be redacted");
+  child.stdout.emit("data", Buffer.from(`${TOKEN.slice(18)}\n`));
+  child.emit("exit", 0);
+  assert.equal((await flow).token, TOKEN, "the desk still gets the whole token");
+  assert.doesNotMatch(streamed.join(""), /FAKEFAKE/, "and the renderer never saw a piece of it");
+});
+
+test("a token printed as the clock runs out is a sign-in that worked", async () => {
+  const child = fakeChild();
+  const flow = runClaudeSetupToken({
+    cli: "/bin/claude",
+    pty: withPython,
+    quietMs: 500,
+    timeoutMs: 40,
+    spawnFn: (() => child) as never,
+  });
+  child.stdout.emit("data", Buffer.from(`token: ${TOKEN}\n`));
+  const result = await flow;
+  assert.deepEqual(result, { ok: true, token: TOKEN }, "approved a moment before the deadline still counts");
+  assert.equal(child.killed, true, "and the terminal is closed either way");
+});
+
+test("a start that only draws is still a start that said nothing", async () => {
+  const child = fakeChild();
+  const flow = runClaudeSetupToken({
+    cli: "/bin/claude",
+    pty: withPython,
+    quietMs: 30,
+    timeoutMs: 60_000,
+    spawnFn: (() => child) as never,
+  });
+  child.stdout.emit("data", Buffer.from(`${ESC}[2J${ESC}[H${ESC}[?25l`));
+  assert.equal((await flow).reason, "needs_terminal", "escapes are not words the person can act on");
+});
+
+test("a python that is a link to the Mac stub is still the stub", () => {
+  const runner = ptyRunner(["claude", "setup-token"], {
+    platform: "darwin",
+    pathDirs: ["/Users/someone/bin"],
+    existsSync: (file) => file === "/Users/someone/bin/python3" || file === "/usr/bin/python3",
+    realpathSync: (file) => (file === "/Users/someone/bin/python3" ? "/usr/bin/python3" : file),
+  });
+  assert.equal(runner, null, "a link to the stub would pop the same dialog");
+
+  const real = ptyRunner(["claude", "setup-token"], {
+    platform: "darwin",
+    pathDirs: ["/Users/someone/bin"],
+    existsSync: (file) => file === "/Users/someone/bin/python3",
+    realpathSync: (file) => (file === "/Users/someone/bin/python3" ? "/opt/python/3.13/bin/python3" : file),
+  });
+  assert.equal(real?.command, "/Users/someone/bin/python3", "a link to a real python is a real python");
+
+  const broken = ptyRunner(["claude", "setup-token"], {
+    platform: "darwin",
+    pathDirs: ["/Users/someone/bin"],
+    existsSync: (file) => file === "/Users/someone/bin/python3",
+    realpathSync: () => {
+      throw new Error("ELOOP");
+    },
+  });
+  assert.equal(broken?.command, "/Users/someone/bin/python3", "a link it cannot follow is judged by its own path");
 });
 
 test("a flow that ends with words but no token says so, and one that ends silent asks for a terminal", async () => {

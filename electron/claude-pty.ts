@@ -79,6 +79,8 @@ export type PtyRunnerInput = {
   platform?: NodeJS.Platform;
   pathDirs?: string[];
   existsSync?: (filePath: string) => boolean;
+  /** Follows symlinks, so a link to the stub is still the stub. Injected for tests. */
+  realpathSync?: (filePath: string) => string;
 };
 
 /**
@@ -105,6 +107,7 @@ export function ptyRunner(
   if (platform === "win32" || argv.length === 0) return null;
   const env = input.env ?? process.env;
   const existsSync = input.existsSync ?? (() => false);
+  const realpathSync = input.realpathSync ?? ((filePath: string) => filePath);
   const dirs = input.pathDirs ?? (env.PATH ?? env.Path ?? "").split(path.delimiter).filter(Boolean);
   const candidates: string[] = [];
   for (const dir of dirs) {
@@ -114,9 +117,17 @@ export function ptyRunner(
   }
   for (const candidate of candidates) {
     if (!existsSync(candidate)) continue;
+    // Follow the link before judging it: `~/bin/python3 -> /usr/bin/python3`
+    // is the stub wearing another name, and would still pop the dialog.
+    let resolved = path.resolve(candidate);
+    try {
+      resolved = path.resolve(realpathSync(candidate));
+    } catch {
+      /* a link to nowhere is judged by its own path */
+    }
     const stub =
       platform === "darwin" &&
-      path.resolve(candidate) === "/usr/bin/python3" &&
+      resolved === "/usr/bin/python3" &&
       !MAC_DEVELOPER_PYTHONS.some((real) => existsSync(real));
     if (stub) continue;
     return { command: candidate, args: ["-c", PTY_RELAY, ...argv] };

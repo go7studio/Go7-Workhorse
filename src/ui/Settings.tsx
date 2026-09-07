@@ -63,7 +63,11 @@ export function Settings() {
       const run = window.workhorse?.claudeSetupToken;
       if (!run) return;
       setClaudeAuth({ stage: "running", message: "Approve the sign-in in your browser." });
-      const result = await run();
+      const result = await run().catch((error: unknown) => ({
+        ok: false as const,
+        message: error instanceof Error ? error.message : "Sign-in failed.",
+        reason: undefined,
+      }));
       if (result.ok) {
         setClaudeAuth({ stage: "done", message: "Signed in." });
       } else if (result.reason === "needs_terminal") {
@@ -85,7 +89,10 @@ export function Settings() {
       }
       if (!keep) return;
       setClaudeAuth((current) => ({ ...current, stage: "paste", message: "Saving…", token }));
-      const result = await keep(token);
+      const result = await keep(token).catch((error: unknown) => ({
+        ok: false as const,
+        message: error instanceof Error ? error.message : "Could not store the token.",
+      }));
       setClaudeAuth(
         result.ok
           ? { stage: "done", message: "Signed in." }

@@ -48,6 +48,16 @@ export function setupTokenEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.Pro
   return deskToolEnv(base, { NO_BROWSER: "" });
 }
 
+/**
+ * What the flow may show. The terminal it runs prints the token, and the
+ * renderer has no use for it: the desk stores it and the card reads the
+ * result. So the stream is stripped, redacted, and emitted a whole line at a
+ * time — a half-written token cannot be redacted, and must not be sent.
+ */
+export function sanitizeSetupTokenOutput(text: string): string {
+  return stripTerminalCodes(text).replace(new RegExp(CLAUDE_OAUTH_TOKEN_PATTERN, "g"), "[token hidden]");
+}
+
 export const NEEDS_TERMINAL_MESSAGE =
   "Signing in needs a terminal this desk cannot make. Run the command below in your own terminal, then paste the token here.";
 
@@ -64,6 +74,7 @@ export function runClaudeSetupToken(input: SetupTokenInput): Promise<SetupTokenR
   const spawnFn = input.spawnFn ?? spawn;
   const runner = ptyRunner([input.cli, "setup-token"], {
     existsSync: (filePath: string) => fs.existsSync(filePath),
+    realpathSync: (filePath: string) => fs.realpathSync(filePath),
     ...input.pty,
   });
   if (!runner) {
@@ -81,13 +92,24 @@ export function runClaudeSetupToken(input: SetupTokenInput): Promise<SetupTokenR
       return;
     }
     let seen = "";
+    let shown = "";
     let settled = false;
     let answeredPrompt = false;
+    /** Whole lines only, so a token split across two chunks is never emitted. */
+    const show = (final: boolean) => {
+      if (!input.onOutput) return;
+      const safe = sanitizeSetupTokenOutput(seen);
+      const upto = final ? safe.length : safe.lastIndexOf("\n") + 1;
+      if (upto <= shown.length) return;
+      input.onOutput(safe.slice(shown.length, upto));
+      shown = safe.slice(0, upto);
+    };
     const timers: NodeJS.Timeout[] = [];
     const finish = (result: SetupTokenResult) => {
       if (settled) return;
       settled = true;
       for (const timer of timers) clearTimeout(timer);
+      show(true);
       resolve(result);
     };
     const stop = (result: SetupTokenResult) => {
@@ -112,20 +134,25 @@ export function runClaudeSetupToken(input: SetupTokenInput): Promise<SetupTokenR
           /* the child may have gone */
         }
       }
-      input.onOutput?.(text);
+      show(false);
     };
     child.stdout?.on("data", read);
     child.stderr?.on("data", read);
     child.once("error", (error: Error) => finish({ ok: false, reason: "failed", message: error.message }));
     timers.push(
       setTimeout(() => {
-        if (seen.trim()) return;
+        // Escapes are not words. A terminal that has only drawn is a terminal
+        // that has said nothing, and the person still has nothing to act on.
+        if (stripTerminalCodes(seen).trim()) return;
         stop({ ok: false, reason: "needs_terminal", message: NEEDS_TERMINAL_MESSAGE });
       }, input.quietMs ?? 25_000),
     );
     timers.push(
       setTimeout(() => {
-        stop({ ok: false, reason: "timed_out", message: "Sign-in timed out." });
+        // The person may have approved it a moment before the clock ran out.
+        // A token that was printed is a sign-in that worked.
+        const late = findClaudeOauthToken(seen);
+        stop(late ? { ok: true, token: late } : { ok: false, reason: "timed_out", message: "Sign-in timed out." });
       }, input.timeoutMs ?? 5 * 60_000),
     );
     child.once("exit", (code: number | null) => {

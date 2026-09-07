@@ -283,6 +283,8 @@ import {
   spawnExclusions,
   spawnWaitsForReply,
   withSubagentStatus,
+  withFinishedTurnSubagentStatus,
+  resolveAgentStatus,
   workerStatusSnapshot,
   workerTaskTitle,
   continueWorkerRun,
@@ -4966,25 +4968,19 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             }
             if (action === "agent-status") {
               const id = (payload.name || payload.message || "").trim();
-              const worker = latest.sessions.find((session) => session.id === id && Boolean(session.parentId));
-              if (worker) {
-                const parentId = payload.fromSessionId?.trim() || "";
-                const allowed = !parentId || descendantSessionIds(latest.sessions, parentId).includes(worker.id);
-                if (!allowed) {
-                  await replyAsk({ error: "unknown" });
-                  return;
-                }
-                await replyAsk({
-                  text: JSON.stringify(workerStatusSnapshot(worker), null, 2),
-                });
-                return;
-              }
-              const task = normalizeTaskStore(latest.externalTasks).byId[id];
-              if (!task) {
+              const resolved = resolveAgentStatus({
+                id,
+                fromSessionId: payload.fromSessionId,
+                sessions: latest.sessions,
+                externalTask: normalizeTaskStore(latest.externalTasks).byId[id],
+              });
+              if (!resolved.ok) {
                 await replyAsk({ error: "unknown" });
                 return;
               }
-              await replyAsk({ text: JSON.stringify({ ...task, status: task.status }, null, 2) });
+              await replyAsk({
+                text: JSON.stringify(resolved.snapshot, null, 2),
+              });
               return;
             }
             if (action === "cancel-agent") {
@@ -6397,6 +6393,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                       toolStatus: "running",
                       text: target.title,
                       createdAt: startedAt,
+                      correlationId: peerCorrelationId,
                     },
                   ],
                 };
@@ -6465,6 +6462,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 ),
                 target.id,
                 "completed",
+                { correlationId: peerCorrelationId, toolCallId: payload.id },
               ),
             }));
             return fallback;
@@ -6502,7 +6500,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                         }
                       : item,
                   ),
-                  { parentId: from?.id, childId: target.id, targetTitle: target.title, error: message },
+                  {
+                    parentId: from?.id,
+                    childId: target.id,
+                    targetTitle: target.title,
+                    error: message,
+                    correlationId: peerCorrelationId,
+                    toolCallId: payload.id,
+                  },
                 ),
               }));
             });
@@ -6543,6 +6548,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 childId,
                 targetTitle: target?.title,
                 error: message,
+                correlationId: payload.traceId || payload.id,
+                toolCallId: payload.id,
               },
             );
             const parentId = payload.fromSessionId || target?.parentId;
@@ -7395,10 +7402,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           const finishedTurn = sessions.find((session) => session.id === event.sessionId);
           const reportedBlocked = Boolean(finishedTurn?.parentId) && workerReportedBlocked(childReportText(finishedTurn));
           const failed = safetyPaused || reportedBlocked;
-          sessions = withSubagentStatus(
+          sessions = withFinishedTurnSubagentStatus(
             sessions,
             event.sessionId,
             holdForHandoff ? "running" : failed ? "failed" : "completed",
+            assistantId,
           );
           const finished = sessions.find((session) => session.id === event.sessionId);
           if (finished?.parentId && !holdForHandoff) {
@@ -7474,7 +7482,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           delete learningTurns.current[event.sessionId];
         }
         setState((current) => {
-          let sessions = withSubagentStatus(
+          let sessions = withFinishedTurnSubagentStatus(
             current.sessions.map((session) =>
               session.id === event.sessionId
                 ? applyVendorTurnIdle({
@@ -7501,6 +7509,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             ),
             event.sessionId,
             "failed",
+            assistantId,
           );
           const failed = sessions.find((session) => session.id === event.sessionId);
           if (failed?.parentId) {

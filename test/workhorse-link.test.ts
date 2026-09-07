@@ -24,6 +24,8 @@ import {
   linkWorkerIdFromReply,
 } from "../src/lib/workhorse-link";
 import { EXTERNAL_RUNTIME_ALLOW, LINK_COMPAT_TOOLS, isMcpToolAllowed, mcpExposureProfile } from "../electron/mcp-exposure";
+import { applyFailedPeerAsk } from "../src/lib/grok-events";
+import { normalizeSession } from "../src/lib/session";
 import { handleWorkhorseRpc, linkCliCall, setInboundLearningSink, setLocalCapabilityHostClient, setWorkhorseDeskAsk } from "../electron/workhorse-mcp";
 import type { LocalCapabilityHostClient } from "../electron/local-capability-host";
 import type { InboundLearningDraft } from "../src/lib/learning-inbound";
@@ -1062,6 +1064,348 @@ test("Link iteration: assign a mission loop, then status carries the report", as
     assert.equal(doneBody.next, "done");
     assert.match(doneBody.report ?? "", /WH_OK/);
     assert.deepEqual(doneBody.findings, [{ severity: "high", title: "Marker risk", file: "src/marker.ts:1", evidence: "Marker was missing." }]);
+  } finally {
+    setWorkhorseDeskAsk(null as never);
+    if (previous.profile === undefined) delete process.env.WORKHORSE_MCP_PROFILE;
+    else process.env.WORKHORSE_MCP_PROFILE = previous.profile;
+    if (previous.state === undefined) delete process.env.WORKHORSE_STATE_PATH;
+    else process.env.WORKHORSE_STATE_PATH = previous.state;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("agent_status follows an asked existing parent through running then terminal, and keeps worker/unknown paths", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "wh-link-ask-status-"));
+  const statePath = path.join(dir, "state.json");
+  const orch = "sess_orch";
+  const target = "sess_target";
+  const workerId = "sess_worker";
+  const writeState = (running: boolean, workerRunning = true) => {
+    writeFileSync(
+      statePath,
+      JSON.stringify({
+        settings: {},
+        sessions: [
+          {
+            id: orch,
+            title: "Coordinator",
+            provider: "grok",
+            projectId: null,
+            messages: [{ role: "user", text: "coordinate", createdAt: 1 }],
+          },
+          {
+            id: target,
+            title: "Existing parent",
+            provider: "grok",
+            projectId: null,
+            status: running ? "running" : "idle",
+            messages: [
+              { id: "old_a", role: "assistant", text: "Old parent report.", createdAt: 1 },
+              {
+                id: "peer_1",
+                role: "user",
+                kind: "peer",
+                peerFromSessionId: orch,
+                correlationId: "corr_ask",
+                text: "Continue the existing work.",
+                createdAt: 2,
+              },
+              {
+                id: "new_a",
+                role: "assistant",
+                text: running ? "" : "Asked turn finished.",
+                createdAt: 3,
+                correlationId: "corr_ask",
+              },
+            ],
+          },
+          {
+            id: workerId,
+            title: "Marlow · slice",
+            workerName: "Marlow",
+            parentId: orch,
+            provider: "grok",
+            projectId: null,
+            status: workerRunning ? "running" : "idle",
+            agentRun: { status: workerRunning ? "running" : "completed", startedAt: 1, isolation: "worktree" },
+            messages: [
+              { id: "w1", role: "user", kind: "peer", text: "slice", createdAt: 1 },
+              { id: "w2", role: "assistant", text: workerRunning ? "" : "Worker slice done.", createdAt: 2 },
+            ],
+          },
+        ],
+      }),
+    );
+  };
+  writeState(true);
+  const previous = { profile: process.env.WORKHORSE_MCP_PROFILE, state: process.env.WORKHORSE_STATE_PATH };
+  process.env.WORKHORSE_MCP_PROFILE = "link";
+  process.env.WORKHORSE_STATE_PATH = statePath;
+  setWorkhorseDeskAsk(async () => ({ error: "unknown" }));
+  try {
+    const running = (await handleWorkhorseRpc({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: { name: "workhorse_agent_status", arguments: { id: target, fromSessionId: orch } },
+    })) as { error?: { code?: number; message?: string }; result?: { content?: Array<{ text?: string }> } };
+    assert.equal(running.error, undefined, running.error?.message);
+    const waitBody = JSON.parse(running.result?.content?.[0]?.text ?? "{}") as {
+      next?: string;
+      status?: string;
+      report?: string;
+      partialReport?: string;
+    };
+    assert.equal(waitBody.next, "wait");
+    assert.equal(waitBody.status, "running");
+    assert.equal(waitBody.report, undefined);
+    assert.doesNotMatch(waitBody.partialReport ?? "", /Old parent report/);
+
+    writeState(false, true);
+    const done = (await handleWorkhorseRpc({
+      jsonrpc: "2.0",
+      id: 2,
+      method: "tools/call",
+      params: { name: "workhorse_agent_status", arguments: { id: target, fromSessionId: orch } },
+    })) as { result?: { content?: Array<{ text?: string }> } };
+    const doneBody = JSON.parse(done.result?.content?.[0]?.text ?? "{}") as { next?: string; report?: string };
+    assert.equal(doneBody.next, "done");
+    assert.equal(doneBody.report, "Asked turn finished.");
+    assert.doesNotMatch(doneBody.report ?? "", /Old parent report/);
+
+    const worker = (await handleWorkhorseRpc({
+      jsonrpc: "2.0",
+      id: 3,
+      method: "tools/call",
+      params: { name: "workhorse_agent_status", arguments: { id: workerId, fromSessionId: orch } },
+    })) as { result?: { content?: Array<{ text?: string }> } };
+    const workerBody = JSON.parse(worker.result?.content?.[0]?.text ?? "{}") as { next?: string; status?: string };
+    assert.equal(workerBody.next, "wait");
+    assert.equal(workerBody.status, "running");
+
+    const missing = (await handleWorkhorseRpc({
+      jsonrpc: "2.0",
+      id: 4,
+      method: "tools/call",
+      params: { name: "workhorse_agent_status", arguments: { id: "sess_missing", fromSessionId: orch } },
+    })) as { error?: { code?: number; message?: string } };
+    assert.equal(missing.error?.code, -32000);
+    assert.equal(missing.error?.message, "unknown");
+
+    const outsider = (await handleWorkhorseRpc({
+      jsonrpc: "2.0",
+      id: 5,
+      method: "tools/call",
+      params: { name: "workhorse_agent_status", arguments: { id: target, fromSessionId: "sess_other" } },
+    })) as { error?: { code?: number; message?: string } };
+    assert.equal(outsider.error?.code, -32000);
+    assert.equal(outsider.error?.message, "unknown");
+
+    writeFileSync(
+      statePath,
+      JSON.stringify({
+        settings: {},
+        sessions: [
+          {
+            id: orch,
+            title: "Coordinator",
+            provider: "grok",
+            projectId: null,
+            messages: [{ role: "user", text: "coordinate", createdAt: 1 }],
+          },
+          {
+            id: target,
+            title: "Existing parent",
+            provider: "grok",
+            projectId: null,
+            status: "idle",
+            agentRun: { status: "failed", startedAt: 1, finishedAt: 2, isolation: "shared", error: "old slice failed" },
+            messages: [
+              { id: "old_a", role: "assistant", text: "Old parent report.", createdAt: 1 },
+              {
+                id: "peer_1",
+                role: "user",
+                kind: "peer",
+                peerFromSessionId: orch,
+                text: "Continue the existing work.",
+                createdAt: 10,
+              },
+              { id: "ack", role: "assistant", text: "On it.", createdAt: 11 },
+              { id: "new_a", role: "assistant", text: "Asked turn finished.", createdAt: 12 },
+              { id: "later_user", role: "user", text: "A later human turn.", createdAt: 13 },
+              { id: "later_a", role: "assistant", text: "Unrelated later answer.", createdAt: 14 },
+            ],
+          },
+        ],
+      }),
+    );
+    const bounded = (await handleWorkhorseRpc({
+      jsonrpc: "2.0",
+      id: 6,
+      method: "tools/call",
+      params: { name: "workhorse_agent_status", arguments: { id: target, fromSessionId: orch } },
+    })) as { error?: { message?: string }; result?: { content?: Array<{ text?: string }> } };
+    assert.equal(bounded.error, undefined, bounded.error?.message);
+    const boundedBody = JSON.parse(bounded.result?.content?.[0]?.text ?? "{}") as {
+      next?: string;
+      report?: string;
+      status?: string;
+    };
+    assert.equal(boundedBody.next, "done");
+    assert.equal(boundedBody.status, "completed");
+    assert.equal(boundedBody.report, "Asked turn finished.");
+    assert.doesNotMatch(boundedBody.report ?? "", /On it|Unrelated later answer|Old parent report/);
+  } finally {
+    setWorkhorseDeskAsk(null as never);
+    if (previous.profile === undefined) delete process.env.WORKHORSE_MCP_PROFILE;
+    else process.env.WORKHORSE_MCP_PROFILE = previous.profile;
+    if (previous.state === undefined) delete process.env.WORKHORSE_STATE_PATH;
+    else process.env.WORKHORSE_STATE_PATH = previous.state;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("Link agent_status uses applyFailedPeerAsk and normalizeSession journals, and waits on needs-input", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "wh-link-ask-fail-"));
+  const statePath = path.join(dir, "state.json");
+  const orch = "sess_orch";
+  const target = "sess_target";
+  const started = "I have started the work.";
+  const parent = {
+    id: orch,
+    title: "Coordinator",
+    provider: "grok" as const,
+    model: "grok-4.6",
+    projectId: null,
+    status: "idle" as const,
+    messages: [
+      {
+        id: "chip",
+        role: "system" as const,
+        kind: "subagent" as const,
+        fromTitle: "Existing parent",
+        subagentSessionId: target,
+        toolStatus: "running",
+        text: "Existing parent",
+        createdAt: 2,
+        correlationId: "corr_ask",
+      },
+    ],
+  };
+  const child = {
+    id: target,
+    title: "Existing parent",
+    provider: "grok" as const,
+    model: "grok-4.6",
+    projectId: null,
+    status: "running" as const,
+    messages: [
+      {
+        id: "peer_1",
+        role: "user" as const,
+        kind: "peer" as const,
+        peerFromSessionId: orch,
+        correlationId: "corr_ask",
+        text: "Continue the existing work.",
+        createdAt: 2,
+      },
+      { id: "new_a", role: "assistant" as const, text: started, createdAt: 3, correlationId: "corr_ask" },
+    ],
+  };
+  const failed = applyFailedPeerAsk([parent as never, child as never], {
+    parentId: orch,
+    childId: target,
+    targetTitle: "Existing parent",
+    error: "vendor exploded",
+    correlationId: "corr_ask",
+  });
+  const restored = [
+    normalizeSession({ ...parent, status: "idle" }),
+    normalizeSession({ ...child, status: "running" }),
+  ];
+  const previous = { profile: process.env.WORKHORSE_MCP_PROFILE, state: process.env.WORKHORSE_STATE_PATH };
+  process.env.WORKHORSE_MCP_PROFILE = "link";
+  process.env.WORKHORSE_STATE_PATH = statePath;
+  setWorkhorseDeskAsk(async () => ({ error: "unknown" }));
+  try {
+    writeFileSync(statePath, JSON.stringify({ settings: {}, sessions: failed }));
+    const failReply = (await handleWorkhorseRpc({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: { name: "workhorse_agent_status", arguments: { id: target, fromSessionId: orch } },
+    })) as { error?: { message?: string }; result?: { content?: Array<{ text?: string }> } };
+    assert.equal(failReply.error, undefined, failReply.error?.message);
+    const failBody = JSON.parse(failReply.result?.content?.[0]?.text ?? "{}") as {
+      next?: string;
+      report?: string;
+    };
+    assert.equal(failBody.next, "failed");
+    assert.doesNotMatch(failBody.report ?? "", /I have started the work/);
+
+    const failAnon = (await handleWorkhorseRpc({
+      jsonrpc: "2.0",
+      id: 11,
+      method: "tools/call",
+      params: { name: "workhorse_agent_status", arguments: { id: target } },
+    })) as { result?: { content?: Array<{ text?: string }> } };
+    const failAnonBody = JSON.parse(failAnon.result?.content?.[0]?.text ?? "{}") as { next?: string; report?: string };
+    assert.equal(failAnonBody.next, "failed");
+    assert.doesNotMatch(failAnonBody.report ?? "", /I have started the work/);
+
+    writeFileSync(statePath, JSON.stringify({ settings: {}, sessions: restored }));
+    const restartReply = (await handleWorkhorseRpc({
+      jsonrpc: "2.0",
+      id: 2,
+      method: "tools/call",
+      params: { name: "workhorse_agent_status", arguments: { id: target, fromSessionId: orch } },
+    })) as { result?: { content?: Array<{ text?: string }> } };
+    const restartBody = JSON.parse(restartReply.result?.content?.[0]?.text ?? "{}") as {
+      next?: string;
+      status?: string;
+      report?: string;
+      partialReport?: string;
+      how?: string;
+    };
+    assert.equal(restartBody.next, "failed");
+    assert.equal(restartBody.status, "interrupted");
+    assert.equal(restartBody.report, undefined);
+    assert.equal(restartBody.partialReport, started);
+    assert.match(restartBody.how ?? "", /workhorse_ask_chat/);
+
+    writeFileSync(
+      statePath,
+      JSON.stringify({
+        settings: {},
+        sessions: [
+          parent,
+          {
+            ...child,
+            status: "needs-input",
+            messages: [
+              child.messages[0],
+              { id: "new_a", role: "assistant", text: started, createdAt: 3, correlationId: "corr_ask" },
+            ],
+          },
+        ],
+      }),
+    );
+    const paused = (await handleWorkhorseRpc({
+      jsonrpc: "2.0",
+      id: 3,
+      method: "tools/call",
+      params: { name: "workhorse_agent_status", arguments: { id: target, fromSessionId: orch } },
+    })) as { result?: { content?: Array<{ text?: string }> } };
+    const pausedBody = JSON.parse(paused.result?.content?.[0]?.text ?? "{}") as {
+      next?: string;
+      status?: string;
+      report?: string;
+      how?: string;
+    };
+    assert.equal(pausedBody.next, "wait");
+    assert.equal(pausedBody.status, "needs-input");
+    assert.equal(pausedBody.report, undefined);
+    assert.match(pausedBody.how ?? "", /permission/);
   } finally {
     setWorkhorseDeskAsk(null as never);
     if (previous.profile === undefined) delete process.env.WORKHORSE_MCP_PROFILE;

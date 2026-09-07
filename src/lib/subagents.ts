@@ -975,6 +975,225 @@ export function withFollowThrough<T extends Record<string, unknown>>(payload: T)
   return { ...payload, next: follow.next, how: follow.how };
 }
 
+const ASKED_WAIT_HOW =
+  "Call workhorse_agent_status with this id later. Do not spawn another worker for the same slice.";
+const ASKED_PERMISSION_HOW =
+  "This chat is waiting on permission. Call workhorse_agent_status with this id later. Do not treat partial text as the answer.";
+const ASKED_DONE_HOW = "The report is in this payload. workhorse_ask_chat to talk to this chat.";
+const ASKED_FAIL_HOW =
+  "This chat did not finish the asked turn. Do not treat an older report as the new response.";
+const ASKED_INTERRUPTED_HOW =
+  "This ask was interrupted. workhorse_ask_chat on this chat to continue. Do not treat partial text as the answer.";
+
+type StatusSession = Pick<
+  Session,
+  | "id"
+  | "parentId"
+  | "status"
+  | "title"
+  | "workerName"
+  | "provider"
+  | "model"
+  | "effort"
+  | "agentRun"
+  | "routingMode"
+  | "routingDecision"
+  | "messages"
+>;
+
+function isPeerAsk(message: ChatMessage, fromSessionId?: string): boolean {
+  if (message.kind !== "peer" || message.role !== "user") return false;
+  const from = fromSessionId?.trim();
+  if (!from) return true;
+  return message.peerFromSessionId === from;
+}
+
+function latestPeerAsk(messages: ChatMessage[] | undefined, fromSessionId?: string): ChatMessage | undefined {
+  return [...(messages ?? [])].reverse().find((message) => isPeerAsk(message, fromSessionId));
+}
+
+function isAskedTurnAssistant(message: ChatMessage, peer: ChatMessage): boolean {
+  if (message.role !== "assistant" || message.kind === "tool" || message.kind === "thought") return false;
+  if (peer.correlationId && message.correlationId && message.correlationId !== peer.correlationId) return false;
+  return true;
+}
+
+/** Messages after the asked peer until the next user/peer turn. */
+function askedTurnWindow(messages: ChatMessage[] | undefined, peer: ChatMessage): {
+  turn: ChatMessage[];
+  closedByLaterUser: boolean;
+} {
+  const list = messages ?? [];
+  const start = list.findIndex((message) => message.id === peer.id);
+  const rest = start >= 0 ? list.slice(start + 1) : list.filter((message) => message.createdAt >= peer.createdAt);
+  const boundary = rest.findIndex((message) => message.role === "user");
+  return {
+    turn: boundary >= 0 ? rest.slice(0, boundary) : rest,
+    closedByLaterUser: boundary >= 0,
+  };
+}
+
+function lastAskedTurnReply(turn: ChatMessage[], peer: ChatMessage): ChatMessage | undefined {
+  const assistants = turn.filter((message) => isAskedTurnAssistant(message, peer));
+  return [...assistants].reverse().find((message) => message.text.trim()) ?? assistants.at(-1);
+}
+
+export function askedChatAllows(session: Pick<Session, "messages">, fromSessionId?: string): boolean {
+  return Boolean(latestPeerAsk(session.messages, fromSessionId));
+}
+
+function askedRunFailed(status: string | undefined): boolean {
+  return (
+    status === "failed" ||
+    status === "cancelled" ||
+    status === "timed-out" ||
+    status === "budget-exceeded" ||
+    status === "interrupted"
+  );
+}
+
+function askedRunForPeer(run: Session["agentRun"], peer: ChatMessage): Session["agentRun"] {
+  if (!run) return undefined;
+  if (peer.correlationId && run.correlationId) {
+    return run.correlationId === peer.correlationId ? run : undefined;
+  }
+  if (typeof run.finishedAt === "number" && run.finishedAt < peer.createdAt) return undefined;
+  if (run.startedAt < peer.createdAt) return undefined;
+  return run;
+}
+
+function askedFollowChip(
+  sessions: StatusSession[],
+  callerId: string | undefined,
+  targetId: string,
+  peer?: ChatMessage,
+): ChatMessage | undefined {
+  const from = callerId?.trim();
+  if (!from || from === targetId) return undefined;
+  const parent = sessions.find((row) => row.id === from);
+  if (!parent) return undefined;
+  const chips = (parent.messages ?? []).filter(
+    (message) => message.kind === "subagent" && message.subagentSessionId === targetId,
+  );
+  if (peer?.correlationId) {
+    const matched = chips.filter((chip) => !chip.correlationId || chip.correlationId === peer.correlationId);
+    if (matched.length) return matched.at(-1);
+  }
+  return chips.at(-1);
+}
+
+function chipFailed(status?: string): boolean {
+  const value = (status ?? "").toLowerCase();
+  return value === "failed" || value === "error" || value === "cancelled" || value === "canceled" || value === "denied";
+}
+
+function chipRunning(status?: string): boolean {
+  const value = (status ?? "").toLowerCase();
+  return value === "running" || value === "queued" || value === "working";
+}
+
+/** Status of the latest asked turn only. Older assistant text is never the new report. */
+export function askedChatStatusSnapshot(
+  session: StatusSession,
+  fromSessionId?: string,
+  sessions: StatusSession[] = [],
+): Record<string, unknown> | null {
+  const peer = latestPeerAsk(session.messages, fromSessionId);
+  if (!peer) return null;
+  const { turn, closedByLaterUser } = askedTurnWindow(session.messages, peer);
+  const reply = lastAskedTurnReply(turn, peer);
+  const replyText = reply?.text.trim() ?? "";
+  const bounded = replyText ? boundWorkerReport(replyText, { workerId: session.id }) : null;
+  const run = askedRunForPeer(session.agentRun, peer);
+  const callerId = fromSessionId?.trim() || peer.peerFromSessionId;
+  const chip = askedFollowChip(sessions, callerId, session.id, peer);
+  const failed = askedRunFailed(run?.status) || chipFailed(chip?.toolStatus);
+  const waitingOnPermission = !closedByLaterUser && session.status === "needs-input";
+  const sessionLive = session.status === "running" || session.status === "needs-input";
+  const live = !closedByLaterUser && sessionLive;
+  const interrupted = !closedByLaterUser && !sessionLive && chipRunning(chip?.toolStatus);
+  let next: WorkerFollowNext;
+  let how: string;
+  let status: string;
+  if (failed) {
+    next = "failed";
+    how = ASKED_FAIL_HOW;
+    status = run?.status ?? "failed";
+  } else if (waitingOnPermission) {
+    next = "wait";
+    how = ASKED_PERMISSION_HOW;
+    status = "needs-input";
+  } else if (live) {
+    next = "wait";
+    how = ASKED_WAIT_HOW;
+    status = "running";
+  } else if (interrupted) {
+    next = "failed";
+    how = ASKED_INTERRUPTED_HOW;
+    status = "interrupted";
+  } else if (!replyText) {
+    next = "failed";
+    how = ASKED_FAIL_HOW;
+    status = "failed";
+  } else {
+    next = "done";
+    how = ASKED_DONE_HOW;
+    status = "completed";
+  }
+  const failText = failed ? (chip?.text.trim() || "") : "";
+  const failBounded = failText && failText !== replyText ? boundWorkerReport(failText, { workerId: session.id }) : null;
+  return {
+    id: session.id,
+    title: session.title,
+    ...(session.workerName ? { worker: session.workerName } : {}),
+    ...(session.parentId ? { parentId: session.parentId } : {}),
+    status,
+    next,
+    how,
+    provider: session.provider,
+    model: session.model,
+    effort: session.effort,
+    ...(next === "wait" && bounded ? { partialReport: bounded.report } : {}),
+    ...(status === "interrupted" && bounded ? { partialReport: bounded.report } : {}),
+    ...(next === "failed" && status !== "interrupted" && failBounded ? { report: failBounded.report } : {}),
+    ...(next === "done" && bounded ? { report: bounded.report } : {}),
+  };
+}
+
+export type AgentStatusLookup = {
+  id: string;
+  fromSessionId?: string;
+  sessions: StatusSession[];
+  externalTask?: (Record<string, unknown> & { id: string; status: string }) | null;
+};
+
+export type AgentStatusResult =
+  | { ok: true; snapshot: Record<string, unknown> }
+  | { ok: false; error: "unknown" };
+
+/**
+ * Follow-through for delegated workers, asked chats, and external tasks.
+ * `fromSessionId` is the parent that spawned or asked; it never broadens access.
+ */
+export function resolveAgentStatus(input: AgentStatusLookup): AgentStatusResult {
+  const id = input.id.trim();
+  if (!id) return { ok: false, error: "unknown" };
+  const from = input.fromSessionId?.trim() || "";
+  const session = input.sessions.find((row) => row.id === id);
+  if (session) {
+    const isWorker = Boolean(session.parentId);
+    const descendantOk = isWorker && (!from || descendantSessionIds(input.sessions, from).includes(session.id));
+    if (descendantOk) return { ok: true, snapshot: workerStatusSnapshot(session) };
+    const asked = askedChatStatusSnapshot(session, from || undefined, input.sessions);
+    if (asked) return { ok: true, snapshot: asked };
+    return { ok: false, error: "unknown" };
+  }
+  if (input.externalTask && input.externalTask.id === id) {
+    return { ok: true, snapshot: { ...input.externalTask, status: input.externalTask.status } };
+  }
+  return { ok: false, error: "unknown" };
+}
+
 export function workerStatusSnapshot(
   worker: Pick<Session, "id" | "title" | "workerName" | "parentId" | "status" | "provider" | "model" | "effort" | "agentRun" | "routingMode" | "routingDecision" | "messages">,
 ): Record<string, unknown> {
@@ -1568,22 +1787,46 @@ export function formatSubagentPrompt(fromTitle: string, text: string, folder = "
   return formatWorkerPrompt({ fromTitle, text, folder });
 }
 
+/** Settle the ask that owns this assistant, never a historical peer from another turn. */
+export function withFinishedTurnSubagentStatus(
+  sessions: Session[],
+  childId: string,
+  status: string,
+  assistantId: string | undefined,
+): Session[] {
+  const child = sessions.find((session) => session.id === childId);
+  const assistantIndex = child?.messages.findIndex((message) => message.id === assistantId) ?? -1;
+  const user = assistantIndex >= 0
+    ? [...child!.messages.slice(0, assistantIndex)].reverse().find((message) => message.role === "user")
+    : undefined;
+  if (user?.kind === "peer") {
+    return withSubagentStatus(sessions, childId, status,
+      user.correlationId ? { correlationId: user.correlationId } : undefined);
+  }
+  // Delegated workers still settle their parent link on ordinary worker turns.
+  return child?.parentId ? withSubagentStatus(sessions, childId, status) : sessions;
+}
+
 export function withSubagentStatus(
   sessions: Session[],
   childId: string,
   status: string,
+  match?: { correlationId?: string; toolCallId?: string },
 ): Session[] {
+  const correlationId = match?.correlationId?.trim() ?? "";
+  const toolCallId = match?.toolCallId?.trim() ?? "";
   return sessions.map((session) => {
     if (!session.messages.some((message) => message.kind === "subagent" && message.subagentSessionId === childId)) {
       return session;
     }
     return {
       ...session,
-      messages: session.messages.map((message) =>
-        message.kind === "subagent" && message.subagentSessionId === childId
-          ? { ...message, toolStatus: status }
-          : message,
-      ),
+      messages: session.messages.map((message) => {
+        if (message.kind !== "subagent" || message.subagentSessionId !== childId) return message;
+        if (correlationId && message.correlationId && message.correlationId !== correlationId) return message;
+        if (toolCallId && message.toolCallId && message.toolCallId !== toolCallId) return message;
+        return { ...message, toolStatus: status };
+      }),
     };
   });
 }

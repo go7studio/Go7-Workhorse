@@ -1115,9 +1115,7 @@ app.whenReady().then(async () => {
       return await new Promise<PeerAskResult>((resolve) => {
         const timer = setTimeout(() => {
           peerWaiters.delete(id);
-          if (spawn && childSessionId && !win.webContents.isDestroyed()) {
-            win.webContents.send("grok:peer-cancel", { childSessionId, reason: "timed-out" });
-          }
+          // A wait bound answers the caller. It does not stop the worker.
           resolve({
             error: peerAskTimeoutMs(ask).timeoutError,
           });

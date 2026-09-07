@@ -439,6 +439,77 @@ function takenWorkerNames(workers: WorkerRecord[], parentId: string): string[] {
     .map((worker) => worker.workerName as string);
 }
 
+/** Enough for the first name round plus a few suffixes, without dumping transcripts. */
+export const PARENT_CREW_CAP = 24;
+
+export type ParentCrewMember = {
+  worker: string;
+  slice: string;
+  status: string;
+  free: boolean;
+};
+
+export type ParentCrewRecord = Pick<
+  WorkerRecord,
+  "id" | "workerName" | "parentId" | "hidden" | "status" | "agentRun"
+> & { title?: string; archivedAt?: number | null };
+
+/** Slice label after `Wanda · `, or the whole title when there is no name prefix. */
+export function workerSliceFromTitle(title: string, workerName?: string): string {
+  const trimmed = title.trim();
+  const name = (workerName?.trim() || workerNameFromTitle(trimmed) || "").trim();
+  if (name) {
+    const prefix = `${name} · `;
+    if (trimmed.startsWith(prefix)) return trimmed.slice(prefix.length).trim();
+    if (trimmed.toLowerCase() === name.toLowerCase()) return "";
+  }
+  const sep = trimmed.indexOf("·");
+  if (sep >= 0) return trimmed.slice(sep + 1).trim();
+  return trimmed;
+}
+
+/**
+ * This parent's live workers only. Wanda on another chat is a different address.
+ * Latest workers stay when the crew is longer than the cap.
+ */
+export function parentCrewSnapshot(
+  workers: readonly ParentCrewRecord[],
+  parentId: string,
+  cap = PARENT_CREW_CAP,
+): ParentCrewMember[] {
+  const mine = workers.filter(
+    (worker) =>
+      worker.parentId === parentId &&
+      worker.hidden &&
+      typeof worker.archivedAt !== "number" &&
+      (worker.workerName?.trim() || workerNameFromTitle(worker.title ?? "")),
+  );
+  const rows = mine.map((worker) => {
+    const name = worker.workerName?.trim() || workerNameFromTitle(worker.title ?? "") || "worker";
+    return {
+      worker: name,
+      slice: workerSliceFromTitle(worker.title ?? "", name),
+      status: worker.agentRun?.status || worker.status || "idle",
+      free: workerIsFree(worker),
+    };
+  });
+  return rows.length > cap ? rows.slice(rows.length - cap) : rows;
+}
+
+export function formatParentCrewLine(crew: readonly ParentCrewMember[]): string | undefined {
+  if (crew.length === 0) return undefined;
+  return `Crew on this chat: ${crew
+    .map((row) => `${row.worker}${row.slice ? ` · ${row.slice}` : ""} (${row.free ? "idle" : "busy"})`)
+    .join("; ")}`;
+}
+
+export function spawnContinuationHowToUse(workerName: string, reused: boolean): string {
+  const who = reused
+    ? `${workerName} picked this up with what it already knew.`
+    : `${workerName} is new to this work.`;
+  return `Worker is running in its own chat. ${who} For the same topic pass worker="${workerName}" so it keeps what it learned. Leave worker empty to mint a new name for a new topic. A busy worker still gets a colleague. Spawn the rest with wait=false, then stop. The desk joins reports later. Do not sit on workhorse_await_agents or ask the user to pick.`;
+}
+
 /**
  * The desk tools a worker may call. A worker does its slice in the bound
  * folder: read and ask other chats, spawn one bounded helper and wait for it,
@@ -1594,13 +1665,12 @@ export function nextCampaignPhase(phase: unknown): CampaignPhase | undefined {
  * build is where workers write.
  */
 /**
- * Workers whose runtime limit has passed.
+ * Workers whose persisted runtime limit has passed.
  *
- * The caller's reply promise cannot enforce this. On Link the desk answers a
- * delegation immediately with the worker id, and that reply clears the caller-side
- * timer while the worker runs on — so a `timeoutSeconds` of 30 bounded nothing and a
- * pass measured at 251s ran to completion. The deadline belongs to the desk, which
- * is the only party still watching once the caller has its id.
+ * The desk no longer stops a worker on that clock. A timeoutSeconds on spawn is
+ * ignored the same way a tokenBudget is: spend stays on the meter, the worker
+ * runs until it finishes or is cancelled. This helper still names the ids so a
+ * saved timeoutMs can be read; nothing in the desk uses it as a kill list.
  */
 export function expiredWorkerIds(
   sessions: Array<{

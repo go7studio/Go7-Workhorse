@@ -213,7 +213,7 @@ Each chat can execute in the linked local folder or a managed detached Git workt
 - The provider capability registry drives controls instead of implying that every vendor supports the same native operations.
 - Custom Anthropic Messages and OpenAI Chat Completions bots can use configured MCP servers through the same normalized approval and result path as built-in tools.
 - Electron main journals queues, one-shot and recurring schedules, and active goals. Dispatched work is recovered after an app-process restart.
-- Cross-provider subagents have explicit lifecycle records, runtime ceilings, cascading cancellation, changed-file review, shared-workspace conflict warnings, and managed-worktree isolation when the project supports it. Billed spend for a chat is on the meter; the desk does not stop a worker on a token ceiling.
+- Cross-provider subagents have explicit lifecycle records, cascading cancellation, changed-file review, shared-workspace conflict warnings, and managed-worktree isolation when the project supports it. Billed spend for a chat is on the meter; the desk does not stop a worker on a token ceiling or a runtime limit.
 - The sidebar searches chat titles and message text across projects.
 - Settings can export a support-safe provider report. It excludes prompts, messages, file contents, environment variables, URLs, and credential values.
 

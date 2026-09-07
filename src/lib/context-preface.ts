@@ -24,6 +24,8 @@ export type DeskContext = {
   projectName?: string;
   sidebar: string;
   preview: string;
+  /** This parent's named workers only. Omitted on a worker chat. */
+  crew?: string;
 };
 
 export type PrefaceInput = {
@@ -146,6 +148,7 @@ export function buildDeskContext(desk: DeskContext): string {
   if (desk.projectName?.trim()) lines.push(`- Project: ${desk.projectName.trim()}`);
   lines.push(`- Sidebar subtitle (under the title): ${desk.sidebar.trim() || "(none)"}`);
   lines.push(`- Preview (last message snippet): ${preview}`);
+  if (desk.crew?.trim()) lines.push(`- ${desk.crew.trim()}`);
   lines.push("If the user asks what the preview says, quote Preview. The sidebar subtitle is not the preview.");
   return lines.join("\n");
 }
@@ -189,7 +192,13 @@ export function composeVendorPrompt(
   text: string,
   preface: string | undefined,
   opened: "session/new" | "session/load",
-  limits?: { mode?: PermissionMode; sandbox?: SandboxProfile; role?: DeskRole; crewMode?: CrewMode | CrewMode[] },
+  limits?: {
+    mode?: PermissionMode;
+    sandbox?: SandboxProfile;
+    role?: DeskRole;
+    crewMode?: CrewMode | CrewMode[];
+    spawnNames?: string[];
+  },
   visibleText?: string,
 ): string {
   const roleHinted =
@@ -199,6 +208,7 @@ export function composeVendorPrompt(
           withSpawnHint(withPermissionHint(withPreviewHint(withDeskBotHint(text)), limits?.role), limits?.role),
           limits?.crewMode,
           limits?.role,
+          limits?.spawnNames,
         ),
         limits?.role,
       ),

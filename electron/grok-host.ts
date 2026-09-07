@@ -42,6 +42,7 @@ export type GrokPromptInput = GrokSessionOpenInput & {
   visibleText?: string;
   images?: import("../src/lib/types").ChatImage[];
   crewModes?: CrewMode[];
+  spawnNames?: string[];
 };
 
 export type GrokCompactInput = GrokSessionOpenInput & {
@@ -196,6 +197,7 @@ export class GrokSessionHost {
       sandbox: input.sandbox,
       role: input.role ?? (input.parentId || input.hidden ? "worker" : "orchestrator"),
       crewMode: input.crewModes,
+      spawnNames: input.spawnNames,
     }, input.visibleText);
 
     try {

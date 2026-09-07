@@ -340,6 +340,38 @@ export function applyDeleteProject(projects: Project[], id: string): Project[] |
   return projects.filter((project) => project.id !== id);
 }
 
+function projectIsArchived(project: { archivedAt?: number | null }): boolean {
+  return typeof project.archivedAt === "number";
+}
+
+/**
+ * Move one project to sit before or after another. Live and archived lists stay
+ * separate, so a desk drop cannot mix them. Returns null when the list would
+ * not change.
+ */
+export function applyReorderProjects(
+  projects: Project[],
+  fromId: string,
+  toId: string,
+  place: "before" | "after",
+): Project[] | null {
+  if (fromId === toId) return null;
+  const from = projects.findIndex((project) => project.id === fromId);
+  const to = projects.findIndex((project) => project.id === toId);
+  if (from < 0 || to < 0) return null;
+  const source = projects[from]!;
+  const target = projects[to]!;
+  if (projectIsArchived(source) !== projectIsArchived(target)) return null;
+  const next = projects.slice();
+  next.splice(from, 1);
+  let insertAt = next.findIndex((project) => project.id === toId);
+  if (insertAt < 0) return null;
+  if (place === "after") insertAt += 1;
+  next.splice(insertAt, 0, source);
+  if (next.every((project, index) => project.id === projects[index]?.id)) return null;
+  return next;
+}
+
 export function applyProjectChatFate<T extends { id: string; projectId?: string | null; parentId?: string }>(
   sessions: T[],
   projectId: string,

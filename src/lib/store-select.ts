@@ -28,6 +28,7 @@ export type ComposerDesk = {
   clearWatchRestore: Store["clearWatchRestore"];
   setComposerDraft: Store["setComposerDraft"];
   setCrewMode: Store["setCrewMode"];
+  setSpawnAllowlist: Store["setSpawnAllowlist"];
 };
 
 export function selectComposerDesk(store: Store): ComposerDesk {
@@ -43,6 +44,7 @@ export function selectComposerDesk(store: Store): ComposerDesk {
     clearWatchRestore: store.clearWatchRestore,
     setComposerDraft: store.setComposerDraft,
     setCrewMode: store.setCrewMode,
+    setSpawnAllowlist: store.setSpawnAllowlist,
   };
 }
 
@@ -63,7 +65,8 @@ export function sameComposerSession(left: Session | null, right: Session | null)
     left.queue === right.queue &&
     left.grokCommands === right.grokCommands &&
     left.composerDraft === right.composerDraft &&
-    left.composerImages === right.composerImages
+    left.composerImages === right.composerImages &&
+    (left.spawnAllowlist ?? []).join() === (right.spawnAllowlist ?? []).join()
   );
 }
 
@@ -80,7 +83,8 @@ export function sameComposerDesk(left: ComposerDesk, right: ComposerDesk): boole
     left.steerQueued === right.steerQueued &&
     left.clearWatchRestore === right.clearWatchRestore &&
     left.setComposerDraft === right.setComposerDraft &&
-    left.setCrewMode === right.setCrewMode
+    left.setCrewMode === right.setCrewMode &&
+    left.setSpawnAllowlist === right.setSpawnAllowlist
   );
 }
 

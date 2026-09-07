@@ -46,6 +46,7 @@ export type CustomPromptInput = {
   hidden?: boolean;
   role?: import("../src/lib/workhorse-rules").DeskRole;
   crewModes?: CrewMode[];
+  spawnNames?: string[];
   customBotId?: string;
   config: CustomHttpConfig;
 };
@@ -374,6 +375,7 @@ export class CustomSessionHost {
           ),
           input.crewModes,
           role,
+          input.spawnNames,
         ),
         ...(input.images?.length ? { images: hydrateChatImages(input.images) } : {}),
       },

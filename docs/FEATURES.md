@@ -268,11 +268,11 @@ transcript rather than as a path.
   (`seed: fresh`) and no parent conversation.
 - **Turn log** — a chat can reconstruct model history from its own turn and
   step log. The log is per chat. It is never shared across vendors.
-- **Subagents** — lifecycle records, runtime ceilings, cascading
+- **Subagents** — lifecycle records, cascading
   cancellation, changed-file review, and worktree isolation where the project
-  supports it. The desk does not stop a worker on a token ceiling. Billed
-  spend for that chat is on the meter, next to retained context. Runtime
-  timeout still ends a run as timed-out. A reused worker starts a new slice
+  supports it. The desk does not stop a worker on a token ceiling or a runtime
+  limit. Billed spend for that chat is on the meter, next to retained context.
+  A reused worker starts a new slice
   count; billed usage for the chat is the lifetime total.
   If the parent then does the work itself, the run records that the parent took
   over instead of a fully Workhorse-owned completion.
@@ -322,7 +322,11 @@ transcript rather than as a path.
   pin stays as a chip next to + until you clear it. Two pins collapse to +2 on
   the bar; click it to expand them. Orchestrate tells this chat
   it is the orchestrator and must spawn desk workers (one assignment is one
-  worker, Auto ranks, fan-out only when asked). Mission is the adaptive loop:
+  worker or a named continuation on this parent for the same topic; a bare spawn
+  still starts clear-headed. Auto ranks, fan-out only when asked). A gear on that chip, or a
+  right-click, opens a this-chat list of which connected bots it may spawn.
+  All bots is the default; a subset stays on this chat until you clear it, and
+  a new chat starts at all again. Left-click still clears the pin. Mission is the adaptive loop:
   spawn the first wave, then continue remaining work with
   `workhorse_continue_mission`. With both on, the chat spawns as orchestrator
   and then continues unmet work as a mission.
@@ -337,8 +341,9 @@ transcript rather than as a path.
   ranks those vendors by leftover. Naming the vendor locks that login. A named
   vendor without a model still ranks that vendor’s models. Composer high on the
   parent, spawn `effort`, or “on high” in the ask is kept on the worker; Auto
-  infers effort only when nobody assigned one. One assignment is one worker; a
-  second only to check that output, unless you asked for every vendor, all
+  infers effort only when nobody assigned one. One assignment is one worker, or a
+  named continuation on this parent for the same topic; a bare spawn still
+  starts clear-headed. A second spawn only to check that output, unless you asked for every vendor, all
   bots, several independent reviews, or a named list. Equal-intelligence picks
   go to the cheaper slot. A model with its own extra pool is kept for visual,
   creative, or complex work. A bot served from this machine is local because of

@@ -156,6 +156,7 @@ export class CodexSessionHost {
       sandbox: input.sandbox,
       role: input.role ?? (input.parentId || input.hidden ? "worker" : "orchestrator"),
       crewMode: input.crewModes,
+      spawnNames: input.spawnNames,
     }, input.visibleText);
 
     try {

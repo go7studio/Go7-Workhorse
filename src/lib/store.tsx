@@ -124,12 +124,24 @@ import {
   primaryFolder,
   projectFolderPaths,
   projectForSpawn,
+  applyReorderProjects,
 } from "./project";
 import { isParentTakeoverTool, isWriteToolTitle, projectEdits, writePathFromToolEvent } from "./project-edits";
 import { isProviderId, providerById } from "./providers";
 import { sameDeskSkills, skillsForAutoLoad } from "./skills-catalog";
 import { withSkillDiscoveryHint } from "./skill-suggestions";
 import { mcpServersForSession } from "./mcp-servers";
+import {
+  filterCandidatesBySpawnAllowlist,
+  filterCatalogBySpawnAllowlist,
+  normalizeSpawnAllowlist,
+  spawnAllowlistBlockedError,
+  spawnAllowlistForCaller,
+  spawnAllowlistIdForSpec,
+  spawnAllowlistNames,
+  spawnIdentityAllowed,
+  spawnSpecDisplayName,
+} from "./spawn-allowlist";
 import {
   applyUpdateStockBot,
   DEFAULT_SETTINGS,
@@ -227,8 +239,6 @@ import {
   admitSpawn,
   assertAgentPathWrite,
   campaignGateError,
-  expiredWorkerIds,
-  WORKER_DEADLINE_SWEEP_MS,
   claimSharedFiles,
   collectChildAgentReports,
   deskRoleOf,
@@ -241,6 +251,7 @@ import {
   normalizeFileLeases,
   normalizePathAllowlist,
   overlappingAgentFiles,
+  parentCrewSnapshot,
   parentHasRunningChildren,
   maxRootWorkers,
   nextCampaignPhase,
@@ -249,6 +260,7 @@ import {
   resolveSpawnSpec,
   missionForDeskSpawn,
   findReusableWorker,
+  formatParentCrewLine,
   fileContentsFingerprint,
   leasePathForWrite,
   refreshSharedFileFingerprint,
@@ -266,6 +278,7 @@ import {
   shouldAutoRouteSpawn,
   routingDecisionMatchesSpawn,
   constrainRouteCandidatesForSpawn,
+  spawnContinuationHowToUse,
   spawnExclusions,
   spawnWaitsForReply,
   withSubagentStatus,
@@ -433,10 +446,12 @@ export type Store = AppState & {
   removeReference: (referenceId: string) => void;
   archiveProject: (id: string, archived?: boolean) => void;
   deleteProject: (id: string, chats: "keep" | "remove") => void;
+  reorderProjects: (fromId: string, toId: string, place: "before" | "after") => void;
   startSession: (projectId?: string | null, provider?: ProviderId) => void;
   setSessionModel: (provider: ProviderId, model: string, customBotId?: string) => void;
   setSessionRoutingMode: (mode: "auto" | "manual") => void;
   setCrewMode: (modes: CrewMode[] | undefined) => void;
+  setSpawnAllowlist: (ids: string[] | undefined) => void;
   /** Pick an interrupted worker back up. Returns why not, when it cannot. */
   resumeAgentRun: (sessionId: string) => { ok: boolean; message: string };
   createCustomBot: () => string | null;
@@ -1595,6 +1610,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  const reorderProjects = useCallback((fromId: string, toId: string, place: "before" | "after") => {
+    setState((current) => {
+      const projects = applyReorderProjects(current.projects, fromId, toId, place);
+      if (!projects) return current;
+      return { ...current, projects };
+    });
+  }, []);
+
   const startSession = useCallback((projectId?: string | null, provider?: ProviderId) => {
     setState((current) => {
       const targetId = projectId === undefined ? null : projectId;
@@ -1701,6 +1724,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       ...current,
       sessions: current.sessions.map((item) =>
         item.id === current.activeSessionId ? { ...item, crewModes: modes } : item,
+      ),
+    }));
+  }, []);
+
+  const setSpawnAllowlist = useCallback((ids: string[] | undefined) => {
+    const spawnAllowlist = normalizeSpawnAllowlist(ids);
+    setState((current) => ({
+      ...current,
+      sessions: current.sessions.map((item) =>
+        item.id === current.activeSessionId ? { ...item, spawnAllowlist } : item,
       ),
     }));
   }, []);
@@ -2982,6 +3015,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           hidden: session.hidden,
           role: deskRoleOf(session),
           crewModes: session.crewModes,
+          spawnNames: spawnAllowlistNames(session.spawnAllowlist, stateRef.current.settings),
           mcpServers: mcpServersForSession(stateRef.current.settings.mcpServers, session),
           preface: withPortableHistory(buildSessionPreface({
             sessionId: session.id,
@@ -3003,6 +3037,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 botName: customBotForSession(stateRef.current.settings.customBots, session)?.name,
               }),
               preview: chatPreview(working),
+              ...(session.parentId
+                ? {}
+                : {
+                    crew: formatParentCrewLine(parentCrewSnapshot(stateRef.current.sessions, session.id)),
+                  }),
             },
           }), session.provider === "custom" ? [] : messagesForPortableReplay(working, session.contextCheckpoint)),
         };
@@ -3044,6 +3083,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             hidden: session.hidden,
             role: deskRoleOf(session),
             crewModes: session.crewModes,
+            spawnNames: spawnAllowlistNames(session.spawnAllowlist, stateRef.current.settings),
             customBotId: session.customBotId ?? ("id" in custom ? custom.id : undefined),
             config: {
               baseUrl: custom.baseUrl,
@@ -3814,6 +3854,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             hidden: session.hidden,
             role,
             crewModes: session.crewModes,
+            spawnNames: spawnAllowlistNames(session.spawnAllowlist, snapshot.settings),
             restartRuntime,
           };
           if (live === "preview") throw new Error(`${providerById(session.provider).name} is not connected yet`);
@@ -3849,6 +3890,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               hidden: session.hidden,
               role,
               crewModes: session.crewModes,
+              spawnNames: spawnAllowlistNames(session.spawnAllowlist, snapshot.settings),
               customBotId: session.customBotId ?? ("id" in custom ? custom.id : undefined),
               config: {
                 baseUrl: custom.baseUrl,
@@ -3896,7 +3938,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 permits: latest.watchPermits,
                 dayMarks: latest.watchDayMarks,
               });
-              await replyAsk({ text: formatDeskRoster(catalog) });
+              const fromId = payload.fromSessionId?.trim() || "";
+              const allowlist = fromId ? spawnAllowlistForCaller(latest.sessions, fromId) : undefined;
+              await replyAsk({ text: formatDeskRoster(filterCatalogBySpawnAllowlist(catalog, allowlist)) });
               return;
             }
             if (action === "plan") {
@@ -5443,10 +5487,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               outcomes: outcomesFromLearningEvents(learningOutcomeEvents),
               exclude: effectiveExclusions,
             };
+            const spawnAllowlist = spawnAllowlistForCaller(latest.sessions, caller.id);
             const routeCandidates = routeSpawn
-              ? constrainRouteCandidatesForSpawn(
-                  routingCandidatesForDesk(latest.settings, routeStatuses, latest.deskPlans ?? plansRef.current),
-                  { provider: payload.provider, model: payload.model },
+              ? filterCandidatesBySpawnAllowlist(
+                  constrainRouteCandidatesForSpawn(
+                    routingCandidatesForDesk(latest.settings, routeStatuses, latest.deskPlans ?? plansRef.current),
+                    { provider: payload.provider, model: payload.model },
+                  ),
+                  spawnAllowlist,
                 )
               : [];
             const routeDecision = routeSpawn
@@ -5478,9 +5526,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             const requestedEffort = parseEffort(String(payload.effort ?? ""))
               ?? parseEffortFromText(lastUserMessage(caller)?.text ?? "")
               ?? parseEffortFromText(String(payload.message ?? ""));
-            const spawnTimeoutSeconds = isNested
-              ? Math.min(120, Math.max(30, payload.timeoutSeconds ?? 120))
-              : payload.timeoutSeconds;
             const spawnIsolation = nestedPolicy.isolation ?? payload.isolation ?? "worktree";
             const admitted = admitSpawn({
               parent: caller,
@@ -5599,6 +5644,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             }, effectiveExclusions)) {
               await replyAsk({
                 error: `no capable route: ${describeRoutingMiss(routeCandidates, routeRequest, latest.settings.routing)}`,
+              });
+              return;
+            }
+            if (!spawnIdentityAllowed(spawnAllowlist, spawnAllowlistIdForSpec(spec))) {
+              await replyAsk({
+                error: spawnAllowlistBlockedError(spawnSpecDisplayName(spec, latest.settings)),
               });
               return;
             }
@@ -5727,9 +5778,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               }
               assignedPlan = running.plan;
             }
-            const timeoutMs = typeof spawnTimeoutSeconds === "number"
-              ? Math.max(30, Math.min(3_600, spawnTimeoutSeconds)) * 1_000
-              : 10 * 60 * 1_000;
             const project = boundProject;
             const root = admitted.cwd;
             let environment: SessionEnvironment = { kind: "local" };
@@ -5893,7 +5941,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               agentRun: {
                 status: "running",
                 startedAt,
-                timeoutMs,
                 isolation,
                 executionOwner: "workhorse",
                 ...assignmentBudget,
@@ -6002,6 +6049,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               };
             });
             const waitForReply = spawnWaitsForReply(payload);
+            const spawnCrew = parentCrewSnapshot(
+              latest.sessions.some((item) => item.id === childId)
+                ? latest.sessions.map((item) => (item.id === childId ? child : item))
+                : [...latest.sessions, child],
+              parent.id,
+            );
             let terminalFailure: "timed-out" | "cancelled" | "budget-exceeded" | undefined;
             const markChildFailure = (error: unknown) => {
               const message = error instanceof Error ? error.message : String(error);
@@ -6168,11 +6221,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                     ),
                     worker: workerName,
                     reused: Boolean(priorWorker),
+                    crew: spawnCrew,
                     access: accessReceipt,
                     routingMode: routedWorkerIsRouted ? "auto" : "manual",
                     ...(routedWorkerIsRouted && routeDecision ? { routingDecision: routeDecision } : {}),
-                    howToUse:
-                      `Worker is running in its own chat. ${priorWorker ? `${workerName} picked this up with what it already knew.` : `${workerName} is new to this work.`} For the next slice of the same kind pass worker="${workerName}" and it goes back to the same worker. Spawn the rest with wait=false, then stop. The desk joins reports later. Do not sit on workhorse_await_agents or ask the user to pick.`,
+                    howToUse: spawnContinuationHowToUse(workerName, Boolean(priorWorker)),
                   },
                   null,
                   2,
@@ -6212,6 +6265,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                   ...(finished?.routingDecision ?? routeDecision
                     ? { routingDecision: finished?.routingDecision ?? routeDecision }
                     : {}),
+                  crew: parentCrewSnapshot(stateRef.current.sessions, parent.id),
                   report: fallback,
                 },
                 null,
@@ -6494,7 +6548,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
-  /** One terminal path, whether the caller cancelled or the desk's own deadline fired. */
+  /** Caller cancel still shares this path. The desk does not fire it for a runtime limit. */
   const stopWorker = useCallback((childSessionId: string, reason: "timed-out" | "cancelled") => {
     const child = stateRef.current.sessions.find((session) => session.id === childSessionId);
     if (child?.status === "running") cancelVendorSession(child);
@@ -6517,23 +6571,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     if (!window.workhorse?.onPeerCancel) return;
     return window.workhorse.onPeerCancel(({ childSessionId, reason }) => stopWorker(childSessionId, reason));
   }, [stopWorker]);
-
-  /**
-   * The desk enforces the runtime limit, because the caller's timer cannot: on Link a
-   * delegation is answered immediately with the worker id, and that reply clears it
-   * while the worker runs on. Measured before this: a 30s limit let a pass run 251s.
-   */
-  useEffect(() => {
-    if (!ready) return;
-    const sweep = () => {
-      for (const id of expiredWorkerIds(stateRef.current.sessions, Date.now())) {
-        stopWorker(id, "timed-out");
-      }
-    };
-    sweep();
-    const timer = window.setInterval(sweep, WORKER_DEADLINE_SWEEP_MS);
-    return () => window.clearInterval(timer);
-  }, [ready, stopWorker]);
 
   useEffect(() => {
     const flushStreams = () => {
@@ -8445,10 +8482,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       removeReference,
       archiveProject,
       deleteProject,
+      reorderProjects,
       startSession,
       setSessionModel,
       setSessionRoutingMode,
       setCrewMode,
+      setSpawnAllowlist,
       resumeAgentRun,
       createCustomBot,
       installCustomBot,
@@ -8582,10 +8621,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       removeReference,
       archiveProject,
       deleteProject,
+      reorderProjects,
       startSession,
       setSessionModel,
       setSessionRoutingMode,
       setCrewMode,
+      setSpawnAllowlist,
       resumeAgentRun,
       createCustomBot,
       installCustomBot,

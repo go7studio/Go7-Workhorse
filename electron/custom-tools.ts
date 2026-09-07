@@ -157,6 +157,11 @@ const DESK_TOOLS: { name: string; description: string; input_schema: Record<stri
       properties: {
         prompt: { type: "string", description: "Full task for the subagent" },
         description: { type: "string", description: "Short 3–5 word label" },
+        worker: {
+          type: "string",
+          description:
+            "Name of a worker already on this chat (Wren, Wanda). Pass it to continue the same topic with what that worker learned. Leave empty to mint a new name for a new topic — a new worker starts with a clear head. Do not name an idle worker just to save a start. A busy worker still gets a colleague.",
+        },
         provider: { type: "string", description: "grok, codex, claude, or custom" },
         model: { type: "string", description: "Optional model id" },
         permission: { type: "string", description: "Seat this worker runs under: ask, accept-edits, or always-approve. Capped at the desk default in Settings › LLMs, not at your own seat. Omit and the worker inherits your seat." },
@@ -171,7 +176,7 @@ const DESK_TOOLS: { name: string; description: string; input_schema: Record<stri
         files: { type: "array", items: { type: "string" }, description: "Files to attach to the worker" },
         chat: { type: "string", description: "Optional existing chat or vendor name to copy" },
         effort: { type: "string", description: "Optional override. Omit to keep a reused worker's thinking level; otherwise derived from quick, balanced, or deep" },
-        timeoutSeconds: { type: "number", description: "Optional 30-3600 second runtime limit. The desk stops the worker when it passes this; the run ends timed-out." },
+        timeoutSeconds: { type: "number", description: "Ignored. The desk does not stop a worker on a runtime limit. The worker runs until it finishes or is cancelled." },
         tokenBudget: {
           type: "number",
           description:

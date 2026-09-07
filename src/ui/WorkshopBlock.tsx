@@ -123,7 +123,7 @@ function vLabel(version: string): string {
   return version.startsWith("v") ? version : `v${version}`;
 }
 
-/** Catalog rows have id + summary, not pack.json name — title-case the id for Pending. */
+/** Catalog rows have id + summary, not pack.json name — title-case the id for Available. */
 function catalogDisplayName(id: string): string {
   return id
     .split("-")
@@ -138,7 +138,7 @@ function packMark(title: string): string {
   return ch ? ch.toUpperCase() : "?";
 }
 
-/** Collapsed Active/Pending blurb — ~80–100 chars; CSS line-clamp 1 is backup. */
+/** Collapsed On this desk / Available blurb — ~80–100 chars; CSS line-clamp 1 is backup. */
 const ROW_ONE_LINER_MAX = 90;
 
 function clampRowOneLiner(raw: string, max = ROW_ONE_LINER_MAX): string {
@@ -256,13 +256,13 @@ export function WorkshopBlock({
     return () => stop?.();
   }, [reload]);
 
-  // Sheet-head Refresh bumps nonce; never place Refresh between Pending rows.
+  // Sheet-head Refresh bumps nonce; never place Refresh between Available rows.
   useEffect(() => {
     if (!catalogRefreshNonce) return;
     reloadCatalog();
   }, [catalogRefreshNonce, reloadCatalog]);
 
-  // Add packs (zero installed) → Pending-first; Manage / Turn on with any On → Active.
+  // Add packs (zero installed) → Available-first; Manage / Turn on with any On → On this desk.
   useEffect(() => {
     if (!inSheet) return;
     const id = window.requestAnimationFrame(() => {
@@ -452,7 +452,7 @@ export function WorkshopBlock({
     catalogState && catalogState.ok && !catalogState.unreachable && !catalogState.pinFailed && !catalogState.expired
       ? catalogState.packs.filter((entry) => {
           const installed = packs.find((pack) => pack.id === entry.id);
-          // Hide same-version Installed; keep yanked + Update rows visible under Pending.
+          // Hide same-version Installed; keep yanked + Update rows visible under Available.
           if (!installed) return true;
           if (entry.yanked) return true;
           return installed.version !== entry.version;
@@ -508,6 +508,7 @@ export function WorkshopBlock({
 
   const sheetIntro =
     activePacks.length === 0 ? "Install a pack, then Turn on." : "Packs on this desk";
+  const settingsIntro = "Add-ons for this desk. Catalog is shared; installs stay local.";
   const showCatalogRefresh =
     catalogState != null &&
     catalogState.ok &&
@@ -523,7 +524,7 @@ export function WorkshopBlock({
         <div className="link-head">
           <div>
             <strong>Workshop</strong>
-            <p className="row-meta">{sheetIntro}</p>
+            <p className="row-meta">{settingsIntro}</p>
           </div>
           {/* Detach is Settings / live-rail only — hidden when surface="sheet" (Manage). */}
           {packs.some((pack) => pack.on) ? (
@@ -547,8 +548,8 @@ export function WorkshopBlock({
         <p className="row-meta workshop-sheet-intro">Catalog stale — Install disabled until refresh.</p>
       ) : null}
 
-      <h3 ref={activeRef} id="workshop-active" className="workshop-section-title section-label" tabIndex={-1}>
-        Active
+      <h3 ref={activeRef} id="workshop-on-this-desk" className="workshop-section-title section-label" tabIndex={-1}>
+        On this desk
       </h3>
       {activePacks.length === 0 ? (
         <p className="row-meta workshop-blurb workshop-active-empty">None on.</p>
@@ -657,11 +658,11 @@ export function WorkshopBlock({
         </ul>
       )}
 
-      <h3 ref={pendingRef} id="workshop-pending" className="workshop-section-title section-label" tabIndex={-1}>
-        Pending
+      <h3 ref={pendingRef} id="workshop-available" className="workshop-section-title section-label" tabIndex={-1}>
+        Available
       </h3>
       {packs.length === 0 && pendingCatalog.length === 0 && catalogState != null && catalogState.ok ? (
-        <p className="row-meta workshop-blurb workshop-pending-empty">Nothing pending.</p>
+        <p className="row-meta workshop-blurb workshop-pending-empty">Nothing available.</p>
       ) : null}
 
       {pendingInstalled.length > 0 ? (

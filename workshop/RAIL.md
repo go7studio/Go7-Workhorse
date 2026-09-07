@@ -13,7 +13,7 @@ Steve UX redirect. Host / grants / read-only law unchanged. **Paint surface chan
 
 | Surface | Role |
 | --- | --- |
-| Desk rail **Manage** sheet | **INSTALL / GRANT / CATALOG** — primary manage home. Same `WorkshopBlock` (Installed / Available / Local). |
+| Desk rail **Manage** sheet | **INSTALL / GRANT / CATALOG** — primary manage home. Same `WorkshopBlock` (On this desk / Available / Local). |
 | Settings → Workshop | **Secondary deep-link** — same install/grant/catalog. Not the live watch surface. |
 | Desk **Workshop rail** | **Live watch** — primary soak. Always-visible Manage chrome (including empty / all-Off). Collapsed strip + expand when packs On. |
 | Breakout window | **Secondary detach** — same cards, optional. |

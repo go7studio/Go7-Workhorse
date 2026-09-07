@@ -9655,7 +9655,7 @@ html.pane-dragging * {
   margin-bottom: 10px;
 }
 
-/* Advanced: whisper — no competing weight with Pending section-label. */
+/* Advanced: whisper — no competing weight with Available section-label. */
 .workshop-advanced-title {
   margin: 22px 0 0;
   font-size: inherit;
@@ -9687,7 +9687,7 @@ html.pane-dragging * {
 }
 
 .workshop-settings { margin-bottom: 8px; }
-/* Active/Pending: rail section-label weight, not Settings h3. */
+/* On this desk / Available: rail section-label weight, not Settings h3. */
 .workshop-settings .workshop-section-title.section-label,
 .workshop-section-title.section-label {
   margin: 12px 0 4px;

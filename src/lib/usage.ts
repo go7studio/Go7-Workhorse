@@ -520,6 +520,47 @@ export function chatSpend(events: UsageEvent[], sessionId: string | undefined): 
   return rollup(events.filter((event) => event.sessionId === sessionId));
 }
 
+export type CrewSpendRow = {
+  sessionId: string;
+  label: string;
+  kind: "chat" | "worker";
+  totals: UsageTotals;
+};
+
+/** This chat first, then each orchestrated bot on its own session. */
+export function crewSpendRows(
+  events: UsageEvent[],
+  chatId: string | undefined,
+  workers: Array<{ id: string; label: string }>,
+): CrewSpendRow[] {
+  if (!chatId) return [];
+  return [
+    { sessionId: chatId, label: "This chat", kind: "chat", totals: chatSpend(events, chatId) },
+    ...workers.map((worker) => ({
+      sessionId: worker.id,
+      label: worker.label,
+      kind: "worker" as const,
+      totals: chatSpend(events, worker.id),
+    })),
+  ];
+}
+
+export function crewSpendTotal(rows: CrewSpendRow[]): UsageTotals {
+  return rows.reduce(
+    (sum, row) => ({
+      inputTokens: sum.inputTokens + row.totals.inputTokens,
+      outputTokens: sum.outputTokens + row.totals.outputTokens,
+      cacheReadTokens: sum.cacheReadTokens + row.totals.cacheReadTokens,
+      cacheWriteTokens: sum.cacheWriteTokens + row.totals.cacheWriteTokens,
+      totalTokens: sum.totalTokens + row.totals.totalTokens,
+      costUsd: sum.costUsd + row.totals.costUsd,
+      costKnown: sum.costKnown || row.totals.costKnown,
+      events: sum.events + row.totals.events,
+    }),
+    { ...EMPTY },
+  );
+}
+
 export function byProvider(events: UsageEvent[]): UsageGroup[] {
   return PROVIDERS.map((provider) => {
     const slice = events.filter((event) => event.provider === provider.id);

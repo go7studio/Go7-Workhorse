@@ -123,6 +123,43 @@ export function sameContextDesk(left: ContextDesk, right: ContextDesk): boolean 
   return sameContextSession(left.session, right.session) && left.settings === right.settings && left.usage === right.usage;
 }
 
+export type ChatSpendSession = Pick<Session, "id" | "title" | "parentId">;
+
+export type ChatSpendDesk = {
+  session: ChatSpendSession | null;
+  workers: ChatSpendSession[];
+  usage: Store["usage"];
+};
+
+function chatSpendSession(session: Session | null): ChatSpendSession | null {
+  if (!session) return null;
+  return { id: session.id, title: session.title, parentId: session.parentId };
+}
+
+export function selectChatSpendDesk(store: Store): ChatSpendDesk {
+  const session = activeDeskSession(store);
+  const workers = session
+    ? store.sessions
+        .filter((item) => item.parentId === session.id)
+        .map((item) => ({ id: item.id, title: item.title, parentId: item.parentId }))
+    : [];
+  return { session: chatSpendSession(session), workers, usage: store.usage };
+}
+
+function sameChatSpendSession(left: ChatSpendSession | null, right: ChatSpendSession | null): boolean {
+  if (left === right) return true;
+  if (!left || !right) return false;
+  return left.id === right.id && left.title === right.title && left.parentId === right.parentId;
+}
+
+export function sameChatSpendDesk(left: ChatSpendDesk, right: ChatSpendDesk): boolean {
+  if (left === right) return true;
+  if (left.usage !== right.usage) return false;
+  if (!sameChatSpendSession(left.session, right.session)) return false;
+  if (left.workers.length !== right.workers.length) return false;
+  return left.workers.every((worker, index) => sameChatSpendSession(worker, right.workers[index] ?? null));
+}
+
 export type WatchDesk = {
   session: Session | null;
   settings: Store["settings"];

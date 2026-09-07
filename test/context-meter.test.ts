@@ -5,6 +5,8 @@ import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import { estimateChatContext, formatRetainedPct, retainedContextStats } from "../src/lib/context-stats";
 import { placeContextPop } from "../src/ui/ContextMeter";
+import { crewSpendCaption, spendWorkerLabel } from "../src/ui/ChatSpend";
+import { crewSpendTotal } from "../src/lib/usage";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -89,8 +91,17 @@ test("ContextMeter populates Cursor retained context without a Grok-only live se
   assert.match(store, /draft\.source === "estimate" && draft\.provider !== "cursor"/);
   assert.match(store, /estimateMessageTokens/);
   assert.match(meter, /formatRetainedPct/);
-  assert.match(meter, /chatSpend/);
-  assert.match(meter, /billed on this chat/);
+  assert.doesNotMatch(meter, /chatSpend/);
+  assert.doesNotMatch(meter, /billed on this chat/);
+  const spend = readFileSync(path.join(ROOT, "src", "ui", "ChatSpend.tsx"), "utf8");
+  const pane = readFileSync(path.join(ROOT, "src", "ui", "SessionPane.tsx"), "utf8");
+  assert.match(spend, /crewSpendRows/);
+  assert.match(spend, /billed on this chat/);
+  assert.match(pane, /session-header-left/);
+  assert.match(pane, /<ChatSpend \/>/);
+  const left = pane.indexOf("<ChatSpend");
+  const ring = pane.indexOf("<ContextMeter");
+  assert.ok(left >= 0 && ring > left, "spent sits on the left of the transcript, before the context ring");
 });
 
 test("a six-message Cursor chat does not keep retained context at 0 of 200k", () => {
@@ -113,4 +124,24 @@ test("a six-message Cursor chat does not keep retained context at 0 of 200k", ()
   assert.equal(formatRetainedPct(stats.used, stats.usagePct), stats.usagePct < 1 ? "<1%" : `${stats.usagePct}%`);
   assert.equal(formatRetainedPct(0, 0), "0%");
   assert.equal(formatRetainedPct(123, 0), "<1%");
+});
+
+test("orchestrated bot spend labels keep the worker name", () => {
+  assert.equal(spendWorkerLabel("Dexter · Hub match FPS"), "Dexter");
+  assert.equal(spendWorkerLabel("Marlow - Coach compile and verify"), "Marlow");
+  assert.equal(spendWorkerLabel("Wren"), "Wren");
+});
+
+test("the grey header is the bots added together, not named one by one", () => {
+  const empty = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0, costKnown: false, events: 1 };
+  const bots = crewSpendTotal([
+    { sessionId: "w", label: "Wren", kind: "worker", totals: { ...empty, totalTokens: 502_000 } },
+    { sessionId: "d", label: "Dexter", kind: "worker", totals: { ...empty, totalTokens: 725_000 } },
+    { sessionId: "m", label: "Marlow", kind: "worker", totals: { ...empty, totalTokens: 48_000 } },
+  ]);
+  assert.equal(bots.totalTokens, 1_275_000);
+  assert.equal(crewSpendCaption(bots.totalTokens), "Crew 1.3M");
+  const spend = readFileSync(path.join(ROOT, "src", "ui", "ChatSpend.tsx"), "utf8");
+  assert.match(spend, /\{formatTokens\(spentTokens\)\} spent/);
+  assert.match(spend, /crewSpendCaption\(botsTotal\)/);
 });

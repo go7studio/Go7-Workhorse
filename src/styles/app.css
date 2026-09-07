@@ -1228,10 +1228,18 @@ html.pane-dragging * {
   border-radius: 980px;
 }
 
+.session-header-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  justify-content: flex-start;
+}
+
 .session-status {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: flex-start;
   flex-wrap: wrap;
   gap: 10px;
   min-width: 0;
@@ -6368,6 +6376,53 @@ html.pane-dragging * {
   border-top: 5px solid var(--text-tertiary);
 }
 
+.chat-spend-wrap {
+  position: relative;
+  flex-shrink: 0;
+  z-index: 12;
+}
+
+.chat-spend {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0;
+  min-width: 0;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 10px;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.chat-spend:hover {
+  background: var(--bg-hover);
+}
+
+.chat-spend strong {
+  font-size: 12px;
+  font-weight: 590;
+  letter-spacing: -0.02em;
+  color: var(--text);
+}
+
+.chat-spend em {
+  display: block;
+  max-width: min(42vw, 420px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-style: normal;
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.chat-spend-pop {
+  width: 320px;
+}
+
 .context-meter-wrap {
   position: relative;
   flex-shrink: 0;
@@ -6483,10 +6538,6 @@ html.pane-dragging * {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  margin-bottom: 10px;
-}
-
-.context-pop header.context-spend {
   margin-bottom: 10px;
 }
 

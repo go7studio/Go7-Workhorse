@@ -26,6 +26,7 @@ import { sameSessionPaneDesk, selectSessionPaneDesk } from "../lib/store-select"
 import { Composer } from "./Composer";
 import { GoalBar } from "./GoalBar";
 import { WatchBanners } from "./WatchNotices";
+import { ChatSpend } from "./ChatSpend";
 import { ContextMeter } from "./ContextMeter";
 import { EditedList } from "./EditedList";
 import { FileOpenProvider } from "./FileOpen";
@@ -428,9 +429,12 @@ export function SessionPane() {
     >
       <div className="session-col">
       <header className="session-header slim">
-        <div className="session-status">
-          {session.status === "needs-input" && <span className="live-pill wait">Needs you</span>}
-          {talking ? <span className="peer-live">{talking}</span> : null}
+        <div className="session-header-left">
+          <ChatSpend />
+          <div className="session-status">
+            {session.status === "needs-input" && <span className="live-pill wait">Needs you</span>}
+            {talking ? <span className="peer-live">{talking}</span> : null}
+          </div>
         </div>
         <div className="session-header-tools">
           {project ? (

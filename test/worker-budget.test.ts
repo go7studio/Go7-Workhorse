@@ -376,6 +376,6 @@ test("FEATURES.md says the desk does not stop on a token ceiling or a runtime li
     /does not stop a worker on a token ceiling or a runtime\s+limit/,
     "FEATURES.md says spend and runtime are visible, not a stop",
   );
-  assert.match(features, /billed total is on the chat meter/);
+  assert.match(features, /Billed spend for that chat and each orchestrated bot is on the left/);
   assert.doesNotMatch(features, /Runtime timeout still ends a run as timed-out/);
 });

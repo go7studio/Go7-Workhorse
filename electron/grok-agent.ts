@@ -84,6 +84,34 @@ export function modelNotOffered(agentLabel: string | undefined, model: string): 
   return `${agentLabel?.trim() || "The vendor"} does not offer ${model}. Pick a listed model.`;
 }
 
+/**
+ * Did the vendor refuse the run instead of answering?
+ *
+ * `stopReason === "error"` is the Codex / ACP signal for a refused prompt —
+ * the vendor carries its own words in the response body, for example
+ * `"The 'gpt-6-astra' model requires a newer version of Codex"`.
+ * `"refusal"` is Anthropic's signal for content the model refused to answer.
+ * A handful of vendors put the message in a top-level `error` field instead.
+ *
+ * Treat any of these as a refusal so the host's catch turns this into a
+ * failed run with the vendor's own words as the error, not a completed run
+ * that just happens to read as a refusal.
+ *
+ * Deliberately not based on text content: a chat may legitimately answer with
+ * prose that mentions the word "error" without the run itself failing.
+ */
+export function isVendorRefusalResult(result: unknown): boolean {
+  const record = result && typeof result === "object" ? (result as Record<string, unknown>) : {};
+  const stopReason = typeof record.stopReason === "string" ? record.stopReason.toLowerCase() : "";
+  if (stopReason === "error" || stopReason === "refusal") return true;
+  if (typeof record.error === "string" && record.error.trim()) return true;
+  if (record.error && typeof record.error === "object") {
+    const message = (record.error as Record<string, unknown>).message;
+    if (typeof message === "string" && message.trim()) return true;
+  }
+  return false;
+}
+
 export type GrokStartResult = {
   initialize: Record<string, unknown>;
   sessionNew: Record<string, unknown>;
@@ -976,6 +1004,12 @@ export class GrokAgent {
       message: result.message ?? asRecord(result._meta).message,
     });
     const reply = collected || fromResult;
+    if (isVendorRefusalResult(result)) {
+      // Throw before the chunk lands so an empty assistant bubble is filled
+      // by the upstream error handler with the vendor's own words — not the
+      // raw refusal sitting next to a status that says "completed".
+      throw new Error(reply.trim() || "The vendor refused this run.");
+    }
     if (!collected && fromResult) handlers.onChunk?.(fromResult);
     debugAcp({
       prompt: "done",

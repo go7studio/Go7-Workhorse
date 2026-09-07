@@ -19,6 +19,7 @@ import {
   extractUpdateText,
   isAcpRpcReply,
   isAcpSessionUpdateMethod,
+  isVendorRefusalResult,
   partitionAcpBatch,
   parseGrokUsage,
   parseRewindPoints,
@@ -7646,6 +7647,7 @@ function fakeAcp(script: {
   methods: string[];
   loadFail?: boolean;
   nextId?: string;
+  promptResult?: Record<string, unknown>;
 }) {
   const stdin = new PassThrough();
   const stdout = new PassThrough();
@@ -7694,7 +7696,8 @@ function fakeAcp(script: {
         continue;
       }
       if (message.method === "session/prompt") {
-        stdout.write(`${JSON.stringify({ jsonrpc: "2.0", id: message.id, result: { stopReason: "end_turn" } })}\n`);
+        const promptResult = script.promptResult ?? { stopReason: "end_turn" };
+        stdout.write(`${JSON.stringify({ jsonrpc: "2.0", id: message.id, result: promptResult })}\n`);
         continue;
       }
       if (message.method === "_x.ai/rewind/points") {
@@ -8000,6 +8003,180 @@ test("launch-key change starts a new vendor session", async () => {
   host.disposeAll();
   assert.deepEqual(methods, ["initialize", "session/new", "session/prompt"]);
   assert.equal(result.opened, "session/new");
+});
+
+test("isVendorRefusalResult fires only on stopReason 'error' / 'refusal' or an error field, never on prose", () => {
+  // The desk must not invent refusals out of text: a chat that legitimately
+  // answers with prose mentioning "error" or "refused" stays a completed run.
+  assert.equal(isVendorRefusalResult({ stopReason: "end_turn" }), false);
+  assert.equal(isVendorRefusalResult({ stopReason: "tool_use" }), false);
+  assert.equal(
+    isVendorRefusalResult({
+      stopReason: "end_turn",
+      content: [{ type: "text", text: "There was an error in the upstream plan." }],
+    }),
+    false,
+  );
+  assert.equal(
+    isVendorRefusalResult({
+      stopReason: "end_turn",
+      content: [{ type: "text", text: "I refused to help with that." }],
+    }),
+    false,
+  );
+
+  // Codex / ACP refusal: the vendor carries its own words in the response body
+  // under stopReason "error".
+  assert.equal(
+    isVendorRefusalResult({
+      stopReason: "error",
+      content: [{ type: "text", text: "The 'gpt-6-astra' model requires a newer version of Codex" }],
+    }),
+    true,
+  );
+  assert.equal(
+    isVendorRefusalResult({ stopReason: "ERROR", content: [{ type: "text", text: "nope" }] }),
+    true,
+  );
+
+  // Anthropic content refusal.
+  assert.equal(isVendorRefusalResult({ stopReason: "refusal" }), true);
+
+  // A handful of vendors put the message in a top-level error field instead.
+  assert.equal(
+    isVendorRefusalResult({ error: "The model gpt-6-astra was not found." }),
+    true,
+  );
+  assert.equal(
+    isVendorRefusalResult({ error: { message: "model not available" } }),
+    true,
+  );
+  assert.equal(
+    isVendorRefusalResult({ error: { code: 404 } }),
+    false,
+  );
+
+  // Non-objects and unknowns do not panic and do not match.
+  assert.equal(isVendorRefusalResult(null), false);
+  assert.equal(isVendorRefusalResult(undefined), false);
+  assert.equal(isVendorRefusalResult("error"), false);
+  assert.equal(isVendorRefusalResult(42), false);
+  assert.equal(isVendorRefusalResult({}), false);
+  assert.equal(isVendorRefusalResult({ error: "" }), false);
+  assert.equal(isVendorRefusalResult({ error: {} }), false);
+});
+
+test("a vendor refusal on the first turn fails the run with the vendor\'s own words, never records it completed", async () => {
+  /*
+   * The bug, repeated twice today: a Codex run was given a model id the
+   * vendor did not serve, the vendor answered "The 'gpt-6-astra' model
+   * requires a newer version of Codex" as its only output, and the desk
+   * recorded the run `completed`. The host must surface this as a failure
+   * so the lineup drops the slice and the chat shows the vendor\'s refusal
+   * as an error, not as a finished answer.
+   */
+  const refusalText = "The 'gpt-6-astra' model requires a newer version of Codex";
+  const methods: string[] = [];
+  const host = new GrokSessionHost(() =>
+    fakeAcp({
+      methods,
+      nextId: "fresh-1",
+      promptResult: { stopReason: "error", content: [{ type: "text", text: refusalText }] },
+    }),
+  );
+  const events: string[] = [];
+  let caught: Error | undefined;
+  try {
+    await host.prompt(
+      {
+        sessionId: "work-1",
+        text: "hello",
+        model: "gpt-6-astra",
+        effort: "medium",
+        mode: "ask",
+        cwd: ROOT,
+      },
+      (event) => events.push(event.type),
+    );
+  } catch (error) {
+    caught = error as Error;
+  }
+  host.disposeAll();
+  assert.ok(caught, "vendor refusal must reject the host promise");
+  assert.equal(caught?.message, refusalText, "the error carries the vendor\'s own words");
+  // The host must not have reported a clean `done` after a refusal: any `done`
+  // would mean the downstream store has nothing to drive the run to `failed`.
+  assert.ok(
+    !events.includes("done") || events.indexOf("error") >= 0,
+    `refusal must emit error before done; got ${events.join(",")}`,
+  );
+  assert.ok(events.includes("error"), `error event must be emitted; got ${events.join(",")}`);
+  // The session lifecycle still completed session/new; the run itself failed.
+  assert.ok(methods.includes("session/prompt"));
+});
+
+test("a stopReason 'error' with no body still fails the run, not silently completes", async () => {
+  // Some vendors return stopReason "error" with no readable body at all.
+  // The desk must still mark the run failed; recording it completed would
+  // leave the lineup one short and the chat showing a phantom success.
+  const methods: string[] = [];
+  const host = new GrokSessionHost(() =>
+    fakeAcp({
+      methods,
+      nextId: "fresh-1",
+      promptResult: { stopReason: "error" },
+    }),
+  );
+  let caught: Error | undefined;
+  try {
+    await host.prompt(
+      {
+        sessionId: "work-1",
+        text: "hello",
+        model: "grok-4.6",
+        effort: "medium",
+        mode: "ask",
+        cwd: ROOT,
+      },
+      () => undefined,
+    );
+  } catch (error) {
+    caught = error as Error;
+  }
+  host.disposeAll();
+  assert.ok(caught, "bare error stopReason must reject the host promise");
+  assert.match(caught?.message ?? "", /refused|error/i);
+});
+
+test("a legitimate answer that mentions the word 'error' still completes normally", async () => {
+  // Belt-and-suspenders against the obvious false positive: the desk must not
+  // mark a real answer as failed just because its prose contains the word
+  // "error".
+  const methods: string[] = [];
+  const host = new GrokSessionHost(() =>
+    fakeAcp({
+      methods,
+      nextId: "fresh-1",
+      promptResult: {
+        stopReason: "end_turn",
+        content: [{ type: "text", text: "There was an error in my last plan; here is the fix." }],
+      },
+    }),
+  );
+  const result = await host.prompt(
+    {
+      sessionId: "work-1",
+      text: "hello",
+      model: "grok-4.6",
+      effort: "medium",
+      mode: "ask",
+      cwd: ROOT,
+    },
+    () => undefined,
+  );
+  host.disposeAll();
+  assert.equal(result.stopReason, "end_turn");
+  assert.match(result.text, /There was an error in my last plan/);
 });
 
 test("Grok login detection runs in Electron main over IPC, not sandboxed preload", () => {

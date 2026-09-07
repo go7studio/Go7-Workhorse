@@ -241,8 +241,11 @@ transcript rather than as a path.
   whole Cursor account. A four-characters-per-token estimate is used only until
   that join covers the turn. Composer and API stay two separate pools. Grok, Claude, and Codex stay unknown if they omit a bill.
   Leftover rings, billed tokens, and retained context stay distinct meters.
-  This chat's billed total is on the chat meter, next to retained context. It
-  is not a stop.
+  This chat's billed total sits in white on the left of the transcript.
+  Orchestrated bots combine into one grey Crew total under it. Click for each
+  bot plus in, cached, and out. A chat with no crew still shows its own billed
+  total there. Retained context stays on the ring to the right. It is not a
+  stop.
 - **In** is fresh input — what the model read for the first time. **Cached** is
   context served back from cache, named apart so a long chat does not read as
   millions of new tokens. **Out** is what it wrote. The total is in + out.
@@ -272,8 +275,8 @@ transcript rather than as a path.
 - **Subagents** — lifecycle records, cascading
   cancellation, changed-file review, and worktree isolation where the project
   supports it. The desk does not stop a worker on a token ceiling or a runtime
-  limit. Billed spend for that chat is on the meter, next to retained context.
-  A reused worker starts a new slice
+  limit. Billed spend for that chat and each orchestrated bot is on the left
+  of the transcript. A reused worker starts a new slice
   count; billed usage for the chat is the lifetime total.
   If the parent then does the work itself, the run records that the parent took
   over instead of a fully Workhorse-owned completion.

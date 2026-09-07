@@ -13,6 +13,8 @@ import {
   byModel,
   cellDotBackground,
   chatSpend,
+  crewSpendRows,
+  crewSpendTotal,
   deskUsageCards,
   heatCellBots,
   eventTotal,
@@ -896,7 +898,8 @@ test("Spend docs keep leftover, billed tokens, and retained context distinct", (
   assert.match(features, /Grok, Claude, and Codex stay unknown/);
   assert.match(features, /Leftover rings, billed tokens, and retained context stay distinct/);
   assert.match(features, /Retained context is this chat's window occupancy, never the[\s\S]*leftover ring/);
-  assert.match(features, /billed total is on the chat meter/);
+  assert.match(features, /billed total sits in white on the left of the transcript/);
+  assert.match(features, /Orchestrated bots combine into one grey Crew total/);
   assert.match(features, /This stretch shows billed in/);
 });
 
@@ -944,6 +947,56 @@ test("chat spend is this session's billed in plus out", () => {
   assert.equal(spend.events, 2);
   assert.equal(chatSpend(events, "missing").events, 0);
   assert.equal(chatSpend(events, undefined).events, 0);
+});
+
+test("crew spend keeps this chat apart from each orchestrated bot", () => {
+  const events = [
+    {
+      id: "parent",
+      at: 1,
+      provider: "grok" as const,
+      model: "grok-4.6",
+      sessionId: "chat-1",
+      inputTokens: 100,
+      outputTokens: 70,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+    },
+    {
+      id: "dexter",
+      at: 2,
+      provider: "cursor" as const,
+      model: "composer-2",
+      sessionId: "worker-dexter",
+      inputTokens: 40,
+      outputTokens: 40,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+    },
+    {
+      id: "marlow",
+      at: 3,
+      provider: "custom" as const,
+      model: "hf:moonshotai/Kimi-K3",
+      sessionId: "worker-marlow",
+      inputTokens: 20,
+      outputTokens: 10,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+    },
+  ];
+  const rows = crewSpendRows(events, "chat-1", [
+    { id: "worker-dexter", label: "Dexter" },
+    { id: "worker-marlow", label: "Marlow" },
+  ]);
+  assert.equal(rows[0]?.label, "This chat");
+  assert.equal(rows[0]?.totals.totalTokens, 170);
+  assert.equal(rows[1]?.label, "Dexter");
+  assert.equal(rows[1]?.totals.totalTokens, 80);
+  assert.equal(rows[2]?.label, "Marlow");
+  assert.equal(rows[2]?.totals.totalTokens, 30);
+  assert.equal(crewSpendTotal(rows).totalTokens, 280);
+  assert.equal(crewSpendRows(events, undefined, [{ id: "worker-dexter", label: "Dexter" }]).length, 0);
 });
 
 test("This stretch bills the range total, including events with no clock", () => {

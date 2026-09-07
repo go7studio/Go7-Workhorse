@@ -703,7 +703,10 @@ test("the desk mints its own token instead of taking over the shared login", () 
   assert.match(main, /claude:setup-token/);
   // Stored in the desk's own vault, and read from there. It is never copied
   // onto `process.env`, which every vendor child inherits.
-  assert.match(main, /credentialStore\(\)\.put\(result\.token, CLAUDE_TOKEN_ID\)/);
+  // Both ways in — the flow the desk runs and a token the person pastes —
+  // reach the vault through the one keeper.
+  assert.match(main, /credentialStore\(\)\.put\(token, CLAUDE_TOKEN_ID\)/);
+  assert.match(main, /const kept = keepClaudeToken\(result\.token\);/);
   assert.match(main, /setStoredClaudeTokenReader\(/);
   assert.doesNotMatch(main, /process\.env\.CLAUDE_CODE_OAUTH_TOKEN\s*=/);
 

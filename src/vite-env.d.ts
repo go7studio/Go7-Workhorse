@@ -176,7 +176,8 @@ type WorkhorseBridge = {
   listCodexNativeThreads?: (limit?: number) => Promise<import("../electron/codex-app-server").CodexNativeThread[]>;
   codexCapabilities?: (projectRoot?: string) => Promise<ReturnType<typeof import("../electron/codex-capabilities").codexCapabilitySummary>>;
   detectClaudeLogin: (input?: { recheck?: boolean }) => Promise<import("../electron/claude-login").ClaudeLoginDetectResult>;
-  claudeSetupToken: () => Promise<{ ok: boolean; message?: string }>;
+  claudeSetupToken: () => Promise<{ ok: boolean; message?: string; reason?: import("../electron/claude-auth").SetupTokenReason }>;
+  claudeStoreToken: (token: string) => Promise<{ ok: boolean; message?: string }>;
   claudePrompt: (input: GrokPromptBridgeInput) => Promise<{
     text?: string;
     stopReason?: string;

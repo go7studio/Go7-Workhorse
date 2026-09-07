@@ -7,10 +7,11 @@ import { formatWindow, modelsFor } from "../lib/models";
 import { PROVIDERS } from "../lib/providers";
 import { agentSystemsFromInboundSelect, inboundParentSelectValue, vendorEnabled, vendorLabel, vendorTint } from "../lib/settings";
 import { llmCardHint, llmDetailCopy } from "../lib/llm-copy";
+import { claudeTokenComplaint, CLAUDE_SETUP_TOKEN_COMMAND } from "../lib/claude-token";
 import { APP_VERSION } from "../lib/app-info";
 import { useStore } from "../lib/store";
 import { SETTINGS_THEME_CHOICES } from "../lib/theme";
-import type { AgentRuntimeId, DeskExportKind, PermissionMode, ProviderId, SandboxProfile, SettingsSection } from "../lib/types";
+import type { AgentRuntimeId, DeskExportKind, LlmLink, PermissionMode, ProviderId, SandboxProfile, SettingsSection } from "../lib/types";
 import type { AgentRuntimeStatus } from "../lib/external-catalog";
 import { BotForm } from "./BotForm";
 import { ContextMeter } from "./ContextMeter";
@@ -46,20 +47,50 @@ export function Settings() {
   const settings = store.settings;
   const section = store.settingsSection;
   const [llmFocus, setLlmFocus] = useState<LlmFocus>(null);
-  const [authMessage, setAuthMessage] = useState("");
+  const [claudeAuth, setClaudeAuth] = useState<ClaudeAuthState>({ stage: "idle", message: "" });
 
   /**
    * Mint a token for this desk with `claude setup-token`. Signing in the
    * ordinary way writes the one credential store Claude Code itself reads,
    * which signs the person out there; a token of our own lets both run.
+   *
+   * The desk runs it under a pseudo-terminal, because that command is a
+   * terminal program: without one it prints nothing and waits. When this desk
+   * cannot make a terminal the card says so and takes a pasted token instead.
    */
   const startClaudeAuth = () => {
     void (async () => {
       const run = window.workhorse?.claudeSetupToken;
       if (!run) return;
-      setAuthMessage("Finish sign-in in your browser.");
+      setClaudeAuth({ stage: "running", message: "Approve the sign-in in your browser." });
       const result = await run();
-      setAuthMessage(result.ok ? "" : result.message || "Sign-in failed.");
+      if (result.ok) {
+        setClaudeAuth({ stage: "done", message: "Signed in." });
+      } else if (result.reason === "needs_terminal") {
+        setClaudeAuth({ stage: "paste", message: result.message || "", token: "" });
+      } else {
+        setClaudeAuth({ stage: "idle", message: result.message || "Sign-in failed." });
+      }
+      store.refreshClaudeLogin();
+    })();
+  };
+
+  const saveClaudeToken = (token: string) => {
+    void (async () => {
+      const keep = window.workhorse?.claudeStoreToken;
+      const complaint = claudeTokenComplaint(token);
+      if (complaint) {
+        setClaudeAuth((current) => ({ ...current, stage: "paste", message: complaint, token }));
+        return;
+      }
+      if (!keep) return;
+      setClaudeAuth((current) => ({ ...current, stage: "paste", message: "Saving…", token }));
+      const result = await keep(token);
+      setClaudeAuth(
+        result.ok
+          ? { stage: "done", message: "Signed in." }
+          : { stage: "paste", message: result.message || "Could not store the token.", token },
+      );
       store.refreshClaudeLogin();
     })();
   };
@@ -259,8 +290,19 @@ export function Settings() {
                     <em>{llmCardHint(id, link)}</em>
                   </button>
                   {id === "claude" && link.needsAuth ? (
-                    <button type="button" className="tiny" onClick={startClaudeAuth}>
-                      Log in
+                    <button
+                      type="button"
+                      className="tiny"
+                      disabled={claudeAuth.stage === "running"}
+                      onClick={() => {
+                        // Open the card as the flow starts: this button is on
+                        // the grid, and everything the flow has to say — the
+                        // progress, the reason, the paste field — is inside.
+                        setLlmFocus("claude");
+                        startClaudeAuth();
+                      }}
+                    >
+                      {claudeAuth.stage === "running" ? "Signing in…" : "Log in"}
                     </button>
                   ) : null}
                 </div>
@@ -314,11 +356,11 @@ export function Settings() {
               id={llmFocus as Exclude<ProviderId, "custom">}
               onGone={() => setLlmFocus(null)}
               onStartAuth={startClaudeAuth}
+              auth={claudeAuth}
+              onAuthToken={saveClaudeToken}
+              onAuthTokenChange={(token) => setClaudeAuth((current) => ({ ...current, token }))}
             />
           )}
-
-          {authMessage ? <p className="row-meta">{authMessage}</p> : null}
-
 
           {typeof llmFocus === "string" && llmFocus.startsWith("bot:") && (
             <CustomBotDetail key={llmFocus} botId={llmFocus.slice(4)} onGone={() => setLlmFocus(null)} />
@@ -345,14 +387,80 @@ export function Settings() {
   );
 }
 
+/** What the desk is doing about the Claude login, and what it needs next. */
+export type ClaudeAuthState = { stage: "idle" | "running" | "paste" | "done"; message: string; token?: string };
+
+/**
+ * The way in to a Claude login, always on the card.
+ *
+ * It used to appear only when detection said the login was missing, so a desk
+ * that had just started — which forgets a refusal — offered no way to sign in
+ * until a call failed first. Minting a token is something a person may want at
+ * any time, so the control is always here and the state changes only its words.
+ */
+function ClaudeSignIn({
+  link,
+  auth,
+  onStart,
+  onToken,
+  onTokenChange,
+}: {
+  link: LlmLink;
+  auth: ClaudeAuthState;
+  onStart: () => void;
+  onToken: (token: string) => void;
+  onTokenChange: (token: string) => void;
+}) {
+  const running = auth.stage === "running";
+  const token = auth.token ?? "";
+  return (
+    <div className="claude-sign-in">
+      <div className="actions">
+        <button type="button" className="ghost" onClick={onStart} disabled={running}>
+          {running ? "Signing in…" : link.needsAuth ? "Log in with Claude" : "Mint a new token"}
+        </button>
+        {auth.message ? <span className="row-meta">{auth.message}</span> : null}
+      </div>
+      {auth.stage === "paste" ? (
+        <div className="claude-sign-in-paste">
+          <label className="row-meta" htmlFor="claude-token">
+            Run this in your terminal, then paste what it prints:
+          </label>
+          <code>{CLAUDE_SETUP_TOKEN_COMMAND}</code>
+          <div className="actions">
+            <input
+              id="claude-token"
+              type="password"
+              autoComplete="off"
+              spellCheck={false}
+              placeholder="sk-ant-…"
+              value={token}
+              onChange={(event) => onTokenChange(event.target.value)}
+            />
+            <button type="button" className="tiny" onClick={() => onToken(token)} disabled={!token.trim()}>
+              Save token
+            </button>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function StockBotDetail({
   id,
   onGone,
   onStartAuth,
+  auth,
+  onAuthToken,
+  onAuthTokenChange,
 }: {
   id: Exclude<ProviderId, "custom">;
   onGone: () => void;
   onStartAuth: () => void;
+  auth: ClaudeAuthState;
+  onAuthToken: (token: string) => void;
+  onAuthTokenChange: (token: string) => void;
 }) {
   const store = useStore();
   const link = store.settings.llms[id];
@@ -408,10 +516,14 @@ function StockBotDetail({
         </div>
       </div>
 
-      {id === "claude" && link.needsAuth ? (
-        <button type="button" className="ghost" onClick={onStartAuth}>
-          Log in with Claude
-        </button>
+      {id === "claude" ? (
+        <ClaudeSignIn
+          link={link}
+          auth={auth}
+          onStart={onStartAuth}
+          onToken={onAuthToken}
+          onTokenChange={onAuthTokenChange}
+        />
       ) : null}
 
       <BotForm

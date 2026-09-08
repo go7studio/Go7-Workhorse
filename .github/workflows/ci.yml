@@ -1,13 +1,31 @@
 name: CI
 
 # Release only builds when a version is cut, so a branch could sit broken for
-# days. This runs the same checks on every push and pull request, and is what
+# days. This runs the same checks on main and on every pull request, and is what
 # branch protection on main should require.
+#
+# One event per change. `push` used to match every branch, so a branch with a
+# pull request open ran the whole matrix twice on every push: six jobs and about
+# twelve job-minutes, spent twice, for one commit. A pull-request branch is now
+# covered by the `pull_request` event alone.
 on:
   push:
-    branches: ["**"]
+    branches: [main]
   pull_request:
   workflow_dispatch:
+
+# A second push to a pull request supersedes the first, so the first run is
+# answering a question nobody is asking any more. Cancel it and take the queue
+# back.
+#
+# Only for a pull request. On main the group falls back to the ref, so two
+# merges close together would cancel the first commit's run and leave that
+# commit with no completed CI status. Branch protection requires those checks,
+# and a commit on main has to keep its own answer. workflow_dispatch is asked
+# for by hand, so it finishes too.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read

@@ -142,31 +142,43 @@ test("the version is a single semantic version, and the changelog knows it", asy
 });
 
 /**
- * The `test` script is a hand-maintained list of files, so a new suite runs
- * only if someone remembers to add it. `third-party-notices.test.ts` sat on
- * disk passing five tests that CI never executed. This closes both directions:
- * nothing on disk goes unrun, and nothing listed has been deleted underneath.
+ * The `test` script used to be a hand-maintained list of 133 files, so a new
+ * suite ran only if someone remembered to add it. `third-party-notices.test.ts`
+ * sat on disk passing five tests that CI never executed. The script now names a
+ * pattern and the Node test runner expands it, so the list cannot drift. What
+ * is left to hold is the pattern itself: it stays quoted, no list grows back
+ * beside it, and the live smokes stay outside it.
  */
-test("every suite on disk is the suite `npm test` runs", () => {
+test("`npm test` runs every suite by name pattern", () => {
   const pkg = JSON.parse(readFileSync(path.join(ROOT, "package.json"), "utf8")) as {
     scripts: Record<string, string>;
   };
-  const listed = pkg.scripts.test
-    .split(/\s+/)
-    .filter((token) => token.startsWith("test/") && token.endsWith(".test.ts"))
-    .sort();
-  const onDisk = readdirSync(path.join(ROOT, "test"))
-    .filter((name) => name.endsWith(".test.ts"))
-    .map((name) => `test/${name}`)
-    .sort();
+  const script = pkg.scripts.test;
 
-  const unrun = onDisk.filter((file) => !listed.includes(file));
-  assert.deepEqual(unrun, [], `on disk but never run: ${unrun.join(", ")}. Add each to the "test" script.`);
+  // Quoted, so Node expands the pattern on all three runners. Unquoted, `sh`
+  // expands it on Linux and macOS and cmd.exe hands it over untouched on
+  // Windows, and the three runners stop running the same command. Either quote
+  // mark holds the pattern back from the shell, so both pass here.
+  assert.match(
+    script,
+    /["']test\/\*\.test\.ts["']/,
+    `the "test" script must pass the quoted pattern "test/*.test.ts". Got: ${script}`,
+  );
 
-  const gone = listed.filter((file) => !onDisk.includes(file));
-  assert.deepEqual(gone, [], `named by the "test" script but missing: ${gone.join(", ")}.`);
+  const named = script.split(/\s+/).filter((token) => token.includes(".test.ts") && !token.includes("*"));
+  assert.deepEqual(named, [], `the "test" script names suites one by one again: ${named.join(", ")}. The pattern covers them.`);
 
-  assert.deepEqual([...new Set(listed)], listed, "a suite is named twice in the \"test\" script");
+  const entries = readdirSync(path.join(ROOT, "test"));
+  const suites = entries.filter((name) => name.endsWith(".test.ts"));
+  assert.ok(suites.length > 100, `the pattern matches ${suites.length} suites, so something has moved the suite out of test/`);
+
+  // The live smokes call real vendors and cost money, which is why they are
+  // named `*-live-smoke.ts` and not `*.test.ts`. Renaming one puts it in the
+  // pattern, and CI starts paying a vendor on every push.
+  const smokes = entries.filter((name) => name.endsWith("-live-smoke.ts"));
+  assert.ok(smokes.length > 0, "no live smoke files found, so this pin proves nothing any more");
+  const caught = smokes.filter((name) => name.endsWith(".test.ts"));
+  assert.deepEqual(caught, [], `a live smoke is named as a suite, so CI would run it against a real vendor: ${caught.join(", ")}`);
 });
 
 /**

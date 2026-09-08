@@ -147,7 +147,7 @@ do before it starts:
 | Field | Values | Rule |
 | --- | --- | --- |
 | `permission` | `ask`, `accept-edits`, `always-approve` | the seat the worker runs under. `plan` is not offered: a worker that cannot write cannot report |
-| `sandbox` | `off`, `workspace`, `read-only`, `strict` | the sandbox the worker runs under. `read-only` still reads: `gh pr view`, `gh pr diff`, `gh pr checks`, the `gh run` and `gh issue` reads, git reads, and the search tools, so a reviewer seat can read the pull request in its own checkout. It refuses anything that writes or sends, every interpreter, `gh api`, and any flag that points the read at another repo or host (`--repo`, `-R`, `--hostname`) |
+| `sandbox` | `off`, `workspace`, `read-only`, `strict` | the sandbox the worker runs under. `read-only` still reads: `gh pr view`, `gh pr diff`, `gh pr checks`, the `gh run` and `gh issue` reads, git reads, and the search tools, so a reviewer seat can read the pull request in its own checkout. It refuses anything that writes or sends, every interpreter, `gh api`, and any gh read that names a repository at all, by flag (`--repo`, `-R`, `--hostname`) or by argument (`owner/repo`, a URL) |
 
 Both are capped by the **desk default** in Settings › LLMs — the app's own
 ceiling, not your seat. So a chat you tightened for reviews can still hand a

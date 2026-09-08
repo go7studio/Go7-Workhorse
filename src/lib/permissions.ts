@@ -365,6 +365,28 @@ const GH_NEVER_READ: ReadonlySet<string> = new Set([
  */
 const GH_UNBOUND_FLAGS = ["-R", "--repo", "--hostname"] as const;
 
+/**
+ * A gh read takes its target as an argument as readily as it takes it from a
+ * flag: `gh repo view owner/other` and `gh pr view
+ * https://github.com/other/repo/pull/1` both leave the bound folder, carrying
+ * the machine's token, with no `--repo` in sight. So a read may not name a
+ * repository at all — it reads the one the folder resolves.
+ *
+ * The three shapes gh accepts: `owner/repo`, a URL, and `owner/repo#123`. A
+ * number on its own is a pull request in the current repo and stays a read,
+ * which is why `gh pr view 1` and `gh run view 12345` still work.
+ */
+const GH_NAMES_A_REPO = /^[^/\s]+\/[^/\s]+$/;
+
+/** Whether any argument names a repository other than the one the seat is in. */
+function ghTargetsAnotherRepo(args: string[]): boolean {
+  return positionals(args).some((arg) => {
+    const word = dequote(arg);
+    if (word.includes("://") || word.toLowerCase().includes("github.com")) return true;
+    return GH_NAMES_A_REPO.test(word);
+  });
+}
+
 /** Everything gh can do that is not on the read table. */
 function ghWrites(args: string[]): boolean {
   const words = positionals(args).map((arg) => dequote(arg).toLowerCase());
@@ -374,7 +396,8 @@ function ghWrites(args: string[]): boolean {
   if (!allowed) return true;
   const sub = words[1];
   if (!sub || !allowed.has(sub)) return true;
-  return hasFlag(args, GH_UNBOUND_FLAGS);
+  if (hasFlag(args, GH_UNBOUND_FLAGS)) return true;
+  return ghTargetsAnotherRepo(args);
 }
 
 /**

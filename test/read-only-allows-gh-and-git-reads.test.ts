@@ -108,6 +108,18 @@ const TABLE: ReadonlyArray<readonly [command: string, reads: boolean, why: strin
   ["gh pr list --hostname ghe.example", false, "--hostname names another GitHub"],
   ["gh run list --hostname=ghe.example", false, "the joined --hostname does too"],
 
+  // A read takes its target as an argument as readily as from a flag, and the
+  // desk cannot hold either to the bound folder. So a read names no repository.
+  ["gh repo view owner/other", false, "an owner/repo argument leaves the folder"],
+  ["gh pr view https://github.com/other/repo/pull/1", false, "a URL leaves the folder"],
+  ["gh issue view owner/repo#3", false, "the owner/repo#n form leaves the folder"],
+  ["gh pr diff other/repo", false, "and so does a bare owner/repo on diff"],
+  ["gh run view github.com/other/repo", false, "a host without a scheme leaves the folder"],
+  ["gh repo view", true, "bare repo view resolves the folder's own repo"],
+  ["gh pr view 1", true, "a number is a pull request in this repo"],
+  ["gh pr view 1 --json title,body", true, "and a --json list is not a repository"],
+  ["gh run view 12345", true, "a run id is not a repository"],
+
   // git reads, including the two added for a reviewer.
   ["git show HEAD --stat", true, "show reads"],
   ["git log --oneline -20", true, "log reads"],

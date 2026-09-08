@@ -1,4 +1,6 @@
 @import "./tokens.css";
+@import "./crew-tray.css";
+@import "./horse-status.css";
 
 * {
   box-sizing: border-box;

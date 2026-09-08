@@ -458,6 +458,46 @@ export function foldModelName(text: string): string {
   return text.trim().toLowerCase().replace(/[\s_]+/g, "-");
 }
 
+/**
+ * Fold a typed name onto a vendor-agnostic key so "Fable 5.1", "claude-fable-5-1",
+ * and "Claude Fable 5.1" meet. Dots in versions become dashes; a leading
+ * "claude-" is dropped. Not a launch id.
+ */
+export function modelChoiceKey(text: string): string {
+  return foldModelName(text)
+    .replace(/^claude-/, "")
+    .replace(/(\d)\.(\d)/g, "$1-$2");
+}
+
+function catalogRowMatches(model: ModelInfo, q: string, provider: ProviderId): boolean {
+  const keys = [model.id, model.name, ...(model.aliases ?? [])];
+  if (keys.some((id) => foldModelName(id) === q || modelChoiceKey(id) === modelChoiceKey(q))) return true;
+  if (provider === "cursor") {
+    const family = cursorFamilyId(model.id);
+    if (foldModelName(family) === q || modelChoiceKey(family) === modelChoiceKey(q)) return true;
+  }
+  return false;
+}
+
+/** Resolve a typed model against one vendor's live overlay and seed, not the whole desk. */
+export function findChoiceOnProvider(provider: ProviderId, query: string): ModelChoice | null {
+  const q = foldModelName(query);
+  if (!q) return null;
+  const seen = new Set<string>();
+  for (const model of [...modelsFor(provider), ...MODEL_CATALOG[provider]]) {
+    if (seen.has(model.id)) continue;
+    seen.add(model.id);
+    if (!catalogRowMatches(model, q, provider)) continue;
+    return {
+      provider,
+      model: model.id,
+      effort: model.effort ? "medium" : null,
+      sandbox: "off",
+    };
+  }
+  return null;
+}
+
 export function findChoice(query: string): ModelChoice | null {
   const q = foldModelName(query);
   if (!q) return null;

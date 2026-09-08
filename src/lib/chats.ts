@@ -515,6 +515,41 @@ export function shiftQueuedPrompt(
   };
 }
 
+/**
+ * The idle drainer may start only the head of this chat's queue. A second
+ * item stays queued until this turn is actually running (or the flush lock
+ * clears after a send that did not start).
+ */
+export function canFlushQueuedHead(
+  session: Pick<Session, "status" | "queue" | "goal">,
+  extra?: { flushing?: boolean; now?: number },
+): boolean {
+  if (session.status !== "idle") return false;
+  if (!session.queue?.length) return false;
+  if (extra?.flushing) return false;
+  if (session.goal?.status === "paused") return false;
+  const head = session.queue[0];
+  if (head?.notBefore && (extra?.now ?? Date.now()) < head.notBefore) return false;
+  return true;
+}
+
+/**
+ * A live send already in flight must queue, except steer (redirect this turn)
+ * and replace/edit. `liveTurnPending` covers the gap after the idle drainer
+ * shifts the head and before React commits `status: "running"`.
+ */
+export function shouldEnqueueInsteadOfLiveSend(input: {
+  status?: string | null;
+  liveTurnPending?: boolean;
+  skipQueue?: boolean;
+  afterGoalHalt?: boolean;
+  steer?: boolean;
+  replaceUserId?: string;
+}): boolean {
+  if (input.skipQueue || input.afterGoalHalt || input.steer || Boolean(input.replaceUserId)) return false;
+  return input.status === "running" || input.liveTurnPending === true;
+}
+
 export function canPlaceInProject(session: Session): boolean {
   return isLooseChat(session) && !hasUserPrompt(session);
 }

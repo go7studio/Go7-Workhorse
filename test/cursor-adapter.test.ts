@@ -124,6 +124,8 @@ test("cursorUsageLane table", () => {
   assert.equal(cursorUsageLane("grok-4.6"), "cursor-models");
   assert.equal(cursorUsageLane("grok-4.5-fast"), "cursor-models");
   assert.equal(cursorUsageLane("claude-4-sonnet"), "other-models");
+  assert.equal(cursorUsageLane("claude-fable-5-1"), "other-models");
+  assert.equal(cursorUsageLane("Fable 5.1"), "other-models");
   assert.equal(cursorUsageLane("gpt-5.4"), "other-models");
   assert.equal(cursorUsageLane("gemini-3-pro"), "other-models");
   assert.equal(cursorUsageLane("auto-smart", { optimize_for: "cost" }), "auto-cost");
@@ -712,12 +714,51 @@ test("fetchCursorPlanUsage posts GetCurrentPeriodUsage", async () => {
 });
 
 test("desk spawn defaults to Composer 2.5; inner task is not a worker", () => {
+  resetCursorBases();
+  resetVendorCatalog();
   assert.equal(parseProviderId("cursor"), "cursor");
   assert.equal(defaultModel("cursor").id, "composer-2.5");
   assert.equal(resolveCursorModel(""), "composer-2.5");
   const spec = resolveSpawnSpec({ fromSessionId: "p", prompt: "review src", provider: "cursor" }, [], { provider: "grok", model: "grok-4.6", effort: "medium" });
   assert.equal(spec.provider, "cursor");
   assert.equal(spec.model, "composer-2.5");
+  const fable = resolveSpawnSpec(
+    { fromSessionId: "p", prompt: "draw the HUD", provider: "cursor", model: "Fable 5.1" },
+    [],
+    { provider: "grok", model: "grok-4.6", effort: "medium" },
+  );
+  assert.equal(fable.provider, "cursor");
+  assert.equal(fable.model, "claude-fable-5-1");
+  const fableId = resolveSpawnSpec(
+    { fromSessionId: "p", prompt: "draw the HUD", provider: "cursor", model: "claude-fable-5-1" },
+    [],
+    { provider: "grok", model: "grok-4.6", effort: "medium" },
+  );
+  assert.equal(fableId.provider, "cursor");
+  assert.equal(fableId.model, "claude-fable-5-1");
+  const gptOnCursor = resolveSpawnSpec(
+    { fromSessionId: "p", prompt: "review src", provider: "cursor", model: "gpt-5.6-sol" },
+    [],
+    { provider: "grok", model: "grok-4.6", effort: "medium" },
+  );
+  assert.equal(gptOnCursor.provider, "cursor");
+  assert.equal(gptOnCursor.model, "gpt-5.6-sol");
+  assert.equal(resolveCursorModel("Fable 5.1", "high"), "claude-fable-5-1");
+  const fableLaunch = buildCursorLaunchSpec({
+    model: "Fable 5.1",
+    effort: "high",
+    cwd: "/proj",
+    mode: "ask",
+    detect: {
+      env: { CURSOR_ACP_BIN: "/opt/cursor-agent" },
+      existsSync: (file) => file === "/opt/cursor-agent",
+      pathDirs: [],
+      homedir: "/no-home",
+      platform: "linux",
+    },
+  });
+  assert.equal(fableLaunch.model, "claude-fable-5-1");
+  assert.deepEqual(fableLaunch.argv, ["--model", "claude-fable-5-1", "acp"]);
   const tools = toolsForDeskRole(
     [{ name: "workhorse_list_bots" }, { name: "read_file" }, { name: "cursor/task" }],
     "worker",

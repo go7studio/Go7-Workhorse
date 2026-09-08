@@ -6,20 +6,30 @@ This page names them so a change that crosses one is recognised as a change
 rather than a slowdown someone notices months later.
 
 The budgets in `test/performance.test.ts` are **tripwires for a complexity
-class**, not benchmarks. They are deliberately loose, because the suite runs on
-Linux, macOS and Windows runners of very different speeds. A number moving from
-9 ms to 40 ms is fine. A number crossing its budget usually means a loop became
-a nested loop, or a per-turn cost became a per-token cost.
+class**, not benchmarks. A class is a count, so the three that used to hold a
+stopwatch now count the work instead: pairs compared, window steps taken. A
+count reads the same on a Windows runner, on a Mac, and beside a build eating
+every core. Each of those three had failed on load at least once, for a change
+that never touched the code it covers. Where a count cannot state the class on
+its own, the test compares the work at n against the work at 100n in the same
+process, and a ratio carries no runner speed either. One wall-clock ceiling
+survives, on the usage collapse, because a count cannot see a step itself
+turning expensive; it sits a hundred times above the worst reading any runner
+has produced.
+
+A number crossing its budget usually means a loop became a nested loop, or a
+per-turn cost became a per-token cost.
 
 ## The hot paths
 
 | Path | Invariant | Enforced by |
 | --- | --- | --- |
 | **Stream commit** | Streamed tokens coalesce to one desk commit per frame; done, cancel, and permission force a flush. A streamed token repaints the chat it belongs to, and nothing else — composer, context meter, watch bar, and Usage hold across prose growth. | `test/performance.test.ts` — "stream commits are bounded by frames, not tokens", "a streamed token does not commit the composer…", "the context meter settles on turn boundaries…", "a streamed chat cannot repaint the watch bar…", "the session pane paints its own chat…", "a streamed token does not commit Usage…" |
-| **Hydrate** | Cleaning the usage log at launch is linear in the number of events. It used to be a cross product: 1.4 s at 10,000 events, inside `hydrate()`, before the window painted. | `test/performance.test.ts` — "collapsing ten thousand usage events stays off the boot path", "ten thousand events in one fast session do not reopen the cross product" |
+| **Hydrate** | Cleaning the usage log at launch is linear in the number of events. It used to be a cross product: 1.4 s at 10,000 events, inside `hydrate()`, before the window painted. Counted as window steps through `usageCollapseWork()` rather than timed: 1.31 steps per event on a mixed log and 6.42 on one fast session, against 5,000 per event for a cross product. A hundredfold log costs 119x and 175x; a cross product would cost 10,000x. One 2 s ceiling stays on the mixed log, to catch a step that itself turns expensive. | `test/performance.test.ts` — "collapsing ten thousand usage events stays off the boot path", "ten thousand events in one fast session do not reopen the cross product" |
 | **Usage collapse correctness** | The bucketed collapse returns exactly what the cross product returned, in any log order. The old implementation is kept in the test as the oracle. | `test/performance.test.ts` — "bucketed usage collapse answers exactly what the cross product answered" |
 | **Sidebar index** | The sidebar is built once per desk change, keeps worker nesting, and ignores streamed prose. A running chat holds the place it was sent in. | `test/performance.test.ts` — "large desks build one sidebar index…", "sidebar ignores streamed prose but sees visible status and tool changes", "three chats running at once keep the order they were sent in" |
 | **Transcript grouping** | Only the live turn is regrouped; earlier blocks keep their identity, and the incremental result equals a full regroup. Older blocks fill one idle slice at a time. | `test/performance.test.ts` — "incremental transcript rebuilds only the live turn…", "sending a new prompt keeps earlier transcript blocks", "older transcript blocks fill one idle slice at a time" |
+| **Reply peel** | Peeling the planning preamble off a reply looks each answer sentence forward only until it finds the restatement that buries it, so the pairs stay well under a full sweep. A repeat peel returns the cached object instead of doing the work twice. Counted as pairs compared through `peelRestateWork()` rather than timed: about 1,500 on a 25-unit report, against about 5,000 for a sweep with no early break, and zero on a cache hit. | `test/performance.test.ts` — "peeling a restated report stays off the first-click budget" |
 | **Scroll pin** | Following a stream reads and writes the scroller once per frame, not once per token, and leaving a chat drops the pending pin. | `test/performance.test.ts` — "a stream pins the transcript once a frame, not once a token" |
 | **Persist** | Selecting a chat is not persist work. A selection-only change must compare equal, so typing and clicking do not journal the desk. | `test/performance.test.ts` — "selection-only desk updates do not look like persist work", "selecting a chat keeps the same sessions array when there is no draft" |
 | **Project changes** | Reading a folder 400 times in one turn still resolves to the files that were written, within the first-click budget. | `test/performance.test.ts` — "project changes skip read tools and still see the write in a long scrape turn" |
@@ -81,6 +91,17 @@ Three habits cover the rest:
   orphans the file. Enforced by `test/long-term-health.test.ts`.
 - **Add the budget with the fix.** When a slow path is repaired, leave a test
   that fails if the old shape returns, with a comment saying what it cost.
+- **Count the work, not the clock.** A budget in milliseconds measures the
+  runner as much as the code, and on a shared runner it ends up measuring only
+  the runner. Three of these budgets failed that way on one day, on pull
+  requests that had not touched the code they guard, and each passed on rerun.
+  Give the code a counter, assert the count. Where no counter fits, compare the
+  work at two input sizes in the same process and assert the ratio: a linear
+  path meets a bound a quadratic one cannot, and a ratio measured on one machine
+  says nothing about that machine. Keep a wall-clock ceiling only where a count
+  is blind to the risk, and set it far enough above every real reading that no
+  load can reach it. `test/perf-heartbeat.test.ts` is the other half of this
+  rule: where the code reads a clock, hand it the clock and step it by hand.
 - **A folder the desk creates needs someone who deletes it.** Managed worktrees
   had a sweep from the start, and the sweep was handed every session id as its
   live set. Hidden workers are sessions, so every tree named a chat that still

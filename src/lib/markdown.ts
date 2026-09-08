@@ -340,6 +340,24 @@ function unitsFromParagraph(para: string, paraIndex: number): ReplyUnit[] {
   }));
 }
 
+/**
+ * Answer pairs `dropRestatedAnswers` compared, counted. The peel is the first
+ * thing a clicked chat runs, and the property worth holding is its shape: each
+ * answer sentence looks forward only until it finds the restatement that buries
+ * it, so the pairs stay a small multiple of the sentence count instead of the
+ * n²/2 a full sweep would take. That is a count. Timing the same peel measures
+ * the runner as much as the peel, and did.
+ *
+ * One integer add per pair. `peelRestateWork()` is read only by
+ * test/performance.test.ts; nothing here changes what the peel returns.
+ */
+let restatePairs = 0;
+
+/** Pairs compared since the process started. Tests read the delta across one peel. */
+export function peelRestateWork(): number {
+  return restatePairs;
+}
+
 function dropRestatedAnswers(units: ReplyUnit[]): ReplyUnit[] {
   const answers = units.filter((unit) => unit.kind === "answer");
   const wordLists = answers.map((item) => sentenceWords(item.text));
@@ -351,6 +369,7 @@ function dropRestatedAnswers(units: ReplyUnit[]): ReplyUnit[] {
     const earlierPolarity = polarities[i];
     if (!earlier) continue;
     for (let j = i + 1; j < answers.length; j += 1) {
+      restatePairs += 1;
       const later = wordSets[j];
       if (!later) continue;
       if (earlierPolarity && polarities[j]) {

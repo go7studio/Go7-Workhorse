@@ -22,10 +22,10 @@ import { mergeStreamedText } from "../src/lib/markdown";
 import { searchChats } from "../src/lib/search";
 import { dropDrafts } from "../src/lib/chats";
 import { deskPersistBodyEqual } from "../src/lib/desk-persist";
-import { peelPlanningPreamble } from "../src/lib/markdown";
+import { peelPlanningPreamble, peelRestateWork } from "../src/lib/markdown";
 import { projectEdits, projectFileChanges } from "../src/lib/project-edits";
 import { createTranscriptGrouper, groupTranscript, recentTranscriptText, scheduleAfterPaint, startTranscriptFill } from "../src/lib/turns";
-import { collapseInflatedUsage, repairInflatedTurn } from "../src/lib/usage";
+import { collapseInflatedUsage, repairInflatedTurn, usageCollapseWork } from "../src/lib/usage";
 import type { AppState, ChatMessage, Session, UsageEvent } from "../src/lib/types";
 
 const message = (id: string, role: ChatMessage["role"], text: string, createdAt: number): ChatMessage => ({ id, role, text, createdAt });
@@ -565,8 +565,8 @@ test("stream queues hold text until an assistant row exists, then flush commits 
 });
 
 test("peeling a restated report stays off the first-click budget", () => {
-  const make = (tag: string) =>
-    Array.from({ length: 25 }, (_, index) => {
+  const make = (tag: string, units = 25) =>
+    Array.from({ length: units }, (_, index) => {
       if (index === 0) {
         return `An MVP like Chess.com is two products in one: a bot that answers like a person, and a review that teaches the last game. I'll sketch that as a Godot layout. ${tag}`;
       }
@@ -575,24 +575,44 @@ test("peeling a restated report stays off the first-click budget", () => {
       }
       return `## Scene ${index}\n\nThe board lives in play.tscn. Piece ${index} uses a locked style so edits chain. Timing and imperfect play stay in v1.`;
     }).join("\n\n");
-  peelPlanningPreamble(make("warmup"));
+
+  /** The peel, and the answer pairs it compared. The counter is a process total, so read the delta. */
+  const peel = (text: string) => {
+    const before = peelRestateWork();
+    const peeled = peelPlanningPreamble(text);
+    return { peeled, pairs: peelRestateWork() - before };
+  };
+
+  // The measure is work, not milliseconds. This used to assert the peel took
+  // under 8 ms, and on 2026-09-08 that failed on a Windows runner for PR #296 —
+  // a Link change that does not touch this code — and again locally beside a
+  // build. The counts below are the same on every machine and every run.
   const report = make("live");
-  const started = performance.now();
-  const peeled = peelPlanningPreamble(report);
-  const uncached = performance.now() - started;
-  const again = peelPlanningPreamble(report);
+  const { peeled, pairs } = peel(report);
   assert.match(peeled.body, /Scene 24/);
-  // Per docs/PERFORMANCE.md this budget is the tripwire for a complexity class:
-  // it catches the peel becoming quadratic in a 25-unit report, and it is loose
-  // enough to survive a slow runner.
-  assert.ok(uncached < 8, `uncached peel took ${uncached}ms`);
-  // The invariant here is a cache hit, not a duration. `peelPlanningPreamble`
-  // returns the stored object on a hit (src/lib/markdown.ts), so identity states
-  // it exactly and cannot be told a lie by the scheduler. This used to assert
-  // the second call took under 1 ms — a sub-millisecond wall-clock floor on a
-  // measurement of 0.001-0.006 ms, which is a coin toss on a shared runner
-  // rather than a statement about the code.
-  assert.equal(again, peeled, "a repeated peel must return the cached object, not an equal one");
+
+  // Each answer sentence looks forward only until it finds the restatement that
+  // buries it, so the early break carries the budget. A sweep with no break over
+  // this same report is about 5,000 pairs; the peel takes about 1,500. Lose the
+  // break and this crosses.
+  assert.ok(pairs < 3_000, `the peel compared ${pairs} pairs on a 25-unit report`);
+
+  // Ten times the report. The compare is quadratic in answer sentences by
+  // design, and this pins it there: 10x the input measures 84x the pairs, a
+  // full quadratic is 100x, and a third loop would be near 1,000x.
+  const tenfold = peel(make("live", 250)).pairs;
+  assert.ok(tenfold < pairs * 150, `10x the report compared ${tenfold} pairs against ${pairs}`);
+
+  // A cache hit is the other half of this budget, and it is an identity, not a
+  // duration. `peelPlanningPreamble` returns the stored object on a hit
+  // (src/lib/markdown.ts), so identity states it exactly and cannot be told a
+  // lie by the scheduler. This used to assert the second call took under 1 ms —
+  // a sub-millisecond wall-clock floor on a measurement of 0.001-0.006 ms,
+  // which is a coin toss on a shared runner rather than a statement about the
+  // code.
+  const hit = peel(report);
+  assert.equal(hit.peeled, peeled, "a repeated peel must return the cached object, not an equal one");
+  assert.equal(hit.pairs, 0, "a cache hit compares nothing");
 });
 
 /**
@@ -731,25 +751,69 @@ test("bucketed usage collapse answers exactly what the cross product answered", 
   assert.deepEqual(collapseInflatedUsage(single), collapseByCrossProduct(single));
 });
 
+/**
+ * One collapse, and the window steps it took. A cross product over n events
+ * looks at n²/2 pairs; the bucketed sweep takes a small multiple of n, and the
+ * counter in src/lib/usage.ts is where that difference is legible. The counter
+ * is a process total, so every reading here is a delta across one call.
+ */
+const collapseWork = (events: UsageEvent[]): { cleaned: UsageEvent[]; steps: number } => {
+  const before = usageCollapseWork();
+  const cleaned = collapseInflatedUsage(events);
+  return { cleaned, steps: usageCollapseWork() - before };
+};
+
 test("collapsing ten thousand usage events stays off the boot path", () => {
   // This ran as a cross product until it was bucketed: 1.4 s at 10k events,
-  // inside hydrate(), before the window paints. The budget is a tripwire for
-  // that class of change coming back, not a benchmark, so it is loose enough
-  // for the slowest CI runner of the three.
+  // inside hydrate(), before the window paints. What was wrong was the number of
+  // pairs it looked at, so that is what this counts. The budget used to be
+  // "under 80 ms"; on 2026-09-08 that failed twice on loaded machines and
+  // muddied two pull requests that had not touched this code.
   const events = syntheticUsage(10_000, 31);
-  collapseInflatedUsage(syntheticUsage(1_000, 32));
-  const started = performance.now();
-  const cleaned = collapseInflatedUsage(events);
-  const ms = performance.now() - started;
+  const { cleaned, steps } = collapseWork(events);
   assert.ok(cleaned.length > 0 && cleaned.length < events.length);
-  assert.ok(ms < 80, `collapseInflatedUsage took ${ms}ms at ${events.length} events`);
+
+  // 1.31 steps per event, measured. A cross product over this log is 5,000 per
+  // event, so three leaves room for the buckets to move and none for a nested
+  // loop to come back.
+  assert.ok(steps < events.length * 3, `the collapse took ${steps} steps at ${events.length} events`);
+
+  // A hundredfold log for near a hundredfold cost: 119x, measured. Linear meets
+  // this bound and nothing quadratic can — a cross product multiplies by ten
+  // thousand. The two logs are read in one process on one machine, so the
+  // comparison says nothing about how fast that machine is.
+  const small = collapseWork(syntheticUsage(100, 31)).steps;
+  assert.ok(steps < small * 400, `100x the events took ${steps} steps against ${small}`);
+
+  // One loose ceiling, kept because a count cannot see a step becoming
+  // expensive — a parse or an allocation moved inside the sweep would hold the
+  // boot path while the step count held still. It is set where no runner can
+  // reach it: this whole test, fixture included, costs 15-20 ms on the slowest
+  // CI runner (windows-latest, runs 34167207345 and 34174449537) and the
+  // collapse alone is 5 ms on this desk, against the 80 ms the failing runs
+  // crossed. Two seconds is a hundred times the worst honest reading.
+  const started = performance.now();
+  collapseInflatedUsage(events);
+  const ms = performance.now() - started;
+  assert.ok(ms < 2_000, `collapseInflatedUsage took ${ms}ms at ${events.length} events`);
 });
 
 test("ten thousand events in one fast session do not reopen the cross product", () => {
+  // One session talking every 40 ms, so nearly every event sits inside its
+  // neighbours' windows. This is the shape a cross product shows up in first,
+  // and counting the pairs says so directly. The old assertion was "under
+  // 80 ms" and failed beside a build running in the same worktree.
   const burst = syntheticUsage(10_000, 41, 1, 40);
-  collapseInflatedUsage(syntheticUsage(1_000, 42, 1, 40));
-  const started = performance.now();
-  collapseInflatedUsage(burst);
-  const ms = performance.now() - started;
-  assert.ok(ms < 80, `one-session collapse took ${ms}ms at ${burst.length} events`);
+  const { steps } = collapseWork(burst);
+
+  // 6.42 steps per event, measured. The window holds about sixty events at this
+  // rate and the sweep enters and leaves each one a bounded number of times, so
+  // the cost per event stops growing. Fifteen is the bound; a cross product
+  // needs 5,000.
+  assert.ok(steps < burst.length * 15, `the one-session collapse took ${steps} steps at ${burst.length} events`);
+
+  // A hundredfold burst for 175x the steps, measured, against 10,000x for a
+  // cross product. Same process, same machine, so no runner speed is in it.
+  const small = collapseWork(syntheticUsage(100, 41, 1, 40)).steps;
+  assert.ok(steps < small * 400, `100x the events took ${steps} steps against ${small}`);
 });

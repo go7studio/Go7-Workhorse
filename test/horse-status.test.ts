@@ -17,7 +17,9 @@ test("sidebar horses are smaller than the header mark; the motion preview is gon
   assert.doesNotMatch(settings, /HorseMotionDemo|Preview horse motion|A crew with a little life/);
   assert.doesNotMatch(features, /motion preview|Settings > Profile includes a motion preview/i);
   assert.match(chatRow, /<HorseStatus /);
-  assert.match(css, /\.chat-row \.horse-status\s*\{[^}]*zoom:\s*0\.75/);
+  // 18px against the header mark's 24px. How it shrinks is pinned by
+  // test/idle-desk-paints-nothing.test.ts; what matters here is the size.
+  assert.match(css, /\.chat-row \.horse-status\s*\{[^}]*width:\s*18px/);
   assert.match(css, /prefers-reduced-motion:\s*reduce/);
   assert.match(css, /animation:\s*none/);
   assert.doesNotMatch(css, /\.horse-demo/);

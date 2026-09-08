@@ -7,13 +7,15 @@ Chat status uses a tiled Workhorse mascot (a 3-by-3 grid with the bottom-right
 pixel sliver omitted): tiles separating and turning within their own cells
 while working, an intact horse with a questioning tilt and double nod for
 input, a brief opposing vibration with suspended tiles when stopped, and a
-repeating rocky collapse into a transparent loose pile (roughly 10% tile-edge
-overlap), a faint twitch, and reassembly on failure. Light and dark themes use
-contrasting silhouettes; Workhorse keeps its mascot colors. Resting uses a
-seamless mascot image, which smoothly separates into tiles when work starts.
-Only the failed mound overlaps; all other motions keep pieces separated.
-Sidebar chat horses sit smaller than the header mark. Reduced-motion
-preferences keep static poses.
+rocky collapse into a transparent loose pile (roughly 10% tile-edge overlap), a
+faint twitch, and reassembly on failure. Stopped and failed are terminal, so
+each plays once and holds its last pose. Only working and needs-you keep
+moving, and a chat at rest holds still, so a desk of idle chats paints nothing.
+Light and dark themes use contrasting silhouettes; Workhorse keeps its mascot
+colors. Resting uses a seamless mascot image, which smoothly separates into
+tiles when work starts. Only the failed mound overlaps; all other motions keep
+pieces separated. Sidebar chat horses sit smaller than the header mark.
+Reduced-motion preferences keep static poses.
 
 The composer crew tray shows direct workers, their model and effort, and their
 latest activity. Expand it to stop individual workers or the crew, preview a

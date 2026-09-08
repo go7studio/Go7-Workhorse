@@ -176,10 +176,10 @@ test("every suite on disk is the suite `npm test` runs", () => {
  * `electron/` is the cheapest proof a suite is wired to the code it names — it
  * does not prove the test is good, only that removing the product breaks it.
  *
- * Five suites read the tree as text on purpose and import nothing: they assert
+ * A few suites read the tree as text on purpose and import nothing: they assert
  * about the repository itself, not about a function in it. They are named here
- * so a sixth is a decision somebody makes, not a suite that quietly slipped
- * through.
+ * so the next one is a decision somebody makes, not a suite that quietly
+ * slipped through.
  */
 const READS_THE_TREE_AS_TEXT = [
   "test/dead-ui.test.ts",
@@ -189,6 +189,7 @@ const READS_THE_TREE_AS_TEXT = [
   "test/third-party-notices.test.ts",
   "test/workshop-never.test.ts", // never-list pins: reads Settings/preload/bridge as text
   "test/horse-status.test.ts", // preview-gone and sidebar size pins: reads horse CSS/Settings as text
+  "test/idle-desk-paints-nothing.test.ts", // idle paint tripwire: reads the desk stylesheets as text
 ];
 
 /** A string literal that resolves into the product: `"../src/…"` or `"../electron/…"`. */

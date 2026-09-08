@@ -285,13 +285,35 @@ export function watchPeerInbox(inbox: string, handler: (ask: PeerAsk) => Promise
       })();
     }
   };
-  const watcher = fs.watch(inbox, scan);
-  const fallback = setInterval(scan, 250);
-  watcher.unref();
-  fallback.unref();
+  // `fs.watch` is the signal here; the interval only covers a filesystem that
+  // does not deliver events. It used to run every 250ms for the life of the
+  // app, so an idle desk read this directory 345,600 times a day to find
+  // nothing. Five seconds is the safety net. A watch that throws or reports an
+  // error is the one case that still earns the fast scan.
+  const poll = (ms: number) => {
+    const timer = setInterval(scan, ms);
+    timer.unref();
+    return timer;
+  };
+  let fallback = poll(5_000);
+  let fast = false;
+  const hurry = () => {
+    if (fast) return;
+    fast = true;
+    clearInterval(fallback);
+    fallback = poll(250);
+  };
+  let watcher: fs.FSWatcher | undefined;
+  try {
+    watcher = fs.watch(inbox, scan);
+    watcher.unref();
+    watcher.on("error", hurry);
+  } catch {
+    hurry();
+  }
   scan();
   return () => {
     clearInterval(fallback);
-    watcher.close();
+    watcher?.close();
   };
 }

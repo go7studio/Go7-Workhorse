@@ -3,10 +3,19 @@
   position: relative; display: inline-block; flex: 0 0 24px; width: 24px; height: 27px;
   align-self: center; color: var(--text); isolation: isolate; perspective: 100px;
 }
-/* Sidebar chats: a little smaller than the 24px mascot, not the header mark. */
+/* Sidebar chats: a little smaller than the 24px mascot, not the header mark.
+   `zoom` did this by shrinking used values, so every row paid layout for a
+   size. `scale` is the individual transform property, so it composes with the
+   `transform` the stride and tilt keyframes animate; `transform: scale()` here
+   would be overwritten by them. Each pose keeps the pivot it has at full size,
+   written in mascot pixels so the smaller box cannot move it, and `translate`
+   is -0.25 of that pivot, which puts the shrunk mascot back in the corner zoom
+   left it in. */
 .chat-row .horse-status {
-  zoom: 0.75;
+  flex-basis: 18px; width: 18px; height: 20.25px;
+  scale: .75; transform-origin: 12px 13.5px; translate: -3px -3.375px;
 }
+.chat-row .horse-status.is-needs-you { transform-origin: 12px 21.6px; translate: -3px -5.4px; }
 .horse-cube {
   position: absolute; left: calc(var(--col) * 8px); top: calc(var(--row) * 8px);
   width: 8px; height: 8px; transition: transform 480ms var(--ease), opacity 240ms;
@@ -44,19 +53,21 @@
   55% { transform: translate(-1px, 0) rotate(4deg); }
   80% { transform: translate(0, -1px); }
 }
-.horse-status.is-idle { animation: horse-rest 6800ms ease-in-out infinite; animation-delay: var(--horse-phase, 0ms); }
-@keyframes horse-rest {
-  0%, 65%, 100% { transform: translateY(0); }
-  78% { transform: translateY(-.6px); }
-  88% { transform: translateY(.3px); }
-}
-/* Fall with weight, bounce into a loose pile, then gather back into the mascot. */
+/* Resting is still, and nothing here animates it. A sidebar holds every chat,
+   so a keyframe on the resting state is one running animation per row: 854
+   idle chats held the renderer at 23-43% CPU with nothing to show. The tiles
+   still part when work starts, because that is a transition, not a loop. */
+
+/* Fall with weight, bounce into a loose pile, then gather back into the mascot.
+   Once, not on a loop: a failed chat is a terminal state, and a desk of them
+   has to come to rest like every other resting row. `both` holds the last
+   frame. */
 .horse-status.is-failed .horse-cube {
   background: transparent;
   box-shadow: none;
   z-index: var(--pile-layer);
   transform: translate(var(--fall-x), var(--fall-y)) rotate(var(--fall-angle)) scale(.78);
-  animation: horse-cube-fall 6200ms var(--fall-delay) linear infinite both;
+  animation: horse-cube-fall 6200ms var(--fall-delay) linear 1 both;
 }
 @keyframes horse-cube-fall {
   0%, 8%, 94%, 100% { transform: translate(0, 0) rotate(0) scale(1); }
@@ -77,11 +88,13 @@
   53%, 65% { transform: translate(1px, .6px) rotate(5deg); }
   59%, 72% { transform: translate(1px, -1px) rotate(13deg); }
 }
-/* A stopped mechanism: brief opposing vibrations, then suspended pieces. */
+/* A stopped mechanism: brief opposing vibrations, then suspended pieces. The
+   vibration runs once and holds the suspended pose, which is where the
+   keyframe ends anyway. */
 .horse-status.is-stopped .horse-cube {
   opacity: .72;
   transform: translate(0, 0) rotate(var(--stop-angle)) scale(.68);
-  animation: horse-brake 3200ms ease-in-out infinite;
+  animation: horse-brake 3200ms ease-in-out 1 forwards;
   animation-delay: var(--delay);
 }
 @keyframes horse-brake {

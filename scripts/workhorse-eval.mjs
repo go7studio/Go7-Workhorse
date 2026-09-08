@@ -391,7 +391,9 @@ async function validate() {
   // expands it, so a suite is in the default gate when it sits in test/ under
   // that name. Searching the script text for a file name only worked while the
   // script was a hand-kept list of 133 files.
-  if (!defaultTestScript.includes('"test/*.test.ts"')) {
+  // Either quote will do. The quoting is what matters, not which mark: unquoted,
+  // sh expands the pattern before Node sees it.
+  if (!/["']test\/\*\.test\.ts["']/.test(defaultTestScript)) {
     problems.push('the default test gate must run the quoted pattern "test/*.test.ts"');
   }
   const defaultGateSuites = new Set(

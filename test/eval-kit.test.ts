@@ -321,7 +321,7 @@ test("plan, device, learning, performance, and usage contracts map to suite rubr
   // `npm test` names the pattern `test/*.test.ts`, so a suite runs when it sits
   // in test/ under that name. Checking the file is on disk is what proves the
   // contract's tripwire still runs.
-  assert.match(manifest.scripts.test, /"test\/\*\.test\.ts"/);
+  assert.match(manifest.scripts.test, /["']test\/\*\.test\.ts["']/);
   for (const file of performance.sourceFiles.filter((item: string) => /^test\/[^/]*\.test\.ts$/.test(item))) {
     assert.ok(existsSync(path.join(ROOT, file)), `${file} is named by the performance contract but is not on disk, so nothing runs it`);
   }

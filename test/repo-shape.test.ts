@@ -157,10 +157,11 @@ test("`npm test` runs every suite by name pattern", () => {
 
   // Quoted, so Node expands the pattern on all three runners. Unquoted, `sh`
   // expands it on Linux and macOS and cmd.exe hands it over untouched on
-  // Windows, and the three runners stop running the same command.
+  // Windows, and the three runners stop running the same command. Either quote
+  // mark holds the pattern back from the shell, so both pass here.
   assert.match(
     script,
-    /"test\/\*\.test\.ts"/,
+    /["']test\/\*\.test\.ts["']/,
     `the "test" script must pass the quoted pattern "test/*.test.ts". Got: ${script}`,
   );
 

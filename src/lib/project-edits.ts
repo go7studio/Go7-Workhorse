@@ -341,6 +341,25 @@ export function formatEditWhen(at: number, now = Date.now()): string {
   return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
+/**
+ * Tool rows that got past the write gate and into path harvesting, counted. A
+ * read row costs one title test; a row that reaches the harvest builds the
+ * turn's nearby text and walks every cited path in it, which is the whole cost
+ * of a scrape turn. Holding that gate is the invariant, and an invariant about
+ * which rows do work is a count. The budget here used to be a stopwatch, and a
+ * stopwatch on a loaded runner reports the runner.
+ *
+ * One integer add per harvested row. Nothing here changes what `collectWrites`
+ * returns; `projectWriteHarvestWork()` is read only by
+ * test/performance.test.ts.
+ */
+let harvestedWrites = 0;
+
+/** Harvested rows since the process started. Tests read the delta across one call. */
+export function projectWriteHarvestWork(): number {
+  return harvestedWrites;
+}
+
 function collectWrites(sessions: Session[], folderRoots: string[] = []): ProjectEdit[] {
   const map = new Map<string, ProjectEdit>();
   for (const session of sessions) {
@@ -349,6 +368,7 @@ function collectWrites(sessions: Session[], folderRoots: string[] = []): Project
       if (message.kind !== "tool") continue;
       const { title } = splitToolLine(message.text);
       if (!isWriteToolTitle(title)) continue;
+      harvestedWrites += 1;
       if (!turn || index < turn.start || index > turn.end) turn = turnWriteContext(session.messages, index);
       const nearby = nearbyFromTurn(turn, index);
       const fromId = (message.toolCallId ?? "").match(/^(?:edit|write):(.+)$/i)?.[1] ?? "";

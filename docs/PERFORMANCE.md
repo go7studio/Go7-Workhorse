@@ -20,6 +20,9 @@ has produced.
 A number crossing its budget usually means a loop became a nested loop, or a
 per-turn cost became a per-token cost.
 
+No budget in this file reads a clock now, except that one ceiling. If you add a
+test here, add a counter with it.
+
 ## The hot paths
 
 | Path | Invariant | Enforced by |
@@ -32,7 +35,7 @@ per-turn cost became a per-token cost.
 | **Reply peel** | Peeling the planning preamble off a reply looks each answer sentence forward only until it finds the restatement that buries it, so the pairs stay well under a full sweep. A repeat peel returns the cached object instead of doing the work twice. Counted as pairs compared through `peelRestateWork()` rather than timed: about 1,500 on a 25-unit report, against about 5,000 for a sweep with no early break, and zero on a cache hit. | `test/performance.test.ts` — "peeling a restated report stays off the first-click budget" |
 | **Scroll pin** | Following a stream reads and writes the scroller once per frame, not once per token, and leaving a chat drops the pending pin. | `test/performance.test.ts` — "a stream pins the transcript once a frame, not once a token" |
 | **Persist** | Selecting a chat is not persist work. A selection-only change must compare equal, so typing and clicking do not journal the desk. | `test/performance.test.ts` — "selection-only desk updates do not look like persist work", "selecting a chat keeps the same sessions array when there is no draft" |
-| **Project changes** | Reading a folder 400 times in one turn still resolves to the files that were written, within the first-click budget. | `test/performance.test.ts` — "project changes skip read tools and still see the write in a long scrape turn" |
+| **Project changes** | Reading a folder 400 times in one turn still resolves to the files that were written, and each of those reads costs one title test. Counted through `projectWriteHarvestWork()` rather than timed: one row per call reaches path harvesting whether the turn holds 400 reads or 4,000, so a scrape turn costs the same however long it scraped. | `test/performance.test.ts` — "project changes skip read tools and still see the write in a long scrape turn" |
 | **Idle paint** | A chat at rest runs no animation; only working and needs-you rows move. Terminal states settle. A keyframe on the resting state is one running animation per sidebar row: 854 idle chats held the renderer at 23-43% CPU and the GPU helper at 12-42%, and 0.1% with the window hidden, which is how we knew it was paint. | `test/idle-desk-paints-nothing.test.ts` — "a chat at rest runs no animation", "a sidebar horse is scaled, not zoomed" |
 | **Boot rewrite decision** | Deciding whether a launch must rewrite the state costs a walk that stops at the first difference, not two serialisations of the whole desk. The old compare was 155 ms on a 46 MB file, on the main process, before first paint, to answer "nothing changed". | `test/long-term-health.test.ts` — "the JSON walk answers exactly what the two stringify calls answered", "the walk stops at the first difference…" |
 | **Backup rotation** | Copying the whole state file is a ten-minute job, not a one-minute one; the fsync keeps its own minute clock so durability does not ride on it. | `test/long-term-health.test.ts` — "two saves inside the cadence rotate once", "slowing the rotation did not slow the flush…" |

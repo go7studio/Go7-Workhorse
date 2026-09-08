@@ -862,9 +862,14 @@ function hydrate(value: unknown, liveRunIds?: ReadonlySet<string>): AppState {
   const normalizedSessions = Array.isArray(record.sessions)
     ? record.sessions.map((row) => normalizeSession(row, liveRunIds)).filter((item): item is Session => item !== null)
     : [];
-  const rawSessions = reconcilePersistedLineups(normalizedSessions);
-  const restored = rehomeCustomUsage(normalizeUsage(record.usage), settings.customBots, rawSessions);
-  const usage = [...backfillCursorUsage(rawSessions, restored), ...restored];
+  // The ledger is built before the lineups are reconciled, because a wave that
+  // was mid-flight when the desk closed joins on restart and that join names
+  // each worker's spend. Neither step reads anything reconcile writes: rehoming
+  // reads provider, model and customBotId, the Cursor backfill reads the
+  // transcript, and reconcile only touches status, titles, lineups and queues.
+  const restored = rehomeCustomUsage(normalizeUsage(record.usage), settings.customBots, normalizedSessions);
+  const usage = [...backfillCursorUsage(normalizedSessions, restored), ...restored];
+  const rawSessions = reconcilePersistedLineups(normalizedSessions, Date.now(), usage);
   const sessions = listedChats(
     applyUsageContext(rawSessions, usage).map((session) => {
       // Local intent titles only for defaults / old prompt slices. Do not rewrite
@@ -7516,7 +7521,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             });
             sessions = admitted.sessions;
           } else if (finished && !finished.parentId && finished.lineup) {
-            sessions = maybeEnqueueLineupJoin(sessions, finished.id);
+            // The deferred join. joinAdmit above no-ops while the parent is
+            // still talking, which is the normal case mid-wave, so this is the
+            // call that actually enqueues most joins. It needs the ledger too,
+            // or the spend lines appear only when the parent happened to be idle.
+            sessions = maybeEnqueueLineupJoin(sessions, finished.id, Date.now(), current.usage);
           }
           return { ...current, sessions };
         });

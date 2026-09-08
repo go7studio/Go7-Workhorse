@@ -12,7 +12,7 @@ import {
   workerProgressCheckpoint,
   workerStatusSnapshot,
 } from "../src/lib/subagents";
-import { addLineupRow, applyChildIdleSync, emptyLineup, formatAwaitAgentsSnapshot, lineupJoinPrompt, normalizeLineup } from "../src/lib/lineup";
+import { addLineupRow, applyChildIdleSync, emptyLineup, formatAwaitAgentsSnapshot, lineupJoinPrompt, maybeEnqueueLineupJoin, normalizeLineup } from "../src/lib/lineup";
 import { sessionTranscript } from "../src/lib/session-bridge";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -400,6 +400,49 @@ test("the join report gives the parent one spend line per worker", () => {
   assert.match(lineupJoinPrompt(wave, { usage: [] }), /spend: not recorded/);
   // No ledger passed, no spend lines: every existing caller reads as before.
   assert.equal(lineupJoinPrompt(wave).includes("spend:"), false);
+});
+
+test("a join deferred because the parent was busy still names each worker's spend", () => {
+  // The common shape mid-wave: the crew finishes while the parent is still
+  // talking, so the join is not enqueued until the parent goes idle. That
+  // later call is the one most joins take.
+  const child = worker({ id: "kid_run", title: "S4 slice", status: "idle" });
+  const parent: Session = {
+    ...worker({ id: "orch", parentId: undefined, title: "Parent", status: "running", agentRun: undefined, messages: [] }),
+    lineup: addLineupRow(emptyLineup("/repo", 1), {
+      childId: child.id,
+      title: child.title,
+      slice: "S4 slice",
+      folder: "/repo",
+      vendor: "Codex",
+      status: "running",
+      startedAt: 1,
+    }),
+  };
+  const usage = [usageEvent({ id: "u1", sessionId: "kid_run", inputTokens: 12_000, outputTokens: 3_000, costUsd: 1.87 })];
+  const settled = applyChildIdleSync([parent, child], child.id, "completed", { now: 3, report: "Done." });
+
+  const whileLive = maybeEnqueueLineupJoin(settled, "orch", 4, usage);
+  const liveParent = whileLive.find((session) => session.id === "orch")!;
+  assert.equal(Boolean(liveParent.queue?.some((item) => item.joinAttempt === 1)), false, "a live parent is not interrupted");
+
+  const idle = whileLive.map((session) => (session.id === "orch" ? { ...session, status: "idle" as const } : session));
+  const joined = maybeEnqueueLineupJoin(idle, "orch", 5, usage);
+  const queued = joined.find((session) => session.id === "orch")!.queue?.find((item) => item.joinAttempt === 1);
+  assert.ok(queued, "the deferred join is queued once the parent goes idle");
+  assert.match(queued!.text, /child=kid_run\s+status=completed\nspend: 15k tokens · \$1\.87/);
+});
+
+test("a wave that was mid-flight when the desk closed joins on restart with its spend", () => {
+  const restart = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
+  // The restart join runs inside reconcilePersistedLineups, so the ledger has
+  // to be built before it, not after.
+  const ledger = restart.indexOf("const usage = [...backfillCursorUsage(");
+  const reconcile = restart.indexOf("reconcilePersistedLineups(normalizedSessions");
+  assert.ok(ledger > 0 && reconcile > ledger, "the ledger is ready before the lineups reconcile");
+  assert.match(restart.slice(reconcile, reconcile + 120), /reconcilePersistedLineups\(normalizedSessions, Date\.now\(\), usage\)/);
+  // And the deferred join in the child-settle path carries it too.
+  assert.match(restart, /maybeEnqueueLineupJoin\(sessions, finished\.id, Date\.now\(\), current\.usage\)/);
 });
 
 test("a checkpoint on a running worker keeps the original startedAt", () => {

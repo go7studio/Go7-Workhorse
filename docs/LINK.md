@@ -109,9 +109,11 @@ calling Claude's model through ACP is the other direction and stays separate.
 }
 ```
 
-`protocolVersion` changes only when a listed tool's shape changes. `desk` is
-`offline` when no Workhorse window is running; reads still answer from the
-last saved state, delegation does not.
+`protocolVersion` changes only when a listed tool's shape breaks. A removed or
+renamed field bumps it, and so does a new required input. A new optional input
+or a new field in a reply does not, because a caller written against the old
+shape still works. `desk` is `offline` when no Workhorse window is running;
+reads still answer from the last saved state, delegation does not.
 
 ## The tools
 
@@ -279,6 +281,14 @@ The same loop for Claude, Codex, Grok, OpenClaw, and Hermes:
    bills a flat plan reports tokens and no dollars, so read a missing `costUsd`
    as unpriced, never as free. The join report the parent chat receives carries
    the same line for each worker in the wave.
+
+   The same payload can also carry `usedTokens`. It is a different quantity and
+   the two must never be added. `usedTokens` is the worker's budget meter: it
+   counts fresh input growth plus output, and bills cache reads at 0.3 of a
+   fresh token, because it exists to brake a run. `spend.tokens` is the ledger
+   total for the same worker: input plus output plus cache writes, with cache
+   reads reported separately as `spend.cachedTokens`. Read `usedTokens` to see
+   how much of a budget is gone and `spend` to say what the slice cost.
 4. Remaining work: `workhorse_continue_mission`. It keeps the prior pass's
    coordinating vendor, model, and effort. Set `initialBrain` only to change
    that brain, or set `route` to opt back into automatic routing. Read:

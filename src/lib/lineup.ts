@@ -505,7 +505,7 @@ export function reconcileIdleChildren(sessions: Session[], parentId: string, now
 }
 
 /** Repair interrupted persisted workers before any new runtime calls can start. */
-export function reconcilePersistedLineups(sessions: Session[], now = Date.now()): Session[] {
+export function reconcilePersistedLineups(sessions: Session[], now = Date.now(), usage?: UsageEvent[]): Session[] {
   const next = [...sessions];
   const indexes = new Map(next.map((session, index) => [session.id, index]));
   let changed = false;
@@ -564,7 +564,7 @@ export function reconcilePersistedLineups(sessions: Session[], now = Date.now())
   for (let index = 0; index < next.length; index += 1) {
     const parent = next[index]!;
     if (!parent.lineup) continue;
-    const reconciled = maybeEnqueueLineupJoin([parent], parent.id, now)[0]!;
+    const reconciled = maybeEnqueueLineupJoin([parent], parent.id, now, usage)[0]!;
     if (reconciled !== parent) {
       next[index] = reconciled;
       changed = true;

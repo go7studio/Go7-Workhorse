@@ -1244,6 +1244,9 @@ export function workerStatusSnapshot(
     ...(worker.agentRun?.mission ? { mission: worker.agentRun.mission } : {}),
     ...(worker.agentRun?.executionOwner ? { executionOwner: worker.agentRun.executionOwner } : {}),
     ...(worker.agentRun?.takeoverReason ? { takeoverReason: worker.agentRun.takeoverReason } : {}),
+    // Two token counts, never a sum. usedTokens is the budget meter and bills
+    // cache reads at CACHE_BILLED_RATIO; spend.tokens is the ledger total and
+    // keeps cache reads in spend.cachedTokens. docs/LINK.md says so too.
     ...(typeof worker.agentRun?.usedTokens === "number" ? { usedTokens: worker.agentRun.usedTokens } : {}),
     ...(spend ? { spend } : {}),
     ...(worker.agentRun?.budgetPhase ? { budgetPhase: worker.agentRun.budgetPhase } : {}),

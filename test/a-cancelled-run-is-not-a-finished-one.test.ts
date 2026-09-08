@@ -313,12 +313,104 @@ test("a reused worker reopens its row for the new slice, and settles again", () 
 });
 
 /**
+ * Re-gate finding 1 on PR #302. A vendor event names only the session, and a
+ * reused worker keeps that name across slices. The desk reads the run off the
+ * child and carries it into the settle, so an end from the run before this one
+ * cannot land on the slice now in flight.
+ */
+test("a late end from the run before does not settle the slice now running", () => {
+  const settled = applyChildIdleSync([parentOf(), auditor()], "sess_casper", "failed", {
+    error: "Denied by sandbox: Run a command",
+    correlationId: "corr_first",
+    runStartedAt: at(1),
+  });
+  const parent = settled.find((session) => session.id === "sess_parent")!;
+  const reopened = addLineupRow(parent.lineup, {
+    ...parent.lineup!.rows[0]!,
+    status: "running" as const,
+    startedAt: at(10),
+    correlationId: "corr_second",
+    finishedAt: undefined,
+    report: undefined,
+    error: undefined,
+  });
+  const live = {
+    ...auditor(),
+    agentRun: { status: "running", startedAt: at(10), correlationId: "corr_second" },
+  } as unknown as Session;
+  const sessions = [{ ...parent, lineup: reopened }, live];
+
+  // The first run's ending arrives late, after the worker was given slice two.
+  for (const late of [
+    { status: "cancelled" as const, extra: { runStartedAt: at(1), error: "Subagent was cancelled." } },
+    { status: "failed" as const, extra: { runStartedAt: at(1), error: "grok exited 1" } },
+    { status: "failed" as const, extra: { correlationId: "corr_first", error: "grok exited 1" } },
+  ]) {
+    const after = applyChildIdleSync(sessions, "sess_casper", late.status, late.extra);
+    assert.equal(
+      after.find((session) => session.id === "sess_parent")?.lineup?.rows[0]?.status,
+      "running",
+      `${late.status}: the new slice keeps running`,
+    );
+    assert.equal(
+      after.find((session) => session.id === "sess_casper")?.agentRun?.status,
+      "running",
+      `${late.status}: and the new run is not settled by the old one's ending`,
+    );
+  }
+
+  // The run that is actually in flight still settles normally.
+  const own = applyChildIdleSync(sessions, "sess_casper", "completed", {
+    report: "Gated it: SHIP.",
+    correlationId: "corr_second",
+    runStartedAt: at(10),
+  });
+  assert.equal(own.find((session) => session.id === "sess_parent")?.lineup?.rows[0]?.status, "completed");
+});
+
+/**
+ * Re-gate finding 2 on PR #302. The cancel mark was a set of session ids, so a
+ * mark left by the slice that was stopped was consumed by the slice after it:
+ * a run nobody touched came back cancelled, and skipped its join.
+ */
+test("the cancel mark names the run, so it cannot be spent by the next slice", () => {
+  const source = STORE.slice(STORE.indexOf("const cancelAsked"), STORE.indexOf("function stopDeletedWorkerSessions"));
+  assert.match(source, /const cancelAsked = new Map<string, string>\(\)/, "the mark is per run, not per chat");
+  assert.match(
+    source,
+    /function runKeyOf\([\s\S]*?run\.correlationId\?\.trim\(\) \|\| String\(run\.startedAt \?\? ""\)/,
+    "a run is named by its correlation, or its clock when it has none",
+  );
+  assert.match(
+    source,
+    /const mark = cancelAsked\.get\(sessionId\);[\s\S]*?return Boolean\(mark\) && mark === runKey/,
+    "a mark only counts for the run it was set on",
+  );
+  assert.match(source, /cancelAsked\.set\(session\.id, runKeyOf\(session\)\)/);
+
+  // Both readers name the run they are settling.
+  assert.match(STORE, /const deskAskedToStop = takeCancelAsked\(event\.sessionId, runKeyOf\(turnOwner\)\)/);
+  assert.match(STORE, /const deskAskedToStop = takeCancelAsked\(event\.sessionId, runKeyOf\(errorTurnOwner\)\)/);
+  // And both carry the run into the settle itself.
+  assert.match(STORE, /\.\.\.\(turnCorrelationId \? \{ correlationId: turnCorrelationId \} : \{\}\)/);
+  assert.match(STORE, /\.\.\.\(errorRunStartedAt !== undefined \? \{ runStartedAt: errorRunStartedAt \} : \{\}\)/);
+});
+
+/**
  * Gate finding 3 on PR #302. The reason travels to the parent transcript, the
  * join prompt and the Link payload, and a denied command can quote a secret.
  */
 test("a secret in a denied command never reaches the parent or a Link caller", () => {
-  const secret = "ghp_16Cfakefakefakefake0000000000000000";
-  const denial = `Denied by sandbox: Run a command — curl -H 'Authorization: Bearer ${secret}' https://api.example.com`;
+  const secrets = {
+    github: "ghp_16Cfakefakefakefake0000000000000000",
+    openai: "sk-fakefakefakefakefakefake0000",
+    bare: "kfake0000000000000000",
+  };
+  // Every shape a denied command can carry, on one line, because a real one
+  // would carry whichever it happened to carry.
+  const denial =
+    `Denied by sandbox: Run a command — curl -H 'Authorization: Bearer ${secrets.github}' ` +
+    `-H "x-api: ${secrets.openai}" 'https://api.example.com/v1?key=${secrets.bare}'`;
   const worker = auditor([message({ role: "system", text: denial, createdAt: at(4) })]);
   assert.equal(deniedToolReason(worker.messages), "Denied by sandbox: Run a command");
 
@@ -328,25 +420,28 @@ test("a secret in a denied command never reaches the parent or a Link caller", (
   });
   const parent = settled.find((session) => session.id === "sess_parent")!;
   const child = settled.find((session) => session.id === "sess_casper")!;
-  const surfaces = [
-    settleLine(settled),
-    child.agentRun?.error ?? "",
-    parent.lineup?.rows[0]?.error ?? "",
-    lineupJoinPrompt(parent.lineup),
-    formatAwaitAgentsSnapshot({ lineup: parent.lineup, children: [child] }),
+  const surfaces: Array<[string, string]> = [
+    ["the parent's line", settleLine(settled)],
+    ["agentRun.error", child.agentRun?.error ?? ""],
+    ["row.error", parent.lineup?.rows[0]?.error ?? ""],
+    ["the join prompt", lineupJoinPrompt(parent.lineup)],
+    ["the await snapshot", formatAwaitAgentsSnapshot({ lineup: parent.lineup, children: [child] })],
   ];
-  for (const surface of surfaces) {
-    assert.doesNotMatch(surface, /ghp_/, "no token reaches a surface the parent or Link reads");
-    assert.doesNotMatch(surface, /Bearer /);
+  for (const [where, surface] of surfaces) {
+    for (const pattern of [/ghp_/, /sk-/, /Bearer /, /key=/, /kfake/]) {
+      assert.doesNotMatch(surface, pattern, `${pattern} must not reach ${where}`);
+    }
   }
 
   // A vendor's own error text takes the same treatment, because it is not the
   // desk that wrote it and it can quote the command too.
   assert.equal(
-    settleReasonText(`grok exited 1: Authorization: Bearer ${secret}`),
+    settleReasonText(`grok exited 1: Authorization: Bearer ${secrets.github}`),
     "grok exited 1: [redacted]",
   );
-  assert.equal(settleReasonText(`token=${secret} was refused`), "[redacted] was refused");
+  assert.equal(settleReasonText(`token=${secrets.github} was refused`), "[redacted] was refused");
+  assert.equal(settleReasonText(`grok exited 1: key=${secrets.bare}`), "grok exited 1: [redacted]");
+  assert.equal(settleReasonText(`grok exited 1: ${secrets.openai} rejected`), "grok exited 1: [redacted] rejected");
   const long = settleReasonText("y".repeat(900));
   assert.ok(long.length <= SETTLE_REASON_MAX, `bounded, got ${long.length}`);
   assert.equal(settleReasonText("First line.\nSecond line."), "First line.");
@@ -356,10 +451,10 @@ test("a secret in a denied command never reaches the parent or a Link caller", (
 test("the store tells a desk cancel apart from a vendor that quit on a denial", () => {
   assert.match(
     STORE,
-    /cancelAsked\.add\(session\.id\)/,
-    "cancelVendorSession must mark the session, or `cancelled` cannot mean somebody cancelled it",
+    /cancelAsked\.set\(session\.id, runKeyOf\(session\)\)/,
+    "cancelVendorSession must mark the run, or `cancelled` cannot mean somebody cancelled it",
   );
-  assert.match(STORE, /const deskAskedToStop = takeCancelAsked\(event\.sessionId\)/);
+  assert.match(STORE, /const deskAskedToStop = takeCancelAsked\(event\.sessionId, runKeyOf\(turnOwner\)\)/);
   assert.match(
     STORE,
     /const vendorQuit = event\.stopReason === "cancelled" && !deskAskedToStop/,
@@ -383,8 +478,8 @@ test("a desk cancel the vendor reports as an error is still a cancel", () => {
   const errorBlock = STORE.slice(STORE.indexOf('if (event.type === "error") {'));
   assert.match(
     errorBlock,
-    /const deskAskedToStop = takeCancelAsked\(event\.sessionId\)/,
-    "the error path must read the mark, not just clear it",
+    /const deskAskedToStop = takeCancelAsked\(event\.sessionId, runKeyOf\(errorTurnOwner\)\)/,
+    "the error path must read the mark for this run, not just clear it",
   );
   assert.match(
     errorBlock,

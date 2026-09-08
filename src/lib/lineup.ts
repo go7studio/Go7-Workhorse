@@ -215,6 +215,7 @@ export function setLineupRowStatus(
     findings?: WorkerFinding[];
     finishedAt?: number;
     correlationId?: string;
+    runStartedAt?: number;
     heal?: boolean;
   },
 ): DeskLineup | undefined {
@@ -224,6 +225,9 @@ export function setLineupRowStatus(
     rows: lineup.rows.map((row) => {
       if (row.childId !== childId) return row;
       if (extra?.correlationId && row.correlationId !== extra.correlationId) return row;
+      // The row has moved on to a later slice on the same worker. An end from
+      // the run before it is news about work that is already recorded.
+      if (extra?.runStartedAt !== undefined && row.startedAt > extra.runStartedAt) return row;
       // A settled row keeps its word and its clock. A later pass may still
       // carry a fuller report, so text and findings are allowed through; an
       // empty report is not, or a stale settle would erase a good one.
@@ -628,6 +632,13 @@ export function applyChildSettleNotice(
 const DENIAL_LINE = /^Denied by /;
 
 /**
+ * The shared redaction patterns want a word in front of the equals sign —
+ * `api_key=`, `token=`, `FOO_KEY=`. A command line writes `key=` on its own,
+ * and a denied command is exactly where that shape turns up.
+ */
+const BARE_KEY_ASSIGNMENT = /\bkey\s*[:=]\s*['"]?[^'"\s]{6,}/gi;
+
+/**
  * What a stop reason is allowed to say to a parent.
  *
  * This text travels further than any other error the desk keeps: into the
@@ -644,7 +655,7 @@ export function settleReasonText(raw: string | undefined): string {
   // Only the sentence the desk wrote is the cause; the arguments are the
   // worker's business and are exactly where a secret would sit.
   const said = DENIAL_LINE.test(first) ? first.split(" — ")[0]!.trim() : first;
-  const safe = redactText(said).text.trim();
+  const safe = redactText(said).text.replace(BARE_KEY_ASSIGNMENT, "[redacted]").trim();
   if (safe.length <= SETTLE_REASON_MAX) return safe;
   return `${safe.slice(0, SETTLE_REASON_MAX - 1).trimEnd()}…`;
 }
@@ -672,11 +683,15 @@ export function applyChildIdleSync(
   sessions: Session[],
   childId: string,
   status: Exclude<DeskLineupRowStatus, "queued" | "running">,
-  extra?: { report?: string; error?: string; now?: number; correlationId?: string },
+  extra?: { report?: string; error?: string; now?: number; correlationId?: string; runStartedAt?: number },
 ): Session[] {
   const now = extra?.now ?? Date.now();
   const child = sessions.find((session) => session.id === childId);
   if (extra?.correlationId && child?.agentRun?.correlationId !== extra.correlationId) return sessions;
+  // A settle belongs to one run. A reused worker keeps its id and its chat, so
+  // the id alone cannot say which slice an ending is about; the run's clock
+  // can. An end from the run before this one is not news about this one.
+  if (extra?.runStartedAt !== undefined && (child?.agentRun?.startedAt ?? 0) > extra.runStartedAt) return sessions;
   const report = (extra?.report ?? childReportText(child)).trim();
   const findings = childFindings(child);
   // A pass that produced nothing is not a finished pass. It was recorded
@@ -729,6 +744,7 @@ export function applyChildIdleSync(
     now,
     extra?.correlationId,
     settleError,
+    extra?.runStartedAt,
   );
   return applyChildSettleNotice(finished, childId, rowStatus, settleError, now);
 }
@@ -1020,6 +1036,7 @@ export function applyLineupChildFinish(
   now = Date.now(),
   correlationId?: string,
   error?: string,
+  runStartedAt?: number,
 ): Session[] {
   const child = sessions.find((session) => session.id === childId);
   const parentId = child?.parentId;
@@ -1032,6 +1049,7 @@ export function applyLineupChildFinish(
       findings: childFindings(child),
       finishedAt: now,
       correlationId,
+      runStartedAt,
     });
     return lineup ? { ...session, lineup } : session;
   });

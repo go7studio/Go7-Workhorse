@@ -222,9 +222,11 @@ import {
   lineupStatusForTerminalRun,
   awaitAgentsWaits,
   childReportText,
+  deniedToolReason,
   emptyLineup,
   formatAwaitAgentsSnapshot,
   lineupSnapshot,
+  VENDOR_ENDED_UNFINISHED,
   applyJoinRateLimitRetry,
   isJoinAssistantTurn,
   JOIN_MAX_ATTEMPTS,
@@ -982,7 +984,24 @@ function presetFrom(
   };
 }
 
+/**
+ * Sessions the desk has told the vendor to stop.
+ *
+ * `cancelled` has to mean somebody cancelled it. A vendor CLI that ends its
+ * turn after a denied tool reports the same stop reason as a real cancel, so
+ * the only honest way to tell them apart is whether the desk asked. The next
+ * terminal event for that session consumes the mark.
+ */
+const cancelAsked = new Set<string>();
+
+function takeCancelAsked(sessionId: string): boolean {
+  const asked = cancelAsked.has(sessionId);
+  cancelAsked.delete(sessionId);
+  return asked;
+}
+
 function cancelVendorSession(session: Pick<Session, "id" | "provider">) {
+  cancelAsked.add(session.id);
   if (session.provider === "codex") void window.workhorse?.codexCancel?.(session.id);
   else if (session.provider === "claude") void window.workhorse?.claudeCancel?.(session.id);
   else if (session.provider === "cursor") void window.workhorse?.cursorCancel?.(session.id);
@@ -5178,6 +5197,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               await replyAsk({
                 text: formatAwaitAgentsSnapshot({
                   lineup: scopedLineup,
+                  children: stateRef.current.sessions.filter((item) => waveIdSet.has(item.id)),
                   reports,
                   wait: shouldWait,
                 }),
@@ -7439,6 +7459,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           ingestCursorLedgerRef.current();
         }
         const closeTurn = () => {
+        const deskAskedToStop = takeCancelAsked(event.sessionId);
         setState((current) => {
           const queued = grokChunkQueue.current[event.sessionId] ?? "";
           delete grokChunkQueue.current[event.sessionId];
@@ -7501,17 +7522,29 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           );
           const finished = sessions.find((session) => session.id === event.sessionId);
           if (finished?.parentId && !holdForHandoff) {
+            // A denied tool ends that one call. When the vendor answers by
+            // ending the whole turn, nobody cancelled anything: that is a run
+            // that failed, and the denial the desk already wrote in the
+            // transcript is the reason it failed.
+            const vendorQuit = event.stopReason === "cancelled" && !deskAskedToStop;
+            const denial = vendorQuit ? deniedToolReason(finished.messages) : "";
             const childSettleStatus =
-              event.stopReason === "cancelled" ? ("cancelled" as const) : failed ? ("failed" as const) : ("completed" as const);
+              event.stopReason === "cancelled" && !vendorQuit
+                ? ("cancelled" as const)
+                : failed || vendorQuit
+                  ? ("failed" as const)
+                  : ("completed" as const);
             sessions = applyChildIdleSync(sessions, event.sessionId, childSettleStatus, {
               report: childReportText(finished),
               ...(safetyPaused
                 ? { error: "Agent paused before completing its goal." }
                 : reportedBlocked
                   ? { error: "Worker reported blocked." }
-                  : event.stopReason === "cancelled"
-                    ? { error: "Subagent was cancelled." }
-                    : {}),
+                  : vendorQuit
+                    ? { error: denial || VENDOR_ENDED_UNFINISHED }
+                    : event.stopReason === "cancelled"
+                      ? { error: "Subagent was cancelled." }
+                      : {}),
             });
             const admitted = shouldJoinAfterChildSettle(childSettleStatus)
               ? joinAdmit(sessions, finished.parentId, current, plansRef.current)
@@ -7546,6 +7579,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         return;
       }
       if (event.type === "error") {
+        takeCancelAsked(event.sessionId);
         const idleHandle = turnIdleTimer.current[event.sessionId];
         if (idleHandle) window.clearTimeout(idleHandle);
         delete turnIdleTimer.current[event.sessionId];

@@ -23,7 +23,7 @@ import { searchChats } from "../src/lib/search";
 import { dropDrafts } from "../src/lib/chats";
 import { deskPersistBodyEqual } from "../src/lib/desk-persist";
 import { peelPlanningPreamble, peelRestateWork } from "../src/lib/markdown";
-import { projectEdits, projectFileChanges } from "../src/lib/project-edits";
+import { projectEdits, projectFileChanges, projectWriteHarvestWork } from "../src/lib/project-edits";
 import { createTranscriptGrouper, groupTranscript, recentTranscriptText, scheduleAfterPaint, startTranscriptFill } from "../src/lib/turns";
 import { collapseInflatedUsage, repairInflatedTurn, usageCollapseWork } from "../src/lib/usage";
 import type { AppState, ChatMessage, Session, UsageEvent } from "../src/lib/types";
@@ -177,29 +177,58 @@ test("header search handles a very long chat without spreading timestamps", () =
 });
 
 test("project changes skip read tools and still see the write in a long scrape turn", () => {
-  const reads = Array.from({ length: 400 }, (_, index) => ({
-    ...message(`r${index}`, "assistant", `Read · completed — file-${index}.gd`, index + 2),
-    kind: "tool" as const,
-  }));
-  const thought = { ...message("th", "assistant", "Creating a simple placeholder markdown file.", 402), kind: "thought" as const };
-  const created = { ...message("w", "assistant", "Edit File · completed — nothing.md", 403), kind: "tool" as const };
-  const scrape = session("scrape", "p", [
-    message("u", "user", "scrape", 1),
-    ...reads,
-    thought,
-    created,
-    message("a", "assistant", "done", 404),
-  ]);
-  const started = performance.now();
-  const edits = projectEdits([scrape], ["D:\\Godot\\Projects\\demo-game"]);
-  const split = projectFileChanges([scrape], ["D:\\Godot\\Projects\\demo-game"]);
-  const ms = performance.now() - started;
+  const scrapeTurn = (reads: number) => {
+    const rows = Array.from({ length: reads }, (_, index) => ({
+      ...message(`r${index}`, "assistant", `Read · completed — file-${index}.gd`, index + 2),
+      kind: "tool" as const,
+    }));
+    const thought = { ...message("th", "assistant", "Creating a simple placeholder markdown file.", reads + 2), kind: "thought" as const };
+    const created = { ...message("w", "assistant", "Edit File · completed — nothing.md", reads + 3), kind: "tool" as const };
+    return session("scrape", "p", [
+      message("u", "user", "scrape", 1),
+      ...rows,
+      thought,
+      created,
+      message("a", "assistant", "done", reads + 4),
+    ]);
+  };
+
+  /** Rows that reached path harvesting. The counter is a process total, so read the delta. */
+  const harvested = (run: () => void) => {
+    const before = projectWriteHarvestWork();
+    run();
+    return projectWriteHarvestWork() - before;
+  };
+
+  const roots = ["D:\\Godot\\Projects\\demo-game"];
+  const scrape = scrapeTurn(400);
+  let edits: ReturnType<typeof projectEdits> = [];
+  let split: ReturnType<typeof projectFileChanges> = { created: [], edited: [] };
+  const rows = harvested(() => {
+    edits = projectEdits([scrape], roots);
+    split = projectFileChanges([scrape], roots);
+  });
+
   assert.equal(edits.length, 1);
   assert.equal(edits[0]?.name, "nothing.md");
   assert.equal(edits[0]?.kind, "created");
   assert.equal(split.created.length, 1);
   assert.equal(split.edited.length, 0);
-  assert.ok(ms < 80, `project changes took ${ms}ms`);
+
+  // The measure is which rows do work, not how long they took. Both calls above
+  // walk the same 402 tool rows, and exactly one of them per call may build the
+  // turn's nearby text and search it. Let the read rows through that gate and
+  // this reads 802. It used to assert the pair ran in under 80 ms, which on a
+  // busy machine says more about the machine than the gate.
+  assert.equal(rows, 2, `${rows} rows reached path harvesting across two calls`);
+
+  // Ten times the reads in the turn, and the harvest does not move. The cost of
+  // a scrape turn is flat in the number of reads, not linear and not the
+  // quadratic it would be if each read rebuilt the nearby text.
+  const tenfold = harvested(() => {
+    projectEdits([scrapeTurn(4_000)], roots);
+  });
+  assert.equal(tenfold, 1, `${tenfold} rows reached path harvesting on a 4,000 read turn`);
 });
 
 test("a chat click paints the sidebar before any transcript work", () => {

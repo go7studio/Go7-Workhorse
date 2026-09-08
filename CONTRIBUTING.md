@@ -111,6 +111,10 @@ That runs the build and the whole suite. It works the same in PowerShell, cmd
 and a shell — Windows PowerShell 5.1 does not understand `&&`, so chaining the
 two by hand fails there and nowhere else.
 
+A new test file runs by its name: `npm test` passes the pattern `test/*.test.ts`
+to the Node test runner, so name it `test/<thing>.test.ts` and it runs. Nothing
+lists it.
+
 CI runs the same on Linux, Windows and macOS, plus a secret scan, a repo-shape
 check, and a check that at least one commit in your pull request carries a type.
 That last one fails when release-please would not see your work at all.

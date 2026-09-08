@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { lstat, mkdir, readFile, realpath, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readdir, readFile, realpath, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -387,6 +387,18 @@ async function validate() {
   const scenarioSet = new Set(scenarioIds);
   const regressionIds = [];
   const defaultTestScript = packageManifest.scripts?.test ?? "";
+  // `npm test` names the pattern `test/*.test.ts` and the Node test runner
+  // expands it, so a suite is in the default gate when it sits in test/ under
+  // that name. Searching the script text for a file name only worked while the
+  // script was a hand-kept list of 133 files.
+  if (!defaultTestScript.includes('"test/*.test.ts"')) {
+    problems.push('the default test gate must run the quoted pattern "test/*.test.ts"');
+  }
+  const defaultGateSuites = new Set(
+    (await readdir(path.join(root, "test")))
+      .filter((name) => name.endsWith(".test.ts"))
+      .map((name) => `test/${name}`),
+  );
   for (const regression of regressions.regressions ?? []) {
     regressionIds.push(regression.id);
     if (!/^REG-\d{3}$/.test(regression.id ?? "")) problems.push(`invalid regression id ${regression.id ?? "(missing)"}`);
@@ -414,7 +426,7 @@ async function validate() {
       if (!packageManifest.scripts?.[command]) problems.push(`regression ${regression.id} verification command is missing: ${command}`);
     }
     const executableProof = (regression.sourceFiles ?? []).some((file) => {
-      if (/^test\/.*\.test\.ts$/.test(file) && defaultTestScript.includes(file)) return true;
+      if (defaultGateSuites.has(file)) return true;
       return (regression.verification ?? []).some((command) => packageManifest.scripts?.[command]?.includes(file));
     });
     if (!executableProof) problems.push(`regression ${regression.id} has no executable proof source in its verification commands`);
@@ -519,7 +531,7 @@ async function validate() {
     if (!packageManifest.scripts?.[command]) problems.push(`usage verification command is missing: ${command}`);
   }
   for (const file of (performance.sourceFiles ?? []).filter((item) => /^test\/.*\.test\.ts$/.test(item))) {
-    if (!defaultTestScript.includes(file)) {
+    if (!defaultGateSuites.has(file)) {
       problems.push(`performance test is not in the default test gate: ${file}`);
     }
   }

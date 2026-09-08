@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -318,8 +318,12 @@ test("plan, device, learning, performance, and usage contracts map to suite rubr
   assert.ok(manifest.scripts[plan.admissionSmokeCommand]);
   for (const command of performance.verificationCommands) assert.ok(manifest.scripts[command]);
   for (const command of usage.verificationCommands) assert.ok(manifest.scripts[command]);
-  for (const file of performance.sourceFiles.filter((item: string) => /^test\/.*\.test\.ts$/.test(item))) {
-    assert.match(manifest.scripts.test, new RegExp(`(?:^|\\s)${file.replaceAll(".", "\\.")}(?:\\s|$)`), file);
+  // `npm test` names the pattern `test/*.test.ts`, so a suite runs when it sits
+  // in test/ under that name. Checking the file is on disk is what proves the
+  // contract's tripwire still runs.
+  assert.match(manifest.scripts.test, /"test\/\*\.test\.ts"/);
+  for (const file of performance.sourceFiles.filter((item: string) => /^test\/[^/]*\.test\.ts$/.test(item))) {
+    assert.ok(existsSync(path.join(ROOT, file)), `${file} is named by the performance contract but is not on disk, so nothing runs it`);
   }
   assert.ok(manifest.scripts["eval:harness-smoke"]);
   assert.ok(manifest.scripts["eval:link-iteration"]);

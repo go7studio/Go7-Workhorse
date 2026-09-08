@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
+import { applyVendorCatalog, resetVendorCatalog } from "../src/lib/models";
 import { DEFAULT_SETTINGS, isSettingsSection, normalizeSettings } from "../src/lib/settings";
 import type { CustomBot, GrokPlanUsage, Settings } from "../src/lib/types";
 import {
@@ -712,6 +713,92 @@ test("deskCallCatalog marks spent and Watch-held vendors as not callable", () =>
   );
 });
 
+test("a custom bot's row lists only the models approved on that bot", () => {
+  const grokBot: CustomBot = {
+    ...bot,
+    id: "bot_grok",
+    name: "Grok Bot",
+    baseUrl: "https://api.synthetic.new/openai/v1",
+    model: "hf:moonshotai/Kimi-K3",
+    models: ["hf:moonshotai/Kimi-K3", "hf:zai-org/GLM-5.2"],
+  };
+  const spark: CustomBot = {
+    ...bot,
+    id: "bot_spark",
+    name: "DGX Spark",
+    baseUrl: "http://spark.local:8080/v1",
+    model: "gpt-oss-120b",
+    models: ["gpt-oss-120b"],
+  };
+  // No `models` at all. Absent means just `model`.
+  const plain: CustomBot = { ...bot, id: "bot_plain", name: "MiniMax" };
+  // The live custom list is desk-wide: every slot's models land in one catalog.
+  // That is what the roster used to hand to every bot.
+  applyVendorCatalog({
+    custom: [
+      { id: "hf:moonshotai/Kimi-K3", name: "Kimi K3", effort: false, contextWindow: 256_000 },
+      { id: "hf:zai-org/GLM-5.2", name: "GLM 5.2", effort: false, contextWindow: 200_000 },
+      { id: "gpt-oss-120b", name: "GPT OSS 120B", effort: false, contextWindow: 128_000 },
+      { id: "MiniMax-M3", name: "MiniMax M3", effort: false, contextWindow: 1_000_000 },
+    ],
+  });
+  try {
+    const rows = deskCallCatalog({
+      settings: {
+        watch: { ...DEFAULT_WATCH, lockDaily: false },
+        customBots: [grokBot, spark, plain],
+        usageBudgets: {},
+        llms: links(),
+      },
+      usage: [],
+      plans: {},
+      permits: {},
+    });
+    const modelIds = (key: string) => rows.find((row) => row.id === key)?.models?.map((item) => item.id) ?? [];
+    assert.deepEqual(modelIds("bot:bot_grok"), ["hf:moonshotai/Kimi-K3", "hf:zai-org/GLM-5.2"]);
+    assert.deepEqual(modelIds("bot:bot_spark"), ["gpt-oss-120b"]);
+    assert.deepEqual(modelIds("bot:bot_plain"), ["MiniMax-M2.5"]);
+    // Neither bot leaks into the other, and no bot picks up MiniMax M3 just
+    // because another slot published it.
+    for (const key of ["bot:bot_grok", "bot:bot_spark", "bot:bot_plain"]) {
+      assert.equal(modelIds(key).includes("MiniMax-M3"), false, `${key} must not offer another slot's model`);
+    }
+    assert.equal(modelIds("bot:bot_grok").includes("gpt-oss-120b"), false);
+    assert.equal(modelIds("bot:bot_spark").includes("hf:zai-org/GLM-5.2"), false);
+    // The bot's own name is not a model name. The catalog names the id when it
+    // knows it, and the id itself stands in when it does not.
+    const grokRow = rows.find((row) => row.id === "bot:bot_grok");
+    assert.deepEqual(
+      grokRow?.models?.map((item) => item.name),
+      ["Kimi K3", "GLM 5.2"],
+    );
+    assert.equal(rows.find((row) => row.id === "bot:bot_plain")?.models?.[0]?.name, "MiniMax-M2.5");
+    // The row is what every harness surface reads, so fixing it fixes them all.
+    assert.deepEqual(
+      deskCallRowFor(rows, { customBotId: "bot_spark" })?.models?.map((item) => item.id),
+      ["gpt-oss-120b"],
+    );
+    const snapshot = projectCapacitySnapshot(rows);
+    assert.deepEqual(
+      snapshot.rows.find((row) => row.id === "bot:bot_grok")?.models.map((item) => item.id),
+      ["hf:moonshotai/Kimi-K3", "hf:zai-org/GLM-5.2"],
+    );
+    assert.deepEqual(
+      snapshot.rows.find((row) => row.id === "bot:bot_spark")?.models.map((item) => item.id),
+      ["gpt-oss-120b"],
+    );
+    const summary = (JSON.parse(formatDeskRoster(rows)) as { summary: string }).summary;
+    const line = (name: string) => summary.split("\n").find((row) => row.startsWith(`- ${name} —`)) ?? "";
+    assert.match(line("Grok Bot"), /models: Kimi K3, GLM 5.2 —/);
+    assert.doesNotMatch(line("Grok Bot"), /MiniMax|GPT OSS/);
+    assert.match(line("DGX Spark"), /models: GPT OSS 120B —/);
+    assert.doesNotMatch(line("DGX Spark"), /Kimi|GLM|MiniMax M3/);
+    assert.match(line("MiniMax"), /models: MiniMax-M2.5 —/);
+  } finally {
+    resetVendorCatalog();
+  }
+});
+
 test("desk roster assigns Cursor Auto to the API pool it actually uses", () => {
   const rows = deskCallCatalog({
     settings: {
@@ -1038,7 +1125,13 @@ test("projectCapacitySnapshot keeps Cursor pools and one custom-account row, dro
   const custom = snapshot.rows.filter((row) => row.kind === "custom");
   assert.equal(custom.length, 1);
   assert.equal(custom[0]?.id, "bot:bot_minimax");
-  assert.ok((custom[0]?.models.length ?? 0) >= 2);
+  // This bot approves nothing beyond its own `model`, so that is the whole
+  // list. It used to read >= 2 only because the row padded itself out of the
+  // desk-wide custom catalog.
+  assert.deepEqual(
+    custom[0]?.models.map((item) => item.id),
+    ["MiniMax-M2.5"],
+  );
   assert.equal(
     snapshot.rows.some((row) => row.id.includes("openclaw") || row.id.includes("hermes") || row.provider === ("hermes" as DeskCallRow["provider"])),
     false,

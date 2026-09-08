@@ -11,7 +11,7 @@ import type {
   WatchPermits,
   WatchSettings,
 } from "./types";
-import { customBotAttached, customBotEnabled } from "./custom-bots";
+import { customBotAttached, customBotEnabled, customBotModels } from "./custom-bots";
 import { defaultModel, modelsFor } from "./models";
 import {
   cursorLaneEvents,
@@ -896,6 +896,10 @@ export function deskCallCatalog(input: {
       }),
     );
   }
+  // The custom catalog is one desk-wide list collapsed across every slot, so it
+  // can only serve as a name table here. Which models a bot offers is decided
+  // by that bot alone.
+  const customNames = new Map(modelsFor("custom").map((item) => [item.id, item.name] as const));
   for (const bot of input.settings.customBots) {
     if (!customBotEnabled(bot)) continue;
     const status = byKey.get(`bot:${bot.id}`);
@@ -905,12 +909,7 @@ export function deskCallCatalog(input: {
         name: bot.name,
         provider: "custom",
         model: bot.model,
-        models: [
-          { id: bot.model, name: bot.name },
-          ...modelsFor("custom")
-            .filter((item) => item.id !== bot.model)
-            .map((item) => ({ id: item.id, name: item.name })),
-        ],
+        models: customBotModels(bot).map((id) => ({ id, name: customNames.get(id) ?? id })),
         kind: "custom",
         connected: customBotAttached(bot),
         enabled: customBotEnabled(bot),

@@ -406,7 +406,15 @@ test("a join deferred because the parent was busy still names each worker's spen
   // The common shape mid-wave: the crew finishes while the parent is still
   // talking, so the join is not enqueued until the parent goes idle. That
   // later call is the one most joins take.
-  const child = worker({ id: "kid_run", title: "S4 slice", status: "idle" });
+  // The shared fixture's turn says nothing, and a pass that produced nothing is
+  // a failed pass. This test is about the spend line on a worker that finished,
+  // so give it the reply it reports.
+  const child = worker({
+    id: "kid_run",
+    title: "S4 slice",
+    status: "idle",
+    messages: [{ id: "a", role: "assistant", text: "Done.", createdAt: 1 }],
+  });
   const parent: Session = {
     ...worker({ id: "orch", parentId: undefined, title: "Parent", status: "running", agentRun: undefined, messages: [] }),
     lineup: addLineupRow(emptyLineup("/repo", 1), {

@@ -274,6 +274,8 @@ export type DeskLineupRow = {
   startedAt: number;
   finishedAt?: number;
   report?: string;
+  /** Why this slice stopped short, when it did. The parent reads this. */
+  error?: string;
   findings?: WorkerFinding[];
   planStepId?: string;
   rationale?: string;

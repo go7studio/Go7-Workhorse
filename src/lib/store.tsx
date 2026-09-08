@@ -222,9 +222,11 @@ import {
   lineupStatusForTerminalRun,
   awaitAgentsWaits,
   childReportText,
+  deniedToolReason,
   emptyLineup,
   formatAwaitAgentsSnapshot,
   lineupSnapshot,
+  VENDOR_ENDED_UNFINISHED,
   applyJoinRateLimitRetry,
   isJoinAssistantTurn,
   JOIN_MAX_ATTEMPTS,
@@ -982,7 +984,36 @@ function presetFrom(
   };
 }
 
-function cancelVendorSession(session: Pick<Session, "id" | "provider">) {
+/**
+ * Which run of a session the desk has told the vendor to stop.
+ *
+ * `cancelled` has to mean somebody cancelled it. A vendor CLI that ends its
+ * turn after a denied tool reports the same stop reason as a real cancel, so
+ * the only honest way to tell them apart is whether the desk asked.
+ *
+ * The mark is per run, not per chat. A reused worker keeps its session id, so
+ * a mark left by the slice that was stopped would be read as a cancel of the
+ * slice after it — a run nobody touched, reported as cancelled and quietly
+ * denied its join. A new run writes its own key over the old one, so a stale
+ * mark cannot be consumed by the run that follows it.
+ */
+const cancelAsked = new Map<string, string>();
+
+/** The run a settle or a stop belongs to. A worker's id is not its run. */
+function runKeyOf(session: Pick<Session, "agentRun"> | undefined): string {
+  const run = session?.agentRun;
+  if (!run) return "chat";
+  return run.correlationId?.trim() || String(run.startedAt ?? "");
+}
+
+function takeCancelAsked(sessionId: string, runKey: string): boolean {
+  const mark = cancelAsked.get(sessionId);
+  cancelAsked.delete(sessionId);
+  return Boolean(mark) && mark === runKey;
+}
+
+function cancelVendorSession(session: Pick<Session, "id" | "provider" | "agentRun">) {
+  cancelAsked.set(session.id, runKeyOf(session));
   if (session.provider === "codex") void window.workhorse?.codexCancel?.(session.id);
   else if (session.provider === "claude") void window.workhorse?.claudeCancel?.(session.id);
   else if (session.provider === "cursor") void window.workhorse?.cursorCancel?.(session.id);
@@ -5178,6 +5209,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               await replyAsk({
                 text: formatAwaitAgentsSnapshot({
                   lineup: scopedLineup,
+                  children: stateRef.current.sessions.filter((item) => waveIdSet.has(item.id)),
                   reports,
                   wait: shouldWait,
                 }),
@@ -6603,8 +6635,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     if (child?.status === "running") cancelVendorSession(child);
     setState((current) => {
       const rowStatus = reason === "timed-out" ? "timed-out" as const : "cancelled" as const;
+      // The stop names the run it was aimed at. If the worker has been reused
+      // since, the new slice is not the one the caller asked to stop.
       let sessions = applyChildIdleSync(current.sessions, childSessionId, rowStatus, {
         error: reason === "timed-out" ? "Subagent exceeded its runtime limit." : "Subagent was cancelled.",
+        ...(child?.agentRun?.correlationId ? { correlationId: child.agentRun.correlationId } : {}),
+        ...(child?.agentRun?.startedAt !== undefined ? { runStartedAt: child.agentRun.startedAt } : {}),
       });
       const parentId = child?.parentId;
       if (parentId) sessions = settlePlanAssignment(sessions, parentId, childSessionId, "failed", reason);
@@ -7439,6 +7475,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           ingestCursorLedgerRef.current();
         }
         const closeTurn = () => {
+        // The run this ending is about. A vendor event names only the session,
+        // and a reused worker keeps that name across slices, so the desk reads
+        // the run off the child and carries it into the settle. A row that has
+        // already moved to a later run refuses the older news.
+        const turnOwner = stateRef.current.sessions.find((item) => item.id === event.sessionId);
+        const turnCorrelationId = turnOwner?.agentRun?.correlationId;
+        const turnRunStartedAt = turnOwner?.agentRun?.startedAt;
+        const deskAskedToStop = takeCancelAsked(event.sessionId, runKeyOf(turnOwner));
         setState((current) => {
           const queued = grokChunkQueue.current[event.sessionId] ?? "";
           delete grokChunkQueue.current[event.sessionId];
@@ -7501,17 +7545,31 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           );
           const finished = sessions.find((session) => session.id === event.sessionId);
           if (finished?.parentId && !holdForHandoff) {
+            // A denied tool ends that one call. When the vendor answers by
+            // ending the whole turn, nobody cancelled anything: that is a run
+            // that failed, and the denial the desk already wrote in the
+            // transcript is the reason it failed.
+            const vendorQuit = event.stopReason === "cancelled" && !deskAskedToStop;
+            const denial = vendorQuit ? deniedToolReason(finished.messages) : "";
             const childSettleStatus =
-              event.stopReason === "cancelled" ? ("cancelled" as const) : failed ? ("failed" as const) : ("completed" as const);
+              event.stopReason === "cancelled" && !vendorQuit
+                ? ("cancelled" as const)
+                : failed || vendorQuit
+                  ? ("failed" as const)
+                  : ("completed" as const);
             sessions = applyChildIdleSync(sessions, event.sessionId, childSettleStatus, {
               report: childReportText(finished),
+              ...(turnCorrelationId ? { correlationId: turnCorrelationId } : {}),
+              ...(turnRunStartedAt !== undefined ? { runStartedAt: turnRunStartedAt } : {}),
               ...(safetyPaused
                 ? { error: "Agent paused before completing its goal." }
                 : reportedBlocked
                   ? { error: "Worker reported blocked." }
-                  : event.stopReason === "cancelled"
-                    ? { error: "Subagent was cancelled." }
-                    : {}),
+                  : vendorQuit
+                    ? { error: denial || VENDOR_ENDED_UNFINISHED }
+                    : event.stopReason === "cancelled"
+                      ? { error: "Subagent was cancelled." }
+                      : {}),
             });
             const admitted = shouldJoinAfterChildSettle(childSettleStatus)
               ? joinAdmit(sessions, finished.parentId, current, plansRef.current)
@@ -7546,6 +7604,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         return;
       }
       if (event.type === "error") {
+        // A stop the desk asked for is a cancel however the vendor spells its
+        // ending. Some report it as a done with stopReason cancelled, some
+        // raise an error on the way down; who decided does not change with the
+        // shape of the message. The mark and the settle both name the run, so
+        // neither can be read against the slice that follows it.
+        const errorTurnOwner = stateRef.current.sessions.find((item) => item.id === event.sessionId);
+        const errorCorrelationId = errorTurnOwner?.agentRun?.correlationId;
+        const errorRunStartedAt = errorTurnOwner?.agentRun?.startedAt;
+        const deskAskedToStop = takeCancelAsked(event.sessionId, runKeyOf(errorTurnOwner));
         const idleHandle = turnIdleTimer.current[event.sessionId];
         if (idleHandle) window.clearTimeout(idleHandle);
         delete turnIdleTimer.current[event.sessionId];
@@ -7635,11 +7702,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           );
           const failed = sessions.find((session) => session.id === event.sessionId);
           if (failed?.parentId) {
-            sessions = applyChildIdleSync(sessions, event.sessionId, "failed", {
+            const childSettleStatus = deskAskedToStop ? ("cancelled" as const) : ("failed" as const);
+            sessions = applyChildIdleSync(sessions, event.sessionId, childSettleStatus, {
               report: childReportText(failed),
-              error: event.message,
+              error: deskAskedToStop ? "Subagent was cancelled." : event.message,
+              ...(errorCorrelationId ? { correlationId: errorCorrelationId } : {}),
+              ...(errorRunStartedAt !== undefined ? { runStartedAt: errorRunStartedAt } : {}),
             });
-            const admitted = joinAdmit(sessions, failed.parentId, current, plansRef.current);
+            const admitted = shouldJoinAfterChildSettle(childSettleStatus)
+              ? joinAdmit(sessions, failed.parentId, current, plansRef.current)
+              : { sessions };
             queueMicrotask(() => {
               if (admitted.auditor) sendRef.current(admitted.auditor.brief, { sessionId: admitted.auditor.id, hideUser: true });
             });

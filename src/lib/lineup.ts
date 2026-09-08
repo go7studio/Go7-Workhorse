@@ -1,6 +1,7 @@
 import { OBJECTIVE_ASK_RULE } from "./ask-default";
 import { enqueuePrompt } from "./chats";
 import { uid } from "./id";
+import { redactText } from "./learning-redact";
 import { boundWorkerReport, crewHasParentTakeover, normalizeMissionIteration, normalizePathAllowlist, normalizeWorkerFindings, parseWorkerFindings, withSubagentStatus, workerNameFromTitle, workerTaskTitle } from "./subagents";
 import type { AgentRun, ChatMessage, DeskLineup, DeskLineupRow, DeskLineupRowStatus, MissionIteration, Session, UsageEvent, WorkerFinding } from "./types";
 import { formatSpendLine, sessionSpend } from "./usage";
@@ -114,6 +115,7 @@ function normalizeLineupRow(raw: unknown): DeskLineupRow | null {
     startedAt: typeof record.startedAt === "number" ? record.startedAt : 0,
     ...(typeof record.finishedAt === "number" ? { finishedAt: record.finishedAt } : {}),
     ...(typeof record.report === "string" && record.report.trim() ? { report: record.report } : {}),
+    ...(typeof record.error === "string" && record.error.trim() ? { error: record.error.trim() } : {}),
     ...(findings ? { findings } : {}),
     ...(typeof record.planStepId === "string" && record.planStepId.trim() ? { planStepId: record.planStepId.trim() } : {}),
     ...(typeof record.rationale === "string" && record.rationale.trim() ? { rationale: record.rationale.trim() } : {}),
@@ -126,6 +128,21 @@ function normalizeLineupRow(raw: unknown): DeskLineupRow | null {
     ...(typeof record.missionId === "string" && record.missionId.trim() ? { missionId: record.missionId.trim() } : {}),
     ...(typeof record.iteration === "number" && record.iteration > 0 ? { iteration: Math.floor(record.iteration) } : {}),
   };
+}
+
+/**
+ * Is this row a second run on the same worker, or the same run said twice?
+ *
+ * A reused worker keeps its chat and its id, so the id alone cannot tell the
+ * slices apart. The run's own clock can: a later `startedAt`, or a different
+ * correlation, is a new assignment. Anything else is the same dispatch
+ * arriving again.
+ */
+export function rowStartsANewRun(existing: DeskLineupRow, incoming: DeskLineupRow): boolean {
+  if (incoming.startedAt > existing.startedAt) return true;
+  const was = existing.correlationId?.trim() ?? "";
+  const now = incoming.correlationId?.trim() ?? "";
+  return Boolean(now) && now !== was;
 }
 
 export function addLineupRow(
@@ -142,8 +159,21 @@ export function addLineupRow(
       ...(mission ? { mission } : {}),
     };
   }
-  if (base.rows.some((item) => item.childId === row.childId)) {
-    return mission ? { ...base, mission } : base;
+  const existing = base.rows.find((item) => item.childId === row.childId);
+  if (existing) {
+    // A reused worker starting a new slice is a new run on the same chat, so
+    // its row reopens. The settled word belonged to the slice that finished;
+    // holding it here would leave the wave advertising the last slice's result
+    // while this one runs, and would freeze the new slice out of settling at
+    // all. Same run, same row: still a no-op, so a repeat spawn is idempotent.
+    if (!rowStartsANewRun(existing, row)) return mission ? { ...base, mission } : base;
+    return {
+      ...base,
+      ...(joinOwner ? { joinOwner } : {}),
+      ...(mission ? { mission } : {}),
+      folder: row.folder || base.folder,
+      rows: base.rows.map((item) => (item.childId === row.childId ? row : item)),
+    };
   }
   const { notifiedAt: _previousNotification, ...openWave } = base;
   return {
@@ -155,26 +185,66 @@ export function addLineupRow(
   };
 }
 
+/**
+ * Row statuses that are fact rather than a guess.
+ *
+ * `interrupted` and `unknown` are the desk admitting it could not see the run,
+ * so a later terminal event is allowed to correct them. The rest already say
+ * what happened, and a second event about the same stop must not rewrite the
+ * word: that is how a cancelled worker came to read `completed` in the lineup
+ * while its own run said `cancelled`.
+ */
+const SETTLED_ROW_STATUSES: ReadonlySet<DeskLineupRowStatus> = new Set([
+  "completed",
+  "failed",
+  "timed-out",
+  "cancelled",
+]);
+
+export function lineupRowIsSettled(status: DeskLineupRowStatus): boolean {
+  return SETTLED_ROW_STATUSES.has(status);
+}
+
 export function setLineupRowStatus(
   lineup: DeskLineup | undefined,
   childId: string,
   status: DeskLineupRowStatus,
-  extra?: { report?: string; findings?: WorkerFinding[]; finishedAt?: number; correlationId?: string },
+  extra?: {
+    report?: string;
+    error?: string;
+    findings?: WorkerFinding[];
+    finishedAt?: number;
+    correlationId?: string;
+    runStartedAt?: number;
+    heal?: boolean;
+  },
 ): DeskLineup | undefined {
   if (!lineup) return undefined;
   return {
     ...lineup,
-    rows: lineup.rows.map((row) =>
-      row.childId === childId && (!extra?.correlationId || row.correlationId === extra.correlationId)
-        ? {
-            ...row,
-            status,
-            ...(extra?.finishedAt ? { finishedAt: extra.finishedAt } : {}),
-            ...(extra?.report !== undefined ? { report: extra.report } : {}),
-            ...(extra?.findings !== undefined ? { findings: extra.findings } : {}),
-          }
-        : row,
-    ),
+    rows: lineup.rows.map((row) => {
+      if (row.childId !== childId) return row;
+      if (extra?.correlationId && row.correlationId !== extra.correlationId) return row;
+      // The row has moved on to a later slice on the same worker. An end from
+      // the run before it is news about work that is already recorded.
+      if (extra?.runStartedAt !== undefined && row.startedAt > extra.runStartedAt) return row;
+      // A settled row keeps its word and its clock. A later pass may still
+      // carry a fuller report, so text and findings are allowed through; an
+      // empty report is not, or a stale settle would erase a good one.
+      const settled = lineupRowIsSettled(row.status) && !extra?.heal;
+      const keepsReport = extra?.report !== undefined && (!settled || Boolean(extra.report.trim()));
+      // The first reason recorded is the one that stopped the slice. A later
+      // event about the same stop cannot talk over it.
+      const reason = settled ? row.error ?? extra?.error : extra?.error ?? row.error;
+      return {
+        ...row,
+        status: settled ? row.status : status,
+        ...(extra?.finishedAt && !(settled && row.finishedAt) ? { finishedAt: extra.finishedAt } : {}),
+        ...(keepsReport ? { report: extra!.report } : {}),
+        ...(reason?.trim() ? { error: reason.trim() } : {}),
+        ...(extra?.findings !== undefined ? { findings: extra.findings } : {}),
+      };
+    }),
   };
 }
 
@@ -207,24 +277,59 @@ export function shouldJoinAfterChildSettle(
   return status !== "cancelled";
 }
 
-export function lineupSnapshot(lineup: DeskLineup | undefined): {
+/**
+ * One word for a row, in the same vocabulary the worker itself answers in.
+ *
+ * `workerStatusSnapshot` reads `agentRun.status`; the lineup read `row.status`.
+ * When those disagreed a caller could read `completed` for a worker in a
+ * delegate reply and `cancelled` from `workhorse_agent_status` for the same
+ * worker in the same second. The run is the fact, so the snapshot says it. A
+ * row whose worker has no run at all keeps the row's own word: there is no
+ * fact to prefer.
+ */
+export function lineupRowTruth(
+  row: Pick<DeskLineupRow, "childId" | "status">,
+  child: Pick<Session, "id" | "status" | "agentRun"> | undefined,
+): string {
+  if (!child) return row.status;
+  if (child.status === "running" || child.agentRun?.status === "running") return "running";
+  return child.agentRun?.status ?? row.status;
+}
+
+export function lineupSnapshot(
+  lineup: DeskLineup | undefined,
+  children: Array<Pick<Session, "id" | "status" | "agentRun">> = [],
+): {
   id?: string;
   folder?: string;
   running: string[];
-  finished: Array<{ title: string; status: string; report: string; childSessionId: string; findings?: WorkerFinding[] }>;
+  finished: Array<{
+    title: string;
+    status: string;
+    report: string;
+    childSessionId: string;
+    error?: string;
+    findings?: WorkerFinding[];
+  }>;
 } {
   if (!lineup) return { running: [], finished: [] };
+  const byId = new Map(children.map((child) => [child.id, child]));
+  const open = (row: DeskLineupRow) => {
+    const status = lineupRowTruth(row, byId.get(row.childId));
+    return status === "queued" || status === "running";
+  };
   return {
     id: lineup.id,
     folder: lineup.folder,
-    running: lineup.rows.filter((row) => row.status === "queued" || row.status === "running").map((row) => row.title),
+    running: lineup.rows.filter(open).map((row) => row.title),
     finished: lineup.rows
-      .filter((row) => row.status !== "queued" && row.status !== "running")
+      .filter((row) => !open(row))
       .map((row) => ({
         title: row.title,
-        status: row.status,
+        status: lineupRowTruth(row, byId.get(row.childId)),
         report: row.report ?? "",
         childSessionId: row.childId,
+        ...(row.error?.trim() ? { error: row.error.trim() } : {}),
         ...(row.findings?.length ? { findings: row.findings } : {}),
       })),
   };
@@ -262,6 +367,9 @@ export function lineupJoinPrompt(
     lines.push(`### ${index + 1}. ${row.title}  child=${row.childId}  status=${row.status}${extra}`);
     // What the slice cost, so a parent can answer that without a second ledger.
     if (options?.usage) lines.push(formatSpendLine(sessionSpend(options.usage, row.childId)));
+    // A slice that stopped short says why here, so the join is written from
+    // the reason rather than from a report that trails off mid-sentence.
+    if (row.error?.trim()) lines.push(`why: ${row.error.trim()}`);
     lines.push((row.report ?? "").trim() || "(no report)");
     if (row.findings?.length) lines.push(`findings: ${JSON.stringify(row.findings)}`);
     lines.push("");
@@ -300,6 +408,7 @@ export function awaitAgentsWaits(input: { wait?: unknown; parentStatus?: string 
 
 export function formatAwaitAgentsSnapshot(input: {
   lineup?: DeskLineup;
+  children?: Array<Pick<Session, "id" | "status" | "agentRun">>;
   reports?: Array<{
     title: string;
     status: string;
@@ -315,7 +424,7 @@ export function formatAwaitAgentsSnapshot(input: {
   }>;
   wait?: boolean;
 }): string {
-  const snapshot = lineupSnapshot(input.lineup);
+  const snapshot = lineupSnapshot(input.lineup, input.children ?? []);
   const running = snapshot.running;
   return JSON.stringify(
     {
@@ -327,6 +436,7 @@ export function formatAwaitAgentsSnapshot(input: {
         status: row.status,
         text: row.report,
         childSessionId: row.childSessionId,
+        ...(row.error ? { error: row.error } : {}),
         ...(row.findings?.length ? { findings: row.findings } : {}),
       })),
       lineup: snapshot,
@@ -424,24 +534,164 @@ function subagentChipStatus(status: DeskLineupRowStatus): string {
   return "failed";
 }
 
+/**
+ * The lineup word for a run that has stopped. One mapping, so every surface
+ * that turns a run into a row reaches the same word.
+ */
+export function lineupRowStatusForRun(
+  status: AgentRun["status"],
+): Exclude<DeskLineupRowStatus, "queued" | "running"> {
+  if (status === "completed") return "completed";
+  if (status === "timed-out") return "timed-out";
+  if (status === "cancelled") return "cancelled";
+  if (status === "interrupted") return "interrupted";
+  return "failed";
+}
+
 /** Map a terminal agent-run stop onto the lineup row, so cancel is not stored as failed. */
 export function lineupStatusForTerminalRun(
   status: Extract<AgentRun["status"], "timed-out" | "cancelled" | "budget-exceeded">,
 ): Exclude<DeskLineupRowStatus, "queued" | "running"> {
-  if (status === "timed-out") return "timed-out";
-  if (status === "cancelled") return "cancelled";
-  return "failed";
+  return lineupRowStatusForRun(status);
+}
+
+export const CHILD_SETTLE_NOTICE_MAX = 300;
+
+/** The same cap on the reason alone, before it is put in a line or a payload. */
+export const SETTLE_REASON_MAX = 300;
+
+/** The sentence for a run that stopped without anyone asking it to. */
+export const VENDOR_ENDED_UNFINISHED = "The vendor ended the run without finishing it.";
+
+const SETTLE_REASON_IS_THE_STATUS = /^subagent was (cancelled|interrupted)\.?$/i;
+
+const SETTLE_WORD: Record<Exclude<DeskLineupRowStatus, "queued" | "running">, string> = {
+  completed: "completed",
+  failed: "failed",
+  "timed-out": "timed out",
+  cancelled: "was cancelled",
+  interrupted: "was interrupted",
+  unknown: "ended in an unknown state",
+};
+
+/**
+ * One line so a parent hears a stop it did not watch.
+ *
+ * A worker denied a tool and then killed took its reason with it: the row read
+ * `completed`, the parent got nothing, and the denial survived only in the
+ * worker's own transcript. This is the line that carries it back — who, what
+ * happened, and why — short enough to sit in a transcript unread.
+ */
+export function childSettleNotice(input: {
+  worker: string;
+  status: Exclude<DeskLineupRowStatus, "queued" | "running">;
+  error?: string;
+}): string {
+  if (input.status === "completed") return "";
+  const head = `${input.worker.trim() || "A worker"} ${SETTLE_WORD[input.status]}`;
+  const first = (input.error ?? "").trim().split(/\r?\n/)[0]?.trim() ?? "";
+  // The desk's own restatement of the word it just said adds nothing.
+  const reason = SETTLE_REASON_IS_THE_STATUS.test(first) ? "" : first;
+  const line = reason ? `${head}: ${reason}` : `${head}.`;
+  if (line.length <= CHILD_SETTLE_NOTICE_MAX) return line;
+  return `${line.slice(0, CHILD_SETTLE_NOTICE_MAX - 1).trimEnd()}…`;
+}
+
+/** Put the settle line in the parent transcript, once per stop. */
+export function applyChildSettleNotice(
+  sessions: Session[],
+  childId: string,
+  status: Exclude<DeskLineupRowStatus, "queued" | "running">,
+  error?: string,
+  now = Date.now(),
+): Session[] {
+  const child = sessions.find((session) => session.id === childId);
+  const parentId = child?.parentId;
+  if (!child || !parentId) return sessions;
+  const worker =
+    child.workerName?.trim() || workerNameFromTitle(child.title ?? "") || (child.title ?? "").trim() || "A worker";
+  const text = childSettleNotice({ worker, status, error });
+  if (!text) return sessions;
+  // One line per stop, not per worker: a reused worker that fails the same way
+  // on a later slice is a second stop and says so again.
+  const since = child.agentRun?.startedAt ?? 0;
+  return sessions.map((session) => {
+    if (session.id !== parentId) return session;
+    // The desk can settle the same stop twice — a vendor turn end and a later
+    // reconcile. The parent hears it once.
+    if (session.messages.some((message) => message.role === "system" && message.text === text && message.createdAt >= since)) {
+      return session;
+    }
+    return {
+      ...session,
+      messages: [...session.messages, { id: uid("msg"), role: "system" as const, text, createdAt: now }],
+    };
+  });
+}
+
+const DENIAL_LINE = /^Denied by /;
+
+/**
+ * The shared redaction patterns want a word in front of the equals sign —
+ * `api_key=`, `token=`, `FOO_KEY=`. A command line writes `key=` on its own,
+ * and a denied command is exactly where that shape turns up.
+ */
+const BARE_KEY_ASSIGNMENT = /\bkey\s*[:=]\s*['"]?[^'"\s]{6,}/gi;
+
+/**
+ * What a stop reason is allowed to say to a parent.
+ *
+ * This text travels further than any other error the desk keeps: into the
+ * parent transcript, into the join prompt as `why:`, and out to a Link caller
+ * as `lineup.finished[].error`. A denial line quotes the command it refused
+ * and a command can carry a token, so the quoted half is dropped, whatever is
+ * left is redacted, and the whole thing is capped. One line, never a
+ * transcript.
+ */
+export function settleReasonText(raw: string | undefined): string {
+  const first = (raw ?? "").trim().split(/\r?\n/)[0]?.trim() ?? "";
+  if (!first) return "";
+  // The desk's own denial line is `Denied by <who>: <tool> — <arguments>`.
+  // Only the sentence the desk wrote is the cause; the arguments are the
+  // worker's business and are exactly where a secret would sit.
+  const said = DENIAL_LINE.test(first) ? first.split(" — ")[0]!.trim() : first;
+  const safe = redactText(said).text.replace(BARE_KEY_ASSIGNMENT, "[redacted]").trim();
+  if (safe.length <= SETTLE_REASON_MAX) return safe;
+  return `${safe.slice(0, SETTLE_REASON_MAX - 1).trimEnd()}…`;
+}
+
+/**
+ * The desk's own denial line from this turn, if it wrote one.
+ *
+ * The transcript already carries the honest reason a run stopped after a
+ * refused tool, and it is the only place that reason survives once the vendor
+ * has gone.
+ */
+export function deniedToolReason(
+  messages: ReadonlyArray<Pick<ChatMessage, "role" | "text" | "kind">>,
+): string {
+  const turn = messagesInThisTurn(messages);
+  for (let at = turn.length - 1; at >= 0; at -= 1) {
+    const text = (turn[at]?.text ?? "").trim();
+    if (turn[at]?.role !== "system" || !DENIAL_LINE.test(text)) continue;
+    return settleReasonText(text);
+  }
+  return "";
 }
 
 export function applyChildIdleSync(
   sessions: Session[],
   childId: string,
   status: Exclude<DeskLineupRowStatus, "queued" | "running">,
-  extra?: { report?: string; error?: string; now?: number; correlationId?: string },
+  extra?: { report?: string; error?: string; now?: number; correlationId?: string; runStartedAt?: number },
 ): Session[] {
   const now = extra?.now ?? Date.now();
   const child = sessions.find((session) => session.id === childId);
   if (extra?.correlationId && child?.agentRun?.correlationId !== extra.correlationId) return sessions;
+  // A settle belongs to one run. A reused worker keeps its id and its chat, so
+  // the id alone cannot say which slice an ending is about; the run's clock
+  // can. An end from the run before this one is not news about this one.
+  if (extra?.runStartedAt !== undefined && (child?.agentRun?.startedAt ?? 0) > extra.runStartedAt) return sessions;
   const report = (extra?.report ?? childReportText(child)).trim();
   const findings = childFindings(child);
   // A pass that produced nothing is not a finished pass. It was recorded
@@ -452,14 +702,26 @@ export function applyChildIdleSync(
   const emptyTurnError = saidNothing
     ? vendorEmptyReply(child?.provider ?? "custom")
     : undefined;
+  // "interrupted" is the desk's guess about a run it could not see, and a
+  // window reload used to make that guess wrongly. A later terminal event
+  // from the vendor is fact, so it is allowed to correct the guess; every
+  // other terminal status is already fact and stands.
+  const priorRun = child?.agentRun;
+  const alreadyDone = Boolean(priorRun && priorRun.status !== "running" && priorRun.status !== "interrupted");
+  // One truth. Whatever the run ends up saying is what the row, the chip and
+  // the parent's line all say. Passing the caller's guess on from here is how
+  // a cancelled run came to sit in `lineup.finished` as `completed`.
+  const settledRun = alreadyDone && priorRun ? priorRun.status : nextStatus;
+  const rowStatus = lineupRowStatusForRun(settledRun);
+  // One reason, bounded and redacted once, for the run, the row, the parent's
+  // line and the Link payload. A vendor's own error text lands here too, so
+  // this is the only place it has to be made safe to repeat.
+  const settleError = settleReasonText(
+    alreadyDone ? priorRun?.error : extra?.error ?? emptyTurnError ?? priorRun?.error,
+  );
   const next = sessions.map((session) => {
     if (session.id !== childId) return session;
     const run = session.agentRun;
-    // "interrupted" is the desk's guess about a run it could not see, and a
-    // window reload used to make that guess wrongly. A later terminal event
-    // from the vendor is fact, so it is allowed to correct the guess; every
-    // other terminal status is already fact and stands.
-    const alreadyDone = Boolean(run && run.status !== "running" && run.status !== "interrupted");
     return {
       ...session,
       status: "idle" as const,
@@ -468,21 +730,23 @@ export function applyChildIdleSync(
             ...run,
             status: alreadyDone ? run.status : nextStatus,
             finishedAt: run.finishedAt ?? now,
-            ...(extra?.error && !alreadyDone ? { error: extra.error } : {}),
-            ...(emptyTurnError && !alreadyDone && !extra?.error ? { error: emptyTurnError } : {}),
+            ...(settleError && !alreadyDone ? { error: settleError } : {}),
             ...(findings ? { findings } : {}),
           }
         : run,
     };
   });
-  return applyLineupChildFinish(
-    withSubagentStatus(next, childId, subagentChipStatus(status)),
+  const finished = applyLineupChildFinish(
+    withSubagentStatus(next, childId, subagentChipStatus(rowStatus)),
     childId,
     report,
-    status,
+    rowStatus,
     now,
     extra?.correlationId,
+    settleError,
+    extra?.runStartedAt,
   );
+  return applyChildSettleNotice(finished, childId, rowStatus, settleError, now);
 }
 
 export function reconcileIdleChildren(sessions: Session[], parentId: string, now = Date.now()): Session[] {
@@ -533,23 +797,18 @@ export function reconcilePersistedLineups(sessions: Session[], now = Date.now(),
       row.status === "failed" &&
       (child.agentRun.status === "interrupted" || child.agentRun.status === "cancelled");
     if (row.status !== "queued" && row.status !== "running" && !legacyFailedRow) continue;
-    const rowStatus = child.agentRun.status === "completed"
-      ? "completed" as const
-      : child.agentRun.status === "timed-out"
-        ? "timed-out" as const
-        : child.agentRun.status === "cancelled"
-          ? "cancelled" as const
-          : child.agentRun.status === "interrupted"
-            // Not a failure and not still going: the wave stops waiting, and the
-            // row says the slice is unfinished so a join cannot claim it is done.
-            ? "interrupted" as const
-            : "failed" as const;
+    // Interrupted is not a failure and not still going: the wave stops waiting,
+    // and the row says the slice is unfinished so a join cannot claim it is done.
+    const rowStatus = lineupRowStatusForRun(child.agentRun.status);
     const report = childReportText(child);
     const lineup = setLineupRowStatus(parent!.lineup, child.id, rowStatus, {
       report,
       findings: childFindings(child),
       finishedAt: child.agentRun.finishedAt ?? now,
       correlationId: child.agentRun.correlationId,
+      // This is the one caller allowed to rewrite a settled word, and only to
+      // heal an old build's row against the run that is the fact.
+      heal: legacyFailedRow,
     });
     if (lineup !== parent!.lineup) {
       const messages = parent!.messages.map((message) =>
@@ -776,6 +1035,8 @@ export function applyLineupChildFinish(
   status: Exclude<DeskLineupRowStatus, "queued" | "running">,
   now = Date.now(),
   correlationId?: string,
+  error?: string,
+  runStartedAt?: number,
 ): Session[] {
   const child = sessions.find((session) => session.id === childId);
   const parentId = child?.parentId;
@@ -784,9 +1045,11 @@ export function applyLineupChildFinish(
     if (session.id !== parentId) return session;
     const lineup = setLineupRowStatus(session.lineup, childId, status, {
       report,
+      ...(status === "completed" ? {} : { error }),
       findings: childFindings(child),
       finishedAt: now,
       correlationId,
+      runStartedAt,
     });
     return lineup ? { ...session, lineup } : session;
   });
@@ -846,10 +1109,10 @@ export function missionRowStatus(
   const childRuns = child?.status === "running" || child?.agentRun?.status === "running";
   if (childRuns) return "running";
   const run = child?.agentRun?.status;
-  // A cancelled or interrupted worker wins over a stale running/failed row so
-  // the parent does not keep saying Working… or 1 failed after a stop.
-  if (run === "cancelled") return "cancelled";
-  if (run === "interrupted") return "interrupted";
+  // A run that has stopped wins over a stale row, so the parent does not keep
+  // saying Working… or 1 failed after a stop. This is the same reading
+  // `lineupSnapshot` publishes, so the two views cannot disagree.
+  if (run && run !== "running") return lineupRowStatusForRun(run);
   return row.status;
 }
 

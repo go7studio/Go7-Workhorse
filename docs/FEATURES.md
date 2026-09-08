@@ -201,6 +201,8 @@ When you add a feature, add it here in the same commit.
 - A reused worker starts a new slice count; billed usage for the chat is the
   lifetime total.
 - If the parent does the work itself, the run records that it took over.
+- A cancelled or failed worker still reports to its parent, in one line naming
+  the worker, what happened and why.
 - A worker gets short rules and only the tools it may call: read and ask chats,
   one bounded helper, raise a block, read skills and references. It creates,
   renames, moves and deletes nothing on the desk.

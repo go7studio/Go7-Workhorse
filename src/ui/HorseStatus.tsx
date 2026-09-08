@@ -1,4 +1,4 @@
-import { useId, type CSSProperties } from "react";
+import { type CSSProperties } from "react";
 import type { CrewDotKind } from "./ChatRow";
 
 
@@ -8,11 +8,10 @@ const labels: Record<CrewDotKind, string> = {
 
 /** A 3-by-3 mascot grid, omitting the bottom-right cell: it contains only a pixel sliver. */
 export function HorseStatus({ kind, ink }: { kind: CrewDotKind; ink?: string }) {
-  const id = useId();
-  const phase = Array.from(id).reduce((sum, char) => sum + char.charCodeAt(0), 0) * -113;
   return (
+    // No per-row phase offset: resting rows hold still, so there is no loop to stagger.
     <span className={`horse-status is-${kind}`} role="img" aria-label={labels[kind]} title={labels[kind]}
-      style={{ "--horse-vendor": ink || "var(--text-tertiary)", "--horse-phase": `${phase % 2600}ms` } as CSSProperties}>
+      style={{ "--horse-vendor": ink || "var(--text-tertiary)" } as CSSProperties}>
       <span className="horse-solid horse-fragment" aria-hidden="true" />
       {Array.from({ length: 8 }, (_, index) => {
         const col = index % 3;

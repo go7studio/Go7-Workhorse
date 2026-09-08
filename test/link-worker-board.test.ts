@@ -68,11 +68,18 @@ test("currentStep comes from the worker's own last step", () => {
   assert.equal(checkpoint.lastActivityAt, 2);
 });
 
-test("the handler only spends progress on running workers", () => {
+test("the handler dates every worker but only spends progress on a running one", () => {
   const helper = readFileSync(new URL("../electron/workhorse-mcp.ts", import.meta.url), "utf8");
   const at = helper.indexOf("A host monitoring its workers");
   assert.ok(at > 0, "the board lives in list_chats");
-  const block = helper.slice(at, at + 1_400);
-  assert.match(block, /if \(!row\.parentId \|\| row\.status !== "running"\) return base;/, "workers only, while running");
-  assert.match(block, /workerProgressCheckpoint\(live\)/);
+  const block = helper.slice(at, at + 1_800);
+  assert.match(block, /if \(!row\.parentId\) return base;/, "workers only");
+  // A finished worker gets the cheap clock the stale filter reads and returns
+  // before the checkpoint. Hundreds of them must not each build a report.
+  const guard = block.indexOf('if (row.status !== "running")');
+  const clock = block.indexOf("workerLastActivityAt(live)");
+  const checkpoint = block.indexOf("workerProgressCheckpoint(live)");
+  assert.ok(guard > 0, "the non-running rows are split off");
+  assert.ok(clock > guard, "every worker is dated");
+  assert.ok(checkpoint > clock, "the checkpoint is reached only once those rows have returned");
 });

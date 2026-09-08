@@ -7,7 +7,7 @@ import {
 } from "./plan";
 import { addLineupRow, lineupIsTerminal, maybeEnqueueLineupJoin } from "./lineup";
 import { formatAuditorPrompt, nextWorkerName, workerTaskTitle } from "./subagents";
-import type { PlanEvidence, PlanRun, ProviderId, Session } from "./types";
+import type { PlanEvidence, PlanRun, ProviderId, Session, UsageEvent } from "./types";
 
 export type AuditorCatalogRow = {
   provider: ProviderId;
@@ -117,9 +117,14 @@ export function joinAndAdmit(
   sessions: Session[],
   parentId: string,
   catalog: AuditorCatalogRow[],
-  ids: { childId: string; now?: number; workerName?: string },
+  ids: { childId: string; now?: number; workerName?: string; usage?: UsageEvent[] },
 ): PlanAuditorSpawn {
-  return applyPlanAuditorSpawn(maybeEnqueueLineupJoin(sessions, parentId, ids.now), parentId, catalog, ids);
+  return applyPlanAuditorSpawn(
+    maybeEnqueueLineupJoin(sessions, parentId, ids.now, ids.usage),
+    parentId,
+    catalog,
+    ids,
+  );
 }
 
 /**

@@ -109,21 +109,23 @@ calling Claude's model through ACP is the other direction and stays separate.
 }
 ```
 
-`protocolVersion` changes only when a listed tool's shape changes. `desk` is
-`offline` when no Workhorse window is running; reads still answer from the
-last saved state, delegation does not.
+`protocolVersion` changes only when a listed tool's shape breaks. A removed or
+renamed field bumps it, and so does a new required input. A new optional input
+or a new field in a reply does not, because a caller written against the old
+shape still works. `desk` is `offline` when no Workhorse window is running;
+reads still answer from the last saved state, delegation does not.
 
 ## The tools
 
 | Tool | Does | Changes the desk |
 | --- | --- | --- |
 | `workhorse_capabilities` | the contract above | no |
-| `workhorse_list_chats` | chats, compact by default (`id`, `title`, `worker`, `parentId`, `status`, `next`, `project`). `parents` omits workers. `full` adds preview and sidebar | no |
+| `workhorse_list_chats` | chats, compact by default (`id`, `title`, `worker`, `parentId`, `status`, `next`, `project`). Workers that finished over 24 hours ago are left out; `all` puts them back. `parents` omits workers. `full` adds preview and sidebar | no |
 | `workhorse_read_chat` | one chat's transcript | no |
 | `workhorse_query_capacity` | leftover and callability per bot; advisory | no |
 | `workhorse_delegate` | run one task through Workhorse as a worker; Workhorse picks the worker | yes |
 | `workhorse_continue_mission` | follow up: continue the wave a worker finished with only the remaining work; Workhorse keeps that pass's coordinating brain unless `initialBrain` changes it or `route` opts into routing | yes |
-| `workhorse_agent_status` | follow through on a worker or asked chat: `next` is wait, done, or failed; report when done | no |
+| `workhorse_agent_status` | follow through on a worker or asked chat: `next` is wait, done, or failed; report when done; `spend` on a worker the ledger has billed | no |
 | `workhorse_ask_chat` | a message to a live chat | yes |
 | `workhorse_local_hosts` | configured local inference hosts, without credentials | no |
 | `workhorse_local_capabilities` | typed capability and model-profile discovery | no |
@@ -253,6 +255,12 @@ The same loop for Claude, Codex, Grok, OpenClaw, and Hermes:
    `status`, and `next` (so Marlow is findable by name). Pass `parents` for
    parent chats only, `full` for preview. If several rows share a worker name,
    pass that row's `id`.
+
+   The default list is a board, not an archive. Every parent chat is on it, and
+   so is every worker that is running or finished within the last 24 hours. A
+   worker that finished before that is left out, because a desk weeks into its
+   work has hundreds of them and they push the live rows past the host cap.
+   Pass `all` to get them back.
 2. New slice: `workhorse_delegate`. `fromSessionId` is that parent, never the
    worker. Stop this turn. The desk joins the report into the parent chat.
    Named worker or live chat: `workhorse_ask_chat` with that row's `id`.
@@ -260,6 +268,27 @@ The same loop for Claude, Codex, Grok, OpenClaw, and Hermes:
    (`childSessionId` from ask or delegate). `next` is `wait`, `done`, or
    `failed`. When `done`, the report is that turn's reply, not an older
    message.
+
+   A worker also carries what it spent:
+
+   ```json
+   { "spend": { "tokens": 184320, "inputTokens": 141200, "outputTokens": 18120, "cachedTokens": 96400, "costUsd": 1.87 } }
+   ```
+
+   These are the desk's own billed numbers, the same ledger the chat spend
+   meter reads. `spend` is absent when the ledger holds nothing for that
+   worker. `costUsd` is there only when the desk knows the price: a vendor that
+   bills a flat plan reports tokens and no dollars, so read a missing `costUsd`
+   as unpriced, never as free. The join report the parent chat receives carries
+   the same line for each worker in the wave.
+
+   The same payload can also carry `usedTokens`. It is a different quantity and
+   the two must never be added. `usedTokens` is the worker's budget meter: it
+   counts fresh input growth plus output, and bills cache reads at 0.3 of a
+   fresh token, because it exists to brake a run. `spend.tokens` is the ledger
+   total for the same worker: input plus output plus cache writes, with cache
+   reads reported separately as `spend.cachedTokens`. Read `usedTokens` to see
+   how much of a budget is gone and `spend` to say what the slice cost.
 4. Remaining work: `workhorse_continue_mission`. It keeps the prior pass's
    coordinating vendor, model, and effort. Set `initialBrain` only to change
    that brain, or set `route` to opt back into automatic routing. Read:
@@ -312,6 +341,7 @@ workhorse capacity --callable
 workhorse chats
 workhorse chats --parents
 workhorse chats --full
+workhorse chats --all
 workhorse read <sessionId>
 workhorse ask --chat <sessionId> --message "Review this change" --key <idempotencyKey>
 workhorse delegate --chat <sessionId> --task "Review this change" --key <idempotencyKey>

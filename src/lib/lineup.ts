@@ -2,7 +2,8 @@ import { OBJECTIVE_ASK_RULE } from "./ask-default";
 import { enqueuePrompt } from "./chats";
 import { uid } from "./id";
 import { boundWorkerReport, crewHasParentTakeover, normalizeMissionIteration, normalizePathAllowlist, normalizeWorkerFindings, parseWorkerFindings, withSubagentStatus, workerNameFromTitle, workerTaskTitle } from "./subagents";
-import type { AgentRun, ChatMessage, DeskLineup, DeskLineupRow, DeskLineupRowStatus, MissionIteration, Session, WorkerFinding } from "./types";
+import type { AgentRun, ChatMessage, DeskLineup, DeskLineupRow, DeskLineupRowStatus, MissionIteration, Session, UsageEvent, WorkerFinding } from "./types";
+import { formatSpendLine, sessionSpend } from "./usage";
 import { isVendorEmptyReply, isVendorRateLimitError, vendorEmptyReply } from "./vendor-bridge";
 
 export const LINEUP_FINISHED_NOTICE = "All workers finished.";
@@ -235,7 +236,7 @@ export function markLineupNotified(lineup: DeskLineup, now = Date.now()): DeskLi
 
 export function lineupJoinPrompt(
   lineup: DeskLineup | undefined,
-  options?: { continuePlan?: boolean; parentTookOver?: boolean },
+  options?: { continuePlan?: boolean; parentTookOver?: boolean; usage?: UsageEvent[] },
 ): string {
   const user = lineup?.userText?.trim() || "(unknown)";
   const id = lineup?.id?.trim() || "(none)";
@@ -259,6 +260,8 @@ export function lineupJoinPrompt(
         ? `  kind=external  agent=${row.runtimeId ?? ""}/${row.agentId ?? ""}  correlation=${row.correlationId ?? ""}`
         : "";
     lines.push(`### ${index + 1}. ${row.title}  child=${row.childId}  status=${row.status}${extra}`);
+    // What the slice cost, so a parent can answer that without a second ledger.
+    if (options?.usage) lines.push(formatSpendLine(sessionSpend(options.usage, row.childId)));
     lines.push((row.report ?? "").trim() || "(no report)");
     if (row.findings?.length) lines.push(`findings: ${JSON.stringify(row.findings)}`);
     lines.push("");
@@ -502,7 +505,7 @@ export function reconcileIdleChildren(sessions: Session[], parentId: string, now
 }
 
 /** Repair interrupted persisted workers before any new runtime calls can start. */
-export function reconcilePersistedLineups(sessions: Session[], now = Date.now()): Session[] {
+export function reconcilePersistedLineups(sessions: Session[], now = Date.now(), usage?: UsageEvent[]): Session[] {
   const next = [...sessions];
   const indexes = new Map(next.map((session, index) => [session.id, index]));
   let changed = false;
@@ -561,7 +564,7 @@ export function reconcilePersistedLineups(sessions: Session[], now = Date.now())
   for (let index = 0; index < next.length; index += 1) {
     const parent = next[index]!;
     if (!parent.lineup) continue;
-    const reconciled = maybeEnqueueLineupJoin([parent], parent.id, now)[0]!;
+    const reconciled = maybeEnqueueLineupJoin([parent], parent.id, now, usage)[0]!;
     if (reconciled !== parent) {
       next[index] = reconciled;
       changed = true;
@@ -685,7 +688,12 @@ export function applyJoinRateLimitRetry(
   return queued ?? cleared;
 }
 
-export function maybeEnqueueLineupJoin(sessions: Session[], parentId: string, now = Date.now()): Session[] {
+export function maybeEnqueueLineupJoin(
+  sessions: Session[],
+  parentId: string,
+  now = Date.now(),
+  usage?: UsageEvent[],
+): Session[] {
   const parent = sessions.find((session) => session.id === parentId);
   if (!parent?.lineup || parent.lineup.notifiedAt || !lineupIsTerminal(parent.lineup)) return sessions;
   if (lineupJoinParentIsLive(parent.status) || !lineupJoinHasActionableRow(parent.lineup)) return sessions;
@@ -698,6 +706,7 @@ export function maybeEnqueueLineupJoin(sessions: Session[], parentId: string, no
     text: lineupJoinPrompt(parent.lineup, {
       continuePlan: parent.planRun?.status === "running",
       parentTookOver: crewHasParentTakeover(sessions, parentId),
+      ...(usage ? { usage } : {}),
     }),
     hideUser: true,
     joinAttempt: 1,

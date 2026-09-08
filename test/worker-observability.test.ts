@@ -12,11 +12,11 @@ import {
   workerProgressCheckpoint,
   workerStatusSnapshot,
 } from "../src/lib/subagents";
-import { addLineupRow, applyChildIdleSync, emptyLineup, formatAwaitAgentsSnapshot, lineupJoinPrompt, normalizeLineup } from "../src/lib/lineup";
+import { addLineupRow, applyChildIdleSync, emptyLineup, formatAwaitAgentsSnapshot, lineupJoinPrompt, maybeEnqueueLineupJoin, normalizeLineup } from "../src/lib/lineup";
 import { sessionTranscript } from "../src/lib/session-bridge";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-import type { Session } from "../src/lib/types";
+import type { Session, UsageEvent } from "../src/lib/types";
 
 function worker(overrides: Partial<Session> = {}): Session {
   return {
@@ -314,6 +314,135 @@ test("status tells a harness wait, done, or failed", () => {
   );
   assert.equal(empty.next, "failed");
   assert.equal(Object.prototype.hasOwnProperty.call(empty, "report"), false);
+});
+
+function usageEvent(overrides: Partial<UsageEvent> & { id: string; sessionId: string }): UsageEvent {
+  return {
+    at: 1787250125161,
+    provider: "custom",
+    model: "MiniMax-M3",
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+    ...overrides,
+  };
+}
+
+test("status reports what the worker spent, from the desk ledger", () => {
+  const usage = [
+    usageEvent({ id: "u1", sessionId: "kid_run", inputTokens: 100, outputTokens: 40, cacheReadTokens: 900, cacheWriteTokens: 10, costUsd: 0.25 }),
+    usageEvent({ id: "u2", sessionId: "kid_run", inputTokens: 20, outputTokens: 5, cacheReadTokens: 100, cacheWriteTokens: 0, costUsd: 0.5 }),
+    // Another worker's spend must not land on this one.
+    usageEvent({ id: "u3", sessionId: "kid_other", inputTokens: 9_000, outputTokens: 9_000, costUsd: 99 }),
+  ];
+  const snap = workerStatusSnapshot(worker({ status: "idle", agentRun: { status: "completed", startedAt: 1, finishedAt: 2, isolation: "shared" } }), { usage });
+  assert.deepEqual(snap.spend, {
+    tokens: 175,
+    inputTokens: 120,
+    outputTokens: 45,
+    cachedTokens: 1_000,
+    costUsd: 0.75,
+  });
+});
+
+test("a worker the ledger never billed reports no spend at all", () => {
+  const other = [usageEvent({ id: "u1", sessionId: "kid_other", inputTokens: 500, outputTokens: 20, costUsd: 4 })];
+  for (const usage of [undefined, [], other]) {
+    const snap = workerStatusSnapshot(worker(), usage === undefined ? undefined : { usage });
+    assert.equal(Object.prototype.hasOwnProperty.call(snap, "spend"), false);
+  }
+});
+
+test("an unpriced vendor reports tokens and omits costUsd, never zero", () => {
+  const usage = [
+    usageEvent({ id: "u1", sessionId: "kid_run", inputTokens: 300, outputTokens: 60, cacheReadTokens: 40 }),
+    usageEvent({ id: "u2", sessionId: "kid_run", inputTokens: 100, outputTokens: 10, cacheReadTokens: 0 }),
+  ];
+  const spend = workerStatusSnapshot(worker(), { usage }).spend as Record<string, unknown>;
+  assert.equal(spend.tokens, 470);
+  assert.equal(spend.cachedTokens, 40);
+  // A flat-plan vendor is unpriced, not free. $0.00 would read as a free slice.
+  assert.equal(Object.prototype.hasOwnProperty.call(spend, "costUsd"), false);
+  assert.notEqual(spend.costUsd, 0);
+});
+
+test("one priced event in a wave of unpriced ones still reports the dollars it knows", () => {
+  const usage = [
+    usageEvent({ id: "u1", sessionId: "kid_run", inputTokens: 100, outputTokens: 10 }),
+    usageEvent({ id: "u2", sessionId: "kid_run", inputTokens: 100, outputTokens: 10, costUsd: 0.02 }),
+  ];
+  assert.equal((workerStatusSnapshot(worker(), { usage }).spend as { costUsd?: number }).costUsd, 0.02);
+});
+
+test("the join report gives the parent one spend line per worker", () => {
+  const row = (childId: string, title: string) => ({
+    childId,
+    title,
+    slice: "report path",
+    folder: "/repo",
+    vendor: "Codex",
+    status: "completed" as const,
+    startedAt: 1,
+  });
+  const wave = addLineupRow(
+    addLineupRow(emptyLineup("/repo", 1, "Two slices"), row("kid_run", "Marlow · S4")),
+    row("kid_flat", "Wren · S5"),
+  );
+  const usage = [
+    usageEvent({ id: "u1", sessionId: "kid_run", inputTokens: 12_000, outputTokens: 3_000, cacheReadTokens: 400, costUsd: 1.87 }),
+    usageEvent({ id: "u2", sessionId: "kid_flat", inputTokens: 2_000, outputTokens: 400 }),
+  ];
+  const join = lineupJoinPrompt(wave, { usage });
+  assert.match(join, /child=kid_run\s+status=completed\nspend: 15k tokens · \$1\.87/);
+  assert.match(join, /child=kid_flat\s+status=completed\nspend: 2\.4k tokens · cost not recorded/);
+  // A worker the ledger never billed says so rather than claiming zero.
+  assert.match(lineupJoinPrompt(wave, { usage: [] }), /spend: not recorded/);
+  // No ledger passed, no spend lines: every existing caller reads as before.
+  assert.equal(lineupJoinPrompt(wave).includes("spend:"), false);
+});
+
+test("a join deferred because the parent was busy still names each worker's spend", () => {
+  // The common shape mid-wave: the crew finishes while the parent is still
+  // talking, so the join is not enqueued until the parent goes idle. That
+  // later call is the one most joins take.
+  const child = worker({ id: "kid_run", title: "S4 slice", status: "idle" });
+  const parent: Session = {
+    ...worker({ id: "orch", parentId: undefined, title: "Parent", status: "running", agentRun: undefined, messages: [] }),
+    lineup: addLineupRow(emptyLineup("/repo", 1), {
+      childId: child.id,
+      title: child.title,
+      slice: "S4 slice",
+      folder: "/repo",
+      vendor: "Codex",
+      status: "running",
+      startedAt: 1,
+    }),
+  };
+  const usage = [usageEvent({ id: "u1", sessionId: "kid_run", inputTokens: 12_000, outputTokens: 3_000, costUsd: 1.87 })];
+  const settled = applyChildIdleSync([parent, child], child.id, "completed", { now: 3, report: "Done." });
+
+  const whileLive = maybeEnqueueLineupJoin(settled, "orch", 4, usage);
+  const liveParent = whileLive.find((session) => session.id === "orch")!;
+  assert.equal(Boolean(liveParent.queue?.some((item) => item.joinAttempt === 1)), false, "a live parent is not interrupted");
+
+  const idle = whileLive.map((session) => (session.id === "orch" ? { ...session, status: "idle" as const } : session));
+  const joined = maybeEnqueueLineupJoin(idle, "orch", 5, usage);
+  const queued = joined.find((session) => session.id === "orch")!.queue?.find((item) => item.joinAttempt === 1);
+  assert.ok(queued, "the deferred join is queued once the parent goes idle");
+  assert.match(queued!.text, /child=kid_run\s+status=completed\nspend: 15k tokens · \$1\.87/);
+});
+
+test("a wave that was mid-flight when the desk closed joins on restart with its spend", () => {
+  const restart = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
+  // The restart join runs inside reconcilePersistedLineups, so the ledger has
+  // to be built before it, not after.
+  const ledger = restart.indexOf("const usage = [...backfillCursorUsage(");
+  const reconcile = restart.indexOf("reconcilePersistedLineups(normalizedSessions");
+  assert.ok(ledger > 0 && reconcile > ledger, "the ledger is ready before the lineups reconcile");
+  assert.match(restart.slice(reconcile, reconcile + 120), /reconcilePersistedLineups\(normalizedSessions, Date\.now\(\), usage\)/);
+  // And the deferred join in the child-settle path carries it too.
+  assert.match(restart, /maybeEnqueueLineupJoin\(sessions, finished\.id, Date\.now\(\), current\.usage\)/);
 });
 
 test("a checkpoint on a running worker keeps the original startedAt", () => {

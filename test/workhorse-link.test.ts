@@ -20,6 +20,7 @@ import {
   linkHandshake,
   linkHostCliArgs,
   formatLinkChatList,
+  LINK_STALE_WORKER_MS,
   linkHostConnectsByOneshot,
   linkWorkerIdFromReply,
 } from "../src/lib/workhorse-link";
@@ -468,6 +469,49 @@ test("Link chat list is compact by default so a 64 KB host cap does not clip it"
   assert.equal(full[0]?.preview, "x".repeat(160));
 });
 
+test("the default chat list drops finished workers older than a day, and only those", () => {
+  const now = Date.UTC(2026, 8, 8, 12, 0, 0);
+  const stale = now - LINK_STALE_WORKER_MS - 60_000;
+  const rows = [
+    { id: "sess_parent", title: "Workhorse Review", status: "idle" },
+    { id: "sess_stale_done", title: "Marlow · old slice", worker: "Marlow", parentId: "sess_parent", status: "completed", next: "done", lastActivityAt: stale },
+    { id: "sess_stale_failed", title: "Wren · old slice", worker: "Wren", parentId: "sess_parent", status: "failed", next: "failed", lastActivityAt: stale },
+    { id: "sess_stale_running", title: "Dexter · long slice", worker: "Dexter", parentId: "sess_parent", status: "running", next: "wait", lastActivityAt: stale },
+    { id: "sess_stale_queued", title: "Piper · waiting", worker: "Piper", parentId: "sess_parent", status: "queued", next: "wait", lastActivityAt: stale },
+    { id: "sess_fresh_done", title: "Wanda · this morning", worker: "Wanda", parentId: "sess_parent", status: "completed", next: "done", lastActivityAt: now - 60_000 },
+    { id: "sess_undated", title: "Nobody · no clock", worker: "Nobody", parentId: "sess_parent", status: "completed", next: "done" },
+  ];
+  const ids = (opts?: { all?: boolean; parents?: boolean }) =>
+    (JSON.parse(formatLinkChatList(rows, { ...opts, now })) as Array<{ id: string }>).map((row) => row.id);
+
+  // A finished worker from last week is history. Everything else is the board.
+  assert.deepEqual(ids(), [
+    "sess_parent",
+    "sess_stale_running",
+    "sess_stale_queued",
+    "sess_fresh_done",
+    "sess_undated",
+  ]);
+  assert.deepEqual(ids({ all: true }), rows.map((row) => row.id));
+  // The parent survives every combination, and `parents` still means no workers.
+  assert.deepEqual(ids({ parents: true }), ["sess_parent"]);
+});
+
+test("the stale filter reads the same clock the full list prints", () => {
+  const now = Date.UTC(2026, 8, 8, 12, 0, 0);
+  const rows = [
+    { id: "sess_parent", title: "Parent", status: "idle" },
+    { id: "sess_old", title: "Marlow", worker: "Marlow", parentId: "sess_parent", status: "completed", next: "done", lastActivityAt: now - LINK_STALE_WORKER_MS - 1 },
+    { id: "sess_edge", title: "Wren", worker: "Wren", parentId: "sess_parent", status: "completed", next: "done", lastActivityAt: now - LINK_STALE_WORKER_MS },
+  ];
+  // Exactly 24 hours old is still inside the window; a millisecond past is not.
+  const compact = JSON.parse(formatLinkChatList(rows, { now })) as Array<{ id: string; lastActivityAt?: number }>;
+  assert.deepEqual(compact.map((row) => row.id), ["sess_parent", "sess_edge"]);
+  assert.equal(compact[1]?.lastActivityAt, now - LINK_STALE_WORKER_MS);
+  const full = JSON.parse(formatLinkChatList(rows, { full: true, now })) as Array<{ id: string }>;
+  assert.deepEqual(full.map((row) => row.id), ["sess_parent", "sess_edge"]);
+});
+
 test("the CLI is the same handler: each subcommand maps to one tool call", () => {
   assert.deepEqual(linkCliCall(["capabilities", "--json"]), { name: "workhorse_capabilities", args: {} });
   assert.deepEqual(linkCliCall(["capacity", "--provider", "claude", "--callable"]), { name: "workhorse_query_capacity", args: { provider: "claude", callableOnly: true } });
@@ -475,6 +519,7 @@ test("the CLI is the same handler: each subcommand maps to one tool call", () =>
   assert.deepEqual(linkCliCall(["chats", "--parents"]), { name: "workhorse_list_chats", args: { parents: true } });
   assert.deepEqual(linkCliCall(["chats", "--full"]), { name: "workhorse_list_chats", args: { full: true } });
   assert.deepEqual(linkCliCall(["chats", "--parents", "--full"]), { name: "workhorse_list_chats", args: { parents: true, full: true } });
+  assert.deepEqual(linkCliCall(["chats", "--all"]), { name: "workhorse_list_chats", args: { all: true } });
   assert.deepEqual(linkCliCall(["read", "sess_1", "--limit", "12"]), { name: "workhorse_read_chat", args: { chat: "sess_1", limit: 12 } });
   assert.deepEqual(linkCliCall(["ask", "--chat", "sess_marlow", "--message", "Review this", "--key", "k8"]), {
     name: "workhorse_ask_chat",

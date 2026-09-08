@@ -166,7 +166,31 @@ export function linkHandshake(input: {
  * Default Link chat list: one compact object per row, no pretty-print, no
  * preview. Hosts clip tool output at 20–64 KB; 160-char previews blow that.
  * `full` restores the catalog row. `parents` drops workers (rows with a parent).
+ * `all` restores the finished workers the default list leaves out.
  */
+
+/** How long a finished worker stays in the default list. */
+export const LINK_STALE_WORKER_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * A worker that finished more than a day ago is history, not a board. Every
+ * finished worker from the last weeks listed beside the live ones is what took
+ * one real list to 142,986 characters, well past the 20–64 KB host caps. Only a
+ * worker row qualifies: a parent chat is never dropped, a running or queued one
+ * is never dropped, and a row the desk cannot date is never dropped either —
+ * an unknown age is not evidence of staleness.
+ *
+ * Live means the same thing here as in `workerFollowThrough`: running or queued.
+ */
+export function linkChatRowIsStaleWorker(
+  row: { parentId?: string; status: string; lastActivityAt?: number },
+  now: number,
+): boolean {
+  if (!row.parentId) return false;
+  if (row.status === "running" || row.status === "queued") return false;
+  if (typeof row.lastActivityAt !== "number") return false;
+  return now - row.lastActivityAt > LINK_STALE_WORKER_MS;
+}
 export type LinkChatListRow = {
   id: string;
   title: string;
@@ -177,6 +201,7 @@ export type LinkChatListRow = {
   project?: string | null;
   /** What a running worker is doing right now; absent once it is finished. */
   currentStep?: string;
+  /** When any worker last did something. Also the clock the stale filter reads. */
   lastActivityAt?: number;
 };
 
@@ -191,11 +216,14 @@ export function formatLinkChatList(
     projectName?: string | null;
     /** What a running worker is doing right now. Absent once it is finished. */
     currentStep?: string;
+    /** When this worker last did something. The stale filter reads it. */
     lastActivityAt?: number;
   }>,
-  opts?: { full?: boolean; parents?: boolean },
+  opts?: { full?: boolean; parents?: boolean; all?: boolean; now?: number },
 ): string {
-  const listed = opts?.parents ? rows.filter((row) => !row.parentId) : rows;
+  const now = opts?.now ?? Date.now();
+  const fresh = opts?.all ? rows : rows.filter((row) => !linkChatRowIsStaleWorker(row, now));
+  const listed = opts?.parents ? fresh.filter((row) => !row.parentId) : fresh;
   if (opts?.full) return JSON.stringify(listed);
   const compact: LinkChatListRow[] = listed.map((row) => ({
     id: row.id,

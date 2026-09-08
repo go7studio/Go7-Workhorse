@@ -16,8 +16,9 @@ When you add a feature, add it here in the same commit.
 - Stopped is a brief opposing vibration with the tiles suspended. Failure is a
   rocky collapse into a transparent loose pile at roughly 10% tile-edge overlap,
   a faint twitch, then reassembly.
-- Stopped and failed are terminal: each plays once and holds its last pose. Only
-  working and needs-you keep moving, so a desk of idle chats paints nothing.
+- Stopped and failed are terminal: each plays once and holds its last pose.
+- Only working and needs-you keep moving, and a chat at rest holds still, so a
+  desk of idle chats paints nothing.
 - Only the failed mound overlaps. Every other motion keeps the pieces separated.
 - Light and dark themes use contrasting silhouettes, Workhorse keeps its mascot
   colours, sidebar horses sit smaller than the header mark, and reduced-motion
@@ -249,9 +250,9 @@ When you add a feature, add it here in the same commit.
   only take image input.
 - Spawning a worker without a model, the desk ranks the slice and picks bot and
   effort.
-- A named model or bot is used as named, except a model that exists on more than
-  one vendor (Grok 4.6 on Grok Build and on Cursor), which still ranks those
-  vendors by leftover.
+- A named model or bot is used as named. The exception is a model that exists on
+  more than one vendor (Grok 4.6 on Grok Build and on Cursor), which still ranks
+  those vendors by leftover.
 - Naming the vendor locks that login, and a named vendor without a model still
   ranks that vendor's models.
 - Composer high, spawn `effort`, or "on high" in the ask stays on the worker.
@@ -260,8 +261,8 @@ When you add a feature, add it here in the same commit.
   bots, several independent reviews, or a named list.
 - Equal-intelligence picks go to the cheaper slot; a model with its own extra
   pool is kept for visual, creative or complex work.
-- A bot is local because of its address, not its name, so a model you named
-  yourself is still covered by Allow local models and is never paced against a
+- A bot is local because of its address, not its name. A model you named
+  yourself is still covered by Allow local models, and is never paced against a
   weekly gauge it does not have.
 - What a bot is good at stays what you told the desk. Costing nothing breaks a
   tie, and never buys work a model cannot do.

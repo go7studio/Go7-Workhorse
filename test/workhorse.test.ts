@@ -7204,11 +7204,12 @@ test("Goal state set pause resume clear maps to display actions", () => {
   assert.match(haltStore, /prepareVendorSend\(/);
   assert.match(haltStore, /appendUserMessage\(/);
   const haltAt = haltStore.indexOf("planHaltForward(");
-  const queueAt = haltStore.indexOf("!skipQueue && !options?.afterGoalHalt && !options?.steer");
+  const queueAt = haltStore.indexOf("shouldEnqueueInsteadOfLiveSend(");
   assert.ok(haltAt >= 0 && queueAt >= 0 && haltAt < queueAt, "pause must halt before a live turn can queue it");
   assert.match(haltStore, /haltPlan === "defer-until-cancelled-done"/);
   assert.match(haltStore, /afterGoalHalt: true/);
-  assert.match(haltStore, /!options\?\.afterGoalHalt && !options\?\.steer/);
+  assert.match(haltStore, /afterGoalHalt: options\?\.afterGoalHalt/);
+  assert.match(haltStore, /steer: options\?\.steer/);
   assert.match(haltStore, /vendorTerminalAction\(/);
   assert.match(haltStore, /consume-halt-then-forward/);
   const consumeAt = haltStore.indexOf('terminal === "consume-halt-then-forward"');
@@ -7621,7 +7622,7 @@ test("turns keep the bot that ran them after a switch", () => {
   const store = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
   assert.match(pane, /turn-who/);
   assert.match(pane, /brainCaption/);
-  assert.match(row, /background: ink/);
+  assert.match(row, /ink=\{ink \|\| `var\(--\$\{session\.provider\}\)`\}/);
   assert.match(store, /applySessionModelChange/);
   assert.match(readFileSync(path.join(ROOT, "src", "lib", "session.ts"), "utf8"), /stampUnstampedMessages\(session\.messages, brainStamp\(session\)\)/);
 });

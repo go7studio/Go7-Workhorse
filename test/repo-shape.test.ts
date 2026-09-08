@@ -188,6 +188,7 @@ const READS_THE_TREE_AS_TEXT = [
   "test/repo-shape.test.ts",
   "test/third-party-notices.test.ts",
   "test/workshop-never.test.ts", // never-list pins: reads Settings/preload/bridge as text
+  "test/horse-status.test.ts", // preview-gone and sidebar size pins: reads horse CSS/Settings as text
 ];
 
 /** A string literal that resolves into the product: `"../src/…"` or `"../electron/…"`. */

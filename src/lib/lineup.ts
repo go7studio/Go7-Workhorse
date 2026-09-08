@@ -3,7 +3,7 @@ import { enqueuePrompt } from "./chats";
 import { uid } from "./id";
 import { boundWorkerReport, crewHasParentTakeover, normalizeMissionIteration, normalizePathAllowlist, normalizeWorkerFindings, parseWorkerFindings, withSubagentStatus, workerNameFromTitle, workerTaskTitle } from "./subagents";
 import type { AgentRun, ChatMessage, DeskLineup, DeskLineupRow, DeskLineupRowStatus, MissionIteration, Session, WorkerFinding } from "./types";
-import { isVendorRateLimitError } from "./vendor-bridge";
+import { isVendorEmptyReply, isVendorRateLimitError, vendorEmptyReply } from "./vendor-bridge";
 
 export const LINEUP_FINISHED_NOTICE = "All workers finished.";
 
@@ -343,21 +343,63 @@ export function stripSafetyPauseNotice(text: string): string {
   return text.replace(/\n*Workhorse paused[\s\S]*$/i, "").trimEnd();
 }
 
+/**
+ * The turn now being answered: everything after the last thing that was asked.
+ *
+ * A report belongs to the pass that produced it. Reading the whole transcript
+ * backwards for the last assistant message with text meant a pass that said
+ * nothing quietly inherited the previous pass's report — seen on a mission
+ * continuation, where the desk handed back the earlier pass's report and
+ * findings as though the new one had done the work.
+ */
+export function messagesInThisTurn(
+  messages: ReadonlyArray<Pick<ChatMessage, "role" | "text" | "kind">>,
+): ReadonlyArray<Pick<ChatMessage, "role" | "text" | "kind">> {
+  let asked = -1;
+  for (let at = messages.length - 1; at >= 0; at -= 1) {
+    if (messages[at].role === "user") {
+      asked = at;
+      break;
+    }
+  }
+  return asked < 0 ? messages : messages.slice(asked + 1);
+}
+
+function lastSpokenInTurn(
+  session: Pick<Session, "messages"> | undefined,
+): Pick<ChatMessage, "role" | "text" | "kind"> | undefined {
+  return [...messagesInThisTurn(session?.messages ?? [])]
+    .reverse()
+    .find((message) => message.role === "assistant" && message.text.trim());
+}
+
+/**
+ * The turn produced nothing at all: no prose, no thinking, no tool call. A
+ * turn that worked and wrote no prose is not this — the desk has always
+ * treated that as a finished turn — and neither is the desk's own placeholder
+ * for a vendor that said nothing.
+ */
+export function childTurnSaidNothing(session: Pick<Session, "messages"> | undefined): boolean {
+  const turn = messagesInThisTurn(session?.messages ?? []);
+  if (turn.length === 0) return false;
+  return !turn.some((message) => {
+    if (message.kind === "thought" || message.kind === "tool") return true;
+    const text = message.text.trim();
+    return message.role === "assistant" && Boolean(text) && !isVendorEmptyReply(text);
+  });
+}
+
 function childFindings(session: Pick<Session, "messages" | "agentRun"> | undefined): WorkerFinding[] | undefined {
   const persisted = normalizeWorkerFindings(session?.agentRun?.findings);
   if (persisted) return persisted;
-  const last = [...(session?.messages ?? [])]
-    .reverse()
-    .find((message) => message.role === "assistant" && message.text.trim());
+  const last = lastSpokenInTurn(session);
   if (!last) return undefined;
   const parsed = parseWorkerFindings(stripSafetyPauseNotice(last.text));
   return parsed.length > 0 ? parsed : undefined;
 }
 
 export function childReportText(session: (Pick<Session, "messages"> & Partial<Pick<Session, "id">>) | undefined): string {
-  const last = [...(session?.messages ?? [])]
-    .reverse()
-    .find((message) => message.role === "assistant" && message.text.trim());
+  const last = lastSpokenInTurn(session);
   if (!last) return "";
   const raw = stripSafetyPauseNotice(last.text.trim());
   return boundWorkerReport(raw, { workerId: session?.id ?? "(worker id)" }).report;
@@ -399,7 +441,14 @@ export function applyChildIdleSync(
   if (extra?.correlationId && child?.agentRun?.correlationId !== extra.correlationId) return sessions;
   const report = (extra?.report ?? childReportText(child)).trim();
   const findings = childFindings(child);
-  const nextStatus = agentStatusForRow(status);
+  // A pass that produced nothing is not a finished pass. It was recorded
+  // `completed` with no error, and because the report came from further back
+  // in the transcript it read exactly like the previous pass succeeding.
+  const saidNothing = status === "completed" && childTurnSaidNothing(child);
+  const nextStatus = saidNothing ? "failed" : agentStatusForRow(status);
+  const emptyTurnError = saidNothing
+    ? vendorEmptyReply(child?.provider ?? "custom")
+    : undefined;
   const next = sessions.map((session) => {
     if (session.id !== childId) return session;
     const run = session.agentRun;
@@ -417,6 +466,7 @@ export function applyChildIdleSync(
             status: alreadyDone ? run.status : nextStatus,
             finishedAt: run.finishedAt ?? now,
             ...(extra?.error && !alreadyDone ? { error: extra.error } : {}),
+            ...(emptyTurnError && !alreadyDone && !extra?.error ? { error: emptyTurnError } : {}),
             ...(findings ? { findings } : {}),
           }
         : run,

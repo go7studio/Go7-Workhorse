@@ -82,6 +82,10 @@ dmg, each marked latest, each broken for half the people who downloaded it.
 Run the Release workflow by hand to get installers to test. They attach to the
 run, so testing costs no version number and publishes nothing.
 
+CI runs once per change. A branch with a pull request open is covered by the
+pull-request event alone, and a new push cancels the run the last push started,
+so only the commit you are looking at is still using a runner.
+
 ## Try and ship
 
 **Try** is how you see a change in a live window without cutting a version.

@@ -83,8 +83,10 @@ Run the Release workflow by hand to get installers to test. They attach to the
 run, so testing costs no version number and publishes nothing.
 
 CI runs once per change. A branch with a pull request open is covered by the
-pull-request event alone, and a new push cancels the run the last push started,
-so only the commit you are looking at is still using a runner.
+pull-request event alone, and a new push there cancels the run the last push
+started, so only the commit you are looking at is still using a runner. A run on
+main always finishes, because branch protection asks each commit on main for its
+own answer.
 
 ## Try and ship
 

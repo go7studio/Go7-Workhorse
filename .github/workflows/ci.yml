@@ -14,11 +14,18 @@ on:
   pull_request:
   workflow_dispatch:
 
-# A second push supersedes the first, so the first run is answering a question
-# nobody is asking any more. Cancel it and take the queue back.
+# A second push to a pull request supersedes the first, so the first run is
+# answering a question nobody is asking any more. Cancel it and take the queue
+# back.
+#
+# Only for a pull request. On main the group falls back to the ref, so two
+# merges close together would cancel the first commit's run and leave that
+# commit with no completed CI status. Branch protection requires those checks,
+# and a commit on main has to keep its own answer. workflow_dispatch is asked
+# for by hand, so it finishes too.
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read

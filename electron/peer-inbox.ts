@@ -193,14 +193,44 @@ export function bridgeRecordPath(statePath: string): string {
   return path.join(path.dirname(statePath), "workhorse-bridge.json");
 }
 
-export function writeBridgeRecord(statePath: string, info: { url: string; token: string }): BridgeRecord {
+/** The record holds the bridge bearer token, so it is owner-only like the other secrets beside the state file. */
+export const BRIDGE_RECORD_MODE = 0o600;
+
+export type BridgeRecordIo = {
+  mkdirSync(dir: string): void;
+  writeFileSync(file: string, data: string, mode: number): void;
+  chmodSync(file: string, mode: number): void;
+};
+
+function defaultBridgeRecordIo(): BridgeRecordIo {
+  return {
+    mkdirSync: (dir) => {
+      fs.mkdirSync(dir, { recursive: true });
+    },
+    writeFileSync: (file, data, mode) => fs.writeFileSync(file, data, { encoding: "utf8", mode }),
+    chmodSync: (file, mode) => fs.chmodSync(file, mode),
+  };
+}
+
+export function writeBridgeRecord(
+  statePath: string,
+  info: { url: string; token: string },
+  io: BridgeRecordIo = defaultBridgeRecordIo(),
+): BridgeRecord {
   const record: BridgeRecord = {
     url: info.url,
     token: info.token,
     inbox: inboxDirFor(statePath),
   };
-  fs.mkdirSync(record.inbox, { recursive: true });
-  fs.writeFileSync(bridgeRecordPath(statePath), JSON.stringify(record, null, 2), "utf8");
+  const file = bridgeRecordPath(statePath);
+  io.mkdirSync(record.inbox);
+  io.writeFileSync(file, JSON.stringify(record, null, 2), BRIDGE_RECORD_MODE);
+  try {
+    // A write only sets the mode on a new file, so repair a file an older build left at 0644.
+    io.chmodSync(file, BRIDGE_RECORD_MODE);
+  } catch {
+    /* Windows has no POSIX mode, so the chmod is a no-op there. */
+  }
   return record;
 }
 

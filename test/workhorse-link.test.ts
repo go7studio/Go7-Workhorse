@@ -30,6 +30,7 @@ import { handleWorkhorseRpc, linkCliCall, setInboundLearningSink, setLocalCapabi
 import type { LocalCapabilityHostClient } from "../electron/local-capability-host";
 import type { InboundLearningDraft } from "../src/lib/learning-inbound";
 import { installReportMessage, installWorkhorseLink, workhorseLinkGenericConfig, workhorseLinkGrokBotOneshot, type InstallIo } from "../electron/mcp-install";
+import { BRIDGE_RECORD_MODE, bridgeRecordPath, readBridgeRecord, writeBridgeRecord, type BridgeRecordIo } from "../electron/peer-inbox";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const LAUNCH = { command: "/Applications/Go7 Workhorse.app/Contents/MacOS/Go7 Workhorse", script: "/app/workhorse-mcp.js", statePath: "/state/workhorse-state.json" };
@@ -1425,4 +1426,63 @@ test("the live Link iteration smoke is opt-in and covers goal, loop, mission, an
   assert.match(smoke, /workhorse_agent_status/);
   assert.match(smoke, /workhorse_continue_mission/);
   assert.doesNotMatch(smoke, /wait:\s*true/);
+});
+
+// Node reports file modes differently on Windows, so the mode assertions below skip there.
+const MODES_ARE_REAL = process.platform !== "win32";
+
+test("the bridge record carrying the bearer token is written owner-only", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "wh-bridge-mode-"));
+  try {
+    const statePath = path.join(dir, "workhorse-state.json");
+    const record = writeBridgeRecord(statePath, { url: "http://127.0.0.1:8123", token: "bridge-token" });
+    const file = bridgeRecordPath(statePath);
+    assert.equal(file, path.join(dir, "workhorse-bridge.json"));
+    if (MODES_ARE_REAL) assert.equal(statSync(file).mode & 0o777, BRIDGE_RECORD_MODE);
+    assert.deepEqual(JSON.parse(readFileSync(file, "utf8")), {
+      url: "http://127.0.0.1:8123",
+      token: "bridge-token",
+      inbox: path.join(dir, "peer-inbox"),
+    });
+    assert.deepEqual(readBridgeRecord(statePath), record);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a bridge record an older build left world-readable is repaired on the next write", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "wh-bridge-repair-"));
+  try {
+    const statePath = path.join(dir, "workhorse-state.json");
+    const file = bridgeRecordPath(statePath);
+    writeFileSync(file, JSON.stringify({ url: "http://127.0.0.1:1", token: "stale", inbox: dir }, null, 2), { mode: 0o644 });
+    chmodSync(file, 0o644);
+    if (MODES_ARE_REAL) assert.equal(statSync(file).mode & 0o777, 0o644);
+    writeBridgeRecord(statePath, { url: "http://127.0.0.1:8123", token: "fresh-token" });
+    if (MODES_ARE_REAL) assert.equal(statSync(file).mode & 0o777, BRIDGE_RECORD_MODE);
+    assert.deepEqual(JSON.parse(readFileSync(file, "utf8")), {
+      url: "http://127.0.0.1:8123",
+      token: "fresh-token",
+      inbox: path.join(dir, "peer-inbox"),
+    });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("writeBridgeRecord asks for 0600 on the write and chmods the file after it", () => {
+  const calls: string[] = [];
+  const io: BridgeRecordIo = {
+    mkdirSync: (target) => calls.push(`mkdir:${path.basename(target)}`),
+    writeFileSync: (file, data, mode) => calls.push(`write:${path.basename(file)}:${mode.toString(8)}:${data.length > 0}`),
+    chmodSync: (file, mode) => calls.push(`chmod:${path.basename(file)}:${mode.toString(8)}`),
+  };
+  const record = writeBridgeRecord(path.join("/desk", "workhorse-state.json"), { url: "http://127.0.0.1:9", token: "t" }, io);
+  assert.deepEqual(calls, [
+    "mkdir:peer-inbox",
+    "write:workhorse-bridge.json:600:true",
+    "chmod:workhorse-bridge.json:600",
+  ]);
+  assert.equal(record.url, "http://127.0.0.1:9");
+  assert.equal(record.token, "t");
 });

@@ -181,16 +181,16 @@ On a Mac, that writes a dmg and a zip per architecture — `release/Go7-Workhors
 
 macOS approval belongs to the signed app identity. One allow sticks across updates with the same bundle ID and Team ID. Local builds cannot open the installed app's vault. Windows keeps the same app identity and encrypted user vault across updates.
 
-## How to use the scaffold
+## How to use
 
-1. **New project** — give it a name. No folder required.
-2. **Chat** from that project, or **New chat** from the welcome screen (creates an Untitled project).
-3. **Link folder** or **Add reference** when you want files, URLs, or notes on the project. Several folders are allowed.
-4. **New chat** starts with the last model. Change vendor, model, and brain level from the menu on the composer.
-5. **Talk** — Grok, Claude, Codex, and Cursor run live. Custom uses the HTTP bot you created.
-6. **Type `/`** — command palette. `/providers` goes back to this project’s home. `/settings` opens Profile, connected LLMs, skills, workshop, routing, learning, usage, and watch.
-7. **`/demo-permission`** — shows Allow once / Allow for session / Deny.
-8. **Review / Terminal** — inspect the real Git working tree or open a shell scoped to this chat's local folder or worktree.
+1. **New project.** Give it a name. No folder required.
+2. **New chat.** Start one from that project, or from the welcome screen, which creates an Untitled project.
+3. **Pick a bot.** Vendor, model, and thinking effort sit on the composer. A new chat starts on the last one you used.
+4. **Link folder.** Point the project at real files. **Add reference** adds URLs or notes. Several folders are allowed.
+5. **Type `/`** for the command palette. `/new` goes back to this project’s home, `/model` switches model, and `/demo-permission` shows Allow once, Allow for session, and Deny.
+6. **Review and Terminal.** Review opens the real Git working tree. Terminal opens a shell in this chat's folder or worktree.
+7. **`/settings`** opens Profile, LLMs, Skills, Workshop, Routing, Learning, Usage, and Watch.
+8. **Missions.** Two pins sit on the composer. Orchestrate tells this chat it is the orchestrator and must spawn desk workers. Mission is mission-board tracking for an adaptive loop.
 
 ## Layout
 

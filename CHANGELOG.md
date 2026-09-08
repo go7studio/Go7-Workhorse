@@ -8,6 +8,19 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.6.69](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.68...v0.6.69) (2026-09-08)
+
+
+### Features
+
+* live crew horses, one-at-a-time queue, Cursor Fable spawn ([#291](https://github.com/go7studio/Go7-Workhorse/issues/291)) ([50491a0](https://github.com/go7studio/Go7-Workhorse/commit/50491a086599ede0d8ef676560be33d71970b7af))
+
+
+### Bug Fixes
+
+* **claude-meter:** key the cached plan by the credential that fetched it ([8ee5286](https://github.com/go7studio/Go7-Workhorse/commit/8ee528630d5cf95dbe81e572954c79ccf6fd804b))
+* **llms:** the desk notices a dead Claude login on its own, and remembers it ([53ed706](https://github.com/go7studio/Go7-Workhorse/commit/53ed7061c231bef3e69f839eef3b86a455c11f57))
+
 ## [0.6.68](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.67...v0.6.68) (2026-09-07)
 
 

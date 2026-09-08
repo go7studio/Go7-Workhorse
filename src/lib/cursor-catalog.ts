@@ -69,6 +69,11 @@ export function familyDisplayName(name: string, family: string): string {
     .replace(/\bMedium\b/gi, " ")
     .replace(/\bLow\b/gi, " ")
     .replace(/\bMax\b/gi, " ")
+    // Cursor spells the no-reasoning variant into the name it reports, so the
+    // desk read "GPT-5.5 None". It is an effort like the rest, not part of the
+    // model's name. `minimal` is the same variant under its other spelling.
+    .replace(/\bNone\b/gi, " ")
+    .replace(/\bMinimal\b/gi, " ")
     .replace(/\s+/g, " ")
     .trim();
   return cleaned || family;

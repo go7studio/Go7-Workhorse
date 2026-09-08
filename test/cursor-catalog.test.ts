@@ -7,6 +7,7 @@ import {
   collapseCursorCatalog,
   cursorFamilyId,
   cursorSlugForEffort,
+  familyDisplayName,
   isCursorAutoModel,
   parseCursorModelsOutput,
   parseCursorVariant,
@@ -93,6 +94,32 @@ test("the checked-in cursor-agent models fixture parses as identity, 204 ids, 20
   assert.equal(opus.contextWindow, CURSOR_DEFAULT_WINDOW);
   assert.match(opus.name, /Claude Opus 5/);
   assert.doesNotMatch(opus.name, /1M/);
+});
+
+test("a reasoning variant of none is an effort, not part of the model's name", () => {
+  // Cursor lists the no-reasoning variant first for several families, so the
+  // family base took its name and the desk read "GPT-5.5 None".
+  assert.equal(familyDisplayName("GPT-5.5 None", "gpt-5.5"), "GPT-5.5");
+  assert.equal(familyDisplayName("GPT-5.6 Terra None", "gpt-5.6-terra"), "GPT-5.6 Terra");
+  assert.equal(familyDisplayName("GPT-5.4 Mini None", "gpt-5.4-mini"), "GPT-5.4 Mini");
+  assert.equal(parseCursorVariant("gpt-5.5-none", "GPT-5.5 1M None").name, "GPT-5.5");
+  assert.equal(parseCursorVariant("gpt-5.5-none", "GPT-5.5 1M None").effort, "none");
+
+  const listed = fixtureRows();
+  assert.ok(
+    listed.some((row) => /\bNone\b/i.test(row.name)),
+    "fixture still lists a name that carries the word None",
+  );
+  assert.ok(
+    listed.some((row) => /\bMinimal\b/i.test(row.name)),
+    "fixture still lists a name that carries the word Minimal",
+  );
+  const bases = fixtureBases();
+  const stray = bases.filter((row) => /\b(?:None|Minimal)\b/i.test(row.name));
+  assert.deepEqual(stray, [], `family names must not carry a reasoning variant: ${stray.map((row) => row.name).join(", ")}`);
+  assert.equal(bases.find((row) => row.id === "gpt-5.5")?.name, "GPT-5.5");
+  assert.equal(bases.find((row) => row.id === "gpt-5.4-mini")?.name, "GPT-5.4 Mini");
+  assert.equal(bases.find((row) => row.id === "gemini-3.6-flash")?.name, "Gemini 3.6 Flash");
 });
 
 test("collapse yields family bases with effort and fast as fields, not extra rows", () => {

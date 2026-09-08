@@ -8182,14 +8182,30 @@ test("isVendorRefusalEnvelope treats the envelope as the entire reply, not a quo
   const leading = "Sure, here is the error envelope from earlier: " + onlyEnvelope;
   assert.equal(isVendorRefusalEnvelope(leading), false);
 
-  // Multiple leading vendor diagnostic lines are still part of the refusal.
-  const multiDiagnostic =
-    "Warning: model unknown\nError: not served\n\n" + onlyEnvelope;
+  // Multiple leading Warning lines are still part of the refusal: that is
+  // what the adapter prints.
+  const multiWarning =
+    "Warning: model unknown\nWarning: falling back\n\n" + onlyEnvelope;
   assert.equal(
-    isVendorRefusalEnvelope(multiDiagnostic),
+    isVendorRefusalEnvelope(multiWarning),
     true,
-    "leading diagnostic lines are vendor output, not model prose",
+    "the adapter's own diagnostics above its envelope are vendor output",
   );
+
+  // A fourth reviewer's finding: the allowlist used to accept any line
+  // starting Note/Info/Hint/Notice/Failed/Error/Deprecated as a vendor's,
+  // so a model that explained an error and then quoted it had its work
+  // thrown away. Only the adapter's Warning line counts. When the two are
+  // indistinguishable the turn stands: a refusal wrongly called a success
+  // is one bad row, a good answer wrongly called a refusal loses work the
+  // person watched happen.
+  for (const marker of ["Note", "Info", "Hint", "Notice", "Failed", "Error", "Deprecated"]) {
+    assert.equal(
+      isVendorRefusalEnvelope(`${marker}: Codex returned this for a bad model id.\n${onlyEnvelope}`),
+      false,
+      `a model's own "${marker}:" line is prose, not a vendor diagnostic`,
+    );
+  }
 
   // A diagnostic line followed by a sentence of the model's prose is NOT
   // a refusal — the second line is the model speaking, not the adapter.

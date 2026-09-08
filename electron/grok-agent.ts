@@ -132,12 +132,18 @@ const VENDOR_USER_INTERRUPTION_STOP_REASONS = new Set([
 ]);
 
 /**
- * Lines that the Codex / ACP adapter prints above its JSON envelope when the
- * diagnostic was a vendor warning or error. The visible reply of a refusal
- * can legitimately lead with one or more of these lines — they are the
- * vendor's own diagnostics, not the model's prose.
+ * Lines the adapter prints above its JSON envelope. The visible reply of a
+ * refusal can lead with one of these — they are the vendor's own diagnostic,
+ * not the model's prose.
+ *
+ * Only "Warning:" counts, because only that is what the adapter emits. A
+ * wider list read a model's own "Note:" or "Info:" line as a vendor's, so an
+ * answer that explained an error and then quoted it failed the run. When the
+ * two are indistinguishable the honest choice is to let the turn stand: a
+ * refusal wrongly called a success is one bad row, a good answer wrongly
+ * called a refusal throws away work the person watched happen.
  */
-const VENDOR_DIAGNOSTIC_LINE_PATTERN = /^\s*(Warning|Error|Info|Note|Hint|Deprecated|Failed|Notice)\s*:/;
+const VENDOR_DIAGNOSTIC_LINE_PATTERN = /^\s*Warning\s*:/;
 
 function isVendorDiagnosticPrefix(prefix: string): boolean {
   if (!prefix) return true;

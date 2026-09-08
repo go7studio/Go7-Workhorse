@@ -2074,6 +2074,24 @@ function usageBucketKey(event: UsageEvent): string | undefined {
 }
 
 /**
+ * Every event pair the collapse looks at, counted. The invariant this exists to
+ * hold is a complexity class — "linear in the number of events", per
+ * docs/PERFORMANCE.md — and a class is a count, not a duration. The budget used
+ * to be milliseconds, which on a loaded runner is a statement about the runner.
+ * A cross product examines n²/2 pairs; the bucketed sweep examines a bounded
+ * multiple of n, and that gap is wide enough to read off the counter.
+ *
+ * One integer add per window step. Nothing here changes what the collapse
+ * returns; `usageCollapseWork()` is read only by test/performance.test.ts.
+ */
+let usageCollapseSteps = 0;
+
+/** Window steps taken since the process started. Tests read the delta across one call. */
+export function usageCollapseWork(): number {
+  return usageCollapseSteps;
+}
+
+/**
  * One turn reported twice: a later entry in the same session with the same
  * four buckets, within two seconds. "Later" is position in `events`, not clock
  * time — the log is stored newest first, and the trailing copy is the keeper.
@@ -2103,15 +2121,19 @@ function doubleReportedIds(events: UsageEvent[]): Set<string> {
     let start = 0;
     let end = 0;
     for (let cursor = 0; cursor < bucket.length; cursor += 1) {
+      usageCollapseSteps += 1;
       const at = events[bucket[cursor]!]!.at;
       while (end < bucket.length && events[bucket[end]!]!.at <= at + DUPLICATE_TURN_MS) {
         while (newestFirst.length > front && bucket[newestFirst[newestFirst.length - 1]!]! < bucket[end]!) {
+          usageCollapseSteps += 1;
           newestFirst.pop();
         }
+        usageCollapseSteps += 1;
         newestFirst.push(end);
         end += 1;
       }
       while (events[bucket[start]!]!.at < at - DUPLICATE_TURN_MS) {
+        usageCollapseSteps += 1;
         if (newestFirst[front] === start) front += 1;
         start += 1;
       }
@@ -2149,9 +2171,16 @@ function cacheShadowedIds(events: UsageEvent[]): Set<string> {
     let start = 0;
     let end = 0;
     for (const snapshot of lane.snapshots) {
-      while (end < lane.cached.length && lane.cached[end]!.at <= snapshot.at + CACHED_SIBLING_MS) end += 1;
-      while (start < end && lane.cached[start]!.at < snapshot.at - CACHED_SIBLING_MS) start += 1;
+      while (end < lane.cached.length && lane.cached[end]!.at <= snapshot.at + CACHED_SIBLING_MS) {
+        usageCollapseSteps += 1;
+        end += 1;
+      }
+      while (start < end && lane.cached[start]!.at < snapshot.at - CACHED_SIBLING_MS) {
+        usageCollapseSteps += 1;
+        start += 1;
+      }
       for (let cursor = start; cursor < end; cursor += 1) {
+        usageCollapseSteps += 1;
         const sibling = lane.cached[cursor]!;
         if (
           sibling.id !== snapshot.id &&

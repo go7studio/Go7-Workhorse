@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import https from "node:https";
@@ -361,6 +362,7 @@ export function parseClaudePlanUsage(raw: unknown): ClaudePlanUsage | undefined 
   };
 }
 
+type NodeGetJson = (url: string, headers: Record<string, string>) => Promise<{ status: number; json: unknown }>;
 function nodeGetJson(url: string, headers: Record<string, string>): Promise<{ status: number; json: unknown }> {
   return new Promise((resolve, reject) => {
     const req = https.get(url, { headers }, (res) => {
@@ -379,8 +381,28 @@ function nodeGetJson(url: string, headers: Record<string, string>): Promise<{ st
   });
 }
 
-let cachedPlan: { at: number; plan: ClaudePlanUsage | undefined } | null = null;
+/**
+ * Per-credential cache of the last successful plan. Keyed by a SHA-256
+ * prefix of the token that fetched it, never by the token itself: the key
+ * distinguishes one login from another without putting the credential on
+ * the heap or in a thrown error. A 429 fallback and a successful fetch
+ * both pass through the same age check, so a stale entry never survives
+ * the cache window even when the API is rate-limiting.
+ */
+type CachedClaudePlan = { at: number; plan: ClaudePlanUsage };
+let cachedPlans: Record<string, CachedClaudePlan> = {};
 const CACHE_MS = 180_000;
+
+function claudePlanCacheKey(token: string): string {
+  // A SHA-256 prefix is enough to distinguish one login from another; the
+  // token itself never appears in the cache, in logs, or in thrown errors.
+  return createHash("sha256").update(token).digest("hex").slice(0, 16);
+}
+
+/** Tests reset the cache between cases so a real fetch never leaks across runs. */
+export function clearClaudePlanCache(): void {
+  cachedPlans = {};
+}
 
 /**
  * What the usage ring's own answer says about the login behind it.
@@ -399,6 +421,8 @@ export function judgeClaudeRingStatus(status: number, token: string | null = nul
 export async function fetchClaudePlanUsage(input?: ClaudePlanTokenInput & {
   fetchImpl?: typeof fetch;
   token?: string;
+  /** Tests inject a transport to exercise the cache path without a real socket. */
+  nodeGet?: NodeGetJson;
 }): Promise<ClaudePlanUsage | undefined> {
   try {
     const token = input?.token?.trim() || (await resolveClaudePlanToken(input));
@@ -421,13 +445,24 @@ export async function fetchClaudePlanUsage(input?: ClaudePlanTokenInput & {
       judgeClaudeRingStatus(response.status, token);
       return parseClaudePlanUsage(await response.json());
     }
-    if (cachedPlan && Date.now() - cachedPlan.at < CACHE_MS) return cachedPlan.plan;
-    const { status, json } = await nodeGetJson("https://api.anthropic.com/api/oauth/usage", headers);
-    if (status === 429 && cachedPlan?.plan) return cachedPlan.plan;
+    // A real fetch with a cached undefined from a previous call would silently
+    // shadow every retry for 180s and strand the ring on "unknown" while the
+    // login behind it still works. Cache only what we can actually answer with,
+    // keyed by the login that fetched it, so a second Claude login does not
+    // get served the first login's reading.
+    const cacheKey = claudePlanCacheKey(token);
+    const now = Date.now();
+    const cached = cachedPlans[cacheKey];
+    if (cached && now - cached.at < CACHE_MS) return cached.plan;
+    const { status, json } = await (input?.nodeGet ?? nodeGetJson)("https://api.anthropic.com/api/oauth/usage", headers);
+    // Apply the same age check to the 429 fallback as to a fresh read: a
+    // stale cached plan must not survive a rate-limit just because the
+    // request itself returned 429 instead of going to the wire.
+    if (status === 429 && cached && now - cached.at < CACHE_MS) return cached.plan;
     judgeClaudeRingStatus(status, token);
     if (status < 200 || status >= 300) return undefined;
     const plan = parseClaudePlanUsage(json);
-    cachedPlan = { at: Date.now(), plan };
+    if (plan) cachedPlans[cacheKey] = { at: now, plan };
     return plan;
   } catch {
     return undefined;

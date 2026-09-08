@@ -24,6 +24,7 @@ import {
   parseVendorErrorEnvelope,
   partitionAcpBatch,
   redactVendorRefusal,
+  truncateForReason,
   parseGrokUsage,
   parseRewindPoints,
   pickPermissionOptionId,
@@ -8139,6 +8140,227 @@ test("redactVendorRefusal produces a short, bounded, structured reason from the 
   const prose = "x".repeat(5_000);
   const bounded = redactVendorRefusal(prose, "grok");
   assert.ok(bounded.length < 280, `prose redaction must be bounded; got ${bounded.length}`);
+});
+
+test("isVendorRefusalEnvelope treats the envelope as the entire reply, not a quoted fragment", () => {
+  // FINDING 1 (third round on #288): the envelope must be the turn's
+  // entire visible output, not merely present in it. A worker pasting a log,
+  // a review of this code, or a fixture printed into the transcript must
+  // not be flagged as a refusal. Leading vendor diagnostic lines are
+  // allowed because the adapter prints them above the JSON, but a sentence
+  // of the model's own prose before or after the envelope is not.
+  const realCapture =
+    "Warning: Model metadata for `gpt-6-astra` not found. Defaulting to fallback metadata; this can degrade performance and cause issues.\n\n" +
+    "{\"type\":\"error\",\"status\":400,\"error\":{\"type\":\"invalid_request_error\",\"message\":\"The 'gpt-6-astra' model requires a newer version of Codex. Please upgrade to the latest app or CLI and try again.\"}}";
+  assert.equal(
+    isVendorRefusalEnvelope(realCapture),
+    true,
+    "the real gpt-6-astra capture (warning line + envelope) must be a refusal",
+  );
+
+  // Just the envelope alone is a refusal.
+  const onlyEnvelope =
+    "{\"type\":\"error\",\"status\":400,\"error\":{\"type\":\"invalid_request_error\",\"message\":\"...\"}}";
+  assert.equal(isVendorRefusalEnvelope(onlyEnvelope), true);
+
+  // The envelope quoted inside the model's own prose is NOT a refusal.
+  const explanation =
+    "I can see the envelope in your error log: " +
+    onlyEnvelope +
+    " — that looks like the Codex refusal.";
+  assert.equal(
+    isVendorRefusalEnvelope(explanation),
+    false,
+    "an envelope quoted inside prose is not a refusal",
+  );
+
+  // Prose trailing the envelope is NOT a refusal.
+  const trailing = onlyEnvelope + " and then I tried again";
+  assert.equal(isVendorRefusalEnvelope(trailing), false);
+
+  // The model's own sentence leading into the envelope is NOT a refusal.
+  const leading = "Sure, here is the error envelope from earlier: " + onlyEnvelope;
+  assert.equal(isVendorRefusalEnvelope(leading), false);
+
+  // Multiple leading vendor diagnostic lines are still part of the refusal.
+  const multiDiagnostic =
+    "Warning: model unknown\nError: not served\n\n" + onlyEnvelope;
+  assert.equal(
+    isVendorRefusalEnvelope(multiDiagnostic),
+    true,
+    "leading diagnostic lines are vendor output, not model prose",
+  );
+
+  // A diagnostic line followed by a sentence of the model's prose is NOT
+  // a refusal — the second line is the model speaking, not the adapter.
+  const diagnosticThenProse =
+    "Warning: model unknown\nHere is what I did next:\n" + onlyEnvelope;
+  assert.equal(
+    isVendorRefusalEnvelope(diagnosticThenProse),
+    false,
+    "a diagnostic line followed by model prose is not a refusal",
+  );
+
+  // A test fixture that mentions the word "error" or "refusal" but has no
+  // envelope stays a non-refusal.
+  assert.equal(isVendorRefusalEnvelope("There was an error in my last plan."), false);
+  assert.equal(isVendorRefusalEnvelope(""), false);
+  assert.equal(isVendorRefusalEnvelope("{\"type\":\"something\"}"), false);
+});
+
+test("isVendorRefusalResult treats a user-initiated cancellation as a stop, not a refusal", () => {
+  // FINDING 2 (third round on #288): a cancelled turn whose body carries
+  // an envelope is NOT a refusal — the operator told the vendor to stop,
+  // and the envelope was incidental on the way down. The recognised
+  // stop reason wins over the envelope check.
+  const envelope =
+    "{\"type\":\"error\",\"status\":400,\"error\":{\"type\":\"invalid_request_error\",\"message\":\"...\"}}";
+
+  // cancelled + envelope = NOT a refusal.
+  assert.equal(
+    isVendorRefusalResult({ stopReason: "cancelled", content: [{ type: "text", text: envelope }] }),
+    false,
+    "a cancelled turn with an envelope in the body is a stop, not a refusal",
+  );
+  assert.equal(
+    isVendorRefusalResult({ stopReason: "canceled", content: [{ type: "text", text: envelope }] }),
+    false,
+  );
+  // Same with the reply passed explicitly.
+  assert.equal(isVendorRefusalResult({ stopReason: "cancelled" }, envelope), false);
+  assert.equal(isVendorRefusalResult({ stopReason: "canceled" }, envelope), false);
+
+  // cancelled + nothing = NOT a refusal.
+  assert.equal(isVendorRefusalResult({ stopReason: "cancelled" }), false);
+
+  // The stop reason wins even when the reply is also passed through
+  // record.text — the predicate must not flip back to "refusal".
+  assert.equal(
+    isVendorRefusalResult({ stopReason: "cancelled", text: envelope }),
+    false,
+    "a cancelled turn with text= envelope is a stop, not a refusal",
+  );
+
+  // end_turn + envelope IS still a refusal.
+  assert.equal(isVendorRefusalResult({ stopReason: "end_turn" }, envelope), true);
+
+  // end_turn + nothing = NOT a refusal.
+  assert.equal(isVendorRefusalResult({ stopReason: "end_turn" }), false);
+});
+
+test("redactVendorRefusal redacts bearer tokens and API keys from the envelope message", () => {
+  // FINDING 3 (third round on #288): vendor messages can echo Authorization
+  // headers or API keys. The thrown reason must not include them — the
+  // worker error metadata is persisted and should be safe to inspect.
+  const bearerEnvelope =
+    "{\"type\":\"error\",\"status\":401,\"error\":{\"type\":\"unauthorized\",\"message\":\"Request failed: Authorization: Bearer abcdefghijklmnopqrstuvwxyz0123456789AABBCC\"}}";
+  const redacted1 = redactVendorRefusal(bearerEnvelope, "gpt-6-astra");
+  assert.doesNotMatch(
+    redacted1,
+    /abcdefghijklmnopqrstuvwxyz0123456789AABBCC/,
+    "bearer token must be redacted from the thrown reason",
+  );
+  assert.doesNotMatch(redacted1, /Bearer abcdef/);
+  assert.match(redacted1, /Authorization: \[redacted\]/);
+
+  // A standalone Bearer token (not in an Authorization header) is redacted too.
+  const standaloneBearer =
+    "{\"type\":\"error\",\"status\":401,\"error\":{\"type\":\"unauthorized\",\"message\":\"Caller leaked Bearer abcdefghijklmnopqrstuvwxyz0123456789 to logs\"}}";
+  const redacted2 = redactVendorRefusal(standaloneBearer, "gpt-6-astra");
+  assert.doesNotMatch(redacted2, /abcdefghijklmnopqrstuvwxyz0123456789/);
+  assert.match(redacted2, /Bearer \[redacted\]/);
+
+  // An OpenAI / Anthropic style `sk-...` key is redacted.
+  const skEnvelope =
+    "{\"type\":\"error\",\"status\":401,\"error\":{\"type\":\"unauthorized\",\"message\":\"Caller leaked sk-proj-abcdefghijklmnopqrstuvwxyz0123 to logs\"}}";
+  const redacted3 = redactVendorRefusal(skEnvelope, "gpt-6-astra");
+  assert.doesNotMatch(redacted3, /abcdefghijklmnopqrstuvwxyz0123/, "sk- key must be redacted");
+  assert.match(redacted3, /sk-\[redacted\]/);
+
+  // A plain `sk-...` (no `proj-` prefix) is also redacted.
+  const skPlain =
+    "{\"type\":\"error\",\"status\":401,\"error\":{\"type\":\"unauthorized\",\"message\":\"Bad key sk-abcdefghijklmnopqrstuvwxyz0123 supplied\"}}";
+  const redacted4 = redactVendorRefusal(skPlain, "gpt-6-astra");
+  assert.doesNotMatch(redacted4, /abcdefghijklmnopqrstuvwxyz0123/);
+  assert.match(redacted4, /sk-\[redacted\]/);
+
+  // A GitHub personal access token is redacted.
+  const ghEnvelope =
+    "{\"type\":\"error\",\"status\":401,\"error\":{\"type\":\"unauthorized\",\"message\":\"Caller leaked ghp_abcdefghijklmnopqrstuvwxyz0123 to logs\"}}";
+  const redacted5 = redactVendorRefusal(ghEnvelope, "gpt-6-astra");
+  assert.doesNotMatch(redacted5, /abcdefghijklmnopqrstuvwxyz0123/);
+  assert.match(redacted5, /\[redacted-github-token\]/);
+
+  // A non-secret message is unchanged.
+  const cleanEnvelope =
+    "{\"type\":\"error\",\"status\":400,\"error\":{\"type\":\"invalid_request_error\",\"message\":\"The 'gpt-6-astra' model requires a newer version of Codex.\"}}";
+  const redacted6 = redactVendorRefusal(cleanEnvelope, "gpt-6-astra");
+  assert.match(redacted6, /newer version of Codex/);
+  // No raw envelope JSON escapes into the reason.
+  assert.doesNotMatch(redacted6, /"type":"error"/);
+});
+
+test("redactVendorRefusal bounds the whole reason and cuts on character boundaries", () => {
+  // FINDING 4 (third round on #288): the 240-character bound must apply
+  // to the whole reason, not just to the message, and the cut must respect
+  // UTF-16 surrogate pairs so the trailing character is never broken.
+
+  // A long message that would push the reason over 240 chars: the total
+  // length of the reason (prefix + message) must be at most 240.
+  const longMessage = "x".repeat(1_000);
+  const envelope = `{\"type\":\"error\",\"status\":400,\"error\":{\"type\":\"invalid_request_error\",\"message\":\"${longMessage}\"}}`;
+  const redacted = redactVendorRefusal(envelope, "gpt-6-astra");
+  assert.ok(redacted.length <= 240, `reason must be bounded; got ${redacted.length}`);
+  assert.match(redacted, /…$/, "truncation must be marked");
+
+  // Surrogate pair safety: a 4-byte emoji (which encodes as a UTF-16
+  // surrogate pair) must never be split in half by the cut.
+  // `\uD83D\uDE00` is U+1F600 GRINNING FACE.
+  const highSurrogate = "\uD83D";
+  const lowSurrogate = "\uDE00";
+  const emoji = highSurrogate + lowSurrogate;
+  assert.equal(emoji.length, 2, "test setup: emoji is a UTF-16 surrogate pair");
+
+  // Build a message whose last two code units form a surrogate pair at the
+  // cut point. We pad with enough x's that the cut lands on the high
+  // surrogate, forcing the function to back off by one code unit.
+  const padding = "y".repeat(238);
+  const textAtCut = padding + emoji; // length 240
+  assert.equal(textAtCut.length, 240);
+
+  const envelopeWithEmoji = `{\"type\":\"error\",\"status\":400,\"error\":{\"type\":\"invalid_request_error\",\"message\":\"${textAtCut}\"}}`;
+  const redactedEmoji = redactVendorRefusal(envelopeWithEmoji, "gpt-6-astra");
+
+  // The total reason is bounded.
+  assert.ok(redactedEmoji.length <= 240, `emoji reason must be bounded; got ${redactedEmoji.length}`);
+
+  // No orphaned high surrogate at the end of the reason. If the cut landed
+  // on a high surrogate, the function backs off so the reason ends in `…`
+  // (after trimEnd) or a non-surrogate character.
+  for (let i = 0; i < redactedEmoji.length; i++) {
+    if (i === redactedEmoji.length - 1) {
+      const c = redactedEmoji.charCodeAt(i);
+      assert.ok(
+        !(c >= 0xd800 && c <= 0xdbff),
+        `no orphaned high surrogate at position ${i} of: ${JSON.stringify(redactedEmoji)}`,
+      );
+    }
+  }
+
+  // Direct unit test of the truncation function: a cut that lands on a high
+  // surrogate must back off so the pair is never split.
+  assert.equal(truncateForReason(padding + emoji, 240), padding + emoji, "exact-fit text is preserved");
+  // max=239 must drop the high surrogate by backing off to 238 (the last "y").
+  const cutOne = truncateForReason(padding + emoji, 239);
+  assert.ok(!cutOne.endsWith(emoji), "no broken emoji at the cut point");
+  assert.equal(cutOne.length, 239);
+  assert.equal(cutOne.charCodeAt(cutOne.length - 2), 0x0079, "last kept char is the last y");
+  assert.equal(cutOne[cutOne.length - 1], "…");
+
+  // A short string is returned unchanged.
+  assert.equal(truncateForReason("hello", 10), "hello");
+  // A cut that does not land on a surrogate keeps everything in the bound.
+  assert.equal(truncateForReason("hello world", 5), "hell…");
 });
 
 test("a vendor refusal on the first turn fails the run with the vendor\'s own words, never records it completed", async () => {

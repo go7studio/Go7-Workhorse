@@ -112,8 +112,6 @@ const VENDOR_RECOGNISED_STOP_REASONS = new Set([
   "end_turn",
   "tool_use",
   "tool_result",
-  "cancelled",
-  "canceled",
   "stop",
   "stop_sequence",
   "max_tokens",
@@ -121,6 +119,62 @@ const VENDOR_RECOGNISED_STOP_REASONS = new Set([
   "complete",
   "completed",
 ]);
+
+/**
+ * Stop reasons that mean the operator told the vendor to stop — a cancellation
+ * raised by the desk (Stop button, timeout, harness kill), not a vendor-initiated
+ * refusal. Those win over anything inferred from the body: a cancelled turn can
+ * still emit an envelope on its way down, and we must not record it as a refusal.
+ */
+const VENDOR_USER_INTERRUPTION_STOP_REASONS = new Set([
+  "cancelled",
+  "canceled",
+]);
+
+/**
+ * Lines that the Codex / ACP adapter prints above its JSON envelope when the
+ * diagnostic was a vendor warning or error. The visible reply of a refusal
+ * can legitimately lead with one or more of these lines — they are the
+ * vendor's own diagnostics, not the model's prose.
+ */
+const VENDOR_DIAGNOSTIC_LINE_PATTERN = /^\s*(Warning|Error|Info|Note|Hint|Deprecated|Failed|Notice)\s*:/;
+
+function isVendorDiagnosticPrefix(prefix: string): boolean {
+  if (!prefix) return true;
+  const lines = prefix.split(/\r?\n/);
+  for (const line of lines) {
+    if (line.trim() === "") continue;
+    if (!VENDOR_DIAGNOSTIC_LINE_PATTERN.test(line)) return false;
+  }
+  return true;
+}
+
+/**
+ * Patterns that look like credentials the vendor leaked into its message —
+ * Authorization headers, Bearer tokens, OpenAI/Anthropic-style `sk-` keys,
+ * GitHub personal access tokens. The reason we throw for a refusal must
+ * not include any of these; the raw reply stays in the transcript where
+ * the streaming handler already placed it, and the user can still see what
+ * the vendor said.
+ */
+const SECRET_REDACTION_PATTERNS: Array<{ pattern: RegExp; replacement: string }> = [
+  // Authorization header values, including Bearer tokens (case-insensitive header name).
+  { pattern: /\bAuthorization:\s*[^\r\n;]+/gi, replacement: "Authorization: [redacted]" },
+  // Standalone Bearer tokens that escaped a header context.
+  { pattern: /\bBearer\s+[A-Za-z0-9._\-+/=]{8,}/g, replacement: "Bearer [redacted]" },
+  // OpenAI / Anthropic style API keys: `sk-...` or `sk-proj-...`.
+  { pattern: /\bsk-(?:proj-)?[A-Za-z0-9_\-]{16,}/g, replacement: "sk-[redacted]" },
+  // GitHub personal access tokens.
+  { pattern: /\bgh[pousr]_[A-Za-z0-9]{20,}/g, replacement: "[redacted-github-token]" },
+];
+
+function redactSecrets(text: string): string {
+  let result = text;
+  for (const { pattern, replacement } of SECRET_REDACTION_PATTERNS) {
+    result = result.replace(pattern, replacement);
+  }
+  return result;
+}
 
 export type VendorErrorEnvelope = {
   type: string;
@@ -188,9 +242,54 @@ export function parseVendorErrorEnvelope(text: string): VendorErrorEnvelope | un
   }
 }
 
-/** The visible reply is, in its entirety, the vendor's error diagnostic. */
+/**
+ * The visible reply is, in its entirety, the vendor's error diagnostic.
+ *
+ * The envelope must be the entire visible output of the turn — not a quote
+ * inside the model's prose, not a fragment the chat is commenting on.
+ * A worker that pastes a log, a review of this code, or a test fixture
+ * printed into the transcript must not be flagged as a refusal.
+ *
+ * Leading vendor diagnostic lines (`Warning: ...`, `Error: ...`, etc.) are
+ * part of the refusal — they are the adapter printing the envelope to
+ * stderr above the JSON. A sentence of the model's own prose is not.
+ */
 export function isVendorRefusalEnvelope(text: string): boolean {
-  return parseVendorErrorEnvelope(text) !== undefined;
+  if (typeof text !== "string" || !text) return false;
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+  const envelope = parseVendorErrorEnvelope(trimmed);
+  if (!envelope) return false;
+  // Find the last occurrence of the needle — if the vendor emitted multiple
+  // envelopes in the same stream, the trailing one is the refusal signal.
+  const needle = '"type":"error"';
+  const idx = trimmed.lastIndexOf(needle);
+  if (idx < 0) return false;
+  const open = trimmed.lastIndexOf("{", idx);
+  if (open < 0) return false;
+  // Brace-match forward to find the matching close.
+  let depth = 0;
+  let close = -1;
+  for (let i = open; i < trimmed.length; i++) {
+    if (trimmed[i] === "{") depth++;
+    else if (trimmed[i] === "}") {
+      depth--;
+      if (depth === 0) {
+        close = i + 1;
+        break;
+      }
+    }
+  }
+  if (close < 0) return false;
+  // The envelope must reach the end of the trimmed text. Anything after it
+  // is the model's own prose — a quote, a follow-up sentence — not the
+  // vendor's diagnostic.
+  if (close !== trimmed.length) return false;
+  // The prefix (text before the envelope) must be empty or vendor diagnostic
+  // lines. A sentence of the model's own prose before the envelope is a
+  // chat answer, not a refusal.
+  const prefix = trimmed.slice(0, open);
+  return isVendorDiagnosticPrefix(prefix);
 }
 
 /**
@@ -206,8 +305,14 @@ export function redactVendorRefusal(reply: string, model?: string): string {
   if (envelope) {
     const status = typeof envelope.status === "number" ? String(envelope.status) : "?";
     const errType = envelope.error.type ?? "error";
-    const message = envelope.error.message;
-    return `vendor refusal ${modelLabel}${status} ${errType} — ${truncateForReason(message, 240)}`;
+    // Redact secrets from the message itself — a vendor message that quotes
+    // an Authorization header or a leaked key would otherwise end up in the
+    // worker's error metadata.
+    const message = redactSecrets(envelope.error.message);
+    return truncateForReason(
+      `vendor refusal ${modelLabel}${status} ${errType} — ${message}`,
+      240,
+    );
   }
   const trimmed = (reply ?? "").trim();
   if (!trimmed) {
@@ -215,12 +320,26 @@ export function redactVendorRefusal(reply: string, model?: string): string {
       ? `vendor refusal ${model.trim()} — empty reply`
       : "vendor refusal — empty reply";
   }
-  return `vendor refusal ${modelLabel}— ${truncateForReason(trimmed, 240)}`;
+  return truncateForReason(`vendor refusal ${modelLabel}— ${redactSecrets(trimmed)}`, 240);
 }
 
-function truncateForReason(text: string, max: number): string {
+/**
+ * Bound a string to `max` UTF-16 code units and append `…`. The cut point
+ * must respect character boundaries: if the last code unit we'd keep is a
+ * high surrogate (0xD800–0xDBFF), backing off by one keeps the pair intact
+ * instead of leaving a broken character at the end of the reason.
+ */
+export function truncateForReason(text: string, max: number): string {
+  // The bound is on the final output, including the `…` marker.
   if (text.length <= max) return text;
-  return `${text.slice(0, max).trimEnd()}…`;
+  if (max <= 0) return "…";
+  let cut = max - 1;
+  // If the last char we would keep is a high surrogate, back off by one
+  // so the low surrogate is dropped along with everything after it and the
+  // pair is never split in half.
+  const code = text.charCodeAt(cut - 1);
+  if (code >= 0xd800 && code <= 0xdbff) cut--;
+  return `${text.slice(0, cut).trimEnd()}…`;
 }
 
 /**
@@ -244,14 +363,19 @@ function truncateForReason(text: string, max: number): string {
 export function isVendorRefusalResult(result: unknown, reply?: string): boolean {
   const record = result && typeof result === "object" ? (result as Record<string, unknown>) : {};
   const stopReason = typeof record.stopReason === "string" ? record.stopReason.toLowerCase() : "";
+  // A user-initiated interruption (Stop, timeout, harness kill) wins over
+  // everything inferred from the body. A cancelled turn can still emit an
+  // envelope on its way down; the vendor was told to stop, so the run did
+  // not refuse — the operator did.
+  if (VENDOR_USER_INTERRUPTION_STOP_REASONS.has(stopReason)) return false;
   // An envelope in the visible reply is a refusal regardless of stop reason
   // — Codex / ACP stream their diagnostic to stderr and then return a
   // normal `end_turn`. The diagnostic IS the refusal signal.
   const replyText = reply ?? extractReplyFromRecord(record);
   if (replyText && isVendorRefusalEnvelope(replyText)) return true;
   // With no envelope, a recognised stop reason wins over a stray `error`
-  // field — a cancelled turn or a permission outcome carries an incidental
-  // error envelope in the adapter that is not a refusal.
+  // field — a permission outcome or empty assistant turn carries an
+  // incidental error envelope in the adapter that is not a refusal.
   if (VENDOR_RECOGNISED_STOP_REASONS.has(stopReason)) return false;
   if (stopReason === "error" || stopReason === "refusal") return true;
   if (typeof record.error === "string" && record.error.trim()) return true;

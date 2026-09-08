@@ -20,7 +20,14 @@ import type { SandboxProfile } from "../src/lib/types";
  * but had never heard of gh, and every shell that was not a search counted as
  * a write.
  */
-const LIVE_GH_VIEW =
+const LIVE_GH_VIEW = "gh pr view 293 --json number,title,state,headRefName,body";
+/**
+ * The observed line carried `--repo go7studio/Go7-Workhorse`, and it stays
+ * denied. `--repo` points gh at a repository the desk cannot hold to the bound
+ * folder, so a seat reading its own checkout drops the flag and lets gh take
+ * the repo from the remote. See the flag rows below.
+ */
+const LIVE_GH_VIEW_WITH_REPO =
   "gh pr view 293 --repo go7studio/Go7-Workhorse --json number,title,state,headRefName,body";
 const LIVE_GH_DIFF = "gh pr diff 293";
 const LIVE_PYTHON_HEREDOC = `python3 - <<'PY'\nimport pathlib\nprint(pathlib.Path("docs/LINK.md").read_text()[:400])\nPY`;
@@ -35,7 +42,8 @@ const DESK_TITLE = "Run a command";
  */
 const TABLE: ReadonlyArray<readonly [command: string, reads: boolean, why: string]> = [
   // The two observed denials.
-  [LIVE_GH_VIEW, true, "the observed gh pr view --json line"],
+  [LIVE_GH_VIEW, true, "the observed gh pr view --json line, with --repo dropped"],
+  [LIVE_GH_VIEW_WITH_REPO, false, "--repo sends the read out of the bound folder"],
   [LIVE_GH_DIFF, true, "the observed gh pr diff"],
   [LIVE_PYTHON_HEREDOC, false, "a heredoc script cannot be read for intent"],
 
@@ -48,10 +56,7 @@ const TABLE: ReadonlyArray<readonly [command: string, reads: boolean, why: strin
   ["gh run watch 12345", true, "run watch reads"],
   ["gh issue view 42", true, "issue view reads"],
   ["gh issue list --label bug", true, "issue list reads"],
-  ["gh repo view go7studio/Go7-Workhorse", true, "repo view reads"],
-  ["gh api repos/go7studio/Go7-Workhorse/pulls/293", true, "gh api defaults to GET"],
-  ["gh api --method GET repos/go7studio/Go7-Workhorse", true, "an explicit GET reads"],
-  ["gh api -X GET /rate_limit", true, "-X GET reads"],
+  ["gh repo view", true, "repo view reads"],
 
   // gh writes.
   ["gh pr merge 293 --squash", false, "merge is a write"],
@@ -60,18 +65,48 @@ const TABLE: ReadonlyArray<readonly [command: string, reads: boolean, why: strin
   ["gh pr create --title x --body y", false, "create is a write"],
   ["gh pr edit 293 --add-label bug", false, "edit is a write"],
   ["gh pr review 293 --approve", false, "review is a write"],
-  ["gh api -X POST repos/go7studio/Go7-Workhorse/issues", false, "-X POST is a write"],
-  ["gh api --method PATCH /repos/x/y", false, "PATCH is a write"],
+  ["gh repo delete go7studio/x", false, "repo delete is a write"],
+  ["gh release create v1", false, "release is not on the read table"],
+  ["gh pr", false, "a group with no subcommand is a write"],
+
+  // gh api reaches every path the machine token can reach, and the desk cannot
+  // bind a path gh resolves itself. Every form of it is a write.
+  ["gh api repos/go7studio/Go7-Workhorse/pulls/293", false, "a plain GET still carries the token"],
+  ["gh api --method GET repos/x/y", false, "an explicit GET is still gh api"],
+  ["gh api -X GET /rate_limit", false, "-X GET is still gh api"],
+  ["gh api /user/emails", false, "the token reads far past the bound folder"],
+  ["gh api --hostname=evil.example /user", false, "--hostname names another GitHub"],
+  ["gh api -X POST repos/x/y/issues", false, "-X POST is a write"],
+  ["gh api -XPOST repos/x/y/issues", false, "the attached -XPOST is a write"],
+  ["gh api --method=PATCH /repos/x/y", false, "the joined method is a write"],
   ["gh api -X PUT /repos/x/y", false, "PUT is a write"],
   ["gh api -X DELETE /repos/x/y", false, "DELETE is a write"],
   ["gh api /repos/x/y/issues -f title=bug", false, "a -f field posts a body"],
+  ["gh api /repos/x/y/issues -ftitle=hi", false, "the attached -f field posts a body"],
   ["gh api /repos/x/y -F n=@file.json", false, "a -F field posts a body"],
+  ["gh api /repos/x/y -Fn=@file.json", false, "the attached -F field posts a body"],
   ["gh api /repos/x/y --input body.json", false, "--input posts a body"],
+  ["gh api /repos/x/y --input -", false, "--input from stdin posts a body"],
   ["gh api graphql -f query=x", false, "graphql posts"],
-  ["gh repo delete go7studio/x", false, "repo delete is a write"],
-  ["gh release create v1", false, "release is not on the read table"],
-  ["gh auth token", false, "auth is not on the read table"],
-  ["gh pr", false, "a group with no subcommand is a write"],
+
+  // Groups that print a credential, named so a later hand cannot call them reads.
+  ["gh auth token", false, "auth prints a token"],
+  ["gh auth status", false, "auth is never a read"],
+  ["gh secret list", false, "secret is never a read"],
+  ["gh ssh-key list", false, "ssh-key is never a read"],
+  ["gh gpg-key list", false, "gpg-key is never a read"],
+  ["gh gist view abc123", false, "gist reaches outside the repo"],
+  ["gh alias set co 'pr checkout'", false, "alias set is a write"],
+  ["gh extension install owner/x", false, "extension install is a write"],
+  ["gh config set editor vim", false, "config set is a write"],
+
+  // A gh read has to stay in the bound repo, in every shape the flag takes.
+  ["gh pr view 293 --repo owner/other", false, "--repo leaves the folder"],
+  ["gh pr view 293 --repo=owner/other", false, "the joined --repo leaves the folder"],
+  ["gh pr diff 293 -R owner/other", false, "-R leaves the folder"],
+  ["gh pr diff 293 -Rowner/other", false, "the attached -R leaves the folder"],
+  ["gh pr list --hostname ghe.example", false, "--hostname names another GitHub"],
+  ["gh run list --hostname=ghe.example", false, "the joined --hostname does too"],
 
   // git reads, including the two added for a reviewer.
   ["git show HEAD --stat", true, "show reads"],
@@ -103,6 +138,33 @@ const TABLE: ReadonlyArray<readonly [command: string, reads: boolean, why: strin
   ["git fetch --prune origin", false, "--prune deletes refs"],
   ["git log --output=out.txt", false, "--output writes the file"],
   ["git diff --output out.txt", false, "--output writes the file"],
+
+  // A git option that names a program, a path or a config runs before the
+  // subcommand gets a say, so "fetch" or "log" at the front proves nothing.
+  ["git fetch --upload-pack='sh -c \"rm -rf x\"' origin", false, "--upload-pack runs a command"],
+  ["git fetch --upload-pack=/tmp/evil origin", false, "the joined --upload-pack runs a command"],
+  ["git ls-remote --upload-pack=/tmp/evil origin", false, "and it is refused wherever it sits"],
+  ["git --exec-path=/tmp/evil fetch origin", false, "--exec-path runs another git"],
+  ["git --exec-path=/tmp/evil log", false, "--exec-path before any subcommand"],
+  ["git --git-dir=/tmp/other log", false, "--git-dir reads another repository"],
+  ["git --work-tree=/tmp/other status", false, "--work-tree points at another tree"],
+  ["git --namespace=x log", false, "--namespace is a global that redirects refs"],
+  ["git --config-env=core.pager=EVIL log", false, "--config-env sets a config"],
+  ["git -c core.pager='sh -c \"rm x\"' log", false, "-c sets a config that names a program"],
+  ["git -ccore.pager=evil log", false, "the attached -c sets a config too"],
+  ["git -C /tmp/other log", false, "-C runs in another folder"],
+  ["git -C/tmp/other log", false, "the attached -C runs in another folder"],
+  ["git fetch --refmap=+refs/heads/*:refs/heads/* origin", false, "--refmap writes local refs"],
+  ["git fetch --recurse-submodules origin", false, "a fetch flag off the short list is a write"],
+  ["git fetch --write-commit-graph origin", false, "--write-commit-graph puts files in .git"],
+  ["git fetch --auto-maintenance origin", false, "--auto-maintenance repacks"],
+  ["git fetch --depth 1 origin", true, "--depth is on the short list"],
+  ["git fetch --tags --quiet origin", true, "--tags and --quiet are on the short list"],
+  ["git fetch --dry-run origin", true, "--dry-run is on the short list"],
+  // The same short flag means different things either side of the subcommand.
+  ["git log -c", true, "-c after the subcommand is a combined diff, and reads"],
+  ["git show -c HEAD", true, "and so is -c on show"],
+  ["git --no-pager log --oneline", true, "a harmless global is still a read"],
 
   // The existing read programs, and the ones the rule names.
   ["head -40 docs/LINK.md", true, "head reads"],
@@ -141,6 +203,17 @@ const TABLE: ReadonlyArray<readonly [command: string, reads: boolean, why: strin
   ["eval gh pr view 293", false, "eval is a write"],
   ["git ls-files | xargs rm", false, "xargs with a write is a write"],
   ["gh pr view $(cat id.txt)", false, "a substitution hides the target"],
+  ["gh pr view `cat id.txt`", false, "backticks hide the target too"],
+  ["cmd /c dir", false, "the Windows interpreter is a write"],
+  ["cmd.exe /c gh pr view 293", false, "a wrapped read is still an interpreter"],
+
+  // An environment prefix is not the program. `GIT_DIR=/tmp/other git log`
+  // reads another repository, and `GIT_SSH_COMMAND=…` runs a command, so the
+  // assignment at the front has to fail the walk rather than be stepped over.
+  ["GIT_DIR=/tmp/other git log", false, "an env prefix is not the program git"],
+  ["GIT_SSH_COMMAND='sh -c evil' git fetch origin", false, "an env prefix can name a program"],
+  ["GH_TOKEN=x gh pr view 293", false, "an env prefix is not the program gh"],
+  ["GH_HOST=evil.example gh pr list", false, "an env prefix can redirect the host"],
 ];
 
 test("the classifier answers every row of the table the same way", () => {

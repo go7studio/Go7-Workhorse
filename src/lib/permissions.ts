@@ -298,9 +298,37 @@ const GIT_READ_SUBCOMMANDS: ReadonlySet<string> = new Set([
 const GIT_OUTPUT_FLAG = /^--output(?:=|$)/;
 
 /**
+ * Whether a token IS this flag. A flag reaches a command in three shapes and
+ * all three have to match: bare (`-X`), joined (`--method=POST`), and — for a
+ * short flag — with the value pushed straight up against it (`-XPOST`,
+ * `-ftitle=hi`, `-Rowner/repo`). Testing only the first two let every attached
+ * form through: `gh api -XPOST` read as a GET, because `-XPOST` is not `-X`
+ * and does not start `-X=`.
+ */
+function flagIs(token: string, flag: string): boolean {
+  if (token === flag || token.startsWith(`${flag}=`)) return true;
+  // Only a single-letter flag carries an attached value. A long flag needs the
+  // `=` or the next token, so `--methodical` is not `--method`.
+  return /^-[^-]$/.test(flag) && token.length > flag.length && token.startsWith(flag);
+}
+
+/** Any of these flags, in any of the three shapes. */
+function hasFlag(args: string[], flags: readonly string[]): boolean {
+  return args.some((arg) => {
+    const token = dequote(arg);
+    return flags.some((flag) => flagIs(token, flag));
+  });
+}
+
+/**
  * The read forms of gh. A group with no subcommand named here is a write:
  * `gh pr merge`, `gh pr comment` and `gh repo delete` all have to stay refused,
  * so the table lists what is allowed rather than what is not.
+ *
+ * `api` is deliberately absent. It reaches every path the machine's GitHub
+ * token can reach — `gh api /user/emails` is a GET — and the desk cannot bind
+ * a path that gh resolves itself. A reviewer needs none of it: the groups below
+ * cover reading a pull request. So every `gh api` form is a write here.
  */
 const GH_READ_SUBCOMMANDS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
   ["pr", new Set(["view", "diff", "checks", "list", "status"])],
@@ -309,48 +337,111 @@ const GH_READ_SUBCOMMANDS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
   ["repo", new Set(["view"])],
 ]);
 
-/** Flags that turn `gh api` into a request with a body. Any of them is a write. */
-const GH_API_BODY_FLAG = /^(?:-f|-F|--field|--raw-field|--input)(?:=|$)/;
-/** The method flag, in both the joined and the separated form. */
-const GH_API_METHOD_FLAG = /^(?:-X|--method)(?:=|$)/;
+/**
+ * Groups that must never become reads, whatever the table above grows to say.
+ * `gh secret list` and `gh auth token` read, in the sense that they print
+ * something — what they print is a credential. Naming them here means a later
+ * hand cannot move one onto the read table by adding a word.
+ */
+const GH_NEVER_READ: ReadonlySet<string> = new Set([
+  "api",
+  "auth",
+  "secret",
+  "ssh-key",
+  "gpg-key",
+  "alias",
+  "config",
+  "extension",
+  "gist",
+  "codespace",
+]);
 
 /**
- * `gh api` is the one gh call that can do anything the REST API can, so it is
- * read only when the method is GET and nothing supplies a body. `gh api
- * graphql` posts, whatever else it carries, so it is refused by name.
+ * Flags that send a gh read somewhere the desk cannot see. `--repo` and `-R`
+ * point the command at another repository, `--hostname` at another GitHub
+ * entirely, and neither value is a path this side can hold to the bound folder.
+ * A seat reading its own checkout needs none of them: inside the worktree gh
+ * takes the repo from the remote.
  */
-function ghApiWrites(args: string[]): boolean {
-  if (positionals(args).some((arg) => dequote(arg).toLowerCase() === "graphql")) return true;
-  for (let index = 0; index < args.length; index += 1) {
-    const arg = dequote(args[index] ?? "");
-    if (GH_API_BODY_FLAG.test(arg)) return true;
-    if (!GH_API_METHOD_FLAG.test(arg)) continue;
-    // `-X POST` puts the method in the next token; `--method=POST` joins it.
-    const method = arg.includes("=") ? arg.slice(arg.indexOf("=") + 1) : dequote(args[index + 1] ?? "");
-    if (method.trim().toUpperCase() !== "GET") return true;
-  }
-  return false;
-}
+const GH_UNBOUND_FLAGS = ["-R", "--repo", "--hostname"] as const;
 
 /** Everything gh can do that is not on the read table. */
 function ghWrites(args: string[]): boolean {
   const words = positionals(args).map((arg) => dequote(arg).toLowerCase());
   const group = words[0];
-  if (!group) return true;
-  if (group === "api") return ghApiWrites(args);
+  if (!group || GH_NEVER_READ.has(group)) return true;
   const allowed = GH_READ_SUBCOMMANDS.get(group);
   if (!allowed) return true;
   const sub = words[1];
-  return !sub || !allowed.has(sub);
+  if (!sub || !allowed.has(sub)) return true;
+  return hasFlag(args, GH_UNBOUND_FLAGS);
 }
+
+/**
+ * Options git reads before the subcommand, every one of which names a program,
+ * a path or a config value that changes what runs. `git --exec-path=/tmp/evil
+ * fetch origin` runs /tmp/evil's git; `-c core.pager='sh -c …'` runs a shell.
+ * The subcommand alone said "fetch", so the command read as a read.
+ *
+ * A separated value already fails, because it lands as the first positional and
+ * is not a read subcommand. This closes the joined and attached forms too.
+ */
+const GIT_UNSAFE_GLOBALS = [
+  "--exec-path",
+  "--git-dir",
+  "--work-tree",
+  "--namespace",
+  "--super-prefix",
+  "--config-env",
+  "-c",
+  "-C",
+] as const;
+
+/**
+ * Flags that hand git a program to run at the other end of a transfer. They
+ * belong to fetch, not to git itself, so they are refused wherever they appear.
+ */
+const GIT_TRANSFER_PROGRAM_FLAGS = ["--upload-pack", "--receive-pack"] as const;
+
+/**
+ * The tokens git reads as its own, before the subcommand names what to run.
+ * The split matters: `-c` in front of `log` sets a config value and can name a
+ * pager to run, while `-c` after it asks `git log` for a combined diff and is
+ * an ordinary read. Judging the whole line would refuse the second for the sins
+ * of the first.
+ */
+function gitGlobalArgs(args: string[]): string[] {
+  const subcommand = args.findIndex((arg) => !arg.startsWith("-"));
+  return subcommand === -1 ? args : args.slice(0, subcommand);
+}
+
+/**
+ * The only flags `git fetch` may carry on a read-only seat. Everything else is
+ * refused rather than judged: `--upload-pack` runs a command, `--refmap` writes
+ * local refs without a `:` in any positional, and `--write-commit-graph` and
+ * `--auto-maintenance` both put files in .git. A list of what is safe cannot be
+ * outgrown by the next flag git adds; a list of what is dangerous can.
+ */
+const GIT_FETCH_READ_FLAGS: ReadonlySet<string> = new Set([
+  "--depth",
+  "--tags",
+  "--no-tags",
+  "--quiet",
+  "--dry-run",
+]);
 
 /**
  * `git fetch` in its plain form only adds objects and moves remote-tracking
  * refs. A refspec with a `:` writes whatever local ref sits on its right-hand
- * side, and `--prune` deletes refs, so both are writes.
+ * side, so it is a write, and so is every flag off the short list above.
  */
 function gitFetchWrites(args: string[]): boolean {
-  if (args.some((arg) => /^-(?:p|f|-prune|-prune-tags|-force)$/.test(dequote(arg)))) return true;
+  for (const arg of args.slice(1)) {
+    const token = dequote(arg);
+    if (!token.startsWith("-")) continue;
+    const name = token.includes("=") ? token.slice(0, token.indexOf("=")) : token;
+    if (!GIT_FETCH_READ_FLAGS.has(name)) return true;
+  }
   return positionals(args).slice(1).some((arg) => dequote(arg).includes(":"));
 }
 
@@ -703,6 +794,12 @@ function stageWrites(program: string, args: string[]): boolean {
     const sub = positionals(args)[0];
     if (!sub || !GIT_READ_SUBCOMMANDS.has(sub.toLowerCase())) return true;
     if (args.some((arg) => GIT_OUTPUT_FLAG.test(dequote(arg)))) return true;
+    // Anything naming a program, a path or a config runs before the subcommand
+    // gets a say, so it is judged before the subcommand is trusted.
+    if (hasFlag(gitGlobalArgs(args), GIT_UNSAFE_GLOBALS)) return true;
+    // These two name a program at the far end of a transfer. No read form of
+    // git takes either, so they are refused wherever they sit.
+    if (hasFlag(args, GIT_TRANSFER_PROGRAM_FLAGS)) return true;
     if (sub.toLowerCase() === "fetch") return gitFetchWrites(args);
     // `git branch` reads; `git branch <name>` and `git branch -d` do not.
     if (sub.toLowerCase() === "branch") {

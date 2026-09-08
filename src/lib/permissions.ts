@@ -125,7 +125,10 @@ export function looksLikeShellTool(tool: string, detail: string): boolean {
 
 export function looksLikeNetworkTool(tool: string, detail: string): boolean {
   const hay = `${tool} ${detail}`.toLowerCase();
-  return /\b(web_search|web_fetch|browser|http|https|curl|wget|invoke-webrequest|npm\s+(?:install|view|info)|pnpm\s+(?:install|add)|yarn\s+add|pip\s+install|git\s+(?:clone|fetch|pull|push)|ssh|scp)\b/.test(hay);
+  // `gh` always talks to GitHub, so a seat with the network blocked has to
+  // refuse it even though its read subcommands are reads. The group word is
+  // matched too, so the word "gh" inside a description is not a network call.
+  return /\b(web_search|web_fetch|browser|http|https|curl|wget|invoke-webrequest|npm\s+(?:install|view|info)|pnpm\s+(?:install|add)|yarn\s+add|pip\s+install|git\s+(?:clone|fetch|pull|push)|gh\s+(?:pr|api|run|issue|repo|release|workflow|auth|search|gist|browse)|ssh|scp)\b/.test(hay);
 }
 
 function comparable(value: string): string {
@@ -252,6 +255,10 @@ const READ_ONLY_PROGRAMS: ReadonlySet<string> = new Set([
   "echo",
   "printf",
   "git",
+  // `gh` reads the pull request a reviewer seat was asked to review. Like git,
+  // it is on this list for its read subcommands only; ghWrites below is what
+  // actually decides, and anything the table does not name is a write.
+  "gh",
   "which",
   "type",
   "file",
@@ -273,7 +280,193 @@ const GIT_READ_SUBCOMMANDS: ReadonlySet<string> = new Set([
   "rev-parse",
   "ls-files",
   "branch",
+  // A reviewer has to bring the branch down before it can read it. `fetch`
+  // touches refs under .git and never the working tree, and the network policy
+  // still gates it in securityPolicyAnswer. Its writing forms are refused
+  // below.
+  "fetch",
+  "merge-base",
 ]);
+
+/**
+ * `--output=<file>` is a diff option, so `git log`, `git show` and `git diff`
+ * all take it, and all three write the file. Read as reads on the strength of
+ * the subcommand alone, `git log --output=out.txt` was answered "once" on a
+ * read-only seat. No read form of git needs the flag, so it is refused for all
+ * of them.
+ */
+const GIT_OUTPUT_FLAG = /^--output(?:=|$)/;
+
+/**
+ * Whether a token IS this flag. A flag reaches a command in three shapes and
+ * all three have to match: bare (`-X`), joined (`--method=POST`), and — for a
+ * short flag — with the value pushed straight up against it (`-XPOST`,
+ * `-ftitle=hi`, `-Rowner/repo`). Testing only the first two let every attached
+ * form through: `gh api -XPOST` read as a GET, because `-XPOST` is not `-X`
+ * and does not start `-X=`.
+ */
+function flagIs(token: string, flag: string): boolean {
+  if (token === flag || token.startsWith(`${flag}=`)) return true;
+  // Only a single-letter flag carries an attached value. A long flag needs the
+  // `=` or the next token, so `--methodical` is not `--method`.
+  return /^-[^-]$/.test(flag) && token.length > flag.length && token.startsWith(flag);
+}
+
+/** Any of these flags, in any of the three shapes. */
+function hasFlag(args: string[], flags: readonly string[]): boolean {
+  return args.some((arg) => {
+    const token = dequote(arg);
+    return flags.some((flag) => flagIs(token, flag));
+  });
+}
+
+/**
+ * The read forms of gh. A group with no subcommand named here is a write:
+ * `gh pr merge`, `gh pr comment` and `gh repo delete` all have to stay refused,
+ * so the table lists what is allowed rather than what is not.
+ *
+ * `api` is deliberately absent. It reaches every path the machine's GitHub
+ * token can reach — `gh api /user/emails` is a GET — and the desk cannot bind
+ * a path that gh resolves itself. A reviewer needs none of it: the groups below
+ * cover reading a pull request. So every `gh api` form is a write here.
+ */
+const GH_READ_SUBCOMMANDS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
+  ["pr", new Set(["view", "diff", "checks", "list", "status"])],
+  ["run", new Set(["view", "list", "watch"])],
+  ["issue", new Set(["view", "list"])],
+  ["repo", new Set(["view"])],
+]);
+
+/**
+ * Groups that must never become reads, whatever the table above grows to say.
+ * `gh secret list` and `gh auth token` read, in the sense that they print
+ * something — what they print is a credential. Naming them here means a later
+ * hand cannot move one onto the read table by adding a word.
+ */
+const GH_NEVER_READ: ReadonlySet<string> = new Set([
+  "api",
+  "auth",
+  "secret",
+  "ssh-key",
+  "gpg-key",
+  "alias",
+  "config",
+  "extension",
+  "gist",
+  "codespace",
+]);
+
+/**
+ * Flags that send a gh read somewhere the desk cannot see. `--repo` and `-R`
+ * point the command at another repository, `--hostname` at another GitHub
+ * entirely, and neither value is a path this side can hold to the bound folder.
+ * A seat reading its own checkout needs none of them: inside the worktree gh
+ * takes the repo from the remote.
+ */
+const GH_UNBOUND_FLAGS = ["-R", "--repo", "--hostname"] as const;
+
+/**
+ * A gh read takes its target as an argument as readily as it takes it from a
+ * flag: `gh repo view owner/other` and `gh pr view
+ * https://github.com/other/repo/pull/1` both leave the bound folder, carrying
+ * the machine's token, with no `--repo` in sight. So a read may not name a
+ * repository at all — it reads the one the folder resolves.
+ *
+ * The three shapes gh accepts: `owner/repo`, a URL, and `owner/repo#123`. A
+ * number on its own is a pull request in the current repo and stays a read,
+ * which is why `gh pr view 1` and `gh run view 12345` still work.
+ */
+const GH_NAMES_A_REPO = /^[^/\s]+\/[^/\s]+$/;
+
+/** Whether any argument names a repository other than the one the seat is in. */
+function ghTargetsAnotherRepo(args: string[]): boolean {
+  return positionals(args).some((arg) => {
+    const word = dequote(arg);
+    if (word.includes("://") || word.toLowerCase().includes("github.com")) return true;
+    return GH_NAMES_A_REPO.test(word);
+  });
+}
+
+/** Everything gh can do that is not on the read table. */
+function ghWrites(args: string[]): boolean {
+  const words = positionals(args).map((arg) => dequote(arg).toLowerCase());
+  const group = words[0];
+  if (!group || GH_NEVER_READ.has(group)) return true;
+  const allowed = GH_READ_SUBCOMMANDS.get(group);
+  if (!allowed) return true;
+  const sub = words[1];
+  if (!sub || !allowed.has(sub)) return true;
+  if (hasFlag(args, GH_UNBOUND_FLAGS)) return true;
+  return ghTargetsAnotherRepo(args);
+}
+
+/**
+ * Options git reads before the subcommand, every one of which names a program,
+ * a path or a config value that changes what runs. `git --exec-path=/tmp/evil
+ * fetch origin` runs /tmp/evil's git; `-c core.pager='sh -c …'` runs a shell.
+ * The subcommand alone said "fetch", so the command read as a read.
+ *
+ * A separated value already fails, because it lands as the first positional and
+ * is not a read subcommand. This closes the joined and attached forms too.
+ */
+const GIT_UNSAFE_GLOBALS = [
+  "--exec-path",
+  "--git-dir",
+  "--work-tree",
+  "--namespace",
+  "--super-prefix",
+  "--config-env",
+  "-c",
+  "-C",
+] as const;
+
+/**
+ * Flags that hand git a program to run at the other end of a transfer. They
+ * belong to fetch, not to git itself, so they are refused wherever they appear.
+ */
+const GIT_TRANSFER_PROGRAM_FLAGS = ["--upload-pack", "--receive-pack"] as const;
+
+/**
+ * The tokens git reads as its own, before the subcommand names what to run.
+ * The split matters: `-c` in front of `log` sets a config value and can name a
+ * pager to run, while `-c` after it asks `git log` for a combined diff and is
+ * an ordinary read. Judging the whole line would refuse the second for the sins
+ * of the first.
+ */
+function gitGlobalArgs(args: string[]): string[] {
+  const subcommand = args.findIndex((arg) => !arg.startsWith("-"));
+  return subcommand === -1 ? args : args.slice(0, subcommand);
+}
+
+/**
+ * The only flags `git fetch` may carry on a read-only seat. Everything else is
+ * refused rather than judged: `--upload-pack` runs a command, `--refmap` writes
+ * local refs without a `:` in any positional, and `--write-commit-graph` and
+ * `--auto-maintenance` both put files in .git. A list of what is safe cannot be
+ * outgrown by the next flag git adds; a list of what is dangerous can.
+ */
+const GIT_FETCH_READ_FLAGS: ReadonlySet<string> = new Set([
+  "--depth",
+  "--tags",
+  "--no-tags",
+  "--quiet",
+  "--dry-run",
+]);
+
+/**
+ * `git fetch` in its plain form only adds objects and moves remote-tracking
+ * refs. A refspec with a `:` writes whatever local ref sits on its right-hand
+ * side, so it is a write, and so is every flag off the short list above.
+ */
+function gitFetchWrites(args: string[]): boolean {
+  for (const arg of args.slice(1)) {
+    const token = dequote(arg);
+    if (!token.startsWith("-")) continue;
+    const name = token.includes("=") ? token.slice(0, token.indexOf("=")) : token;
+    if (!GIT_FETCH_READ_FLAGS.has(name)) return true;
+  }
+  return positionals(args).slice(1).some((arg) => dequote(arg).includes(":"));
+}
 
 type CommandStage = { program: string; args: string[] };
 type CommandWalk = {
@@ -619,9 +812,18 @@ function stageWrites(program: string, args: string[]): boolean {
   if (program === "uniq") return positionals(args).length > 1;
   // `env FOO=1 rm x` runs rm, so env only reads when it names no program.
   if (program === "env") return positionals(args).length > 0;
+  if (program === "gh") return ghWrites(args);
   if (program === "git") {
     const sub = positionals(args)[0];
     if (!sub || !GIT_READ_SUBCOMMANDS.has(sub.toLowerCase())) return true;
+    if (args.some((arg) => GIT_OUTPUT_FLAG.test(dequote(arg)))) return true;
+    // Anything naming a program, a path or a config runs before the subcommand
+    // gets a say, so it is judged before the subcommand is trusted.
+    if (hasFlag(gitGlobalArgs(args), GIT_UNSAFE_GLOBALS)) return true;
+    // These two name a program at the far end of a transfer. No read form of
+    // git takes either, so they are refused wherever they sit.
+    if (hasFlag(args, GIT_TRANSFER_PROGRAM_FLAGS)) return true;
+    if (sub.toLowerCase() === "fetch") return gitFetchWrites(args);
     // `git branch` reads; `git branch <name>` and `git branch -d` do not.
     if (sub.toLowerCase() === "branch") {
       if (positionals(args).length > 1) return true;
@@ -708,6 +910,28 @@ function readOnlyPipeline(command: string): boolean {
     return !stageWrites(program, stage.args);
   });
 }
+
+/**
+ * Whether every segment of a shell command reads. This is the whole rule, as
+ * one pure function, so the table-driven test judges the same thing the desk
+ * judges and every host asking permissionPolicyAnswer gets the same answer.
+ *
+ * A read here means: each stage of the pipeline starts with a program that only
+ * reads, and that stage's own flags do not turn it into a write. A redirect, a
+ * substitution, an unclosed quote or a token the shell rewrites all end the
+ * walk, because past any of them this side cannot see what runs.
+ */
+export function commandOnlyReads(command: string): boolean {
+  return readOnlyPipeline(command);
+}
+
+/**
+ * What a read-only seat refuses, and what it does not. A worker denied for a
+ * shell call reads this line in its own transcript, so it says the shape of the
+ * thing that would have worked instead of only naming the dial.
+ */
+export const READ_ONLY_SHELL_HINT =
+  "Read-only sandbox: gh, git and search reads are allowed; interpreters and writes are not.";
 
 /** rg / grep as the invoked program — allow through Ask / Plan / Always. */
 export function looksLikeSearchOnly(tool: string, detail: string, filePath?: string): boolean {
@@ -1326,7 +1550,12 @@ export function sandboxSourceNote(input: {
 }): string {
   const desk = input.deskAccess ?? DESK_ACCESS_FALLBACK;
   const sandbox = input.session?.sandbox ?? desk.sandbox;
-  return `Sandbox ${sandboxLabel(sandbox)} comes from ${accessOrigin(input)}; ask for sandbox: off in the call, or raise that chat's Sandbox.`;
+  const line = `Sandbox ${sandboxLabel(sandbox)} comes from ${accessOrigin(input)}; ask for sandbox: off in the call, or raise that chat's Sandbox.`;
+  // A worker refused on a read-only seat used to be told only which dial
+  // stopped it, so it asked for the dial to move when the call it wanted was
+  // already allowed in another form. The line now says what the seat can run.
+  if (sandbox === "read-only" || sandbox === "strict") return `${READ_ONLY_SHELL_HINT} ${line}`;
+  return line;
 }
 
 /**

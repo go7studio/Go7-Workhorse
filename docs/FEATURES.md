@@ -140,7 +140,19 @@ When you add a feature, add it here in the same commit.
 - A chat reads media the agent wrote, so a generated image shows in the
   transcript, not a path.
 - **Permission modes** ask, accept-edits, always-approve, plan.
-- **Sandbox profiles** off, workspace, read-only, strict.
+- **Sandbox profiles** off, workspace, read-only, strict. Read-only still reads:
+  gh, git and the search tools. Anything that writes or sends stops, and so does
+  every interpreter, because a script cannot be read for what it will do.
+- `gh api` is refused in every form. It reaches whatever the machine's GitHub
+  token can reach, and the desk cannot bind a path gh resolves for itself.
+- A gh read names no repository at all, by flag (`--repo`, `-R`, `--hostname`)
+  or by argument (`owner/repo`, a URL, `owner/repo#3`), so a seat reads its own
+  checkout and gh takes the repo from the remote.
+- A git option naming a program, a path or a config is a write: `--exec-path`,
+  `--upload-pack`, `-c`, `-C`, `--git-dir`. It decides what runs before the
+  subcommand gets a say.
+- A refusal names what the seat can run, so a worker asks for the right call
+  rather than for the dial to move.
 - **Scoped approvals** a grant remembers the exact tool, command and path for 24
   hours. Changed or expired requests ask again.
 - **Execution directory** a chat starts in a linked folder or managed git

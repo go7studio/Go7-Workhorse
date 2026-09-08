@@ -614,7 +614,9 @@ test("past the desk default a hidden worker is told where to ask instead", () =>
   assert.equal(outcome.prompted, false, "a subagent's ask is never a card");
   assert.deepEqual(outcome.reply, {
     ok: false,
-    reason: "Sandbox Read-only comes from chat “root”; ask for sandbox: off in the call, or raise that chat's Sandbox.",
+    reason:
+      "Read-only sandbox: gh, git and search reads are allowed; interpreters and writes are not. " +
+      "Sandbox Read-only comes from chat “root”; ask for sandbox: off in the call, or raise that chat's Sandbox.",
   });
 });
 

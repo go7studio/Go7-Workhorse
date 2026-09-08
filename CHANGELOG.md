@@ -8,6 +8,15 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.6.70](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.69...v0.6.70) (2026-09-08)
+
+
+### Bug Fixes
+
+* **meter:** a stale custom-meter answer cannot overwrite a newer one ([4396578](https://github.com/go7studio/Go7-Workhorse/commit/439657849ce3d56759afdcda807b5a641d85ee6f))
+* **missions:** a pass that produced nothing is not a finished pass ([658f9c5](https://github.com/go7studio/Go7-Workhorse/commit/658f9c5841c5d1b483ae0b4a7fbcdd4d91b7a09d))
+* **vendors:** a vendor refusal on the first turn fails the run, never records it completed ([bd7ff9e](https://github.com/go7studio/Go7-Workhorse/commit/bd7ff9e8a59640c0ed91cb208aaa5afee02e682e))
+
 ## [0.6.69](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.68...v0.6.69) (2026-09-08)
 
 

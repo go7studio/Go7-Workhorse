@@ -4,16 +4,21 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import {
+  addLineupRow,
   applyChildIdleSync,
   CHILD_SETTLE_NOTICE_MAX,
   childReportText,
   childSettleNotice,
   deniedToolReason,
+  formatAwaitAgentsSnapshot,
   lineupJoinHasActionableRow,
+  lineupJoinPrompt,
   lineupSnapshot,
   maybeEnqueueLineupJoin,
   missionRowStatus,
+  SETTLE_REASON_MAX,
   setLineupRowStatus,
+  settleReasonText,
   VENDOR_ENDED_UNFINISHED,
 } from "../src/lib/lineup";
 import { workerStatusSnapshot } from "../src/lib/subagents";
@@ -253,6 +258,101 @@ test("the settle line names the worker, the word and the reason, and stays under
   assert.equal(multiline, "Casper 2 failed: First line.", "one line, not a transcript");
 });
 
+/**
+ * Gate finding 1 on PR #302. Freezing a settled row froze a reused worker out
+ * of its next slice: `addLineupRow` no-ops on a duplicate childId, so the row
+ * kept the finished slice's word and `setLineupRowStatus` then refused to move
+ * it back to running, or to settle the new slice at all.
+ */
+test("a reused worker reopens its row for the new slice, and settles again", () => {
+  const settled = applyChildIdleSync([parentOf(), auditor()], "sess_casper", "failed", {
+    error: "Denied by sandbox: Run a command",
+  });
+  const parent = settled.find((session) => session.id === "sess_parent")!;
+  assert.equal(parent.lineup?.rows[0]?.status, "failed");
+
+  const secondSlice = {
+    ...parent.lineup!.rows[0]!,
+    title: "Casper 2 · gate the second pull request",
+    slice: "gate the second pull request",
+    status: "running" as const,
+    startedAt: at(10),
+    correlationId: "corr_second",
+    finishedAt: undefined,
+    report: undefined,
+    error: undefined,
+  };
+  const reopened = addLineupRow(parent.lineup, secondSlice);
+  assert.equal(reopened.rows.length, 1, "a reused worker keeps one row, not two");
+  assert.equal(reopened.rows[0]?.status, "running", "the new slice is running, not last slice's failure");
+  assert.equal(reopened.rows[0]?.error, undefined, "and it does not carry the last slice's reason");
+  assert.equal(reopened.rows[0]?.report, undefined);
+
+  // The same dispatch arriving twice is still a no-op.
+  assert.equal(addLineupRow(reopened, secondSlice), reopened);
+
+  // And the second slice can now settle on its own terms.
+  const live = {
+    ...auditor([message({ role: "assistant", text: "Gated it: SHIP.", createdAt: at(11) })]),
+    agentRun: { status: "running", startedAt: at(10), correlationId: "corr_second" },
+  } as unknown as Session;
+  const done = applyChildIdleSync([{ ...parent, lineup: reopened }, live], "sess_casper", "completed", {
+    report: "Gated it: SHIP.",
+    correlationId: "corr_second",
+  });
+  const after = done.find((session) => session.id === "sess_parent")?.lineup?.rows[0];
+  assert.equal(after?.status, "completed", "the new slice settles even though the old one had settled");
+  assert.equal(after?.report, "Gated it: SHIP.");
+
+  // A late event from the run that settled first cannot reach the new slice.
+  const stale = applyChildIdleSync([{ ...parent, lineup: reopened }, live], "sess_casper", "failed", {
+    error: "Denied by sandbox: Run a command",
+    correlationId: "corr_first",
+  });
+  assert.equal(stale.find((session) => session.id === "sess_parent")?.lineup?.rows[0]?.status, "running");
+});
+
+/**
+ * Gate finding 3 on PR #302. The reason travels to the parent transcript, the
+ * join prompt and the Link payload, and a denied command can quote a secret.
+ */
+test("a secret in a denied command never reaches the parent or a Link caller", () => {
+  const secret = "ghp_16Cfakefakefakefake0000000000000000";
+  const denial = `Denied by sandbox: Run a command — curl -H 'Authorization: Bearer ${secret}' https://api.example.com`;
+  const worker = auditor([message({ role: "system", text: denial, createdAt: at(4) })]);
+  assert.equal(deniedToolReason(worker.messages), "Denied by sandbox: Run a command");
+
+  const settled = applyChildIdleSync([parentOf(), worker], "sess_casper", "failed", {
+    report: childReportText(worker),
+    error: deniedToolReason(worker.messages),
+  });
+  const parent = settled.find((session) => session.id === "sess_parent")!;
+  const child = settled.find((session) => session.id === "sess_casper")!;
+  const surfaces = [
+    settleLine(settled),
+    child.agentRun?.error ?? "",
+    parent.lineup?.rows[0]?.error ?? "",
+    lineupJoinPrompt(parent.lineup),
+    formatAwaitAgentsSnapshot({ lineup: parent.lineup, children: [child] }),
+  ];
+  for (const surface of surfaces) {
+    assert.doesNotMatch(surface, /ghp_/, "no token reaches a surface the parent or Link reads");
+    assert.doesNotMatch(surface, /Bearer /);
+  }
+
+  // A vendor's own error text takes the same treatment, because it is not the
+  // desk that wrote it and it can quote the command too.
+  assert.equal(
+    settleReasonText(`grok exited 1: Authorization: Bearer ${secret}`),
+    "grok exited 1: [redacted]",
+  );
+  assert.equal(settleReasonText(`token=${secret} was refused`), "[redacted] was refused");
+  const long = settleReasonText("y".repeat(900));
+  assert.ok(long.length <= SETTLE_REASON_MAX, `bounded, got ${long.length}`);
+  assert.equal(settleReasonText("First line.\nSecond line."), "First line.");
+  assert.equal(settleReasonText(undefined), "");
+});
+
 test("the store tells a desk cancel apart from a vendor that quit on a denial", () => {
   assert.match(
     STORE,
@@ -270,4 +370,45 @@ test("the store tells a desk cancel apart from a vendor that quit on a denial", 
     /vendorQuit\s*\?\s*\{ error: denial \|\| VENDOR_ENDED_UNFINISHED \}/,
     "the denial in the transcript is the run's error",
   );
+});
+
+/**
+ * Gate finding 2 on PR #302. Vendors do not agree on how a stopped run ends.
+ * Some send a done with stopReason cancelled, some raise an error on the way
+ * down. The error path consumed the desk's cancel mark and then recorded the
+ * run failed, so a crew-tray stop, a Link cancel or a goal deadline came back
+ * as a failure nobody caused.
+ */
+test("a desk cancel the vendor reports as an error is still a cancel", () => {
+  const errorBlock = STORE.slice(STORE.indexOf('if (event.type === "error") {'));
+  assert.match(
+    errorBlock,
+    /const deskAskedToStop = takeCancelAsked\(event\.sessionId\)/,
+    "the error path must read the mark, not just clear it",
+  );
+  assert.match(
+    errorBlock,
+    /const childSettleStatus = deskAskedToStop \? \("cancelled" as const\) : \("failed" as const\)/,
+    "a stop the desk asked for is a cancel however the vendor spells its ending",
+  );
+  assert.match(
+    errorBlock,
+    /error: deskAskedToStop \? "Subagent was cancelled\." : event\.message/,
+    "and the reason names the cancel rather than the vendor's crash text",
+  );
+  assert.match(
+    errorBlock,
+    /const admitted = shouldJoinAfterChildSettle\(childSettleStatus\)/,
+    "a cancel on the error path must not synthesize a wave join either",
+  );
+
+  // The state transition itself: a cancel settles cancelled in both views.
+  const settled = applyChildIdleSync([parentOf(), auditor()], "sess_casper", "cancelled", {
+    report: childReportText(auditor()),
+    error: "Subagent was cancelled.",
+  });
+  const worker = settled.find((session) => session.id === "sess_casper")!;
+  assert.equal(worker.agentRun?.status, "cancelled");
+  assert.equal(settled.find((session) => session.id === "sess_parent")?.lineup?.rows[0]?.status, "cancelled");
+  assert.equal(lineupSnapshot(settled.find((session) => session.id === "sess_parent")?.lineup, [worker]).finished[0]?.status, "cancelled");
 });

@@ -1,6 +1,7 @@
 import { OBJECTIVE_ASK_RULE } from "./ask-default";
 import { enqueuePrompt } from "./chats";
 import { uid } from "./id";
+import { redactText } from "./learning-redact";
 import { boundWorkerReport, crewHasParentTakeover, normalizeMissionIteration, normalizePathAllowlist, normalizeWorkerFindings, parseWorkerFindings, withSubagentStatus, workerNameFromTitle, workerTaskTitle } from "./subagents";
 import type { AgentRun, ChatMessage, DeskLineup, DeskLineupRow, DeskLineupRowStatus, MissionIteration, Session, UsageEvent, WorkerFinding } from "./types";
 import { formatSpendLine, sessionSpend } from "./usage";
@@ -129,6 +130,21 @@ function normalizeLineupRow(raw: unknown): DeskLineupRow | null {
   };
 }
 
+/**
+ * Is this row a second run on the same worker, or the same run said twice?
+ *
+ * A reused worker keeps its chat and its id, so the id alone cannot tell the
+ * slices apart. The run's own clock can: a later `startedAt`, or a different
+ * correlation, is a new assignment. Anything else is the same dispatch
+ * arriving again.
+ */
+export function rowStartsANewRun(existing: DeskLineupRow, incoming: DeskLineupRow): boolean {
+  if (incoming.startedAt > existing.startedAt) return true;
+  const was = existing.correlationId?.trim() ?? "";
+  const now = incoming.correlationId?.trim() ?? "";
+  return Boolean(now) && now !== was;
+}
+
 export function addLineupRow(
   lineup: DeskLineup | undefined,
   row: DeskLineupRow,
@@ -143,8 +159,21 @@ export function addLineupRow(
       ...(mission ? { mission } : {}),
     };
   }
-  if (base.rows.some((item) => item.childId === row.childId)) {
-    return mission ? { ...base, mission } : base;
+  const existing = base.rows.find((item) => item.childId === row.childId);
+  if (existing) {
+    // A reused worker starting a new slice is a new run on the same chat, so
+    // its row reopens. The settled word belonged to the slice that finished;
+    // holding it here would leave the wave advertising the last slice's result
+    // while this one runs, and would freeze the new slice out of settling at
+    // all. Same run, same row: still a no-op, so a repeat spawn is idempotent.
+    if (!rowStartsANewRun(existing, row)) return mission ? { ...base, mission } : base;
+    return {
+      ...base,
+      ...(joinOwner ? { joinOwner } : {}),
+      ...(mission ? { mission } : {}),
+      folder: row.folder || base.folder,
+      rows: base.rows.map((item) => (item.childId === row.childId ? row : item)),
+    };
   }
   const { notifiedAt: _previousNotification, ...openWave } = base;
   return {
@@ -524,6 +553,9 @@ export function lineupStatusForTerminalRun(
 
 export const CHILD_SETTLE_NOTICE_MAX = 300;
 
+/** The same cap on the reason alone, before it is put in a line or a payload. */
+export const SETTLE_REASON_MAX = 300;
+
 /** The sentence for a run that stopped without anyone asking it to. */
 export const VENDOR_ENDED_UNFINISHED = "The vendor ended the run without finishing it.";
 
@@ -596,11 +628,33 @@ export function applyChildSettleNotice(
 const DENIAL_LINE = /^Denied by /;
 
 /**
+ * What a stop reason is allowed to say to a parent.
+ *
+ * This text travels further than any other error the desk keeps: into the
+ * parent transcript, into the join prompt as `why:`, and out to a Link caller
+ * as `lineup.finished[].error`. A denial line quotes the command it refused
+ * and a command can carry a token, so the quoted half is dropped, whatever is
+ * left is redacted, and the whole thing is capped. One line, never a
+ * transcript.
+ */
+export function settleReasonText(raw: string | undefined): string {
+  const first = (raw ?? "").trim().split(/\r?\n/)[0]?.trim() ?? "";
+  if (!first) return "";
+  // The desk's own denial line is `Denied by <who>: <tool> — <arguments>`.
+  // Only the sentence the desk wrote is the cause; the arguments are the
+  // worker's business and are exactly where a secret would sit.
+  const said = DENIAL_LINE.test(first) ? first.split(" — ")[0]!.trim() : first;
+  const safe = redactText(said).text.trim();
+  if (safe.length <= SETTLE_REASON_MAX) return safe;
+  return `${safe.slice(0, SETTLE_REASON_MAX - 1).trimEnd()}…`;
+}
+
+/**
  * The desk's own denial line from this turn, if it wrote one.
  *
  * The transcript already carries the honest reason a run stopped after a
- * refused tool. Everything after the em dash is the tool's arguments, which is
- * detail rather than cause, so only the head travels.
+ * refused tool, and it is the only place that reason survives once the vendor
+ * has gone.
  */
 export function deniedToolReason(
   messages: ReadonlyArray<Pick<ChatMessage, "role" | "text" | "kind">>,
@@ -609,7 +663,7 @@ export function deniedToolReason(
   for (let at = turn.length - 1; at >= 0; at -= 1) {
     const text = (turn[at]?.text ?? "").trim();
     if (turn[at]?.role !== "system" || !DENIAL_LINE.test(text)) continue;
-    return text.split(" — ")[0]!.trim();
+    return settleReasonText(text);
   }
   return "";
 }
@@ -644,7 +698,12 @@ export function applyChildIdleSync(
   // a cancelled run came to sit in `lineup.finished` as `completed`.
   const settledRun = alreadyDone && priorRun ? priorRun.status : nextStatus;
   const rowStatus = lineupRowStatusForRun(settledRun);
-  const settleError = alreadyDone ? priorRun?.error : extra?.error ?? emptyTurnError ?? priorRun?.error;
+  // One reason, bounded and redacted once, for the run, the row, the parent's
+  // line and the Link payload. A vendor's own error text lands here too, so
+  // this is the only place it has to be made safe to repeat.
+  const settleError = settleReasonText(
+    alreadyDone ? priorRun?.error : extra?.error ?? emptyTurnError ?? priorRun?.error,
+  );
   const next = sessions.map((session) => {
     if (session.id !== childId) return session;
     const run = session.agentRun;
@@ -656,8 +715,7 @@ export function applyChildIdleSync(
             ...run,
             status: alreadyDone ? run.status : nextStatus,
             finishedAt: run.finishedAt ?? now,
-            ...(extra?.error && !alreadyDone ? { error: extra.error } : {}),
-            ...(emptyTurnError && !alreadyDone && !extra?.error ? { error: emptyTurnError } : {}),
+            ...(settleError && !alreadyDone ? { error: settleError } : {}),
             ...(findings ? { findings } : {}),
           }
         : run,

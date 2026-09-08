@@ -7579,7 +7579,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         return;
       }
       if (event.type === "error") {
-        takeCancelAsked(event.sessionId);
+        // A stop the desk asked for is a cancel however the vendor spells its
+        // ending. Some report it as a done with stopReason cancelled, some
+        // raise an error on the way down; who decided does not change with the
+        // shape of the message.
+        const deskAskedToStop = takeCancelAsked(event.sessionId);
         const idleHandle = turnIdleTimer.current[event.sessionId];
         if (idleHandle) window.clearTimeout(idleHandle);
         delete turnIdleTimer.current[event.sessionId];
@@ -7669,11 +7673,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           );
           const failed = sessions.find((session) => session.id === event.sessionId);
           if (failed?.parentId) {
-            sessions = applyChildIdleSync(sessions, event.sessionId, "failed", {
+            const childSettleStatus = deskAskedToStop ? ("cancelled" as const) : ("failed" as const);
+            sessions = applyChildIdleSync(sessions, event.sessionId, childSettleStatus, {
               report: childReportText(failed),
-              error: event.message,
+              error: deskAskedToStop ? "Subagent was cancelled." : event.message,
             });
-            const admitted = joinAdmit(sessions, failed.parentId, current, plansRef.current);
+            const admitted = shouldJoinAfterChildSettle(childSettleStatus)
+              ? joinAdmit(sessions, failed.parentId, current, plansRef.current)
+              : { sessions };
             queueMicrotask(() => {
               if (admitted.auditor) sendRef.current(admitted.auditor.brief, { sessionId: admitted.auditor.id, hideUser: true });
             });

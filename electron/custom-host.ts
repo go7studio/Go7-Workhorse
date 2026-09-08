@@ -3,6 +3,7 @@ import { buildPolicyContext } from "../src/lib/context-preface";
 import {
   classifyElevationInput,
   elevationForBlock,
+  READ_ONLY_SHELL_HINT,
   securityPolicyAnswer,
   type PermissionAnswer,
 } from "../src/lib/permissions";
@@ -768,7 +769,14 @@ export class CustomSessionHost {
             });
           }
           if (answer === "deny") {
-            results.push({ id: use.id, name: use.name, content: `Denied by permission/sandbox: ${use.name}`, isError: true });
+            // The refusal is the only thing the bot reads back, so on a
+            // read-only seat it carries the shape of a call that would work.
+            // Told only "denied", a bot asked for the sandbox to be dropped
+            // when the read it wanted was already allowed as a gh or git read.
+            const denial = sandbox === "read-only" || sandbox === "strict"
+              ? `Denied by permission/sandbox: ${use.name}. ${READ_ONLY_SHELL_HINT}`
+              : `Denied by permission/sandbox: ${use.name}`;
+            results.push({ id: use.id, name: use.name, content: denial, isError: true });
             emit({
               type: "tool",
               sessionId: input.sessionId,

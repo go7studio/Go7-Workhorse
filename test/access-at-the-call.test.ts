@@ -285,9 +285,13 @@ const nadia: LineageChat = {
 };
 
 test("the denial names the chat the sandbox came from, and both ways to change it", () => {
+  // A read-only seat leads with what it can still run, because the worker
+  // reading this line was usually refused for a call it could have made in
+  // another form. Then it names the chat and both ways to change it.
   assert.equal(
     sandboxSourceNote({ session: nadia, sessions: [reviewChat, nadia], deskAccess: DESK_DEFAULT }),
-    "Sandbox Read-only comes from chat “Adversarial product and eval review only”; " +
+    "Read-only sandbox: gh, git and search reads are allowed; interpreters and writes are not. " +
+      "Sandbox Read-only comes from chat “Adversarial product and eval review only”; " +
       "ask for sandbox: off in the call, or raise that chat's Sandbox.",
   );
   // Any depth: a helper under Nadia climbs past every hidden row to the chat
@@ -307,7 +311,8 @@ test("the denial names the chat the sandbox came from, and both ways to change i
   const orphan: LineageChat = { id: "orphan", parentId: "gone", hidden: true, mode: "ask", sandbox: "strict" };
   assert.equal(
     sandboxSourceNote({ session: orphan, sessions: [orphan] }),
-    "Sandbox Strict comes from the desk default; ask for sandbox: off in the call, or raise that chat's Sandbox.",
+    "Read-only sandbox: gh, git and search reads are allowed; interpreters and writes are not. " +
+      "Sandbox Strict comes from the desk default; ask for sandbox: off in the call, or raise that chat's Sandbox.",
   );
   assert.match(sandboxSourceNote({ deskAccess: { mode: "ask", sandbox: "workspace" } }), /Sandbox Workspace comes from the desk default/);
 });

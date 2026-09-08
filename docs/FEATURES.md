@@ -140,7 +140,11 @@ When you add a feature, add it here in the same commit.
 - A chat reads media the agent wrote, so a generated image shows in the
   transcript, not a path.
 - **Permission modes** ask, accept-edits, always-approve, plan.
-- **Sandbox profiles** off, workspace, read-only, strict.
+- **Sandbox profiles** off, workspace, read-only, strict. Read-only still reads:
+  gh, git and the search tools. Anything that writes or sends stops, and so does
+  every interpreter, because a script cannot be read for what it will do.
+- A refusal names what the seat can run, so a worker asks for the right call
+  rather than for the dial to move.
 - **Scoped approvals** a grant remembers the exact tool, command and path for 24
   hours. Changed or expired requests ask again.
 - **Execution directory** a chat starts in a linked folder or managed git

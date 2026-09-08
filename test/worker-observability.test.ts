@@ -16,7 +16,7 @@ import { addLineupRow, applyChildIdleSync, emptyLineup, formatAwaitAgentsSnapsho
 import { sessionTranscript } from "../src/lib/session-bridge";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-import type { Session } from "../src/lib/types";
+import type { Session, UsageEvent } from "../src/lib/types";
 
 function worker(overrides: Partial<Session> = {}): Session {
   return {
@@ -314,6 +314,92 @@ test("status tells a harness wait, done, or failed", () => {
   );
   assert.equal(empty.next, "failed");
   assert.equal(Object.prototype.hasOwnProperty.call(empty, "report"), false);
+});
+
+function usageEvent(overrides: Partial<UsageEvent> & { id: string; sessionId: string }): UsageEvent {
+  return {
+    at: 1787250125161,
+    provider: "custom",
+    model: "MiniMax-M3",
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+    ...overrides,
+  };
+}
+
+test("status reports what the worker spent, from the desk ledger", () => {
+  const usage = [
+    usageEvent({ id: "u1", sessionId: "kid_run", inputTokens: 100, outputTokens: 40, cacheReadTokens: 900, cacheWriteTokens: 10, costUsd: 0.25 }),
+    usageEvent({ id: "u2", sessionId: "kid_run", inputTokens: 20, outputTokens: 5, cacheReadTokens: 100, cacheWriteTokens: 0, costUsd: 0.5 }),
+    // Another worker's spend must not land on this one.
+    usageEvent({ id: "u3", sessionId: "kid_other", inputTokens: 9_000, outputTokens: 9_000, costUsd: 99 }),
+  ];
+  const snap = workerStatusSnapshot(worker({ status: "idle", agentRun: { status: "completed", startedAt: 1, finishedAt: 2, isolation: "shared" } }), { usage });
+  assert.deepEqual(snap.spend, {
+    tokens: 175,
+    inputTokens: 120,
+    outputTokens: 45,
+    cachedTokens: 1_000,
+    costUsd: 0.75,
+  });
+});
+
+test("a worker the ledger never billed reports no spend at all", () => {
+  const other = [usageEvent({ id: "u1", sessionId: "kid_other", inputTokens: 500, outputTokens: 20, costUsd: 4 })];
+  for (const usage of [undefined, [], other]) {
+    const snap = workerStatusSnapshot(worker(), usage === undefined ? undefined : { usage });
+    assert.equal(Object.prototype.hasOwnProperty.call(snap, "spend"), false);
+  }
+});
+
+test("an unpriced vendor reports tokens and omits costUsd, never zero", () => {
+  const usage = [
+    usageEvent({ id: "u1", sessionId: "kid_run", inputTokens: 300, outputTokens: 60, cacheReadTokens: 40 }),
+    usageEvent({ id: "u2", sessionId: "kid_run", inputTokens: 100, outputTokens: 10, cacheReadTokens: 0 }),
+  ];
+  const spend = workerStatusSnapshot(worker(), { usage }).spend as Record<string, unknown>;
+  assert.equal(spend.tokens, 470);
+  assert.equal(spend.cachedTokens, 40);
+  // A flat-plan vendor is unpriced, not free. $0.00 would read as a free slice.
+  assert.equal(Object.prototype.hasOwnProperty.call(spend, "costUsd"), false);
+  assert.notEqual(spend.costUsd, 0);
+});
+
+test("one priced event in a wave of unpriced ones still reports the dollars it knows", () => {
+  const usage = [
+    usageEvent({ id: "u1", sessionId: "kid_run", inputTokens: 100, outputTokens: 10 }),
+    usageEvent({ id: "u2", sessionId: "kid_run", inputTokens: 100, outputTokens: 10, costUsd: 0.02 }),
+  ];
+  assert.equal((workerStatusSnapshot(worker(), { usage }).spend as { costUsd?: number }).costUsd, 0.02);
+});
+
+test("the join report gives the parent one spend line per worker", () => {
+  const row = (childId: string, title: string) => ({
+    childId,
+    title,
+    slice: "report path",
+    folder: "/repo",
+    vendor: "Codex",
+    status: "completed" as const,
+    startedAt: 1,
+  });
+  const wave = addLineupRow(
+    addLineupRow(emptyLineup("/repo", 1, "Two slices"), row("kid_run", "Marlow · S4")),
+    row("kid_flat", "Wren · S5"),
+  );
+  const usage = [
+    usageEvent({ id: "u1", sessionId: "kid_run", inputTokens: 12_000, outputTokens: 3_000, cacheReadTokens: 400, costUsd: 1.87 }),
+    usageEvent({ id: "u2", sessionId: "kid_flat", inputTokens: 2_000, outputTokens: 400 }),
+  ];
+  const join = lineupJoinPrompt(wave, { usage });
+  assert.match(join, /child=kid_run\s+status=completed\nspend: 15k tokens · \$1\.87/);
+  assert.match(join, /child=kid_flat\s+status=completed\nspend: 2\.4k tokens · cost not recorded/);
+  // A worker the ledger never billed says so rather than claiming zero.
+  assert.match(lineupJoinPrompt(wave, { usage: [] }), /spend: not recorded/);
+  // No ledger passed, no spend lines: every existing caller reads as before.
+  assert.equal(lineupJoinPrompt(wave).includes("spend:"), false);
 });
 
 test("a checkpoint on a running worker keeps the original startedAt", () => {

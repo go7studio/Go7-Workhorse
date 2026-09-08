@@ -21,12 +21,14 @@ import type {
   RoutingDecision,
   Session,
   SessionEnvironment,
+  UsageEvent,
   WorkerFinding,
   WorkerFindingSeverity,
   WorkerHandoff,
   WorkerSeed,
   SandboxProfile,
 } from "./types";
+import { sessionSpend } from "./usage";
 import { beginAssignmentBudget } from "./worker-budget";
 import { looksLikeWorkerBrief, type DeskRole } from "./workhorse-rules";
 
@@ -900,6 +902,21 @@ export function workerReportedBlocked(text: string | undefined): boolean {
   return declarations.at(-1)?.[1]?.toLowerCase() === "blocked";
 }
 
+/**
+ * When this worker last did anything. Split out of workerProgressCheckpoint so
+ * a list of hundreds of workers can date every row without building a bounded
+ * report for each one.
+ */
+export function workerLastActivityAt(worker: Pick<Session, "agentRun" | "messages">): number | null {
+  const lastMeaningful = [...(worker.messages ?? [])].reverse().find((message) => {
+    if (message.kind === "tool" && message.text.trim()) return true;
+    if (message.role === "assistant" && message.kind !== "tool" && message.kind !== "thought" && message.text.trim()) return true;
+    if (message.role === "user" && message.text.trim()) return true;
+    return false;
+  });
+  return lastMeaningful?.createdAt ?? worker.agentRun?.finishedAt ?? worker.agentRun?.startedAt ?? null;
+}
+
 export function workerProgressCheckpoint(
   worker: Pick<Session, "id" | "status" | "agentRun" | "messages">,
 ): WorkerProgressCheckpoint {
@@ -907,12 +924,6 @@ export function workerProgressCheckpoint(
   const status = worker.agentRun?.status ?? worker.status;
   const lastTool = [...messages].reverse().find((message) => message.kind === "tool" && message.text.trim());
   const lastNote = lastAssistantReport(messages);
-  const lastMeaningful = [...messages].reverse().find((message) => {
-    if (message.kind === "tool" && message.text.trim()) return true;
-    if (message.role === "assistant" && message.kind !== "tool" && message.kind !== "thought" && message.text.trim()) return true;
-    if (message.role === "user" && message.text.trim()) return true;
-    return false;
-  });
   const currentStep = lastTool?.text.trim().split("\n")[0]?.trim()
     || lastNote?.text.trim().split("\n")[0]?.trim()
     || (status === "running" ? "no vendor output" : status);
@@ -920,7 +931,7 @@ export function workerProgressCheckpoint(
   return {
     phase: status,
     currentStep,
-    lastActivityAt: lastMeaningful?.createdAt ?? worker.agentRun?.finishedAt ?? worker.agentRun?.startedAt ?? null,
+    lastActivityAt: workerLastActivityAt(worker),
     changedFiles: worker.agentRun?.changedFiles ?? [],
     checksRun: extractChecks(messages),
     blockers: extractBlockers(lastNote?.text),
@@ -1166,6 +1177,8 @@ export type AgentStatusLookup = {
   fromSessionId?: string;
   sessions: StatusSession[];
   externalTask?: (Record<string, unknown> & { id: string; status: string }) | null;
+  /** Desk usage ledger. Pass it and a worker's status carries `spend`. */
+  usage?: UsageEvent[];
 };
 
 export type AgentStatusResult =
@@ -1184,7 +1197,7 @@ export function resolveAgentStatus(input: AgentStatusLookup): AgentStatusResult 
   if (session) {
     const isWorker = Boolean(session.parentId);
     const descendantOk = isWorker && (!from || descendantSessionIds(input.sessions, from).includes(session.id));
-    if (descendantOk) return { ok: true, snapshot: workerStatusSnapshot(session) };
+    if (descendantOk) return { ok: true, snapshot: workerStatusSnapshot(session, { usage: input.usage }) };
     const asked = askedChatStatusSnapshot(session, from || undefined, input.sessions);
     if (asked) return { ok: true, snapshot: asked };
     return { ok: false, error: "unknown" };
@@ -1195,9 +1208,16 @@ export function resolveAgentStatus(input: AgentStatusLookup): AgentStatusResult 
   return { ok: false, error: "unknown" };
 }
 
+/**
+ * `usage` is the desk ledger. Pass it and the snapshot carries `spend`, so an
+ * app delegating on someone's behalf can answer what the slice cost without a
+ * second ledger of its own.
+ */
 export function workerStatusSnapshot(
   worker: Pick<Session, "id" | "title" | "workerName" | "parentId" | "status" | "provider" | "model" | "effort" | "agentRun" | "routingMode" | "routingDecision" | "messages">,
+  opts?: { usage?: UsageEvent[] },
 ): Record<string, unknown> {
+  const spend = sessionSpend(opts?.usage, worker.id);
   const last = lastAssistantReport(worker.messages);
   const raw = last?.text.trim();
   const bounded = raw ? boundWorkerReport(raw, { workerId: worker.id }) : null;
@@ -1225,6 +1245,7 @@ export function workerStatusSnapshot(
     ...(worker.agentRun?.executionOwner ? { executionOwner: worker.agentRun.executionOwner } : {}),
     ...(worker.agentRun?.takeoverReason ? { takeoverReason: worker.agentRun.takeoverReason } : {}),
     ...(typeof worker.agentRun?.usedTokens === "number" ? { usedTokens: worker.agentRun.usedTokens } : {}),
+    ...(spend ? { spend } : {}),
     ...(worker.agentRun?.budgetPhase ? { budgetPhase: worker.agentRun.budgetPhase } : {}),
     ...(status !== "running" && bounded ? { report: bounded.report } : {}),
     ...(status !== "running" && findings?.length ? { findings } : {}),

@@ -520,6 +520,34 @@ export function chatSpend(events: UsageEvent[], sessionId: string | undefined): 
   return rollup(events.filter((event) => event.sessionId === sessionId));
 }
 
+/** What one session cost, shaped for a Link caller. Same ledger as the ChatSpend meter. */
+export type SessionSpend = {
+  tokens: number;
+  inputTokens: number;
+  outputTokens: number;
+  cachedTokens: number;
+  costUsd?: number;
+};
+
+/**
+ * Spend for one session. Undefined when the ledger holds nothing for it, so a
+ * caller can tell "nothing recorded" from "recorded nothing". `costUsd` is
+ * present only when the ledger knows the price: an unpriced vendor reads as no
+ * cost at all, never as free.
+ */
+export function sessionSpend(events: UsageEvent[] | undefined, sessionId: string | undefined): SessionSpend | undefined {
+  if (!sessionId || !events?.length) return undefined;
+  const totals = chatSpend(events, sessionId);
+  if (totals.events === 0) return undefined;
+  return {
+    tokens: totals.totalTokens,
+    inputTokens: totals.inputTokens,
+    outputTokens: totals.outputTokens,
+    cachedTokens: totals.cacheReadTokens,
+    ...(totals.costKnown ? { costUsd: totals.costUsd } : {}),
+  };
+}
+
 export type CrewSpendRow = {
   sessionId: string;
   label: string;
@@ -1841,6 +1869,20 @@ export function formatCost(totals: UsageTotals): string {
   if (!totals.costKnown) return "—";
   if (totals.costUsd < 0.01) return `$${totals.costUsd.toFixed(4)}`;
   return `$${totals.costUsd.toFixed(2)}`;
+}
+
+/**
+ * One line of spend for the join report a parent reads. Tokens always, dollars
+ * only when the ledger knows them. An unpriced vendor says so rather than
+ * printing $0.00, which a parent would read as a free slice.
+ */
+export function formatSpendLine(spend: SessionSpend | undefined): string {
+  if (!spend) return "spend: not recorded";
+  const cost =
+    typeof spend.costUsd === "number"
+      ? formatCost({ ...EMPTY, costUsd: spend.costUsd, costKnown: true })
+      : "cost not recorded";
+  return `spend: ${formatTokens(spend.tokens)} tokens · ${cost}`;
 }
 
 export function usageHasBilledTokens(draft: {

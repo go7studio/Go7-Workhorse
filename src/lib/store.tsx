@@ -1084,7 +1084,7 @@ function joinAdmit(
     plans,
     permits: state.watchPermits,
     dayMarks: state.watchDayMarks,
-  }), { childId: uid("sess") });
+  }), { childId: uid("sess"), usage: state.usage });
 }
 
 function snapshotWriteInstance(

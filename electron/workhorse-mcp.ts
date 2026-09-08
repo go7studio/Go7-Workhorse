@@ -49,6 +49,7 @@ import {
   withFollowThrough,
   listedChatFollowThrough,
   resolveAgentStatus,
+  workerLastActivityAt,
   workerNameFromTitle,
   workerProgressCheckpoint,
 } from "../src/lib/subagents";
@@ -481,12 +482,13 @@ const TOOLS = [
   {
     name: "workhorse_list_chats",
     description:
-      "List live chats and their workers. Default is compact JSON (id, title, worker, parentId, status, next, project) so host output caps do not clip the list. Pass full for preview/sidebar. Pass parents to omit workers. Use this to pick a parent for delegate, or to find a named worker such as Marlow. If several rows share a worker name, pass id to ask or status. fromSessionId for delegate is the parent id, never the worker. Archived and deleted chats are omitted.",
+      "List live chats and their workers. Default is compact JSON (id, title, worker, parentId, status, next, project) so host output caps do not clip the list. Every parent chat is listed. Workers are listed while they run and for 24 hours after they finish; pass all to include the older finished ones. Pass full for preview/sidebar. Pass parents to omit workers. Use this to pick a parent for delegate, or to find a named worker such as Marlow. If several rows share a worker name, pass id to ask or status. fromSessionId for delegate is the parent id, never the worker. Archived and deleted chats are omitted.",
     inputSchema: {
       type: "object",
       properties: {
         parents: { type: "boolean", description: "If true, omit workers (rows with a parentId)." },
         full: { type: "boolean", description: "If true, include preview, sidebar, provider, and model." },
+        all: { type: "boolean", description: "If true, also list workers that finished more than 24 hours ago." },
       },
       additionalProperties: false,
     },
@@ -619,7 +621,7 @@ const TOOLS = [
   {
     name: "workhorse_agent_status",
     description:
-      "Follow through on a delegated worker or an asked chat. Pass the id from delegate or ask_chat (childSessionId). next is wait, done, or failed. When done, report is that turn's reply, not an older message. Do not spawn another worker for the same slice.",
+      "Follow through on a delegated worker or an asked chat. Pass the id from delegate or ask_chat (childSessionId). next is wait, done, or failed. When done, report is that turn's reply, not an older message. A worker also carries spend (tokens, inputTokens, outputTokens, cachedTokens, and costUsd when the desk knows the price) so you can say what the slice cost. Do not spawn another worker for the same slice.",
     inputSchema: {
       type: "object",
       properties: {
@@ -3060,9 +3062,15 @@ async function callDeskTool(name: string, args: Record<string, unknown>, from?: 
     const rows = catalogSessions(listState, { fromSessionId: from, includeWorkers: true }).map((row) => {
       const follow = listedChatFollowThrough(row);
       const base = { ...row, ...(follow.next ? { next: follow.next } : {}) };
-      // Only while running: once a worker is done, `next` is the whole story.
-      if (!row.parentId || row.status !== "running") return base;
+      if (!row.parentId) return base;
       const live = liveById.get(row.id);
+      // Every worker gets a clock, because that is what tells the default list
+      // which finished ones are old news. Only a running one is worth the
+      // fuller checkpoint: once a worker is done, `next` is the whole story.
+      if (row.status !== "running") {
+        const lastActivityAt = live ? workerLastActivityAt(live) : null;
+        return { ...base, ...(typeof lastActivityAt === "number" ? { lastActivityAt } : {}) };
+      }
       const checkpoint = live ? workerProgressCheckpoint(live) : undefined;
       return {
         ...base,
@@ -3071,7 +3079,11 @@ async function callDeskTool(name: string, args: Record<string, unknown>, from?: 
       };
     });
     if (!isLinkProfile()) return JSON.stringify(rows, null, 2);
-    return formatLinkChatList(rows, { full: args.full === true, parents: args.parents === true });
+    return formatLinkChatList(rows, {
+      full: args.full === true,
+      parents: args.parents === true,
+      all: args.all === true,
+    });
   }
   if (name === "workhorse_read_chat") {
     const chat = typeof args.chat === "string" ? args.chat : "";
@@ -3165,7 +3177,7 @@ async function callDeskTool(name: string, args: Record<string, unknown>, from?: 
     const id = typeof args.id === "string" ? args.id : "";
     const parent = typeof args.fromSessionId === "string" ? args.fromSessionId : from;
     const fromState = (): string | null => {
-      const raw = readState() as { sessions?: unknown; externalTasks?: unknown };
+      const raw = readState() as { sessions?: unknown; externalTasks?: unknown; usage?: UsageEvent[] };
       const sessions = Array.isArray(raw.sessions) ? (raw.sessions as Session[]) : [];
       const task = normalizeTaskStore(raw.externalTasks).byId[id];
       const resolved = resolveAgentStatus({
@@ -3173,6 +3185,9 @@ async function callDeskTool(name: string, args: Record<string, unknown>, from?: 
         fromSessionId: parent,
         sessions,
         externalTask: task,
+        // The desk ledger is already in state, so the caller gets what the
+        // slice cost without keeping a ledger of its own.
+        usage: Array.isArray(raw.usage) ? raw.usage : [],
       });
       if (!resolved.ok) return null;
       if (typeof resolved.snapshot.next === "string") return JSON.stringify(resolved.snapshot, null, 2);
@@ -3763,7 +3778,7 @@ function isMcpEntry(): boolean {
  *
  *   <helper> link capabilities
  *   <helper> link capacity [--provider <id>] [--callable]
- *   <helper> link chats [--parents] [--full]
+ *   <helper> link chats [--parents] [--full] [--all]
  *   <helper> link read <sessionId> [--limit <n>]
  *   <helper> link ask --chat <sessionId> --message "<text>" [--trace <id>] [--key <idempotencyKey>]
  *   <helper> link delegate --chat <sessionId> --task "<text>" [--provider <id>] [--model <id>] [--effort <level>] [--permission <seat>] [--sandbox <profile>] [--accept <criterion>] [--passes <n>] [--folder <path>] [--trace <id>] [--key <idempotencyKey>]
@@ -3804,7 +3819,7 @@ export function linkCliCall(argv: string[]): { name: string; args: Record<string
   }
   const flag = (name: string): string | undefined => flags.get(name) || undefined;
   const usage =
-    "usage: link capabilities | capacity [--provider <id>] [--callable] | chats [--parents] [--full] | read <id> [--limit <n>] | ask --chat <id> --message <text> [--trace <id>] [--key <id>] | delegate --chat <id> --task <text> [--provider <id>] [--model <id>] [--effort <level>] [--permission <seat>] [--sandbox <profile>] [--accept <criterion>] [--passes <n>] [--folder <path>] [--trace <id>] [--key <id>] | status <workerId> | follow-up <workerId> <text> --chat <id> [--pass <n>] [--provider <id>] [--model <id>] [--effort <level>] [--permission <seat>] [--sandbox <profile>] [--route <tier>] [--trace <id>] [--key <id>] | grok-pending | grok-reply <id> --text <answer> | local-hosts | local-capabilities [--host <id>] | local-upload <path> --capability <id> --kind <kind> --role <role> --media-type <mime> | local-invoke <capabilityId> ['<invocation-json>'] | local-chat <prompt> | local-3d <sourceArtifactId> | local-job <jobId> | local-cancel <jobId> | local-artifact <artifactId> | local-materialize <artifactId> | local-continue <jobId> <continuationId> --chat <id> --folder <path>";
+    "usage: link capabilities | capacity [--provider <id>] [--callable] | chats [--parents] [--full] [--all] | read <id> [--limit <n>] | ask --chat <id> --message <text> [--trace <id>] [--key <id>] | delegate --chat <id> --task <text> [--provider <id>] [--model <id>] [--effort <level>] [--permission <seat>] [--sandbox <profile>] [--accept <criterion>] [--passes <n>] [--folder <path>] [--trace <id>] [--key <id>] | status <workerId> | follow-up <workerId> <text> --chat <id> [--pass <n>] [--provider <id>] [--model <id>] [--effort <level>] [--permission <seat>] [--sandbox <profile>] [--route <tier>] [--trace <id>] [--key <id>] | grok-pending | grok-reply <id> --text <answer> | local-hosts | local-capabilities [--host <id>] | local-upload <path> --capability <id> --kind <kind> --role <role> --media-type <mime> | local-invoke <capabilityId> ['<invocation-json>'] | local-chat <prompt> | local-3d <sourceArtifactId> | local-job <jobId> | local-cancel <jobId> | local-artifact <artifactId> | local-materialize <artifactId> | local-continue <jobId> <continuationId> --chat <id> --folder <path>";
   if (sub === "capabilities") return { name: "workhorse_capabilities", args: {} };
   if (sub === "capacity") {
     return { name: "workhorse_query_capacity", args: { ...(flag("provider") ? { provider: flag("provider") } : {}), ...(flag("callable") ? { callableOnly: true } : {}) } };
@@ -3812,7 +3827,11 @@ export function linkCliCall(argv: string[]): { name: string; args: Record<string
   if (sub === "chats") {
     return {
       name: "workhorse_list_chats",
-      args: { ...(flag("parents") ? { parents: true } : {}), ...(flag("full") ? { full: true } : {}) },
+      args: {
+        ...(flag("parents") ? { parents: true } : {}),
+        ...(flag("full") ? { full: true } : {}),
+        ...(flag("all") ? { all: true } : {}),
+      },
     };
   }
   if (sub === "read") {

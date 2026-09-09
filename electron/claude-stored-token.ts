@@ -29,7 +29,7 @@ export function storedClaudeToken(): string | null {
 
 import { createHash } from "node:crypto";
 
-type Refusal = { fingerprint: string; reason: string; at: string };
+type Refusal = { fingerprint: string; reason: string; at: string; source?: "usage" };
 let rejected: Refusal | null = null;
 let store: { read: () => string | null; write: (text: string | null) => void } | null = null;
 
@@ -63,7 +63,12 @@ export function setClaudeRefusalStore(io: { read: () => string | null; write: (t
   try {
     const parsed = JSON.parse(raw) as Partial<Refusal>;
     if (typeof parsed.fingerprint === "string" && typeof parsed.reason === "string" && parsed.reason.trim()) {
-      rejected = { fingerprint: parsed.fingerprint, reason: parsed.reason, at: typeof parsed.at === "string" ? parsed.at : "" };
+      rejected = {
+        fingerprint: parsed.fingerprint,
+        reason: parsed.reason,
+        at: typeof parsed.at === "string" ? parsed.at : "",
+        ...(parsed.source === "usage" ? { source: "usage" as const } : {}),
+      };
     }
   } catch {
     /* a torn file is no refusal */
@@ -91,7 +96,18 @@ export function markClaudeTokenRejected(reason: string, current: string | null =
 
 /** Why the current login cannot be used, or null once a different token is stored. */
 export function claudeTokenProblem(current: string | null = storedClaudeToken()): string | null {
-  return rejected && rejected.fingerprint === claudeTokenFingerprint(current) ? rejected.reason : null;
+  return rejected?.source !== "usage" && rejected?.fingerprint === claudeTokenFingerprint(current) ? rejected.reason : null;
+}
+
+/** A refused meter is suspect, but it is not evidence that inference fails. */
+export function markClaudeMeterTokenSuspect(reason: string, current: string | null): void {
+  if (claudeTokenProblem(current)) return;
+  rejected = { fingerprint: claudeTokenFingerprint(current), reason, at: new Date().toISOString(), source: "usage" };
+  keep();
+}
+
+export function claudeMeterTokenProblem(current: string | null): string | null {
+  return rejected?.source === "usage" && rejected.fingerprint === claudeTokenFingerprint(current) ? rejected.reason : null;
 }
 
 /**

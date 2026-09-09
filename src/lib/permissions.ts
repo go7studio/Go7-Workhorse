@@ -1,7 +1,7 @@
 import { modeLabel, sandboxLabel } from "./commands";
 import { uid } from "./id";
 import { applySessionElevation } from "./session";
-import { toolNameKey } from "./tool-labels";
+import { canonicalToolKey, isAcpToolKind, toolNameKey } from "./tool-labels";
 import type { BotAccessDefaults, DeskAccess, PermissionGrant, PermissionMode, PermissionRequest, SandboxProfile, Session } from "./types";
 
 export type PermissionAnswer = "once" | "session" | "deny";
@@ -16,7 +16,7 @@ const DELEGATION_TOOLS = /^(?:task|agent|launch_agent|spawn_agent|spawn_subagent
  * judged at spawn admission; the write heuristic stays out of it.
  */
 export function looksLikeDelegationTool(tool: string, detail: string): boolean {
-  if (DELEGATION_TOOLS.test(toolNameKey(tool))) return true;
+  if (DELEGATION_TOOLS.test(canonicalToolKey(tool))) return true;
   // Past this line the evidence is a field inside vendor-supplied text, and a
   // shell must never be excused by its own envelope: a call named "Run a
   // command" carrying {"variant":"Task","command":"rm -rf src"} is a command.
@@ -89,6 +89,7 @@ const WRITE_WORDS =
   /\b(write|write_file|edit|search_replace|str_replace|create|delete|unlink|rm |remove|move|rename|bash|shell|powershell|cmd\.exe|run a command|run command|run_command)\b/;
 
 export function looksLikeWriteTool(tool: string, detail: string, filePath?: string): boolean {
+  if (isQuietDeskTool(tool)) return false;
   if (looksLikeDelegationTool(tool, detail)) return false;
   const shell = looksLikeShellTool(tool, detail);
   // A tool that is not a shell is what its name says it is. The name is the
@@ -119,8 +120,19 @@ function shellByName(tool: string): boolean {
 }
 
 export function looksLikeShellTool(tool: string, detail: string): boolean {
+  if (isQuietDeskTool(tool)) return false;
   if (shellByName(tool)) return true;
   return SHELL_WORDS.test(`${tool} ${detail}`);
+}
+
+/**
+ * Name the classifiers judge. ACP `kind` (execute, other, …) is not a tool
+ * name: concatenating it onto "Wait for agents" made every MCP call a shell.
+ */
+export function classifyPermissionTool(tool: string, rawTool?: string): string {
+  const kind = rawTool?.trim() ?? "";
+  if (!kind || isAcpToolKind(kind)) return tool;
+  return `${tool} ${kind}`;
 }
 
 export function looksLikeNetworkTool(tool: string, detail: string): boolean {
@@ -988,7 +1000,7 @@ const QUIET_DESK_TOOLS = new Set([
 ]);
 
 export function isQuietDeskTool(tool: string): boolean {
-  return QUIET_DESK_TOOLS.has(toolNameKey(tool));
+  return QUIET_DESK_TOOLS.has(canonicalToolKey(tool));
 }
 
 function grantText(value: string | undefined): string {
@@ -996,7 +1008,7 @@ function grantText(value: string | undefined): string {
 }
 
 export function permissionGrantKey(tool: string, detail?: string, filePath?: string): string {
-  const key = toolNameKey(tool);
+  const key = canonicalToolKey(tool);
   if (
     QUIET_DESK_TOOLS.has(key) ||
     /^(ask_chat|spawn_agent|await_agents|add_reference|delete_reference|setup_custom_bot|delete_bot|create_project|list_projects|move_chat|rename_chat|rename_project|delete_chat|delete_project)$/.test(
@@ -1656,6 +1668,7 @@ export function permissionPolicyAnswer(input: {
   detail: string;
   path?: string;
 }): PermissionAnswer | null {
+  if (isQuietDeskTool(input.tool)) return input.mode === "always-approve" ? "session" : "once";
   const searchOnly = looksLikeSearchOnly(input.tool, input.detail, input.path);
   // A read-only seat blocks writes, never reads. A search-only command is a
   // read whatever the seat is, so it is answered above the sandbox clamp and

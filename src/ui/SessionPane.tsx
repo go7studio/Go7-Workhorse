@@ -27,6 +27,7 @@ import { Composer } from "./Composer";
 import { GoalBar } from "./GoalBar";
 import { CrewTray } from "./CrewTray";
 import { WatchBanners } from "./WatchNotices";
+import { VendorTasksStrip } from "./VendorTasksStrip";
 import { ChatSpend } from "./ChatSpend";
 import { ContextMeter } from "./ContextMeter";
 import { EditedList } from "./EditedList";
@@ -576,6 +577,7 @@ export function SessionPane() {
         </div>
       ) : null}
       <div className="session-notices">
+        <VendorTasksStrip tasks={session.vendorTasks} />
         <CrewTray key={session.id} />
         <GoalBar />
         <WatchBanners onSwitchModel={openSetup} setupOpen={setupOpen} />

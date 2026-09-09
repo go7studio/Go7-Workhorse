@@ -1,7 +1,14 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import { crewActivity, crewIsLive, crewWorkers } from "../src/lib/crew-tray";
 import type { Session } from "../src/lib/types";
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const css = readFileSync(path.join(ROOT, "src", "styles", "crew-tray.css"), "utf8");
+const tray = readFileSync(path.join(ROOT, "src", "ui", "CrewTray.tsx"), "utf8");
 
 const worker = (id: string, patch: Partial<Session> = {}) => ({
   id, parentId: "parent", status: "idle", messages: [], ...patch,
@@ -27,4 +34,14 @@ test("latest activity uses worker output, never a queued user follow-up", () => 
   ] })), "Reading source files");
   assert.equal(crewActivity(worker("one", { status: "needs-input" })), "Needs you");
   assert.equal(crewActivity(worker("one", { agentRun: { status: "failed", error: "Connection lost", startedAt: 1, isolation: "shared" } })), "Connection lost");
+});
+
+test("crew tray chip sits left of the composer and does not span the chat", () => {
+  assert.match(css, /\.crew-tray\s*\{[^}]*width:\s*max-content/);
+  assert.match(css, /\.crew-tray-toggle\s*\{[^}]*flex:\s*0 1 auto/);
+  assert.match(css, /\.crew-tray-caret/);
+  assert.doesNotMatch(css, /margin-left:\s*auto/);
+  assert.match(tray, /crew-tray-caret/);
+  assert.match(tray, /View workers/);
+  assert.match(tray, /setOpen\(!open\)/);
 });

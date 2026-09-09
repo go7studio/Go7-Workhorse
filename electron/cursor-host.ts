@@ -172,6 +172,8 @@ export class CursorSessionHost {
           path: ask.path,
         }),
       onTool: (tool: GrokToolEvent) => emit({ type: "tool" as const, sessionId: input.sessionId, ...tool }),
+      onBackgroundTask: (task: import("../src/lib/vendor-tasks").VendorBackgroundTask) =>
+        emit({ type: "background-task" as const, sessionId: input.sessionId, ...task }),
       onTitle: (title: string) => emit({ type: "title" as const, sessionId: input.sessionId, title }),
       onCommands: (commands: import("../src/lib/types").Command[]) =>
         emit({ type: "commands" as const, sessionId: input.sessionId, commands }),

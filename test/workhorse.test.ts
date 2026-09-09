@@ -170,7 +170,7 @@ import {
   stripOutputFromThought,
   wrapMarkdown,
 } from "../src/lib/markdown";
-import { applyPermissionAnswer, autoAllowPermission, classifyElevation, deskClampNote, describeElevation, elevationForBlock, enqueuePermission, grantedPolicyAnswer, inboundAccess, lineageGrant, looksLikeDelegationTool, looksLikeSearchOnly, looksLikeWriteTool, parseElevationInput, pathOwnerMode, permissionGrantKey, permissionPolicyAnswer, permissionResumeStatus, promptOwner, workerAccess, workerGrant, workerTightening } from "../src/lib/permissions";
+import { applyPermissionAnswer, autoAllowPermission, classifyPermissionTool, classifyElevation, deskClampNote, describeElevation, elevationForBlock, enqueuePermission, grantedPolicyAnswer, inboundAccess, isQuietDeskTool, lineageGrant, looksLikeDelegationTool, looksLikeSearchOnly, looksLikeShellTool, looksLikeWriteTool, parseElevationInput, pathOwnerMode, permissionGrantKey, permissionPolicyAnswer, permissionResumeStatus, promptOwner, workerAccess, workerGrant, workerTightening } from "../src/lib/permissions";
 import { detectClaudeAccessDefaults, detectCursorAccessDefaults, detectGrokAccessDefaults } from "../electron/vendor-access";
 import { normalizePermissionGrants } from "../src/lib/permission-grants";
 import { appendUserMessage, applyComposerDrafts, applyDeleteDeskChat, applyDeleteLooseDeskChats, applyRenameDeskChat, archiveChat, autoRenameChat, canPlaceInProject, deleteChat, deleteChatGuard, deleteWorkerChats, dropDrafts, dropQueuedPrompt, enqueuePrompt, findListedChat, forkChat, omitQueuedUserMessages, forkTitle, formatLastTalked, hasComposerDraft, hiddenProjectChatCount, isDraftChat, isLooseDeleteScope, lastProjectChat, lastTalkedAt, lastUserMessage, listedChats, defaultInboundParentId, messagesThrough, moveChat, openDraft, activeProjectChat, pinnedCollapsedChat, PROJECT_CHAT_LIMIT, renameChat, resolveListedChat, rewindToUserMessage, shiftQueuedPrompt, visibleProjectChats, workersFoldOpen } from "../src/lib/chats";
@@ -199,6 +199,7 @@ import {
   selectedText,
 } from "../src/lib/edit-menu";
 import {
+  canonicalToolKey,
   chatLinksFromSessions,
   describePeerTool,
   formatPermissionDetail,
@@ -447,6 +448,38 @@ test("applyPermissionAnswer updates the real pending queue and session", () => {
   assert.equal(autoAllowPermission({ tool: "workhorse_ask_chat" }), "once");
   assert.equal(autoAllowPermission({ tool: "workhorse_spawn_agent" }), "once");
   assert.equal(autoAllowPermission({ tool: "workhorse_ask_chat" }), "once");
+  assert.equal(autoAllowPermission({ tool: "Wait for agents" }), "once");
+  assert.equal(autoAllowPermission({ tool: "Wait for agents execute" }), "once");
+  assert.equal(autoAllowPermission({ tool: "List bots" }), "once");
+  assert.equal(autoAllowPermission({ tool: "Call agent" }), "once");
+  assert.equal(isQuietDeskTool("Wait for agents"), true);
+  assert.equal(isQuietDeskTool("Wait for agents execute"), true);
+  assert.equal(canonicalToolKey("Wait for agents"), "await_agents");
+  assert.equal(canonicalToolKey("Wait for agents execute"), "await_agents");
+  assert.equal(canonicalToolKey("Call agent"), "spawn_agent");
+  assert.equal(classifyPermissionTool("Wait for agents", "execute"), "Wait for agents");
+  assert.equal(classifyPermissionTool("Run a command", "execute"), "Run a command");
+  assert.equal(classifyPermissionTool("Run a command", "bash"), "Run a command bash");
+  assert.equal(looksLikeShellTool("Wait for agents execute", '{"workerIds":["w1"]}'), false);
+  assert.equal(looksLikeWriteTool("Wait for agents execute", "write the fruit system and create files", undefined), false);
+  assert.equal(
+    permissionPolicyAnswer({
+      mode: "always-approve",
+      sandbox: "read-only",
+      tool: "Wait for agents execute",
+      detail: '{"wait":true,"prompt":"write the fruit system"}',
+    }),
+    "session",
+  );
+  assert.equal(
+    permissionPolicyAnswer({
+      mode: "ask",
+      sandbox: "read-only",
+      tool: "Wait for agents",
+      detail: "wait for workers",
+    }),
+    "once",
+  );
   assert.equal(permissionResumeStatus({ hasOtherPending: true }), "needs-input");
   assert.equal(permissionResumeStatus({ hasOtherPending: false }), "running");
   assert.equal(

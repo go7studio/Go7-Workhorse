@@ -52,6 +52,7 @@ import { autoTitleForSend, firstUserText, suggestedTitleForSession, titleAccepts
 import {
   applyPermissionAnswer,
   autoAllowPermission,
+  classifyPermissionTool,
   deskClampNote,
   describeElevation,
   elevationStillNeeded,
@@ -204,6 +205,7 @@ import {
   setPlanStepStatus,
   startPlanRun,
 } from "./plan";
+import { applyVendorBackgroundTask } from "./vendor-tasks";
 import {
   applyCompactUsage,
   formatCompactLine,
@@ -6835,7 +6837,24 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           ...current,
           sessions: current.sessions.map((session) =>
             session.id === event.sessionId
-              ? { ...session, vendorSessionId: event.vendorSessionId, vendorProvider: session.provider }
+              ? {
+                  ...session,
+                  vendorSessionId: event.vendorSessionId,
+                  vendorProvider: session.provider,
+                  ...(event.opened === "session/new" ? { vendorTasks: undefined } : {}),
+                }
+              : session,
+          ),
+        }));
+        return;
+      }
+      if (event.type === "background-task") {
+        const { sessionId: _sessionId, type: _type, ...task } = event;
+        setState((current) => ({
+          ...current,
+          sessions: current.sessions.map((session) =>
+            session.id === event.sessionId
+              ? { ...session, vendorTasks: applyVendorBackgroundTask(session.vendorTasks, task) }
               : session,
           ),
         }));
@@ -7122,10 +7141,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         // The classifiers need the vendor's own name for the same call, which
         // rides alongside it, because a title no classifier knew read as
         // not-a-shell and denied a Claude worker's grep on a read-only seat.
-        const classifyTool =
-          "rawTool" in event && typeof event.rawTool === "string" && event.rawTool.trim()
-            ? `${event.tool} ${event.rawTool.trim()}`
-            : event.tool;
+        const classifyTool = classifyPermissionTool(
+          event.tool,
+          "rawTool" in event && typeof event.rawTool === "string" ? event.rawTool : undefined,
+        );
         const security = owner
           ? securityPolicyAnswer({
               policy: owner.securityPolicy,

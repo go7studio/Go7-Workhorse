@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import {
   autoAllowPermission,
+  classifyPermissionTool,
   looksLikeDelegationTool,
   looksLikeSearchOnly,
   looksLikeShellTool,
@@ -411,7 +412,7 @@ function deskAnswer(input: {
   sandbox: SandboxProfile;
   hidden: boolean;
 }): PermissionAnswer | null {
-  const classifyTool = input.rawTool ? `${input.tool} ${input.rawTool}` : input.tool;
+  const classifyTool = classifyPermissionTool(input.tool, input.rawTool);
   const security = securityPolicyAnswer({ tool: classifyTool, detail: input.detail });
   const forced = security.answer ?? permissionPolicyAnswer({
     mode: input.mode,
@@ -555,6 +556,7 @@ test("every vendor host hands the classifiers the vendor's own tool name", () =>
     assert.match(read(rel), /rawTool\?: string;/, `${rel} carries the field`);
   }
   const store = read("src/lib/store.tsx");
+  assert.match(store, /classifyPermissionTool\(/, "the store drops ACP kinds before the classifiers judge");
   assert.match(store, /const classifyTool =/, "the store composes the name the classifiers judge");
   assert.match(store, /tool: classifyTool,\n\s+detail: event\.detail,/, "and passes it to the policy");
   assert.match(store, /tool: event\.tool,\n\s+detail:/, "while the card still shows the title");

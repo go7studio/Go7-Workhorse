@@ -80,6 +80,44 @@ export function toolNameKey(raw: string): string {
   return stripDeskPrefixes(toolTokens(raw)).join("_");
 }
 
+/** ACP `toolCall.kind` values. Grok appends these next to the pretty title. */
+const ACP_KIND = /^(read|edit|delete|move|search|execute|think|fetch|other)$/i;
+const ACP_KIND_SUFFIX = /_(?:read|edit|delete|move|search|execute|think|fetch|other)$/;
+
+const TITLE_TO_KEY: Readonly<Record<string, string>> = Object.fromEntries(
+  Object.entries(TOOL_NAMES).map(([id, info]) => [toolNameKey(info.title), id]),
+);
+
+export function isAcpToolKind(raw: string): boolean {
+  return ACP_KIND.test(raw.trim());
+}
+
+/**
+ * The catalog id for a vendor title, MCP name, or pretty label.
+ *
+ * Grok's permission card is titled "Wait for agents"; the quiet-desk list
+ * keys on `await_agents`. Kind `execute` riding beside that title used to make
+ * the same call look like a shell.
+ */
+export function canonicalToolKey(raw: string): string {
+  let key = toolNameKey(raw);
+  if (!key) return key;
+  key = key.replace(ACP_KIND_SUFFIX, "");
+  if (TOOL_NAMES[key]) return key;
+  const fromTitle = TITLE_TO_KEY[key];
+  if (fromTitle) return fromTitle;
+  const tokens = key.split("_").filter(Boolean);
+  if (tokens.length >= 2) {
+    const lastTwo = tokens.slice(-2).join("_");
+    if (TOOL_NAMES[lastTwo]) return lastTwo;
+    const titled = TITLE_TO_KEY[lastTwo];
+    if (titled) return titled;
+  }
+  const last = tokens[tokens.length - 1] ?? "";
+  if (TOOL_NAMES[last]) return last;
+  return TITLE_TO_KEY[last] ?? key;
+}
+
 export function looksLikeInlineCommand(raw: string): boolean {
   const text = raw.trim();
   if (!text) return false;

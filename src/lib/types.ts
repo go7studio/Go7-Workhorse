@@ -588,6 +588,11 @@ export type Session = {
   queue?: QueuedPrompt[];
   /** Persisted background runs. Electron main dispatches pending entries and recovers interrupted work. */
   scheduledRuns?: ScheduledRun[];
+  /**
+   * Live Grok ACP Tasks / Watchers (scripts the vendor started). Not Settings → Watch,
+   * and not Workhorse scheduledRuns. Dropped on load; ACP events refill the strip.
+   */
+  vendorTasks?: import("./vendor-tasks").VendorBackgroundTask[];
   /** Workhorse-owned context checkpoint used when a provider has no native compaction. */
   contextCheckpoint?: PortableCheckpoint;
   /** Unsent composer text. Kept when leaving this chat. */

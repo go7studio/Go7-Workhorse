@@ -41,7 +41,9 @@ export function PermissionCard() {
       <div className={`permission-card${elevate ? " elevate-card" : ""}`}>
         <div className="session-who">
           <span className={`dot ${request.provider}`} style={tint ? { background: tint } : undefined} />
-          <span className="eyebrow">{elevate ? `${label} · Elevate` : `${label} · Ask`}</span>
+          <span className="eyebrow">
+            {elevate ? `${label} · Elevate` : `${label} · ${modeLabel(child?.mode ?? "ask")}`}
+          </span>
         </div>
         <strong>{elevate ? `${who} needs more access` : `${who} wants to ${action}`}</strong>
         {detail ? <span className="permission-detail">{detail}</span> : null}

@@ -128,6 +128,10 @@ When you add a feature, add it here in the same commit.
   current hop stays open, the reply below.
 - Grok tables keep their real columns. Empty `| |` chrome is dropped, and
   `foo.md (34441 chars)` still opens.
+- Grok Build background **Tasks** and **Watchers** (a script or monitor the
+  agent started) stay on the chat as a small strip: name, elapsed time, and
+  whether they are still running or were killed. That is the Grok ACP session,
+  not Settings → Watch leftover pools. Other vendors do not report this yet.
 - **Attach** takes files or a folder. You can drag them onto the window or paste
   them in.
   - **Images** png, jpg, jpeg, webp, gif, bmp

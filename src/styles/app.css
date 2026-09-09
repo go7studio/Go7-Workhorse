@@ -3834,6 +3834,68 @@ html.pane-dragging * {
   white-space: nowrap;
 }
 
+.vendor-tasks {
+  margin: 0 22px 8px;
+  padding: 6px 0 2px;
+  display: grid;
+  gap: 8px;
+  border-top: 1px solid var(--line);
+}
+
+.vendor-tasks-group {
+  display: grid;
+  gap: 3px;
+}
+
+.vendor-tasks-label {
+  color: var(--text-tertiary);
+  font-size: 11px;
+  font-weight: 620;
+  letter-spacing: 0.01em;
+}
+
+.vendor-task {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: baseline;
+  min-width: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.vendor-task.live {
+  color: var(--text);
+}
+
+.vendor-task-kind {
+  color: var(--text-tertiary);
+  font-size: 11px;
+}
+
+.vendor-task.live .vendor-task-kind {
+  color: var(--text-secondary);
+}
+
+.vendor-task-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vendor-task-meta {
+  color: var(--text-tertiary);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.vendor-task.killed .vendor-task-name,
+.vendor-task.failed .vendor-task-name {
+  color: var(--text-tertiary);
+}
+
 .codex-native-status {
   display: grid;
   gap: 8px;
@@ -8565,6 +8627,7 @@ html.pane-dragging * {
 
 @media (max-width: 760px) {
   .goal-bar { margin-inline: 16px; }
+  .vendor-tasks { margin-inline: 16px; }
   .goal-bar-copy { grid-template-columns: 1fr; gap: 1px; }
 }
 

@@ -36,6 +36,7 @@ type GrokBridgeEvent =
       vendor?: { provider: import("./lib/types").ProviderId; name: string; status?: string };
     }
   | { type: "tool"; sessionId: string; toolCallId: string; title: string; status: string; detail: string }
+  | { type: "background-task"; sessionId: string } & import("./lib/vendor-tasks").VendorBackgroundTask
   | {
       type: "compact";
       sessionId: string;

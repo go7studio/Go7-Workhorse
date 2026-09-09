@@ -47,7 +47,8 @@ export function CrewTray() {
       <button type="button" className="crew-tray-toggle" aria-expanded={open} onClick={() => setOpen(!open)}>
         <HorseStatus kind={live.length ? "working" : "idle"} />
         <strong>{live.length ? `Working ${live.length}` : `Crew ${desk.workers.length}`}</strong>
-        <span>{live.length ? `${desk.workers.length} workers` : "View workers"}</span><span aria-hidden="true">{open ? "⌄" : "›"}</span>
+        <span>{live.length ? `${desk.workers.length} workers` : "View workers"}</span>
+        <span className="crew-tray-caret" aria-hidden="true">{open ? "⌄" : "›"}</span>
       </button>
       {open && live.length > 0 ? <button type="button" className="tiny" onClick={() => live.forEach((item) => desk.cancelRun(item.id))}>Stop all workers</button> : null}
     </div>

@@ -15,6 +15,7 @@ import type { ChatImage, Command } from "../src/lib/types";
 import { isCursorInnerTask } from "../src/lib/cursor-lane";
 export { applyCompactUsage } from "../src/lib/grok-events";
 import { parseSubagentFinished, subagentUsageDraft } from "../src/lib/grok-events";
+import { parseVendorBackgroundTask, type VendorBackgroundTask } from "../src/lib/vendor-tasks";
 
 export function cursorExtensionResult(method: string): { outcome: { outcome: string; reason?: string } } | null {
   if (method === "cursor/ask_question") return { outcome: { outcome: "skipped" } };
@@ -63,6 +64,8 @@ export type GrokAgentHandlers = {
   onUsage?: (usage: GrokUsageDraft) => void;
   onPermission?: (ask: GrokPermissionAsk) => void;
   onTool?: (tool: GrokToolEvent) => void;
+  /** Grok ACP background Task / Watcher, not a transcript tool chip. */
+  onBackgroundTask?: (task: VendorBackgroundTask) => void;
   onCompact?: (compact: GrokCompactEvent) => void;
   onTitle?: (title: string) => void;
   onCommands?: (commands: Command[]) => void;
@@ -534,6 +537,7 @@ export type ClassifiedAcpUpdate =
   | { kind: "thought"; text: string }
   | { kind: "usage"; usage: GrokUsageDraft }
   | { kind: "tool"; tool: GrokToolEvent }
+  | { kind: "background-task"; task: VendorBackgroundTask }
   | { kind: "compact"; compact: GrokCompactEvent }
   | { kind: "title"; title: string }
   | { kind: "commands"; commands: Command[] }
@@ -555,6 +559,8 @@ export function isCodexThoughtUpdate(update: Record<string, unknown>): boolean {
 
 export function classifyAcpUpdate(update: Record<string, unknown>): ClassifiedAcpUpdate {
   const name = updateKind(update);
+  const background = parseVendorBackgroundTask(update);
+  if (background) return { kind: "background-task", task: background };
   const tool = extractToolEvent(update);
   if (tool) return { kind: "tool", tool };
   const compact = extractCompactEvent(update);
@@ -688,6 +694,7 @@ function firstPath(value: unknown): string {
     "description",
     "command",
     "query",
+    "prompt",
   ]) {
     if (typeof record[key] === "string" && record[key].trim()) return record[key].trim();
   }
@@ -1559,6 +1566,10 @@ export class GrokAgent {
     }
     if (classified.kind === "tool") {
       this.handlers.onTool?.(classified.tool);
+      return;
+    }
+    if (classified.kind === "background-task") {
+      this.handlers.onBackgroundTask?.(classified.task);
       return;
     }
     if (classified.kind === "compact") {

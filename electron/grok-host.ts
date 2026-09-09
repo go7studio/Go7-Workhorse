@@ -67,6 +67,7 @@ export type GrokIpcEvent =
       vendor?: { provider: import("../src/lib/types").ProviderId; name: string; status?: string };
     }
   | { type: "tool"; sessionId: string } & GrokToolEvent
+  | { type: "background-task"; sessionId: string } & import("../src/lib/vendor-tasks").VendorBackgroundTask
   | { type: "compact"; sessionId: string } & import("./grok-agent").GrokCompactEvent
   | {
       type: "usage";
@@ -286,6 +287,8 @@ export class GrokSessionHost {
           path: ask.path,
         }),
       onTool: (tool: GrokToolEvent) => emit({ type: "tool" as const, sessionId: input.sessionId, ...tool }),
+      onBackgroundTask: (task: import("../src/lib/vendor-tasks").VendorBackgroundTask) =>
+        emit({ type: "background-task" as const, sessionId: input.sessionId, ...task }),
       onCompact: (compact: import("./grok-agent").GrokCompactEvent) =>
         emit({ type: "compact" as const, sessionId: input.sessionId, ...compact }),
       onTitle: (title: string) => emit({ type: "title" as const, sessionId: input.sessionId, title }),

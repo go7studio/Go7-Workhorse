@@ -593,7 +593,7 @@ test("no file outside a user-chosen preset names a vendor host to call", () => {
   }
 });
 
-test("the Settings path a person actually clicks still leads to Delete", () => {
+test("the Settings paths a person actually clicks still lead to the same bot controls", () => {
   // Source pins, and marked as such: these are render paths in a pane that
   // needs the store context, the window bridge and a DOM to draw. There is no
   // shipped function to call for "the tile carries a Delete button", so each
@@ -601,9 +601,67 @@ test("the Settings path a person actually clicks still leads to Delete", () => {
   // quietly stop existing.
   const settings = source("src", "ui", "Settings.tsx");
   assert.match(settings, /section === "llms"/, "connections live under LLMs");
-  assert.match(settings, /settings\.customBots\.map\(\(bot\) => \{/, "every custom bot gets a tile");
+  assert.match(settings, /settings\.customBots\.filter\(customBotEnabled\)\.map/, "only on bots get tiles");
+  assert.match(settings, /offCustomBots\.length > 0 \? \(/, "the off rows exist only when needed");
   assert.match(settings, /setLlmFocus\(\(current\) => \(current === `bot:\$\{bot\.id\}`/, "the tile opens that bot");
-  assert.match(settings, /<CustomBotDetail key=\{llmFocus\} botId=\{llmFocus\.slice\(4\)\}/, "which renders its detail");
+  assert.match(settings, /onOpen=\{\(botId\) =>/, "the off row opens that bot too");
+  assert.match(settings, /<CustomBotDetail[\s\S]*botId=\{llmFocus\.slice\(4\)\}/, "which renders its detail");
   assert.match(settings, /store\.setCustomBotEnabled\(bot\.id, !live\)/, "the detail carries Disable");
-  assert.match(settings, /store\.deleteCustomBot\(bot\.id\);/, "and Delete");
+  assert.match(settings, /store\.deleteCustomBot\(bot\.id\);/, "the detail and off row use the store's Delete");
+});
+
+test("a switched-off bot leaves the grid and keeps its ordered off row", () => {
+  const settings = source("src", "ui", "Settings.tsx");
+  const grid = settings.slice(
+    settings.indexOf('<div className="usage-brains llm-brains">'),
+    settings.indexOf("<OffCustomBots"),
+  );
+  const rows = settings.slice(settings.indexOf("function OffCustomBots"), settings.indexOf("export type ClaudeAuthState"));
+  assert.match(settings, /const offCustomBots = settings\.customBots\.filter\(\(bot\) => !customBotEnabled\(bot\)\)/);
+  assert.match(grid, /settings\.customBots\.filter\(customBotEnabled\)\.map\(\(bot\) =>/);
+  assert.doesNotMatch(grid, /settings\.customBots\.map\(\(bot\) =>/, "the grid never walks every bot");
+  assert.match(rows, /bots\.map\(\(bot\) =>/);
+  assert.match(rows, />Off<\/span>/);
+  assert.match(rows, /bot\.model\.trim\(\) \|\| customBotHost\(bot\.baseUrl\)/);
+});
+
+test("Enable on an off row returns the bot to the enabled grid filter", () => {
+  const settings = source("src", "ui", "Settings.tsx");
+  const grid = settings.slice(
+    settings.indexOf('<div className="usage-brains llm-brains">'),
+    settings.indexOf("<OffCustomBots"),
+  );
+  const rows = settings.slice(settings.indexOf("function OffCustomBots"), settings.indexOf("export type ClaudeAuthState"));
+  assert.match(rows, /store\.setCustomBotEnabled\(bot\.id, true\)/);
+  assert.match(grid, /settings\.customBots\.filter\(customBotEnabled\)/);
+});
+
+test("Delete on an off row uses the slot-removing store action", () => {
+  const settings = source("src", "ui", "Settings.tsx");
+  const rows = settings.slice(settings.indexOf("function OffCustomBots"), settings.indexOf("export type ClaudeAuthState"));
+  const store = source("src", "lib", "store.tsx");
+  assert.match(rows, /store\.deleteCustomBot\(bot\.id\)/);
+  assert.match(store, /setState\(\(current\) => deskAfterCustomBotDeleted\(current, id\)\)/);
+  assert.match(store, /forgetCustomSlotRecords\(id\)/);
+});
+
+test("no switched-off bots means no off-row section", () => {
+  const settings = source("src", "ui", "Settings.tsx");
+  assert.match(settings, /offCustomBots\.length > 0 \? \([\s\S]*<OffCustomBots[\s\S]*\) : null/);
+});
+
+test("Delete needs two clicks and any other click disarms it", () => {
+  const settings = source("src", "ui", "Settings.tsx");
+  const rows = settings.slice(settings.indexOf("function OffCustomBots"), settings.indexOf("export type ClaudeAuthState"));
+  assert.match(rows, /confirmDelete === bot\.id \? \([\s\S]*Delete for good[\s\S]*setConfirmDelete\(bot\.id\)[\s\S]*Delete/);
+  assert.match(rows, /document\.addEventListener\("mousedown", disarm\)/);
+  assert.match(rows, /armedDelete\.current\?\.contains\(event\.target as Node\)/);
+});
+
+test("opening a bot detail scrolls it into view and respects reduced motion", () => {
+  const settings = source("src", "ui", "Settings.tsx");
+  assert.match(settings, /if \(typeof llmFocus !== "string" \|\| !llmFocus\.startsWith\("bot:"\)\) return/);
+  assert.match(settings, /botDetail\.current\?\.scrollIntoView/);
+  assert.match(settings, /window\.matchMedia\("\(prefers-reduced-motion: reduce\)"\)\.matches \? "auto" : "smooth"/);
+  assert.match(settings, /panelRef=\{botDetail\}/);
 });

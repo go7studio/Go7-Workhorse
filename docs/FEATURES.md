@@ -408,6 +408,8 @@ When you add a feature, add it here in the same commit.
   Environment values go to the OS-encrypted credential store.
 - **Custom bots** a pasted URL and key become a first-class bot with its own
   name and colour.
+- A bot you switch off leaves the LLM grid and sits under it with Enable and
+  Delete. The grid holds what you can call.
 - A host that answers "at capacity, try again shortly" is waited out for about
   twenty-three seconds, honouring Retry-After. Workhorse keeps no count of its
   own.

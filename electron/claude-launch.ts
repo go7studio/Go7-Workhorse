@@ -9,10 +9,11 @@ import {
   type GrokSessionMeta,
 } from "./grok-launch";
 import { readClaudeDesktopOauth } from "./claude-desktop-auth";
-import { storedClaudeToken } from "./claude-stored-token";
+import { claudeTokenProblem, storedClaudeToken } from "./claude-stored-token";
 import {
   CLAUDE_ACP_NOT_INSTALLED,
   CLAUDE_CLI_NOT_INSTALLED,
+  hasClaudeCliLoginArtifact,
   isElectronAcpCommand,
   resolveClaudeAcpLaunch,
   resolveClaudeCliBinary,
@@ -186,12 +187,17 @@ export function buildClaudeLaunchSpec(input: ClaudeLaunchInput): ClaudeLaunchSpe
   const stored = (input.storedToken ?? storedClaudeToken)();
   const ownOauth = outer.CLAUDE_CODE_OAUTH_TOKEN?.trim();
   const ownKey = outer.ANTHROPIC_API_KEY?.trim();
-  if (stored) env.CLAUDE_CODE_OAUTH_TOKEN = stored;
-  else if (ownOauth) env.CLAUDE_CODE_OAUTH_TOKEN = ownOauth;
-  else if (ownKey) env.ANTHROPIC_API_KEY = ownKey;
-  else {
-    const desktop = readClaudeDesktopOauth(input.detect);
-    if (desktop?.accessToken) env.CLAUDE_CODE_OAUTH_TOKEN = desktop.accessToken;
+  const problem = input.detect?.tokenProblem === undefined ? claudeTokenProblem(stored) : input.detect.tokenProblem;
+  if (stored && !problem) env.CLAUDE_CODE_OAUTH_TOKEN = stored;
+  // Leave credentials off the child env when the CLI has its own login.
+  // An exported or Desktop token would take precedence over that store too.
+  else if (!hasClaudeCliLoginArtifact(input.detect)) {
+    if (ownOauth) env.CLAUDE_CODE_OAUTH_TOKEN = ownOauth;
+    else if (ownKey) env.ANTHROPIC_API_KEY = ownKey;
+    else {
+      const desktop = readClaudeDesktopOauth(input.detect);
+      if (desktop?.accessToken) env.CLAUDE_CODE_OAUTH_TOKEN = desktop.accessToken;
+    }
   }
   if (isElectronAcpCommand(command)) env.ELECTRON_RUN_AS_NODE = "1";
 

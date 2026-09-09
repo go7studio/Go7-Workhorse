@@ -1419,7 +1419,12 @@ test("a worker's CLI is launched with worker rules, an orchestrator's with the b
   assert.equal(rulesOf(buildGrokLaunchSpec({ ...base, role: "worker" })), WORKER_SESSION_RULES);
   assert.equal(rulesOf(buildGrokLaunchSpec({ ...base, role: "orchestrator" })), WORKHORSE_SESSION_RULES);
   assert.equal(rulesOf(buildGrokLaunchSpec(base)), WORKHORSE_SESSION_RULES, "no role means the root chat");
-  assert.equal(rulesOf(buildClaudeLaunchSpec({ ...base, role: "worker" })), WORKER_SESSION_RULES);
+  assert.equal(rulesOf(buildClaudeLaunchSpec({ ...base, role: "worker", storedToken: () => null, detect: {
+    env: { CLAUDE_ACP_BIN: "fixture-claude-agent-acp" },
+    homedir: base.cwd, platform: "linux", pathDirs: [], extraDirs: [], moduleDirs: [],
+    existsSync: (file) => file === "fixture-claude-agent-acp", readFile: () => "", listDir: () => [],
+    keychainHasLogin: () => false,
+  } })), WORKER_SESSION_RULES);
   assert.equal(rulesOf(buildCodexLaunchSpec({ ...base, role: "worker" })), WORKER_SESSION_RULES);
   // Cursor's orchestrator rules are the bible with two identity sentences
   // changed; nothing Cursor-mechanical, so a Cursor worker takes worker rules too.

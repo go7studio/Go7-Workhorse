@@ -299,7 +299,8 @@ test("the desk stores a pasted token, logs the attempt, and never logs the token
   assert.match(settings, /\{id === "claude" \? \(\n\s*<ClaudeSignIn/, "the way in is always on the Claude card, not only when a call has already failed");
   const grid = settings.slice(settings.indexOf('className="llm-brain-open"'), settings.indexOf("{settings.customBots.map"));
   assert.match(grid, /setLlmFocus\("claude"\);\n\s*startClaudeAuth\(\);/, "the grid button opens the card it reports into");
-  assert.match(grid, /claudeAuth\.stage === "running" \? "Signing in…" : "Log in"/, "and says what it is doing");
+  assert.match(grid, /claudeAuth\.stage === "running" \? "Signing in…" : link\.authProblem \? "Sign in again" : "Log in"/, "and says what it is doing");
+  assert.match(grid, /id === "claude" && \(link\.needsAuth \|\| link\.authProblem\)/, "fallback keeps the sign-in button visible");
   assert.match(settings, /running \? "Signing in…"/, "the button says what is happening");
   assert.match(settings, /auth\.stage === "paste"/, "and the paste path appears when the desk cannot make a terminal");
   assert.match(settings, /type="password"/, "a token is not typed in the clear");

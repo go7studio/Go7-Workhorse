@@ -8,6 +8,13 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.6.72](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.71...v0.6.72) (2026-09-09)
+
+
+### Bug Fixes
+
+* **permissions:** workers inherit the parent seat; spawn cannot retune it ([3b4c17d](https://github.com/go7studio/Go7-Workhorse/commit/3b4c17dec097288fda863452f223130ed4e1e001))
+
 ## [0.6.71](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.70...v0.6.71) (2026-09-09)
 
 

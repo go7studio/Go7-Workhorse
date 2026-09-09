@@ -8,6 +8,23 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.6.71](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.70...v0.6.71) (2026-09-09)
+
+
+### Features
+
+* **desk:** Wait for agents stays Always allow, Grok tasks stay on the chat, crew chip sits left ([#306](https://github.com/go7studio/Go7-Workhorse/issues/306)) ([78af9cd](https://github.com/go7studio/Go7-Workhorse/commit/78af9cd28914f4d2f11bcf7ee15ae6a9b0976535))
+* **link:** status and the join report spend; the default chat list stays small ([#296](https://github.com/go7studio/Go7-Workhorse/issues/296)) ([a5c74ac](https://github.com/go7studio/Go7-Workhorse/commit/a5c74ac11d2dd19a897d5f9ed65465624583286c))
+
+
+### Bug Fixes
+
+* **link:** the bridge token file is owner-only ([#293](https://github.com/go7studio/Go7-Workhorse/issues/293)) ([9eb711e](https://github.com/go7studio/Go7-Workhorse/commit/9eb711e9c0d99cb5d0199b7daf898ddb79a2e255))
+* **missions:** a cancelled run is not a finished one, and its parent hears why ([#302](https://github.com/go7studio/Go7-Workhorse/issues/302)) ([c1f7400](https://github.com/go7studio/Go7-Workhorse/commit/c1f74002398e927358a74c0757b97a72ca67b427))
+* **roster:** a custom bot lists only its own approved models ([#295](https://github.com/go7studio/Go7-Workhorse/issues/295)) ([ed9b436](https://github.com/go7studio/Go7-Workhorse/commit/ed9b43659913c3e3e61dae08ef67590d39f41fca))
+* **sandbox:** read-only allows gh and git reads ([#300](https://github.com/go7studio/Go7-Workhorse/issues/300)) ([ba27e34](https://github.com/go7studio/Go7-Workhorse/commit/ba27e34e928836ab5979a67d23e3341368bbdbf6))
+* **ui:** a desk at rest paints nothing ([#297](https://github.com/go7studio/Go7-Workhorse/issues/297)) ([9a6e745](https://github.com/go7studio/Go7-Workhorse/commit/9a6e745fd530f5609852c28d747716af02677c12))
+
 ## [0.6.70](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.69...v0.6.70) (2026-09-08)
 
 

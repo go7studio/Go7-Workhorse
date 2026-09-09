@@ -545,7 +545,7 @@ test("applyPermissionAnswer updates the real pending queue and session", () => {
   assert.deepEqual(lineageGrant({ deskAccess: { mode: "ask", sandbox: "workspace" } }), { mode: "ask", sandbox: "workspace" });
   assert.equal(promptOwner({ sandbox: "off" }, { mode: "always-approve", sandbox: "off" }), "desk");
   assert.equal(promptOwner({ sandbox: "off" }, { mode: "plan", sandbox: "read-only" }), "person");
-  assert.equal(deskClampNote({ role: "helper" }), "This helper was asked to run read-only; hand this write to your parent, or spawn it with a sandbox that can write.");
+  assert.equal(deskClampNote({ role: "helper" }), "This helper inherited the parent chat's Permission and Sandbox; raise that chat's setting if it must write.");
   assert.equal(looksLikeSearchOnly("rg", "rg -n leftover src"), true);
   assert.equal(looksLikeSearchOnly("shell", "rg --files"), true);
   assert.equal(
@@ -604,7 +604,7 @@ test("applyPermissionAnswer updates the real pending queue and session", () => {
     "deny",
   );
   // The stored desk default answers when no chat was named, and only the
-  // person moves it. A vendor app set narrower keeps its own limit.
+  // person moves it. A vendor app's own config does not move Workhorse's seat.
   assert.deepEqual(DEFAULT_SETTINGS.access, { mode: "always-approve", sandbox: "off" });
   assert.deepEqual(normalizeDeskAccess(undefined), { mode: "always-approve", sandbox: "off" });
   assert.deepEqual(normalizeDeskAccess({ mode: "plan" }), { mode: "plan", sandbox: "off" });
@@ -612,7 +612,7 @@ test("applyPermissionAnswer updates the real pending queue and session", () => {
   assert.deepEqual(inboundAccess({ desk: { mode: "ask", sandbox: "off" } }), { mode: "ask", sandbox: "off" });
   assert.deepEqual(
     inboundAccess({ desk: { mode: "always-approve", sandbox: "off" }, vendor: { mode: "ask" } }),
-    { mode: "ask", sandbox: "off" },
+    { mode: "always-approve", sandbox: "off" },
   );
   assert.deepEqual(
     inboundAccess({ desk: { mode: "always-approve", sandbox: "off" }, vendor: { mode: "always-approve" } }),
@@ -9245,7 +9245,7 @@ test("switching This-chat vendor drops the previous vendor session", () => {
       messages: [],
       agentRun: { status: "completed", startedAt: 1, isolation: "worktree" },
     }),
-    "GPT-5.6-Terra · Medium · Done",
+    "GPT-5.6-Terra · Medium · Always · Done",
   );
   assert.equal(
     workerSidebarLabel({
@@ -9269,7 +9269,7 @@ test("switching This-chat vendor drops the previous vendor session", () => {
         takeoverReason: "Parent applied patch after handing the work to Workhorse.",
       },
     }),
-    "GPT-5.6-Terra · Medium",
+    "GPT-5.6-Terra · Medium · Always",
   );
   assert.equal(
     workerSidebarLabel({
@@ -9301,7 +9301,7 @@ test("switching This-chat vendor drops the previous vendor session", () => {
         },
       },
     }),
-    "Sonnet 4.6 · Medium",
+    "Sonnet 4.6 · Medium · Always",
   );
   const listed = catalogSessions({
     sessions: [
@@ -10916,7 +10916,6 @@ test("a path-owned worker launches at Ask and the desk answers its in-path write
   assert.doesNotMatch(features, /stale writes stay blocked/);
   const storeSource = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
   assert.match(storeSource, /refreshSharedFileFingerprint\(\{/);
-  assert.match(storeSource, /readOnly: nestedPolicy\.readOnly/);
   assert.match(storeSource, /nestedPolicy\.mayReuse/);
   assert.match(storeSource, /nestedPolicy\.mayOwnPaths/);
 });

@@ -801,6 +801,7 @@ export const Composer = memo(function Composer({
                 effort: session.effort,
                 mode: session.mode,
                 routingMode: session.routingMode,
+                worker: session.hidden === true,
               })}
             </span>
             <span className="caret" aria-hidden="true" />

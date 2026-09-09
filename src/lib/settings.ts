@@ -253,13 +253,14 @@ export function firstAttachedChoice(settings: Settings, remembered?: ModelChoice
     return remembered;
   }
   // Falling back is not the person restricting the desk. When the remembered
-  // vendor drops off, the seat comes from the desk default narrowed by that
-  // vendor's own recorded config — never from a bare "ask", which is how a
-  // disconnect used to quietly tighten every chat opened afterwards.
+  // vendor drops off, the seat comes from the desk default — never from a bare
+  // "ask", and never from that vendor app's own config, which is how a
+  // disconnect or a Codex read-only default used to quietly tighten every chat
+  // opened afterwards.
   const stock = attachedStockVendors(settings)[0];
   if (stock) {
     const model = defaultModel(stock).id;
-    const seat = inboundAccess({ desk: settings.access, vendor: settings.llms[stock].accessDefaults });
+    const seat = inboundAccess({ desk: settings.access });
     return {
       provider: stock,
       model,

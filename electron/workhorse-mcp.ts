@@ -15,8 +15,8 @@ import {
 import { applyCreateWorkhorseProject, normalizeProject } from "../src/lib/project";
 import { normalizeSettings } from "../src/lib/settings";
 import { applyVendorCatalog, resetVendorCatalog } from "../src/lib/models";
-import { passGrantedAccess, releasedHelper } from "../src/lib/permissions";
-import type { AttachmentKind, ChatImage, CustomLlm, MissionIteration, Session, SessionEnvironment, UsageEvent, WatchDayMarks, WatchPermits, SandboxProfile } from "../src/lib/types";
+import { passGrantedAccess } from "../src/lib/permissions";
+import type { AttachmentKind, ChatImage, CustomLlm, MissionIteration, Session, SessionEnvironment, UsageEvent, WatchDayMarks, WatchPermits } from "../src/lib/types";
 import {
   attachmentKind,
   attachmentMime,
@@ -419,8 +419,8 @@ const TOOLS = [
           required: ["acceptanceCriteria"],
           additionalProperties: false,
         },
-        permission: { type: "string", description: "Seat this worker runs under: ask, accept-edits, or always-approve. Capped at the desk default (Settings › LLMs), not at your own seat, so a tightened chat can still hand a worker the access it needs. Omit and the worker inherits your seat." },
-        sandbox: { type: "string", description: "Sandbox this worker runs under: off, workspace, read-only, or strict. Same ceiling as permission. Ask for the sandbox the work needs — a worker cannot ask you for one later." },
+        permission: { type: "string", description: "Ignored. This chat's Permission is the person's setting; the worker copies it. Do not pass permission." },
+        sandbox: { type: "string", description: "Ignored. This chat's Sandbox is the person's setting; the worker copies it. Do not pass sandbox." },
         route: { type: "string", description: "auto (default), quick, balanced, or deep" },
         role: { type: "string", description: "auditor when this slice checks another worker's output, so it routes deep instead of being sized from the prompt. It does not restrict the worker or pick a different vendor from the builder — name the builder in exclude for that." },
         exclude: { type: "array", items: { type: "string" }, description: "Provider, model, or bot terms this worker and its descendants must avoid" },
@@ -464,8 +464,8 @@ const TOOLS = [
           },
           additionalProperties: false,
         },
-        permission: { type: "string", description: "Seat this pass's worker runs under: ask, accept-edits, or always-approve. Capped at the desk default (Settings › LLMs), not at your own seat. Omit and this pass keeps the seat the previous pass ran under." },
-        sandbox: { type: "string", description: "Sandbox this pass's worker runs under: off, workspace, read-only, or strict. Same ceiling as permission. Omit and this pass keeps the previous pass's sandbox, so a mission does not lose access halfway." },
+        permission: { type: "string", description: "Ignored. This chat's Permission is the person's setting; the worker copies it. Do not pass permission." },
+        sandbox: { type: "string", description: "Ignored. This chat's Sandbox is the person's setting; the worker copies it. Do not pass sandbox." },
         route: { type: "string", description: "Omit to keep the prior brain; auto, quick, balanced, or deep opts into routing" },
         timeoutSeconds: { type: "number", description: "Ignored. The desk does not stop a worker on a runtime limit. The worker runs until it finishes or is cancelled." },
         tokenBudget: { type: "number", description: "Ignored. The desk does not stop a worker on a token ceiling. This chat's billed spend is on the meter." },
@@ -539,8 +539,8 @@ const TOOLS = [
         },
         provider: { type: "string", description: "Explicit user override only: grok, codex, claude, cursor, or custom" },
         model: { type: "string", description: "Explicit user override only, such as gpt-5.6-terra" },
-        permission: { type: "string", description: "Seat this worker runs under: ask, accept-edits, or always-approve. Capped at the desk default (Settings › LLMs), not at your own seat. Omit and the worker inherits your seat." },
-        sandbox: { type: "string", description: "Sandbox this worker runs under: off, workspace, read-only, or strict. Same ceiling as permission. A nested helper is read-only unless you name one here." },
+        permission: { type: "string", description: "Ignored. This chat's Permission is the person's setting; the worker copies it. Do not pass permission." },
+        sandbox: { type: "string", description: "Ignored. This chat's Sandbox is the person's setting; the worker copies it. Do not pass sandbox." },
         route: { type: "string", description: "auto, quick, balanced, or deep" },
         chat: { type: "string", description: "Optional existing chat or vendor name to copy (Codex, Terra, Test)" },
         planStepId: { type: "string", description: "Optional executable plan step id" },
@@ -2183,11 +2183,7 @@ async function spawnAgent(
         tokenBudget: undefined,
         isolation: nestedPolicy.isolation,
         route: input.route ?? "quick",
-        // The role and the read-only clamp are the same fact. A helper the call
-        // did not ask to run read-only is released, so it is not stamped one.
-        role: releasedHelper({ role: nestedPolicy.role, requestedSandbox: input.sandbox as SandboxProfile | undefined })
-          ? undefined
-          : nestedPolicy.role,
+        role: nestedPolicy.role,
       }
     : {
         ...inheritedInput,

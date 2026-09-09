@@ -26,14 +26,13 @@ import {
 import type { DeskAccess, PermissionGrant } from "../src/lib/types";
 
 /**
- * A delegation's access is decided at the call, never by a card mid-run.
+ * Permission and Sandbox are the person's settings. A coordinator may pick
+ * who works, not what they are allowed to do.
  *
- * The live complaint: a Claude subagent asked the person to move "Sandbox
- * Read-only → Off" for a write to /tmp. The read-only had been set months
- * earlier on a Grok review chat two rows up, which someone then used as a
- * parent for working delegations. The card named a setting on a chat the
- * person was not looking at, and the call that made the worker had no way to
- * ask for the access it needed. Both halves are fixed here.
+ * The live complaint: Wren · Playthrough UX review sat at Ask under a parent
+ * the person had set to Always allow, because the spawn call passed
+ * permission: ask. The composer chip then looked like the desk had fallen
+ * back to Ask. The call must not move the seat.
  */
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -61,82 +60,37 @@ const DESK_DEFAULT: DeskAccess = { mode: "always-approve", sandbox: "off" };
 const READ_ONLY_REVIEW: DeskAccess = { mode: "always-approve", sandbox: "read-only" };
 
 // ---------------------------------------------------------------------------
-// requestedWorkerAccess — the call, the ceiling, and silence.
+// requestedWorkerAccess — the parent seat, and the call cannot move it.
 // ---------------------------------------------------------------------------
 
-test("a requested seat is honoured exactly, under a caller that cannot give it", () => {
-  // The live row: parent "Adversarial product and eval review only" is
-  // always-approve / read-only, because the person set it so for reviews. The
-  // call asks for a writable child. The caller's own seat is NOT the ceiling —
-  // the desk default is — so the child gets what the call asked for.
-  const decided = requestedWorkerAccess({
-    requested: { sandbox: "off" },
-    inherited: READ_ONLY_REVIEW,
-    ceiling: DESK_DEFAULT,
-  });
-  assert.deepEqual(decided.granted, { mode: "always-approve", sandbox: "off" });
-  assert.equal(decided.source, "call");
-  assert.equal(decided.refused, undefined, "nothing was refused, so nothing is claimed to be");
-
-  // A call may also tighten a child below the caller. Same path, no refusal.
-  const tightened = requestedWorkerAccess({
+test("a requested seat is ignored: the child copies the parent", () => {
+  // The live row: parent is Always / Full access. The spawn call passed
+  // permission: ask. The child used to land at Ask. It must stay Always.
+  const dropped = requestedWorkerAccess({
     requested: { mode: "ask", sandbox: "workspace" },
     inherited: DESK_DEFAULT,
     ceiling: DESK_DEFAULT,
   });
-  assert.deepEqual(tightened.granted, { mode: "ask", sandbox: "workspace" });
-  assert.equal(tightened.source, "call");
+  assert.deepEqual(dropped.granted, DESK_DEFAULT);
+  assert.equal(dropped.source, "inherited");
+  assert.equal(dropped.refused, undefined);
 
-  // One dial named, the other inherited.
-  const half = requestedWorkerAccess({
-    requested: { mode: "accept-edits" },
+  // A call asking to raise a read-only parent also cannot move the seat.
+  const raised = requestedWorkerAccess({
+    requested: { sandbox: "off" },
     inherited: READ_ONLY_REVIEW,
     ceiling: DESK_DEFAULT,
   });
-  assert.deepEqual(half.granted, { mode: "accept-edits", sandbox: "read-only" });
+  assert.deepEqual(raised.granted, READ_ONLY_REVIEW);
+  assert.equal(raised.source, "inherited");
 });
 
-test("the ceiling is the desk default, and passing it returns the cap plus a reason", () => {
-  // The person narrowed Settings › LLMs to Ask / Workspace. No call gets past
-  // that, and the caller is told what it got instead of finding out from a
-  // failed write ten minutes later.
-  const tightDesk: DeskAccess = { mode: "ask", sandbox: "workspace" };
-  const capped = requestedWorkerAccess({
-    requested: { mode: "always-approve", sandbox: "off" },
-    inherited: { mode: "ask", sandbox: "read-only" },
-    ceiling: tightDesk,
-  });
-  assert.deepEqual(capped.granted, tightDesk, "capped, not refused outright");
-  assert.equal(capped.source, "desk", "the desk decided this seat, so the call is not named as its author");
-  assert.match(capped.refused ?? "", /Permission Always approve is above the desk default, so this worker runs at Ask/);
-  assert.match(capped.refused ?? "", /Sandbox Off is above the desk default, so this worker runs at Workspace/);
-  assert.equal(capped.refused?.includes("\n"), false, "one line, so a caller can print it");
-
-  // One dial capped, one honoured: the call still authored the seat.
-  const mixed = requestedWorkerAccess({
-    requested: { mode: "ask", sandbox: "off" },
-    inherited: DESK_DEFAULT,
-    ceiling: { mode: "always-approve", sandbox: "workspace" },
-  });
-  assert.deepEqual(mixed.granted, { mode: "ask", sandbox: "workspace" });
-  assert.equal(mixed.source, "call");
-  assert.match(mixed.refused ?? "", /Sandbox Off is above the desk default/);
-  assert.doesNotMatch(mixed.refused ?? "", /Permission/);
-
-  // The shipped default when Settings has never been touched.
-  const shipped = requestedWorkerAccess({ requested: { sandbox: "off" }, inherited: READ_ONLY_REVIEW });
-  assert.deepEqual(shipped.granted, { mode: "always-approve", sandbox: "off" });
-});
-
-test("a silent call changes nothing: the child inherits the caller", () => {
+test("a silent call copies the parent, including a parent the person tightened", () => {
   const silent = requestedWorkerAccess({ inherited: READ_ONLY_REVIEW, ceiling: DESK_DEFAULT });
-  assert.deepEqual(silent.granted, READ_ONLY_REVIEW, "this is what every call did before the fields existed");
+  assert.deepEqual(silent.granted, READ_ONLY_REVIEW);
   assert.equal(silent.source, "inherited");
   assert.equal(silent.refused, undefined);
-  // An empty object is silence too — a caller that built the field and left it unset.
   assert.equal(requestedWorkerAccess({ requested: {}, inherited: READ_ONLY_REVIEW }).source, "inherited");
-  // Silence never reaches for the desk default: a caller the person tightened
-  // stays tight for its children unless the call says otherwise.
   assert.deepEqual(
     requestedWorkerAccess({ inherited: { mode: "ask", sandbox: "read-only" }, ceiling: DESK_DEFAULT }).granted,
     { mode: "ask", sandbox: "read-only" },
@@ -172,15 +126,13 @@ function spawnSeat(input: {
   };
   const callAccess = requestedWorkerAccess({ requested, inherited: input.caller, ceiling: input.desk });
   const nestedRole = input.nested ? "helper" : undefined;
-  const helperReleased = releasedHelper({ role: nestedRole, requestedSandbox: requested.sandbox });
   return {
     seat: workerAccess({
       inherited: callAccess.granted,
       owned: Boolean(input.owned),
-      readOnly: Boolean(input.nested) && !helperReleased,
     }),
     granted: { ...workerGrant({ inherited: callAccess.granted }), source: callAccess.source },
-    role: (helperReleased ? undefined : nestedRole) ?? (helperReleased ? "worker" : undefined),
+    role: nestedRole,
     log: spawnAccessLogDetail({
       child: "sess_child",
       parent: "sess_pj3m99rpahx5",
@@ -193,23 +145,17 @@ function spawnSeat(input: {
   };
 }
 
-test("a delegate call with sandbox off under a read-only caller yields a child at off", () => {
-  // The whole point of the lane, end to end: the visible Grok chat is
-  // always-approve / read-only, and the call asks for a writable worker.
+test("a delegate call with sandbox off under a read-only caller still yields read-only", () => {
+  // The person set the parent to read-only. The spawn call asking for off
+  // cannot raise that. The child copies the parent.
   const spawned = spawnSeat({ caller: READ_ONLY_REVIEW, desk: DESK_DEFAULT, call: { sandbox: "off" } });
-  assert.deepEqual(spawned.seat, { mode: "always-approve", sandbox: "off" }, "the child can write");
-  assert.equal(spawned.granted.source, "call");
-  assert.deepEqual(
-    { mode: spawned.granted.mode, sandbox: spawned.granted.sandbox },
-    { mode: "always-approve", sandbox: "off" },
-  );
-  // One line the Link helper records: identifiers and seats, never the brief.
+  assert.deepEqual(spawned.seat, READ_ONLY_REVIEW, "the call cannot raise the parent seat");
+  assert.equal(spawned.granted.source, "inherited");
   assert.equal(
     spawned.log,
-    "child=sess_child parent=sess_pj3m99rpahx5 requested=-/off granted=always-approve/off cap=always-approve/off source=call",
+    "child=sess_child parent=sess_pj3m99rpahx5 requested=-/off granted=always-approve/read-only cap=always-approve/off source=inherited",
   );
-  // And one line the caller reads in the spawn result, so it needs no card.
-  assert.equal(spawned.line, "Permission Always approve, Sandbox Off (from the call).");
+  assert.equal(spawned.line, "Permission Always approve, Sandbox Read-only (inherited from the caller).");
 });
 
 test("a silent call under the same caller yields read-only, source inherited", () => {
@@ -223,37 +169,21 @@ test("a silent call under the same caller yields read-only, source inherited", (
   assert.equal(spawned.line, "Permission Always approve, Sandbox Read-only (inherited from the caller).");
 });
 
-test("a nested helper sits at the seat it inherited unless the call asks it to run read-only", () => {
-  // The desk default is the standing permission for work the system starts.
-  // A helper nobody asked to clamp is a worker at its parent's seat; the label
-  // and the read-only clamp are one fact, so releasing one releases the other.
+test("a nested helper copies the parent seat; the call cannot clamp it", () => {
   const silent = spawnSeat({ caller: DESK_DEFAULT, desk: DESK_DEFAULT, nested: true });
-  assert.equal(silent.seat.sandbox, DESK_DEFAULT.sandbox, "silence inherits; it does not clamp");
-  assert.equal(silent.role, "worker");
+  assert.equal(silent.seat.sandbox, DESK_DEFAULT.sandbox);
+  assert.equal(silent.role, "helper");
 
-  const clamped = spawnSeat({ caller: DESK_DEFAULT, desk: DESK_DEFAULT, nested: true, call: { sandbox: "read-only" } });
-  assert.equal(clamped.seat.sandbox, "read-only", "the call asked for read-only, so read-only it is");
-  assert.equal(clamped.role, "helper", "and the label says what the seat does");
-
-  // Asking only for a permission does not clamp the sandbox either.
-  const modeOnly = spawnSeat({
-    caller: DESK_DEFAULT,
-    desk: DESK_DEFAULT,
-    nested: true,
-    call: { permission: "always-approve" },
-  });
-  assert.equal(modeOnly.seat.sandbox, DESK_DEFAULT.sandbox);
-  assert.equal(modeOnly.role, "worker");
-  assert.equal(releasedHelper({ role: "worker", requestedSandbox: "off" }), false, "only a helper is subject to release");
-  assert.equal(releasedHelper({ role: "helper" }), true, "a helper the call did not clamp is released");
+  const asked = spawnSeat({ caller: DESK_DEFAULT, desk: DESK_DEFAULT, nested: true, call: { sandbox: "read-only" } });
+  assert.equal(asked.seat.sandbox, DESK_DEFAULT.sandbox, "the call cannot clamp a helper");
+  assert.equal(asked.role, "helper");
+  assert.equal(releasedHelper({ role: "helper", requestedSandbox: "read-only" }), true);
+  assert.equal(releasedHelper({ role: "worker" }), false);
 });
 
-test("the desk ceiling still holds over a delegation to a path-owned worker", () => {
-  // A path allowlist clamps the vendor session to Ask so ownership can still
-  // be checked per write. That is the desk's clamp, and it survives a call
-  // asking for always-approve — but the recorded grant keeps what was granted.
+test("a path-owned worker still launches at Ask so ownership can be preflighted", () => {
   const spawned = spawnSeat({
-    caller: READ_ONLY_REVIEW,
+    caller: DESK_DEFAULT,
     desk: DESK_DEFAULT,
     call: { permission: "always-approve", sandbox: "off" },
     owned: true,
@@ -292,7 +222,7 @@ test("the denial names the chat the sandbox came from, and both ways to change i
     sandboxSourceNote({ session: nadia, sessions: [reviewChat, nadia], deskAccess: DESK_DEFAULT }),
     "Read-only sandbox: gh, git and search reads are allowed; interpreters and writes are not. " +
       "Sandbox Read-only comes from chat “Adversarial product and eval review only”; " +
-      "ask for sandbox: off in the call, or raise that chat's Sandbox.",
+      "raise that chat's Sandbox.",
   );
   // Any depth: a helper under Nadia climbs past every hidden row to the chat
   // the person can actually see and open.
@@ -312,7 +242,7 @@ test("the denial names the chat the sandbox came from, and both ways to change i
   assert.equal(
     sandboxSourceNote({ session: orphan, sessions: [orphan] }),
     "Read-only sandbox: gh, git and search reads are allowed; interpreters and writes are not. " +
-      "Sandbox Strict comes from the desk default; ask for sandbox: off in the call, or raise that chat's Sandbox.",
+      "Sandbox Strict comes from the desk default; raise that chat's Sandbox.",
   );
   assert.match(sandboxSourceNote({ deskAccess: { mode: "ask", sandbox: "workspace" } }), /Sandbox Workspace comes from the desk default/);
 });
@@ -322,17 +252,10 @@ test("the denial names the chat the sandbox came from, and both ways to change i
 // ---------------------------------------------------------------------------
 
 test("a new chat after a read-only chat of the same vendor starts at the desk default", () => {
-  // The quiet third fact behind the complaint: one review chat set to
-  // read-only made every next Grok chat read-only, and nobody chose that.
   const afterReadOnly = inboundAccess({ desk: DESK_DEFAULT, vendor: undefined });
   assert.deepEqual(afterReadOnly, DESK_DEFAULT, "memory of a seat is not a setting on the new chat");
-  // A vendor app the person configured narrower is still honoured — that is a
-  // setting they made, on that vendor.
-  assert.deepEqual(inboundAccess({ desk: DESK_DEFAULT, vendor: { mode: "ask" } }), {
-    mode: "ask",
-    sandbox: "off",
-  });
-  // And a desk default the person narrowed is what a new chat starts at.
+  // A vendor app's own config is not a Workhorse setting.
+  assert.deepEqual(inboundAccess({ desk: DESK_DEFAULT, vendor: { mode: "ask", sandbox: "read-only" } }), DESK_DEFAULT);
   assert.deepEqual(inboundAccess({ desk: { mode: "ask", sandbox: "workspace" } }), {
     mode: "ask",
     sandbox: "workspace",
@@ -341,42 +264,37 @@ test("a new chat after a read-only chat of the same vendor starts at the desk de
 
 test("startSession no longer seeds a new chat's seat from the last chat", () => {
   const store = source("src", "lib", "store.tsx");
-  // The pin is the guard, not the words: the call must not carry a parent, and
-  // the remembered row must not be read for a mode or a sandbox anywhere near
-  // it. `if (false) {}` around the old block would leave this failing.
   assert.match(
     store,
-    /const seat = inboundAccess\(\{\n\s*desk: current\.settings\.access,\n\s*vendor: nativeAccess,\n\s*\}\);/,
-    "a new chat takes the desk default and that vendor's own config, nothing else",
+    /const seat = inboundAccess\(\{\n\s*desk: current\.settings\.access,\n\s*\}\);/,
+    "a new chat takes the desk default, not a vendor app's config",
   );
   assert.doesNotMatch(store, /rememberedAccess/, "the seat memory is gone, not merely unused");
-  // Vendor, model and effort memory stay: this lane took the seat, not the brain.
   assert.match(store, /const picked = provider \?\? remembered!\.provider;/);
   assert.match(store, /effort: withEffort\(picked, model, remembered\?\.effort \?\? null\)/);
+  assert.match(store, /function rememberLastModel\(/);
+  assert.match(store, /if \(!session \|\| session\.hidden\) return lastModel;/);
 });
 
 // ---------------------------------------------------------------------------
 // The schemas, the payload, and the CLI — pinned where a caller reads them.
 // ---------------------------------------------------------------------------
 
-test("both spawn tool declarations expose permission and sandbox", () => {
+test("both spawn tool declarations tell coordinators permission and sandbox are ignored", () => {
   const mcp = source("electron", "workhorse-mcp.ts");
-  // Each schema is sliced to its own tool first: a pin that may run on to the
-  // next declaration passes while the field it names is gone from this one.
+  const ignored = /permission: \{ type: "string", description: "Ignored\. This chat's Permission is the person's setting/;
+  const ignoredBox = /sandbox: \{ type: "string", description: "Ignored\. This chat's Sandbox is the person's setting/;
   const delegate = between(mcp, 'name: "workhorse_delegate",', 'name: "workhorse_continue_mission",');
-  assert.match(delegate, /permission: \{ type: "string", description: "Seat this worker runs under: ask, accept-edits, or always-approve\./);
-  assert.match(delegate, /sandbox: \{ type: "string", description: "Sandbox this worker runs under: off, workspace, read-only, or strict\./);
-  assert.match(delegate, /Capped at the desk default \(Settings › LLMs\), not at your own seat/);
+  assert.match(delegate, ignored);
+  assert.match(delegate, ignoredBox);
 
   const spawn = between(mcp, 'name: "workhorse_spawn_agent",', 'name: "workhorse_await_agents",');
-  assert.match(spawn, /permission: \{ type: "string", description: "Seat this worker runs under/);
-  assert.match(spawn, /sandbox: \{ type: "string", description: "Sandbox this worker runs under/);
-  assert.match(spawn, /Capped at the desk default \(Settings › LLMs\), not at your own seat/);
+  assert.match(spawn, ignored);
+  assert.match(spawn, ignoredBox);
 
-  // The in-desk tool a custom bot sees carries the same pair.
   const custom = between(source("electron", "custom-tools.ts"), 'name: "workhorse_spawn_agent",', 'name: "workhorse_await_agents",');
-  assert.match(custom, /permission: \{ type: "string", description: "Seat this worker runs under/);
-  assert.match(custom, /sandbox: \{ type: "string", description: "Sandbox this worker runs under/);
+  assert.match(custom, ignored);
+  assert.match(custom, ignoredBox);
 });
 
 test("the call's seat reaches the /spawn payload and comes back as a decision", () => {
@@ -398,7 +316,7 @@ test("the call's seat reaches the /spawn payload and comes back as a decision", 
   // The spawn result states the seat on both replies — started and completed.
   const store = source("src", "lib", "store.tsx");
   assert.equal((store.match(/access: accessReceipt,/g) ?? []).length, 2);
-  assert.match(store, /summary: grantedAccessLine\(callAccess, continuedAccess\?\.pass\),/);
+  assert.match(store, /summary: grantedAccessLine\(callAccess\),/);
   // And the desk's own main log gets one line per delegation.
   assert.match(mcp, /openMainLog\(userData\)\.record\("spawn:access", detail\);/);
   assert.equal((mcp.match(/recordSpawnAccess\(/g) ?? []).length, 3, "declared once, called on both spawn replies");
@@ -420,16 +338,15 @@ test("the CLI can hand a delegation its seat", () => {
   );
 });
 
-test("the store decides the seat at the call and records who decided it", () => {
+test("the store seats a worker from the parent, not from the call", () => {
   const store = source("src", "lib", "store.tsx");
   assert.match(
     store,
-    /const callAccess = requestedWorkerAccess\(\{\n\s*requested: requestedAccess,\n\s*inherited: callerAccess,\n\s*ceiling: latest\.settings\.access,\n\s*\}\);/,
-    "the ceiling is the desk default, never the caller's seat",
+    /const callAccess = requestedWorkerAccess\(\{\n\s*inherited: callerAccess,\n\s*\}\);/,
+    "the call cannot name a seat",
   );
-  // The seat and the recorded grant both come off the decision, or the child
-  // would launch at one access and have its writes answered from another.
-  assert.match(store, /inherited: callAccess\.granted,\n\s*owned: assignedPaths\.length > 0,\n\s*readOnly: nestedPolicy\.readOnly && !helperReleased,/);
+  assert.match(store, /inherited: callAccess\.granted,\n\s*owned: assignedPaths\.length > 0,/);
+  assert.doesNotMatch(store, /readOnly: nestedPolicy\.readOnly && !helperReleased/);
   assert.match(store, /grantedAccess: \{ \.\.\.workerGrant\(\{ inherited: callAccess\.granted, prior: priorWorker \}\), source: callAccess\.source \}/);
   // The guard, not the sentence: a hidden owner must reach sandboxSourceNote
   // and the note must reach `need`, so dead-coding the branch fails this.
@@ -447,28 +364,21 @@ test("the store decides the seat at the call and records who decided it", () => 
   assert.match(store, /if \(from\.hidden\) \{[\s\S]{0,3400}?const need = classified\.need;[\s\S]{0,600}?kind: "elevate",/);
 });
 
-test("the rules text tells a coordinator to ask for the sandbox in the call", () => {
+test("the rules text tells a coordinator not to pass permission or sandbox", () => {
   const rules = source("src", "lib", "workhorse-rules.ts");
-  assert.match(
-    rules,
-    /A worker's Permission and Sandbox are decided by your spawn call, so pass sandbox \(off, workspace, read-only, strict\) and permission/,
-  );
-  assert.match(rules, /the worker cannot ask the user for more later/);
-  // It has to be on the surfaces the desk actually injects, not just declared.
+  assert.match(rules, /Do not pass permission or sandbox on a spawn/);
+  assert.match(rules, /You cannot raise, lower, or retune a worker's access from the call/);
   assert.equal((rules.match(/SPAWN_ACCESS_LAW \+/g) ?? []).length, 3, "every coordinator surface carries it");
-  // A worker may still make one bounded helper, so it gets the short form —
-  // worker rules are held to a tenth of the bible's length, and the long
-  // sentence broke that ceiling by four characters when it was shared.
-  assert.match(rules, /Your spawn call decides that helper's Permission and Sandbox: pass sandbox when it must write/);
+  assert.match(rules, /Do not pass permission or sandbox on a helper spawn/);
   assert.equal((rules.match(/HELPER_ACCESS_LAW \+/g) ?? []).length, 2, "both worker surfaces carry the short form");
 });
 
-test("LINK.md states the two fields and the ceiling rule", () => {
+test("LINK.md states that spawn cannot set a worker's seat", () => {
   const link = source("docs", "LINK.md");
-  assert.match(link, /\| `permission` \| `ask`, `accept-edits`, `always-approve` \|/);
-  assert.match(link, /\| `sandbox` \| `off`, `workspace`, `read-only`, `strict` \|/);
-  assert.match(link, /capped by the \*\*desk default\*\* in Settings › LLMs — the app's own\nceiling, not your seat/);
-  assert.match(link, /Send neither field\nand the worker inherits your own seat/);
+  assert.match(link, /Permission and Sandbox are the person's settings/);
+  assert.match(link, /`permission` and `sandbox` on `workhorse_delegate`/);
+  assert.match(link, /are ignored if sent/);
+  assert.match(link, /The worker copies the parent chat's current seat/);
 });
 
 // ---------------------------------------------------------------------------
@@ -554,7 +464,7 @@ test("an Ask-mode subagent's write is answered by the desk, never queued", () =>
   assert.equal(
     outcome.line,
     "Denied by the desk: Write — src/app.ts · Permission Ask comes from chat “Nightly cleanup”; " +
-      "ask for permission: always-approve in the call, or raise that chat's Permission.",
+      "raise that chat's Permission.",
     "and the denial names the seat that stopped it and the two ways to change it",
   );
 });
@@ -625,7 +535,7 @@ test("permissionSourceNote names the Permission dial, not the sandbox", () => {
   // note about the sandbox here would send the coordinator to the wrong dial.
   const note = permissionSourceNote({ session: askWorker, sessions: [askChat, askWorker], deskAccess: DESK_DEFAULT });
   assert.match(note, /^Permission Ask comes from chat “Nightly cleanup”;/);
-  assert.match(note, /ask for permission: always-approve in the call, or raise that chat's Permission\.$/);
+  assert.match(note, /raise that chat's Permission\.$/);
   assert.doesNotMatch(note, /Sandbox/);
   // Same walk as the sandbox note: past every hidden row, to the chat the
   // person can open — and to the call when the call is what set the seat.
@@ -670,24 +580,11 @@ test("store.tsx shuts the ordinary door on a hidden worker", () => {
 // A call-set clamp is not a person's tightening.
 // ---------------------------------------------------------------------------
 
-test("a worker whose call set read-only widens back on a silent reuse", () => {
-  // The desk records what it granted, so only a seat TIGHTER than that record
-  // reads as something the person did by hand. A call-set clamp equals its own
-  // record, so it leaves no tightening behind and the next slice re-derives.
+test("a spawn call cannot leave a read-only clamp on the worker", () => {
   const call = requestedWorkerAccess({ requested: { sandbox: "read-only" }, inherited: DESK_DEFAULT, ceiling: DESK_DEFAULT });
   const seat = workerAccess({ inherited: call.granted, owned: false });
-  const grant = { ...workerGrant({ inherited: call.granted }), source: call.source };
-  assert.deepEqual(seat, { mode: "always-approve", sandbox: "read-only" });
-  assert.equal(grant.source, "call");
-
-  const prior = { mode: seat.mode, sandbox: seat.sandbox, agentRun: { grantedAccess: grant } };
-  assert.equal(workerTightening(prior), undefined, "the desk's own record is not a wish the worker made");
-  const reuse = requestedWorkerAccess({ inherited: DESK_DEFAULT, ceiling: DESK_DEFAULT });
-  assert.deepEqual(
-    workerAccess({ inherited: reuse.granted, owned: false, prior }),
-    DESK_DEFAULT,
-    "a silent reuse under an always/off lineage widens back to off",
-  );
+  assert.deepEqual(seat, DESK_DEFAULT);
+  assert.equal(call.source, "inherited");
 });
 
 test("a narrowing the person made by hand still survives the next slice", () => {
@@ -706,19 +603,9 @@ test("a narrowing the person made by hand still survives the next slice", () => 
   });
 });
 
-test("the one seat that would read a desk clamp as a wish is unreachable", () => {
-  // A nested helper is the single case where the recorded grant is WIDER than
-  // the seat: workerGrant deliberately records the unclamped access. Reusing
-  // one would read that gap as a tightening — so nestedWorkerPolicy refuses to
-  // reuse a helper at all, and the store honours that. The two have to stay a
-  // matched pair, which is what this pins.
-  const helperSeat = workerAccess({ inherited: DESK_DEFAULT, owned: false, readOnly: true });
-  const helperGrant = { ...workerGrant({ inherited: DESK_DEFAULT }), source: "inherited" as const };
-  assert.deepEqual(
-    workerTightening({ mode: helperSeat.mode, sandbox: helperSeat.sandbox, agentRun: { grantedAccess: helperGrant } }),
-    { sandbox: "read-only" },
-    "the gap is real, which is why the reuse door has to stay shut",
-  );
-  assert.match(source("src", "lib", "subagents.ts"), /readOnly: true,\n\s*mayReuse: false,/);
+test("a nested helper is not reused, and it inherits the parent seat", () => {
+  const helperSeat = workerAccess({ inherited: DESK_DEFAULT, owned: false });
+  assert.deepEqual(helperSeat, DESK_DEFAULT);
+  assert.match(source("src", "lib", "subagents.ts"), /readOnly: false,\n\s*mayReuse: false,/);
   assert.match(source("src", "lib", "store.tsx"), /const reusedWorker = nestedPolicy\.mayReuse \?/);
 });

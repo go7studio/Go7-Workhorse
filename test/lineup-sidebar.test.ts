@@ -75,7 +75,7 @@ test("a nested worker subtitle names a clean finish as Done", () => {
       messages: [],
       agentRun: { status: "completed", startedAt: 1, isolation: "worktree" },
     }),
-    "GPT-5.6-Terra · Medium · Done",
+    "GPT-5.6-Terra · Medium · Always · Done",
   );
   assert.equal(
     workerSidebarLabel({
@@ -93,7 +93,7 @@ test("a nested worker subtitle names a clean finish as Done", () => {
       messages: [],
       agentRun: { status: "failed", startedAt: 1, isolation: "shared" },
     }),
-    "Sonnet 4.6 · High",
+    "Sonnet 4.6 · High · Always",
   );
   assert.equal(
     workerSidebarLabel({
@@ -111,7 +111,7 @@ test("a nested worker subtitle names a clean finish as Done", () => {
       messages: [],
       agentRun: { status: "cancelled", startedAt: 1, isolation: "shared" },
     }),
-    "Composer 2.5 · High · Cancelled",
+    "Composer 2.5 · High · Always · Cancelled",
   );
   assert.match(read("src/ui/ChatRow.tsx"), /status === "completed" && session\.agentRun\.executionOwner !== "parent"/);
 });
@@ -151,6 +151,10 @@ test("an auto-routed chat says Auto where a model name would read as the plan", 
     formatChatSidebar({ provider: "grok", model: "grok-4.6", effort: "medium", mode: "ask" }),
     "Grok 4.6 · Medium · Ask",
     "Ask still shows because it is not the usual permission",
+  );
+  assert.equal(
+    formatChatSidebar({ provider: "grok", model: "grok-4.6", effort: "high", mode: "always-approve", worker: true }),
+    "Worker · Grok 4.6 · High · Always",
   );
   assert.equal(
     formatChatSidebar({ provider: "grok", model: "grok-4.6", effort: "high", mode: "plan" }),

@@ -220,18 +220,16 @@ When you add a feature, add it here in the same commit.
   changes out of the linked folder.
 - The owner's lease refreshes from disk when its write completes.
 - **One permission inbox** every prompt lands in one place, translated to each
-  vendor's protocol. A delegation's access is decided at
-  the call, up to the desk default.
-- A silent call gives the worker the caller's own seat, or,
-  for a mission's later pass, the seat the pass before
-  it ran under.
+  vendor's protocol. Permission and Sandbox are the person's settings. A
+  worker copies the parent chat's current seat. A spawn call cannot raise,
+  lower, or retune them.
 - A subagent never asks
   you. The desk answers it, so the only card you see is your own chat lifting a
   limit you set.
 - **Desk access default** Settings › LLMs holds one Permission and Sandbox for
-  work that names no chat. It ships as Always allow, sandbox off.
-- A call naming a parent chat takes that chat's setting, and a vendor app set
-  narrower keeps its own limit.
+  work that names no chat. It ships as Always allow, sandbox off. A new chat
+  starts there. A call naming a parent chat takes that chat's setting. A
+  vendor app's own config does not move Workhorse's seat.
 - **Campaigns** ordinary delegation stays ordinary at every permitted width, and
   root-worker capacity bounds the wave. That bound is checked per admission, so
   simultaneous spawns can land more workers than the bound.

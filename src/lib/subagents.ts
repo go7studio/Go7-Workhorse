@@ -2371,7 +2371,8 @@ export function nestedWorkerPolicy(input: {
     projectFolder: sessionExecutionCwd(input.parentEnvironment, input.projectFolder),
     isolation: "shared",
     role: "helper",
-    readOnly: true,
+    // Helpers inherit the parent seat. A spawn call cannot clamp them.
+    readOnly: false,
     mayReuse: false,
     mayOwnPaths: false,
   };

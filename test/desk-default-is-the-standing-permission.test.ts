@@ -11,13 +11,12 @@ import { assertSharedWrite, claimSharedFiles, workerMayWrite } from "../src/lib/
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const read = (rel: string) => readFileSync(path.join(ROOT, rel), "utf8");
 
-test("a nested helper is released unless the call asked for it to be read-only", () => {
-  assert.equal(releasedHelper({ role: "helper" }), true, "nothing asked: the helper inherits its seat");
+test("a nested helper is always released: the call cannot clamp it", () => {
+  assert.equal(releasedHelper({ role: "helper" }), true);
   assert.equal(releasedHelper({ role: "helper", requestedSandbox: "off" }), true);
-  assert.equal(releasedHelper({ role: "helper", requestedSandbox: "workspace" }), true);
-  assert.equal(releasedHelper({ role: "helper", requestedSandbox: "read-only" }), false, "the call said read-only, so read-only it is");
-  assert.equal(releasedHelper({ role: "helper", requestedSandbox: "strict" }), false);
-  assert.equal(releasedHelper({ role: "auditor" }), false, "only helpers are subject to release; other roles never had the clamp");
+  assert.equal(releasedHelper({ role: "helper", requestedSandbox: "read-only" }), true);
+  assert.equal(releasedHelper({ role: "helper", requestedSandbox: "strict" }), true);
+  assert.equal(releasedHelper({ role: "auditor" }), false);
 });
 
 test("the seat decides who may write, not the label on the role", () => {
@@ -48,7 +47,7 @@ test("a lease refusal names the sandbox, because that is what refused it", () =>
 
 test("the copy no longer claims helpers are read-only by design", () => {
   assert.doesNotMatch(deskClampNote({ role: "helper" }), /by design/);
-  assert.match(deskClampNote({ role: "helper" }), /asked to run read-only/);
+  assert.match(deskClampNote({ role: "helper" }), /inherited the parent chat's Permission and Sandbox/);
   for (const rel of ["src/lib/store.tsx", "src/lib/permissions.ts", "electron/workhorse-mcp.ts", "src/lib/workhorse-rules.ts"]) {
     const src = read(rel).replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
     assert.doesNotMatch(src, /read-only by design/, `${rel} still tells someone the old rule`);
@@ -57,7 +56,7 @@ test("the copy no longer claims helpers are read-only by design", () => {
 
 test("both write gates receive the seat that will actually apply", () => {
   const store = read("src/lib/store.tsx");
-  assert.match(store, /sandbox: nestedPolicy\.readOnly && !helperReleased \? "read-only" : callAccess\.granted\.sandbox,/, "the lease claim sees the seat the worker will run under");
+  assert.match(store, /sandbox: callAccess\.granted\.sandbox,/, "the lease claim sees the seat the worker will run under");
   assert.match(store, /role: owner\.agentRun\?\.role,\s*sandbox: owner\.sandbox,/, "the path write sees the worker's own sandbox");
   const sub = read("src/lib/subagents.ts");
   assert.match(sub, /sandbox: input\.sandbox,\s*path,/, "the allowlist gate passes it on");

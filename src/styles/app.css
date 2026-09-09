@@ -7924,6 +7924,13 @@ html.pane-dragging * {
   margin-bottom: 11px;
 }
 
+.setup-lede {
+  margin: -4px 0 12px;
+  color: var(--setup-muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 .setup-heading.compact {
   margin-bottom: 9px;
 }

@@ -4,12 +4,12 @@ export type { CrewMode };
 
 /** Grok Bot is a calling harness, not an allocated worker LLM. One fact, every rule surface. */
 /**
- * A delegation's access is decided at the call. A worker cannot ask the person
- * for a sandbox afterwards — the desk answers that itself and names where the
- * sandbox came from — so the coordinator has to ask while it still can.
+ * Permission and Sandbox are the person's settings. Coordinators pick who
+ * works, not what they are allowed to do. Passing permission/sandbox on spawn
+ * used to seat Wren at Ask under an Always parent.
  */
 const SPAWN_ACCESS_LAW =
-  "A worker's Permission and Sandbox are decided by your spawn call, so pass sandbox (off, workspace, read-only, strict) and permission (ask, accept-edits, always-approve) whenever the slice has to write: a silent call hands the worker your own seat, the desk caps both at its Settings default, and the worker cannot ask the user for more later. ";
+  "Do not pass permission or sandbox on a spawn. This chat's Permission and Sandbox are the person's setting; every worker you hire copies that seat. You cannot raise, lower, or retune a worker's access from the call. ";
 
 /**
  * The same fact for a worker, which may make one bounded helper and nothing
@@ -18,7 +18,7 @@ const SPAWN_ACCESS_LAW =
  * this says only the part a worker can act on.
  */
 const HELPER_ACCESS_LAW =
-  "Your spawn call decides that helper's Permission and Sandbox: pass sandbox when it must write, because it cannot ask the user later. ";
+  "Do not pass permission or sandbox on a helper spawn. The helper copies this chat's seat. ";
 
 const GROK_BOT_SPAWN_LAW =
   "Grok 4.6 is ACP Grok or Cursor Grok, never Grok Bot. Do not spawn grok-bot as a worker, builder, or auditor even when canCall is true. Grok Bot may call, analyze, and dispatch only. Naming Grok locks provider grok. Naming Cursor Grok locks Cursor. Naming grok-4.6 with no vendor lets the desk pick by leftover. Never the grok-bot custom slot. ";

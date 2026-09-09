@@ -4,6 +4,7 @@ import { lastTalkedAt } from "../lib/chats";
 import type { MissionRowLook } from "../lib/lineup";
 import { clampMenuPosition } from "../lib/edit-menu";
 import { formatChatSidebar } from "../lib/session";
+import { shortModeLabel } from "../lib/commands";
 import { effortLabel, modelName } from "../lib/models";
 import { deskInk, vendorAttachedForSession } from "../lib/settings";
 import type { Store } from "../lib/store";
@@ -38,10 +39,11 @@ export function crewDotClass(kind: CrewDotKind): string {
 export function workerSidebarLabel(session: Session, botName?: string): string {
   const name = botName?.trim() || modelName(session.provider, session.model);
   const effort = effortLabel(session.effort ?? null);
+  const mode = shortModeLabel(session.mode);
   const cancelled = session.agentRun?.status === "cancelled" ? "Cancelled" : "";
   const done =
     session.agentRun?.status === "completed" && session.agentRun.executionOwner !== "parent" ? "Done" : "";
-  return [name, effort, cancelled, done].filter(Boolean).join(" · ");
+  return [name, effort, mode, cancelled, done].filter(Boolean).join(" · ");
 }
 
 export type ChatRowDesk = {

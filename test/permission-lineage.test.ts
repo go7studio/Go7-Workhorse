@@ -331,7 +331,7 @@ test("a person's own chat set to plan/read-only keeps its prompt", () => {
 });
 
 test("the clamp note says which clamp, and says nothing false when there is none", () => {
-  assert.equal(deskClampNote({ role: "helper" }), "This helper was asked to run read-only; hand this write to your parent, or spawn it with a sandbox that can write.");
+  assert.equal(deskClampNote({ role: "helper" }), "This helper inherited the parent chat's Permission and Sandbox; raise that chat's setting if it must write.");
   assert.match(deskClampNote({ paths: ["src/app.ts"] }), /path-owned/);
   assert.match(deskClampNote(undefined), /The desk narrowed this launch itself/);
   assert.match(deskClampNote({ paths: [] }), /The desk narrowed this launch itself/);
@@ -469,9 +469,6 @@ function siteTwo(input: {
   );
   if (classified.kind !== "raise" || !classified.need) {
     const downgrade = classified.kind === "downgrade";
-    if (!downgrade && from.agentRun?.role === "helper") {
-      return { reply: { ok: false, reason: "This helper was asked to run read-only; the parent owns its writes." }, prompted: false };
-    }
     if (!downgrade && (from.agentRun?.paths?.length ?? 0) > 0) {
       return {
         reply: {
@@ -507,7 +504,7 @@ function siteTwo(input: {
   return { reply: { need: classified.need }, prompted: true };
 }
 
-test("a helper asking for sandbox off is turned back without a prompt", () => {
+test("a helper asking for sandbox off is already at the parent seat", () => {
   const helper = helperUnder(alwaysRoot, ALWAYS);
   const outcome = siteTwo({
     from: helper,
@@ -515,12 +512,8 @@ test("a helper asking for sandbox off is turned back without a prompt", () => {
     deskAccess: ALWAYS,
     ask: { folder: "off", message: "need to write the fix" },
   });
-  assert.equal(outcome.prompted, false, "the seat is a clamp, not a setting the person made");
-  assert.deepEqual(outcome.reply, {
-    ok: false,
-    reason: "This helper was asked to run read-only; the parent owns its writes.",
-  });
-  // Asking with nothing named lands in the same place.
+  assert.equal(outcome.prompted, false);
+  assert.equal((outcome.reply as { alreadyElevated?: boolean }).alreadyElevated, true);
   assert.equal(siteTwo({ from: helper, sessions: [alwaysRoot, helper], deskAccess: ALWAYS, ask: {} }).prompted, false);
 });
 
@@ -616,7 +609,7 @@ test("past the desk default a hidden worker is told where to ask instead", () =>
     ok: false,
     reason:
       "Read-only sandbox: gh, git and search reads are allowed; interpreters and writes are not. " +
-      "Sandbox Read-only comes from chat “root”; ask for sandbox: off in the call, or raise that chat's Sandbox.",
+      "Sandbox Read-only comes from chat “root”; raise that chat's Sandbox.",
   });
 });
 
@@ -740,37 +733,25 @@ test("store.tsx routes both permission sites through the lineage grant", () => {
     /reason: payload\.message,\n\s*\},\n\s*from,\n\s*\)/,
     "the seat must not come back as the comparison",
   );
-  // The guard has to reach the reply. Pinning the sentence alone let a mutation
-  // dead-code the branch — the words stayed in the file and the pin held.
-  assert.match(
-    store,
-    /if \(!downgrade && from\.agentRun\?\.role === "helper"\) \{[\s\S]{0,260}?reason: "This helper was asked to run read-only; the parent owns its writes\.",/,
-    "a helper's ask is answered from its own branch",
-  );
   assert.match(
     store,
     /if \(!downgrade && \(from\.agentRun\?\.paths\?\.length \?\? 0\) > 0\) \{[\s\S]{0,320}?howToUse: "Your writes are answered from the grant this chat carries; keep going\.",/,
-    "and a path-owned worker from its own",
+    "a path-owned worker's ask is answered from its grant",
   );
 });
 
-test("the desk's read-only clamp on a nested helper is still the desk's alone", () => {
-  // If nestedWorkerPolicy ever stopped clamping, this lane would be answering a
-  // block nobody applied. The clamp and the answer have to stay a matched pair.
+test("a nested helper inherits the parent seat; the call cannot clamp it", () => {
   const subagents = source("src", "lib", "subagents.ts");
-  assert.match(subagents, /role: "helper",\n\s*readOnly: true,/);
-  // And the desk still records the unclamped grant at spawn, which is what the
-  // lineage reads first.
+  assert.match(subagents, /role: "helper",\n\s*\/\/ Helpers inherit the parent seat\. A spawn call cannot clamp them\.\n\s*readOnly: false,/);
   assert.match(
     source("src", "lib", "store.tsx"),
     /grantedAccess: \{ \.\.\.workerGrant\(\{ inherited: callAccess\.granted, prior: priorWorker \}\), source: callAccess\.source \}/,
   );
-  // The seat itself is unchanged by this lane.
   assert.match(source("src", "lib", "permissions.ts"), /sandbox: input\.readOnly \? "read-only" : input\.inherited\.sandbox,/);
 });
 
 test("the permission inbox promise is written down where a person can read it", () => {
   const features = source("docs", "FEATURES.md");
-  assert.match(features, /A delegation's access is decided at\n\s*the call/);
+  assert.match(features, /Permission and Sandbox are the person's settings/);
   assert.match(features, /A subagent never asks\n\s*you/);
 });

@@ -98,10 +98,9 @@ test("a nested helper defaults to its parent worktree and stays local and shared
     assert.equal(result.error, undefined, result.error?.message);
     assert.equal(seen?.folder, workerTree);
     assert.equal(seen?.isolation, "shared");
-    // A plain nested spawn is no longer forced read-only, so it is not recorded
-    // as a helper either: the role and the clamp are the same fact. The desk
-    // default is the standing permission for work the system asked for.
-    assert.notEqual(seen?.role, "helper", "no clamp the call did not ask for");
+    // Nested stays a helper for routing bounds. The seat is inherited; the
+    // call cannot clamp it read-only.
+    assert.equal(seen?.role, "helper");
     assert.equal(seen?.paths, undefined);
   } finally {
     setWorkhorseDeskAsk(null);

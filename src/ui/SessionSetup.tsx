@@ -427,6 +427,11 @@ export function SessionSetup({ onClose }: { onClose: () => void }) {
           </div>
           <span className="setup-current">{selectedPermission.label} · {selectedSandbox.label}</span>
         </div>
+        {session.hidden ? (
+          <p className="setup-lede">
+            Copied from the parent chat when this worker started. Changing it here is yours — orchestration cannot retune this seat.
+          </p>
+        ) : null}
         <div className="setup-split">
           <div className="setup-block">
             <div className="setup-choice-title">

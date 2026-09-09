@@ -65,15 +65,12 @@ import {
   classifyElevationInput,
   lineageGrant,
   continuedInheritedAccess,
-  parseCallPermission,
   parseContinuedAccess,
   parseElevationInput,
-  parseSandboxValue,
   permissionPolicyAnswer,
   permissionResumeStatus,
   permissionSourceNote,
   promptOwner,
-  releasedHelper,
   requestedWorkerAccess,
   sandboxSourceNote,
   securityPolicyAnswer,
@@ -986,6 +983,16 @@ function presetFrom(
   };
 }
 
+/** lastModel is the person's remembered brain. A hidden worker must not write it. */
+function rememberLastModel(
+  lastModel: AppState["lastModel"],
+  session: Pick<Session, "provider" | "model" | "effort" | "sandbox" | "mode" | "customBotId" | "hidden"> | undefined,
+  patch: Partial<AppState["lastModel"]> = {},
+): AppState["lastModel"] {
+  if (!session || session.hidden) return lastModel;
+  return presetFrom(session, patch);
+}
+
 /**
  * Which run of a session the desk has told the vendor to stop.
  *
@@ -1360,7 +1367,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             setCatalogRev((value) => value + 1);
           }
           setState((current) => {
-            const firstNativeCodexDefaults = !current.settings.llms.codex.accessDefaults && codex.accessDefaults;
             return {
               ...current,
               settings: {
@@ -1418,10 +1424,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                   custom: { ...current.settings.llms.custom, connected: false },
                 },
               },
-              lastModel:
-                firstNativeCodexDefaults && current.lastModel.provider === "codex"
-                  ? { ...current.lastModel, ...firstNativeCodexDefaults }
-                  : current.lastModel,
             };
           });
         })();
@@ -1704,15 +1706,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const picked = provider ?? remembered!.provider;
       const model = provider ? defaultModel(provider).id : remembered!.model;
       const customBotId = picked === "custom" ? remembered?.customBotId : undefined;
-      const nativeAccess = picked === "custom" ? undefined : current.settings.llms[picked].accessDefaults;
-      // A new chat starts at the desk default, narrowed by that vendor's own
-      // config. It no longer copies the last chat of the same vendor: one
-      // read-only review chat then made every next Grok chat read-only, and
-      // nobody had asked for that. A chat is tightened by the person, on that
-      // chat. Vendor, model and effort still come from memory below.
+      // A new chat starts at the desk default. It no longer copies the last
+      // chat of the same vendor, and it no longer folds that vendor app's own
+      // config in: one Codex read-only default then made every next Codex chat
+      // read-only, and nobody had asked for that. Vendor, model and effort
+      // still come from memory below.
       const seat = inboundAccess({
         desk: current.settings.access,
-        vendor: nativeAccess,
       });
       const choice = {
         provider: picked,
@@ -1774,7 +1774,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const next = applySessionModelChange(live, { provider, model, effort, customBotId: botId });
       return {
         ...latest,
-        lastModel: presetFrom(next),
+        lastModel: rememberLastModel(latest.lastModel, next),
         sessions: latest.sessions.map((item) =>
           item.id === live.id ? { ...next, routingMode: "manual", routingDecision: undefined } : item,
         ),
@@ -1818,7 +1818,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if (!session || !withEffort(session.provider, session.model, effort)) return current;
       return {
         ...current,
-        lastModel: presetFrom(session, { effort }),
+        lastModel: rememberLastModel(current.lastModel, session, { effort }),
         sessions: current.sessions.map((item) =>
           item.id === session.id ? { ...item, effort } : item,
         ),
@@ -1994,7 +1994,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const next = applySessionPolicyChange(live, { mode });
       return {
         ...current,
-        lastModel: presetFrom(next),
+        lastModel: rememberLastModel(current.lastModel, next, { mode }),
         sessions: current.sessions.map((item) => (item.id === live.id ? next : item)),
       };
     });
@@ -2023,7 +2023,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const next = applySessionPolicyChange(live, { sandbox });
       return {
         ...current,
-        lastModel: presetFrom(next),
+        lastModel: rememberLastModel(current.lastModel, next, { sandbox }),
         sessions: current.sessions.map((item) => (item.id === live.id ? next : item)),
       };
     });
@@ -2124,7 +2124,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         ? await window.workhorse.detectCodexLogin()
         : { connected: false, accessDefaults: undefined };
       setState((current) => {
-        const firstNativeCodexDefaults = !current.settings.llms.codex.accessDefaults && detected.accessDefaults;
         return {
           ...current,
           settings: {
@@ -2142,10 +2141,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               },
             },
           },
-          lastModel:
-            firstNativeCodexDefaults && current.lastModel.provider === "codex"
-              ? { ...current.lastModel, ...firstNativeCodexDefaults }
-              : current.lastModel,
         };
       });
       refreshVendorModels();
@@ -2318,7 +2313,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         watchPermits,
         settings,
         lastModel:
-          pending?.kind === "elevate" && answer !== "deny" && live ? presetFrom(live) : current.lastModel,
+          pending?.kind === "elevate" && answer !== "deny" && live
+            ? rememberLastModel(current.lastModel, live)
+            : current.lastModel,
       };
     });
   }, []);
@@ -4557,15 +4554,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               );
               if (classified.kind !== "raise" || !classified.need) {
                 const downgrade = classified.kind === "downgrade";
-                if (!downgrade && from.agentRun?.role === "helper") {
-                  await replyAsk({
-                    text: JSON.stringify({
-                      ok: false,
-                      reason: "This helper was asked to run read-only; the parent owns its writes.",
-                    }),
-                  });
-                  return;
-                }
                 if (!downgrade && (from.agentRun?.paths?.length ?? 0) > 0) {
                   await replyAsk({
                     text: JSON.stringify({
@@ -5253,10 +5241,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             namedCaller ?? (exposure === "external-runtime" ? undefined : openChat);
           const deskSeat = inboundAccess({
             desk: latest.settings.access,
-            vendor:
-              caller && caller.provider !== "custom"
-                ? latest.settings.llms[caller.provider].accessDefaults
-                : undefined,
           });
           const inboundSeat: DeskAccess = namedCaller
             ? { mode: namedCaller.mode, sandbox: namedCaller.sandbox }
@@ -5282,14 +5266,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               title,
               titleLocked: false,
               // No chat was named, so this host stands in for the desk and
-              // takes the desk's stored default, narrowed by the vendor app's
-              // own recorded config. Never the visible chat's setting.
+              // takes the desk's stored default. Never the visible chat's
+              // setting, and never a vendor app's own config.
               ...inboundAccess({
                 desk: latest.settings.access,
-                vendor:
-                  remembered.provider === "custom"
-                    ? undefined
-                    : latest.settings.llms[remembered.provider].accessDefaults,
               }),
               environment: { kind: "local" },
               securityPolicy: { network: "allowed", root: "allowed" },
@@ -5515,19 +5495,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               parentEnvironment: caller.environment,
               projectFolder,
             });
-            // A delegation's access is decided here, at the call. The ceiling
-            // is the desk default, never the caller's seat, so a chat the
-            // person tightened for reviews can still hand a working child the
-            // access the app allows. Silence keeps the caller's seat.
-            const requestedAccess = {
-              ...(parseCallPermission(payload.permission) ? { mode: parseCallPermission(payload.permission)! } : {}),
-              ...(parseSandboxValue(payload.sandbox) ? { sandbox: parseSandboxValue(payload.sandbox)! } : {}),
-            };
-            // A continuation is seated by the mission it continues, not by the
-            // chat it was called from. Reading the caller here is what made a
-            // mission delegated with sandbox: off out of a tightened chat write
-            // in pass 1 and get refused in pass 2 — same work, same call, and
-            // nothing said why. An explicit seat on this call still outranks it.
+            // Permission and Sandbox are the person's settings. A coordinator
+            // may pick who works, not what they are allowed to do: permission
+            // and sandbox on the call are ignored. The child copies the parent
+            // chat, or the desk default when no chat was named.
             const continuedAccess = parseContinuedAccess(payload.continuedAccess);
             const callerAccess = continuedInheritedAccess({
               continued: continuedAccess,
@@ -5535,19 +5506,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               ceiling: latest.settings.access,
             });
             const callAccess = requestedWorkerAccess({
-              requested: requestedAccess,
               inherited: callerAccess,
-              ceiling: latest.settings.access,
             });
-            // A helper the call made writable is not a helper any more, so it
-            // is not recorded as one; the read-only clamp and the role are the
-            // same fact and they move together.
-            const helperReleased = releasedHelper({
-              role: nestedPolicy.role,
-              requestedSandbox: requestedAccess.sandbox,
-            });
-            const spawnRole = (helperReleased ? undefined : nestedPolicy.role) ??
-              (payload.role === "auditor" ? "auditor" as const : routeSpawn || helperReleased ? "worker" as const : undefined);
+            const spawnRole = nestedPolicy.role ??
+              (payload.role === "auditor" ? "auditor" as const : routeSpawn ? "worker" as const : undefined);
             const routingRole = spawnRole === "helper" ? "worker" as const : spawnRole;
             const routeRequest = {
               prompt: payload.message,
@@ -5787,11 +5749,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               granted: callAccess.granted,
               source: callAccess.source,
               ...(callAccess.refused ? { refused: callAccess.refused } : {}),
-              summary: grantedAccessLine(callAccess, continuedAccess?.pass),
+              summary: grantedAccessLine(callAccess),
               log: spawnAccessLogDetail({
                 child: childId,
                 parent: parent.id,
-                requested: requestedAccess,
                 granted: callAccess.granted,
                 ceiling: latest.settings.access,
                 source: callAccess.source,
@@ -5902,7 +5863,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 role: spawnRole,
                 // The seat this worker will actually run under decides the write,
                 // not the label on its role.
-                sandbox: nestedPolicy.readOnly && !helperReleased ? "read-only" : callAccess.granted.sandbox,
+                sandbox: callAccess.granted.sandbox,
                 files,
               });
               if (!claim.ok) {
@@ -6001,7 +5962,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               ...workerAccess({
                 inherited: callAccess.granted,
                 owned: assignedPaths.length > 0,
-                readOnly: nestedPolicy.readOnly && !helperReleased,
                 prior: priorWorker,
               }),
               securityPolicy: parent.securityPolicy,

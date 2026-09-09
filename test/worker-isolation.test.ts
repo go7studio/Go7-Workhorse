@@ -40,7 +40,7 @@ test("nested helpers stay shared even when a caller asks for a worktree", () => 
     projectFolder: "/managed/worker",
     isolation: "shared",
     role: "helper",
-    readOnly: true,
+    readOnly: false,
     mayReuse: false,
     mayOwnPaths: false,
   });

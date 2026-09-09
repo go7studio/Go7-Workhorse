@@ -1101,8 +1101,8 @@ function DeskAccessBlock() {
             on a prompt. Narrow it here when you want inbound work held back.
           </span>
           <span>
-            A chat that names itself as the parent lends its own setting instead, and a vendor app set narrower than
-            this keeps its own limit. Nothing else writes this — connecting or dropping a vendor leaves it alone.
+            A chat that names itself as the parent lends its own setting instead. A vendor app's own config does not
+            move this. Nothing else writes this — connecting or dropping a vendor leaves it alone.
           </span>
         </div>
       </div>

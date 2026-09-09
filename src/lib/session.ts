@@ -1,4 +1,4 @@
-import { modeLabel } from "./commands";
+import { modeLabel, shortModeLabel } from "./commands";
 import { normalizeQueuedPrompt } from "./chats";
 import { collapseToolText } from "./grok-events";
 import { normalizeImages } from "./images";
@@ -68,16 +68,23 @@ export function formatChatSidebar(input: {
   mode?: string;
   botName?: string;
   routingMode?: string;
+  worker?: boolean;
 }): string {
-  const parsed = parsePermissionMode(input.mode ?? "") ?? "ask";
-  const mode = parsed === "always-approve" ? "" : modeLabel(parsed);
+  const parsed = parsePermissionMode(input.mode ?? "") ?? "always-approve";
+  const mode = input.worker
+    ? shortModeLabel(parsed)
+    : parsed === "always-approve"
+      ? ""
+      : modeLabel(parsed);
   if (input.routingMode === "auto") {
-    return ["Auto", effortLabel((input.effort as EffortLevel | null) ?? null), mode].filter(Boolean).join(" · ");
+    return [input.worker ? "Worker" : "", "Auto", effortLabel((input.effort as EffortLevel | null) ?? null), mode]
+      .filter(Boolean)
+      .join(" · ");
   }
   const provider = asProviderId(input.provider);
   const name = input.botName?.trim() || modelName(provider, input.model);
   const effort = effortLabel((input.effort as EffortLevel | null) ?? null);
-  return [name, effort, mode].filter(Boolean).join(" · ");
+  return [input.worker ? "Worker" : "", name, effort, mode].filter(Boolean).join(" · ");
 }
 
 export function applySessionPolicyChange(

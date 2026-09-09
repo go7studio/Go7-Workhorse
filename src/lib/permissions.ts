@@ -1205,21 +1205,20 @@ export const DESK_ACCESS_FALLBACK: DeskAccess = { mode: "always-approve", sandbo
  * An explicit parent chat is the path: the call takes that chat's Permission
  * and Sandbox, so a chat the person tightened stays tight and a chat they set
  * to Always stays Always. With no parent the desk's own stored default answers
- * — Always / Off as shipped, and only the person may narrow it. The vendor
- * app's recorded defaults are folded in as a second thing the person set, so
- * the narrower of the two wins: a Codex on approval_policy="never" keeps the
- * desk's Always, and a Codex on "on-request" pulls it back to Ask.
+ * — Always / Off as shipped, and only the person may narrow it.
  *
- * Nothing here reads the caller's live permission state, and nothing asks for
- * it. A desk cannot see what another vendor's app is allowing right now, so
- * that handshake is not attempted. Every input is the desk's own record.
+ * A vendor app's own config is not a Workhorse setting. Folding it in used to
+ * open a new Codex chat at Ask / Read-only while Settings still showed Always
+ * / Full access. `vendor` stays on the call so existing callers compile; it
+ * does not move the seat.
  */
 export function inboundAccess(input: {
   parent?: BotAccessDefaults;
   desk?: DeskAccess;
   vendor?: BotAccessDefaults;
 }): DeskAccess {
-  const seat = tighterAccess(input.desk ?? DESK_ACCESS_FALLBACK, input.vendor);
+  void input.vendor;
+  const seat = input.desk ?? DESK_ACCESS_FALLBACK;
   return {
     mode: input.parent?.mode ?? seat.mode,
     sandbox: input.parent?.sandbox ?? seat.sandbox,
@@ -1314,55 +1313,21 @@ export function parseCallPermission(raw: string | undefined): PermissionMode | u
 /**
  * The seat a delegation's child launches under.
  *
- * A delegation's access is decided at the CALL. A call that names `permission`
- * or `sandbox` is honoured exactly, capped by `ceiling` — which is the desk
- * default (Settings › LLMs), never the caller's own seat. That is the point: a
- * chat the person tightened for reviews may still hand a working child the
- * access the app allows, so a read-only review chat stops being a trap for
- * every delegation made from it. A silent call changes nothing and the child
- * inherits the caller's seat, which is what every call did before.
- *
- * When a request passes the ceiling the capped seat is returned WITH a reason,
- * so the caller reads what it got instead of guessing from a failure later.
+ * Permission and Sandbox are the person's settings. A coordinator may pick
+ * who works, not what they are allowed to do. `requested` on the call is
+ * ignored — even an explicit `permission: ask` must not drop a parent that
+ * is Always allow. The child copies `inherited` (the parent chat, or the
+ * desk default when no chat was named). `ceiling` stays on the signature
+ * so existing callers compile; it does not move the seat.
  */
 export function requestedWorkerAccess(input: {
   requested?: RequestedAccess;
   inherited: DeskAccess;
   ceiling?: DeskAccess;
 }): GrantedWorkerAccess {
-  const ceiling = input.ceiling ?? DESK_ACCESS_FALLBACK;
-  const wantMode = input.requested?.mode;
-  const wantSandbox = input.requested?.sandbox;
-  if (!wantMode && !wantSandbox) return { granted: { ...input.inherited }, source: "inherited" };
-  const refusals: string[] = [];
-  let honoured = 0;
-  let mode = input.inherited.mode;
-  if (wantMode) {
-    if (MODE_RANK[wantMode] > MODE_RANK[ceiling.mode]) {
-      mode = ceiling.mode;
-      refusals.push(`Permission ${modeLabel(wantMode)} is above the desk default, so this worker runs at ${modeLabel(ceiling.mode)}`);
-    } else {
-      mode = wantMode;
-      honoured += 1;
-    }
-  }
-  let sandbox = input.inherited.sandbox;
-  if (wantSandbox) {
-    if (SANDBOX_RANK[wantSandbox] > SANDBOX_RANK[ceiling.sandbox]) {
-      sandbox = ceiling.sandbox;
-      refusals.push(`Sandbox ${sandboxLabel(wantSandbox)} is above the desk default, so this worker runs at ${sandboxLabel(ceiling.sandbox)}`);
-    } else {
-      sandbox = wantSandbox;
-      honoured += 1;
-    }
-  }
-  return {
-    granted: { mode, sandbox },
-    // Nothing the call asked for survived, so the desk default decided this
-    // seat — not the call. Saying "call" there would name the wrong author.
-    source: honoured > 0 ? "call" : "desk",
-    ...(refusals.length > 0 ? { refused: `${refusals.join("; ")}. Raise the desk default in Settings › LLMs to go higher.` } : {}),
-  };
+  void input.requested;
+  void input.ceiling;
+  return { granted: { ...input.inherited }, source: "inherited" };
 }
 
 /** Who decided this seat, said the way a caller reads it. */
@@ -1439,22 +1404,20 @@ export function parseContinuedAccess(raw: unknown): ContinuedAccess | undefined 
 }
 
 /**
- * What a continuation's new worker inherits when the call named no seat: the
- * pass it continues, still held to the desk default. The pass's own grant was
- * capped when it was made, so this only bites when the person narrowed Settings
- * between passes — and then their latest decision is the one that should win.
+ * What a continuation's new worker inherits. Permission and Sandbox stay the
+ * parent chat's current setting — a coordinator cannot retune a mission mid
+ * flight by sending a seat, and pass 1's recorded grant is not a setting the
+ * person made. `continued` and `ceiling` stay on the signature so existing
+ * callers compile; they do not move the seat.
  */
 export function continuedInheritedAccess(input: {
   continued?: ContinuedAccess;
   caller: DeskAccess;
   ceiling?: DeskAccess;
 }): DeskAccess {
-  if (!input.continued) return input.caller;
-  const seat: DeskAccess = {
-    mode: input.continued.mode ?? input.caller.mode,
-    sandbox: input.continued.sandbox ?? input.caller.sandbox,
-  };
-  return tighterAccess(seat, input.ceiling ?? DESK_ACCESS_FALLBACK);
+  void input.continued;
+  void input.ceiling;
+  return input.caller;
 }
 
 export type LineageChat = {
@@ -1552,8 +1515,8 @@ export function standingGrant(input: {
  * that a Grok review chat two rows up had been set to months earlier.
  *
  * So the desk answers, and the answer has to name the SOURCE: which chat that
- * sandbox came from, and the two ways to change it. A coordinator reading this
- * in its transcript can fix the next call without anyone touching the desk.
+ * sandbox came from. A coordinator cannot retune it from the next spawn call;
+ * the person raises that chat's Sandbox.
  */
 export function sandboxSourceNote(input: {
   session?: LineageChat;
@@ -1562,7 +1525,7 @@ export function sandboxSourceNote(input: {
 }): string {
   const desk = input.deskAccess ?? DESK_ACCESS_FALLBACK;
   const sandbox = input.session?.sandbox ?? desk.sandbox;
-  const line = `Sandbox ${sandboxLabel(sandbox)} comes from ${accessOrigin(input)}; ask for sandbox: off in the call, or raise that chat's Sandbox.`;
+  const line = `Sandbox ${sandboxLabel(sandbox)} comes from ${accessOrigin(input)}; raise that chat's Sandbox.`;
   // A worker refused on a read-only seat used to be told only which dial
   // stopped it, so it asked for the dial to move when the call it wanted was
   // already allowed in another form. The line now says what the seat can run.
@@ -1587,7 +1550,7 @@ export function permissionSourceNote(input: {
 }): string {
   const desk = input.deskAccess ?? DESK_ACCESS_FALLBACK;
   const mode = input.session?.mode ?? desk.mode;
-  return `Permission ${modeLabel(mode)} comes from ${accessOrigin(input)}; ask for permission: always-approve in the call, or raise that chat's Permission.`;
+  return `Permission ${modeLabel(mode)} comes from ${accessOrigin(input)}; raise that chat's Permission.`;
 }
 
 /** The thing that decided this worker's seat, named the way a person reads it. */
@@ -1607,30 +1570,18 @@ function accessOrigin(input: { session?: LineageChat; sessions?: readonly Lineag
 }
 
 /**
- * A nested helper is read-only by design, and that clamp holds — unless the
- * call asked for a sandbox on purpose. A child the call made writable is not a
- * helper any more, so it stops being recorded as one: keeping the label would
- * make deskClampNote tell the person "helpers are read-only" about a chat that
- * is writing files. The access and the role move together or neither moves.
- */
-/**
- * Whether a nested helper runs at the seat it inherited rather than read-only.
- *
- * It used to take an explicit sandbox on the call to release one, so a plain
- * nested spawn under a desk whose default was always-approve / off was seated
- * read-only anyway, blocked on its first write, and asked the person to
- * elevate — for work another part of the system had asked for. The desk
- * default is the person's standing decision. The desk must not add a clamp the
- * call did not ask for: a helper is read-only only when the call says so.
+ * Nested helpers inherit the parent seat. A spawn call cannot clamp them
+ * read-only, and cannot release a clamp it is no longer allowed to set.
+ * `requestedSandbox` stays on the signature so existing callers compile.
  */
 export function releasedHelper(input: { role?: string; requestedSandbox?: SandboxProfile }): boolean {
-  if (input.role !== "helper") return false;
-  return input.requestedSandbox !== "read-only" && input.requestedSandbox !== "strict";
+  void input.requestedSandbox;
+  return input.role === "helper";
 }
 
 /** The clamp, named, so a denial says what actually stopped the work. */
 export function deskClampNote(run: { role?: string; paths?: string[] } | undefined): string {
-  if (run?.role === "helper") return "This helper was asked to run read-only; hand this write to your parent, or spawn it with a sandbox that can write.";
+  if (run?.role === "helper") return "This helper inherited the parent chat's Permission and Sandbox; raise that chat's setting if it must write.";
   if ((run?.paths?.length ?? 0) > 0) {
     return "This launch is path-owned; the desk answers its in-path writes from the access you granted.";
   }

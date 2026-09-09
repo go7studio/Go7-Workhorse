@@ -139,34 +139,19 @@ reads still answer from the last saved state, delegation does not.
 | `workhorse_local_materialize` | byte-range download into Workhorse's SHA-verified cache | yes |
 | `workhorse_local_continue` | dispatch one approved, allowlisted continuation as a visible worker | yes |
 
-### The seat a delegation asks for
+### The seat a worker runs under
 
-`workhorse_delegate` takes two more fields, and they decide what the worker may
-do before it starts:
-
-| Field | Values | Rule |
-| --- | --- | --- |
-| `permission` | `ask`, `accept-edits`, `always-approve` | the seat the worker runs under. `plan` is not offered: a worker that cannot write cannot report |
-| `sandbox` | `off`, `workspace`, `read-only`, `strict` | the sandbox the worker runs under. `read-only` still reads: `gh pr view`, `gh pr diff`, `gh pr checks`, the `gh run` and `gh issue` reads, git reads, and the search tools, so a reviewer seat can read the pull request in its own checkout. It refuses anything that writes or sends, every interpreter, `gh api`, and any gh read that names a repository at all, by flag (`--repo`, `-R`, `--hostname`) or by argument (`owner/repo`, a URL) |
-
-Both are capped by the **desk default** in Settings › LLMs — the app's own
-ceiling, not your seat. So a chat you tightened for reviews can still hand a
-worker the access the work needs, and a call can never take a worker past what
-the app allows. Ask above the ceiling and you get the capped seat plus one line
-saying what was refused; the reply's `access` field always states the granted
-seat, so you learn it from the result and never from a card. Send neither field
-and the worker inherits your own seat, which is what every call did before.
+Permission and Sandbox are the person's settings — This chat, or Settings ›
+LLMs when no chat is named. A coordinator picks who works, not what they are
+allowed to do. `permission` and `sandbox` on `workhorse_delegate`,
+`workhorse_spawn_agent`, and `workhorse_continue_mission` are ignored if sent.
+The worker copies the parent chat's current seat. The reply's `access` field
+still states that seat, so the caller can obey it.
 
 A worker cannot ask a person for access afterwards — that card is only ever
-raised by a chat about its own setting — so ask for the sandbox in the call.
-
-`workhorse_continue_mission` takes the same two fields, under the same ceiling.
-Omit them and the next pass keeps the seat the pass before it ran under, not
-the seat of the chat you called from: a mission delegated with `sandbox: off`
-out of a chat someone tightened writes in pass 1 and goes on writing in pass 2.
-Where that wave's workers held different seats the tightest one carries forward.
-Pass the fields to change the seat mid-mission, and the reply's `access` field
-says which pass the seat came from.
+raised by a chat about its own setting. Raise a block with
+`workhorse_request_permission` on the chat that owns the setting, never by
+passing a seat on spawn.
 
 Not available through Link: credentials, permissions, deletes, renames,
 custom-bot setup, Watch permits, project mutation. They are not listed and

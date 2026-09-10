@@ -76,3 +76,19 @@ test("a sidebar horse is scaled, not zoomed", () => {
   }
   assert.match(styles("horse-status.css"), /\.chat-row \.horse-status\s*\{[^}]*scale:\s*\.75/);
 });
+
+/**
+ * The same change that stopped the desk painting at rest also slowed the peer
+ * inbox from four reads a second to one every five seconds. That is the path a
+ * chat takes to another chat when the bridge is down, and five seconds was long
+ * enough that the suite's own four second round trip failed under load. An idle
+ * desk should be cheap and still quick: one second bounds the wait and still
+ * costs a fifth of what it used to.
+ */
+test("an idle peer inbox is read cheaply, and still often enough to answer", async () => {
+  const { IDLE_INBOX_SCAN_MS, WATCHLESS_INBOX_SCAN_MS } = await import("../electron/peer-inbox");
+
+  assert.ok(IDLE_INBOX_SCAN_MS <= 1_000, `a peer ask waits up to ${IDLE_INBOX_SCAN_MS}ms when the watch misses it`);
+  assert.ok(IDLE_INBOX_SCAN_MS >= 500, "reading four times a second for nothing is what this replaced");
+  assert.ok(WATCHLESS_INBOX_SCAN_MS <= 250, "with no watch at all the read is the only signal there is");
+});

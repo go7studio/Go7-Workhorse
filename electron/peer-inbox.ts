@@ -285,6 +285,12 @@ export async function askViaInbox(inbox: string, ask: PeerAsk, timeoutMs = 10 * 
   }
 }
 
+/** The inbox is read this often when `fs.watch` is healthy: a floor under how long a peer ask can sit. */
+export const IDLE_INBOX_SCAN_MS = 1_000;
+
+/** And this often when the watch is not usable at all, where the read is the only signal there is. */
+export const WATCHLESS_INBOX_SCAN_MS = 250;
+
 export function watchPeerInbox(inbox: string, handler: (ask: PeerAsk) => Promise<PeerAskResult>): () => void {
   fs.mkdirSync(inbox, { recursive: true });
   const seen = new Set<string>();
@@ -315,23 +321,33 @@ export function watchPeerInbox(inbox: string, handler: (ask: PeerAsk) => Promise
       })();
     }
   };
-  // `fs.watch` is the signal here; the interval only covers a filesystem that
-  // does not deliver events. It used to run every 250ms for the life of the
-  // app, so an idle desk read this directory 345,600 times a day to find
-  // nothing. Five seconds is the safety net. A watch that throws or reports an
-  // error is the one case that still earns the fast scan.
+  /*
+   * `fs.watch` is the signal here; the interval only covers a filesystem that
+   * does not deliver events. It used to run every 250ms for the life of the
+   * app, so an idle desk read this directory 345,600 times a day to find
+   * nothing.
+   *
+   * The safety net was five seconds for one release, and that was too long.
+   * This is the path a chat takes to reach another chat when the bridge is
+   * down, and under a loaded machine the watch event can arrive late or not at
+   * all: the suite's own peer round trip, which allows four seconds, failed
+   * once at five and passed three times out of three on an idle machine. One
+   * second bounds the wait without going back to four reads a second, and it
+   * leaves the same test four chances instead of none. A watch that throws or
+   * reports an error is the one case that still earns the fast scan.
+   */
   const poll = (ms: number) => {
     const timer = setInterval(scan, ms);
     timer.unref();
     return timer;
   };
-  let fallback = poll(5_000);
+  let fallback = poll(IDLE_INBOX_SCAN_MS);
   let fast = false;
   const hurry = () => {
     if (fast) return;
     fast = true;
     clearInterval(fallback);
-    fallback = poll(250);
+    fallback = poll(WATCHLESS_INBOX_SCAN_MS);
   };
   let watcher: fs.FSWatcher | undefined;
   try {

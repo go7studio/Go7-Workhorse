@@ -1,6 +1,6 @@
 # Collect Spark model delivery onto this desk.
 # Forwards loopback 8788, copies the owner bearer into a local token file,
-# GETs /v1/models. Prints ids and paths only — never the bearer.
+# GETs /v1/models. Prints ids and paths only -- never the bearer.
 param(
   [string]$SshTarget = $env:DGX_SPARK_SSH,
   [string]$Id = $(if ($env:DGX_SPARK_ID) { $env:DGX_SPARK_ID } else { "spark" }),
@@ -42,7 +42,7 @@ New-Item -ItemType Directory -Force -Path $tokenDir | Out-Null
 $remoteSpec = "${SshTarget}:$RemoteToken"
 & scp @sshArgs $remoteSpec $TokenFile
 if ($LASTEXITCODE -ne 0) {
-  Write-Host "SCP_FAIL=$LASTEXITCODE — key login refused or remote token missing."
+  Write-Host "SCP_FAIL=$LASTEXITCODE key login refused or remote token missing."
   exit 4
 }
 Restrict-File $TokenFile
@@ -81,12 +81,12 @@ try {
   $ids = @()
   if ($resp.data) { $ids = @($resp.data | ForEach-Object { $_.id }) }
   elseif ($resp.models) { $ids = @($resp.models | ForEach-Object { if ($_ -is [string]) { $_ } else { $_.id } }) }
-  Write-Host "MODELS=$($ids -join ',')"
-  Write-Host "BASE_URL=http://127.0.0.1:$LocalPort/v1"
-  Write-Host "TOKEN_FILE=$TokenFile"
+  Write-Host ("MODELS=" + ($ids -join ","))
+  Write-Host ("BASE_URL=http://127.0.0.1:" + $LocalPort + "/v1")
+  Write-Host ("TOKEN_FILE=" + $TokenFile)
 } catch {
-  Write-Host "MODELS_UNAVAILABLE $($_.Exception.Message)"
-  Write-Host "BASE_URL=http://127.0.0.1:$LocalPort/v1"
-  Write-Host "TOKEN_FILE=$TokenFile"
+  Write-Host ("MODELS_UNAVAILABLE " + $_.Exception.Message)
+  Write-Host ("BASE_URL=http://127.0.0.1:" + $LocalPort + "/v1")
+  Write-Host ("TOKEN_FILE=" + $TokenFile)
   exit 7
 }

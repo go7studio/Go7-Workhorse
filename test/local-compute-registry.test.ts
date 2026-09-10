@@ -31,9 +31,14 @@ function dependencies(fetchImpl: typeof fetch, patch: Partial<LocalComputeProbeD
 
 test("Electron returns typed discovery without returning the token", async () => {
   let authorization = "";
+  const seen: string[] = [];
   const result = await probeLocalComputeHost(host, dependencies((async (input, init) => {
-    assert.equal(String(input), "https://compute.example.test/run/v1/capabilities");
+    seen.push(String(input));
     authorization = new Headers(init?.headers).get("authorization") ?? "";
+    if (String(input).endsWith("/v1/models")) {
+      return new Response(JSON.stringify({ data: [{ id: "qwen3.8-27b" }, { id: "bloom-v40-continue" }] }), { status: 200 });
+    }
+    assert.equal(String(input), "https://compute.example.test/run/v1/capabilities");
     return new Response(JSON.stringify(capabilities), { status: 200 });
   }) as typeof fetch));
   assert.equal(authorization, "Bearer private-token");
@@ -45,7 +50,21 @@ test("Electron returns typed discovery without returning the token", async () =>
     tool: "artifact.review_asset",
     outputRoles: ["review"],
   }]);
+  assert.deepEqual(result.chatModels, ["bloom-v40-continue", "qwen3.8-27b"]);
+  assert.deepEqual(seen, [
+    "https://compute.example.test/run/v1/capabilities",
+    "https://compute.example.test/run/v1/models",
+  ]);
   assert.doesNotMatch(JSON.stringify(result), /private-token|authorization/i);
+});
+
+test("a missing /v1/models catalog does not fail a healthy host", async () => {
+  const result = await probeLocalComputeHost(host, dependencies((async (input) => {
+    if (String(input).endsWith("/v1/models")) return new Response("", { status: 404 });
+    return new Response(JSON.stringify(capabilities), { status: 200 });
+  }) as typeof fetch));
+  assert.equal(result.status, "healthy");
+  assert.equal(result.chatModels, undefined);
 });
 
 test("Unix token files with broad permissions fail before network", async () => {
@@ -107,4 +126,6 @@ test("Local Compute privileged work and picker are wired through typed IPC", () 
   assert.match(ui, /Continuation capabilities/);
   assert.match(ui, /Allowed callers/);
   assert.match(ui, /LOCAL_COMPUTE_CALLER_ROLES/);
+  assert.match(ui, /\/v1\/models/);
+  assert.match(ui, /127\.0\.0\.1:8788/);
 });

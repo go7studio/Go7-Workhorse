@@ -104,6 +104,7 @@ export function LocalComputeBlock() {
           <strong>Local Compute</strong>
           <span>Execution hosts advertise typed capabilities. They are not vendors, bots, or Usage rings.</span>
           <span>Nothing is callable until both a caller role and an advertised capability are allowed.</span>
+          <span>A Spark gateway stays on the box. NVIDIA Sync is SSH: local-forward 8788, then Address is http://127.0.0.1:8788. Recheck also lists /v1/models.</span>
           {note ? <span className="settings-row-note">{note}</span> : null}
         </div>
         <div className="settings-control">
@@ -128,7 +129,7 @@ export function LocalComputeBlock() {
           </label>
           <label>
             <span>Address</span>
-            <input value={draft.baseUrl} placeholder="https://host.example/run" onChange={(event) => setDraft({ ...draft, baseUrl: event.target.value })} />
+            <input value={draft.baseUrl} placeholder="http://127.0.0.1:8788" onChange={(event) => setDraft({ ...draft, baseUrl: event.target.value })} />
           </label>
           <label className="local-compute-token">
             <span>Token file</span>
@@ -144,7 +145,7 @@ export function LocalComputeBlock() {
             </button>
           </label>
           <div className="local-compute-add-actions">
-            <span>{duplicate ? "That host ID is already in use." : candidate ? "Ready to add. Grants start off." : "Enter a valid HTTPS host and absolute token-file path."}</span>
+            <span>{duplicate ? "That host ID is already in use." : candidate ? "Ready to add. Grants start off." : "Enter a valid HTTPS host (HTTP only on loopback) and an absolute token-file path."}</span>
             <button
               className="tiny"
               type="button"
@@ -236,6 +237,9 @@ export function LocalComputeBlock() {
                 <b>Advertised capabilities</b>
                 {!healthy ? <span>Recheck a healthy host before granting capabilities.</span> : null}
                 {health?.runtimeId ? <span>{health.runtimeId}{health.runtimeVersion ? ` · ${health.runtimeVersion}` : ""}</span> : null}
+                {healthy && health.chatModels && health.chatModels.length > 0 ? (
+                  <span>Chat models · {health.chatModels.join(", ")}</span>
+                ) : null}
                 {healthy && health.capabilities.length === 0 ? <span>No capabilities advertised.</span> : null}
                 {health?.capabilities.map((capability) => (
                   <button

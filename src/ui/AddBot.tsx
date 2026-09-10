@@ -8,7 +8,7 @@ import { BotForm } from "./BotForm";
 import { GrokBotWakeSetup } from "./GrokBotWakeSetup";
 
 const CATALOG: {
-  id: "grok" | "codex" | "claude" | "cursor" | "grok-bot" | "own";
+  id: "grok" | "codex" | "claude" | "cursor" | "grok-bot" | "dgx-spark" | "own";
   name: string;
   hint: string;
 }[] = [
@@ -17,13 +17,16 @@ const CATALOG: {
   { id: "claude", name: "Claude", hint: "Local Claude Code." },
   { id: "cursor", name: "Cursor", hint: "Local Cursor Agent." },
   { id: "grok-bot", name: "Grok Bot", hint: "Private local bridge. Instant replies are optional." },
+  { id: "dgx-spark", name: "DGX Spark", hint: "Qwen on the Spark. NVIDIA Sync local-forwards 8788." },
   { id: "own", name: "Your own", hint: "API URL and key." },
 ];
 
-type Stage = "catalog" | "own" | "grok" | "codex" | "claude" | "cursor" | "grok-bot";
+type Stage = "catalog" | "own" | "grok" | "codex" | "claude" | "cursor" | "grok-bot" | "dgx-spark";
+
+const ALWAYS_OFFERED = new Set<(typeof CATALOG)[number]["id"]>(["grok-bot", "dgx-spark", "own"]);
 
 export function addBotChoices(llms: Record<"grok" | "codex" | "claude" | "cursor", Pick<LlmLink, "connected">>) {
-  return CATALOG.filter((item) => item.id === "grok-bot" || item.id === "own" || !llms[item.id]?.connected);
+  return CATALOG.filter((item) => ALWAYS_OFFERED.has(item.id) || !llms[item.id as "grok" | "codex" | "claude" | "cursor"]?.connected);
 }
 
 type StockStage = "grok" | "codex" | "claude" | "cursor";
@@ -90,6 +93,19 @@ export function AddBot() {
       setStage(id);
       return;
     }
+    if (id === "dgx-spark") {
+      const preset = findProvider(id);
+      if (preset) {
+        store.updateCustomLlm({
+          ...draftFromProvider(preset),
+          apiKey: "",
+          tested: false,
+          source: "manual",
+        });
+      }
+      setStage(id);
+      return;
+    }
     if (id === "own") {
       if (!draft.apiKey.trim() && !draft.baseUrl.trim()) store.refreshCustomLogin();
       setStage("own");
@@ -128,18 +144,25 @@ export function AddBot() {
         </>
       )}
 
-      {(stage === "own" || stage === "grok-bot") && (
+      {(stage === "own" || stage === "grok-bot" || stage === "dgx-spark") && (
         <>
           <header className="project-hero">
             <div className="link-head">
-              <p className="eyebrow">{stage === "grok-bot" ? "Grok Bot" : "Your own"}</p>
+              <p className="eyebrow">
+                {stage === "grok-bot" ? "Grok Bot" : stage === "dgx-spark" ? "DGX Spark" : "Your own"}
+              </p>
               <button className="tiny" type="button" onClick={leaveChoice}>
                 Back
               </button>
             </div>
-            <h2>{stage === "grok-bot" ? "Connect Grok Bot" : "New bot"}</h2>
+            <h2>{stage === "grok-bot" ? "Connect Grok Bot" : stage === "dgx-spark" ? "Connect DGX Spark" : "New bot"}</h2>
             {stage === "grok-bot" ? (
               <p className="lede">Add the private local bot now. You can finish its optional instant-reply connection later.</p>
+            ) : stage === "dgx-spark" ? (
+              <p className="lede">
+                NVIDIA Sync is SSH. Local-forward 8788 to the Spark gateway, paste the owner bearer, then Test API — that
+                call collects /v1/models so Qwen and anything else the box serves can be ticked.
+              </p>
             ) : draft.source === "openclaw" ? (
               <p className="row-meta">Imported MiniMax key from OpenClaw config. This is not harness integration.</p>
             ) : draft.source === "env" ? (
@@ -174,18 +197,20 @@ export function AddBot() {
 
           {stage === "grok-bot" ? <GrokBotWakeSetup /> : null}
 
-          {stage === "own" ? (
+          {stage === "own" || stage === "dgx-spark" ? (
             <p className="row-meta">
               {probing
                 ? "Testing API…"
                 : probeNote ||
                   (draft.tested
                     ? `Tested. ${formatWindow(draft.contextWindow)} context.`
-                    : "Test the API before Create.")}
+                    : stage === "dgx-spark"
+                      ? "Test the API before Create. That GET is how the desk collects the models this box is delivering."
+                      : "Test the API before Create.")}
             </p>
           ) : null}
           <div className="actions add-bot-actions">
-            {stage === "own" ? (
+            {stage === "own" || stage === "dgx-spark" ? (
               <button
                 className="tiny"
                 type="button"

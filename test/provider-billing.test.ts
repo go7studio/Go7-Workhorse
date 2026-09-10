@@ -72,6 +72,7 @@ test("Add Bot presets keep every existing host and group billing copy", () => {
     aimlapi: "direct",
     gemini: "direct",
     "grok-bot": "local",
+    "dgx-spark": "local",
   };
   for (const preset of PROVIDER_PRESETS) {
     assert.equal(preset.billing, expectedBilling[preset.id], preset.id);
@@ -106,7 +107,7 @@ test("Add Bot presets keep every existing host and group billing copy", () => {
   );
   assert.deepEqual(
     groups.find((item) => item.group.id === "local")?.presets.map((item) => item.id),
-    ["grok-bot"],
+    ["grok-bot", "dgx-spark"],
   );
 
   const form = readFileSync(path.join(ROOT, "src", "ui", "BotForm.tsx"), "utf8");
@@ -147,6 +148,10 @@ test("Vercel Kimi Code and Gemini ship as Custom HTTP presets with documented de
   assert.equal(detectProviderFromUrl("https://api.kimi.com/coding/v1")?.id, "kimi");
   assert.equal(detectProviderFromUrl("https://generativelanguage.googleapis.com/v1beta/openai/")?.id, "gemini");
   assert.equal(detectProviderFromUrl("https://api.moonshot.ai/v1")?.id, undefined);
+  assert.equal(detectProviderFromUrl("http://127.0.0.1:8787/v1")?.id, "grok-bot");
+  assert.equal(detectProviderFromUrl("http://127.0.0.1:8788/v1")?.id, "dgx-spark");
+  assert.equal(draftFromProvider(findProvider("dgx-spark")!).model, "qwen3.8-27b");
+  assert.equal(draftFromProvider(findProvider("dgx-spark")!).baseUrl, "http://127.0.0.1:8788/v1");
   assert.equal(detectProviderFromUrl("https://api.minimax.io/v1")?.id, "minimax");
   assert.equal(detectProviderFromUrl("http://127.0.0.1:8787/v1")?.id, "grok-bot");
   assert.equal(detectProviderFromUrl("http://127.0.0.1:8787/v1/")?.id, "grok-bot");
@@ -289,6 +294,8 @@ test("FEATURES names the shipped billing groups and new Custom HTTP presets", ()
   assert.match(features, /Kimi Code/);
   assert.match(features, /Gemini API/);
   assert.match(features, /Grok Bot/);
+  assert.match(features, /DGX Spark/);
+  assert.match(features, /\/v1\/models/);
   assert.match(features, /subscription plans/);
   assert.match(features, /gateway credits/);
   assert.match(features, /direct API billing/);
@@ -334,6 +341,7 @@ test("Grok Bot is a local Custom HTTP preset, not a stock vendor", () => {
   assert.equal(isGrokBotUrl("http://localhost:11434/v1"), false, "Ollama on loopback is not this door");
   assert.equal(isGrokBotUrl("http://[::1]:11434/v1"), false);
   assert.equal(isGrokBotUrl("http://127.0.0.1:11434/v1"), false);
+  assert.equal(isGrokBotUrl("http://127.0.0.1:8788/v1"), false, "the Spark gateway is not the Grok Bot shim");
   assert.equal(isGrokBotUrl("http://127.0.0.1:9999/v1"), false);
   assert.equal(isGrokBotUrl("https://api.minimax.io/v1"), false);
 

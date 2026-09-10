@@ -1,6 +1,9 @@
 
-.welcome-ver {
-  margin: 4px 0 0 !important;
+/* `.welcome p` sets the margin for every paragraph on this pane and outranks
+   a lone class, so this one named itself louder instead of naming itself
+   properly. */
+.welcome p.welcome-ver {
+  margin: 4px 0 0;
   font-size: var(--text-13);
   font-variant-numeric: tabular-nums;
   color: var(--text-tertiary);

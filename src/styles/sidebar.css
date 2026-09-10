@@ -198,6 +198,10 @@ button {
 
 html.pane-dragging,
 html.pane-dragging * {
+  /* This one stays. While a pane is being dragged every element's own cursor
+     must yield, and `.project-head .row { cursor: grab }` outranks a state
+     class on <html>. Beating it on specificity alone takes a selector
+     repeated three times, which reads worse than the word. */
   cursor: col-resize !important;
   user-select: none !important;
 }

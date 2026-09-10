@@ -112,8 +112,10 @@
   color: var(--text-secondary);
 }
 
-.grok-bot-wake-state {
-  display: inline-flex !important;
+/* `.grok-bot-wake-head span` lays every span in the head out as a block and
+   outranks a lone class. Naming the parent wins on specificity alone. */
+.grok-bot-wake-head .grok-bot-wake-state {
+  display: inline-flex;
   align-items: center;
   gap: 6px;
   flex: none;

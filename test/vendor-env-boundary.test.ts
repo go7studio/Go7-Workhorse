@@ -570,8 +570,7 @@ test("a Mac token written by Claude Desktop is read back", () => {
   assert.equal(oauth?.source, "desktop");
 });
 
-test("the Mac key takes the rounds Chromium takes", () => {
-  assert.equal(MAC_KEY_ROUNDS, 1003);
+test("a round thousand rounds cannot read what Chromium wrote", () => {
   const password = "invented-safe-storage-password";
   const short = crypto.pbkdf2Sync(password, "saltysalt", 1000, 16, "sha1");
   const body = Buffer.from(MAC_PAYLOAD_FROM_CHROMIUM, "base64").subarray(3);

@@ -4,7 +4,7 @@ import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { ClaudeSessionHost, type ClaudePromptInput } from "../electron/claude-host";
-import { readClaudeDesktopOauth } from "../electron/claude-desktop-auth";
+import { MAC_KEY_ROUNDS, readClaudeDesktopOauth } from "../electron/claude-desktop-auth";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
@@ -456,7 +456,7 @@ test("a 401 or 403 usage response leaves the ring unknown and the vendor callabl
 });
 
 /** All decrypted material below is generated in memory from invented fixtures. */
-function desktopFixture(platform: "darwin" | "win32" = "darwin") {
+function desktopFixture(platform: "darwin" | "win32" = "darwin", stored?: string) {
   const input = claudeFixture(platform, true);
   const root = platform === "darwin"
     ? path.join(input.homedir!, "Library", "Application Support", "Claude")
@@ -465,7 +465,7 @@ function desktopFixture(platform: "darwin" | "win32" = "darwin") {
   const state = path.join(root, "Local State");
   const password = "invented-safe-storage-password";
   const token = "invented-desktop-oauth";
-  const key = platform === "darwin" ? crypto.pbkdf2Sync(password, "saltysalt", 1000, 16, "sha1") : Buffer.alloc(32, 7);
+  const key = platform === "darwin" ? crypto.pbkdf2Sync(password, "saltysalt", MAC_KEY_ROUNDS, 16, "sha1") : Buffer.alloc(32, 7);
   const iv = platform === "darwin" ? Buffer.alloc(16, " ") : Buffer.alloc(12, 3);
   const clear = JSON.stringify({ "user:inference claude_code": { token, expiresAt: Date.now() + 60_000 } });
   let payload: Buffer;
@@ -480,7 +480,8 @@ function desktopFixture(platform: "darwin" | "win32" = "darwin") {
   const read = input.readFile!;
   input.existsSync = (file) => file === config || file === state || file.endsWith("Packages") || exists(file);
   input.listDir = () => ["Claude_fixture"];
-  input.readFile = (file) => file === config ? JSON.stringify({ "oauth:tokenCacheV2": payload.toString("base64") })
+  const cache = stored ?? payload.toString("base64");
+  input.readFile = (file) => file === config ? JSON.stringify({ "oauth:tokenCacheV2": cache })
     : file === state ? JSON.stringify({ os_crypt: { encrypted_key: Buffer.from("DPAPI-fixture").toString("base64") } }) : read(file);
   let keyReads = 0;
   input.readSafeStoragePassword = () => { keyReads++; return password; };
@@ -551,6 +552,32 @@ test("Desktop decrypts on macOS and Windows and stays last in the credential cha
   } finally {
     resetClaudeTokenRejection();
   }
+});
+
+/**
+ * Written once by Chromium's own recipe, then pasted here: salt "saltysalt",
+ * 1003 rounds of PBKDF2-SHA1, a 128-bit key, AES-128-CBC and an IV of sixteen
+ * spaces, over the password below. Nothing in the tree computes it, so a build
+ * that derives its key any other way cannot read it.
+ */
+const MAC_PAYLOAD_FROM_CHROMIUM =
+  "djEwoanjC8eHaXZQO9KN4Xe8deX329VA4ZmGluYX/XeijW0J12CqMdwxm0BPqqunC+LlvS2ciSjxRy2fxtFxAZrnQhuh11gn9As1u3hDlkr+CHg1t3aXAY6CzVnGh6lxaV95";
+
+test("a Mac token written by Claude Desktop is read back", () => {
+  const fixture = desktopFixture("darwin", MAC_PAYLOAD_FROM_CHROMIUM);
+  const oauth = readClaudeDesktopOauth(fixture.input);
+  assert.equal(oauth?.accessToken, "invented-desktop-oauth");
+  assert.equal(oauth?.source, "desktop");
+});
+
+test("a round thousand rounds cannot read what Chromium wrote", () => {
+  const password = "invented-safe-storage-password";
+  const short = crypto.pbkdf2Sync(password, "saltysalt", 1000, 16, "sha1");
+  const body = Buffer.from(MAC_PAYLOAD_FROM_CHROMIUM, "base64").subarray(3);
+  assert.throws(() => {
+    const decipher = crypto.createDecipheriv("aes-128-cbc", short, Buffer.alloc(16, " "));
+    Buffer.concat([decipher.update(body), decipher.final()]);
+  }, "a round thousand rounds cannot read what Claude Desktop wrote");
 });
 
 test("a denied or throwing macOS keychain reader quietly leaves no fallback", () => {

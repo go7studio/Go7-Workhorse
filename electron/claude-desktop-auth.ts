@@ -85,6 +85,9 @@ $dec = [System.Security.Cryptography.ProtectedData]::Unprotect($enc, $null, 'Cur
   return Buffer.from(out, "base64");
 }
 
+/** Rounds Chromium uses to turn the keychain password into the Mac key. */
+export const MAC_KEY_ROUNDS = 1003;
+
 export function decryptElectronV10(payload: string, aesKey: Buffer, platform: NodeJS.Platform = "win32"): string {
   const data = Buffer.from(payload, "base64");
   if (data.subarray(0, 3).toString() !== "v10") {
@@ -174,7 +177,10 @@ export function readClaudeDesktopOauth(input: ClaudeDesktopAuthInput = {}): Clau
     if (platform === "darwin") {
       const password = (input.readSafeStoragePassword ?? macSafeStoragePassword)();
       if (!password) return null;
-      aesKey = crypto.pbkdf2Sync(password, "saltysalt", 1000, 16, "sha1");
+      // 1003, not a round thousand: Chromium picked it in os_crypt_mac.mm and
+      // Electron's safeStorage writes through that same code, so three fewer
+      // rounds derive a different key and every real payload fails to decrypt.
+      aesKey = crypto.pbkdf2Sync(password, "saltysalt", MAC_KEY_ROUNDS, 16, "sha1");
     } else {
       const state = JSON.parse(readFile(statePath)) as { os_crypt?: { encrypted_key?: string } };
       const blob = state.os_crypt?.encrypted_key;

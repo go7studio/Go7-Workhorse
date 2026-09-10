@@ -650,8 +650,7 @@ test("an expired or unusable credential is not a login", () => {
     true,
   );
 
-  // Claude Desktop logged in, but its token is DPAPI-encrypted. Off Windows we
-  // cannot read it, so it is not a login this desk can use.
+  // An incomplete Desktop store is no usable login on either platform.
   const macConfig = path.join(home, "Library", "Application Support", "Claude", "config.json");
   assert.equal(
     hasClaudeLoginArtifact(

@@ -8,12 +8,11 @@ import {
   type GrokMcpServer,
   type GrokSessionMeta,
 } from "./grok-launch";
-import { readClaudeDesktopOauth } from "./claude-desktop-auth";
-import { claudeTokenProblem, storedClaudeToken } from "./claude-stored-token";
 import {
   CLAUDE_ACP_NOT_INSTALLED,
   CLAUDE_CLI_NOT_INSTALLED,
-  hasClaudeCliLoginArtifact,
+  selectClaudeCredential,
+  type ClaudeCredential,
   isElectronAcpCommand,
   resolveClaudeAcpLaunch,
   resolveClaudeCliBinary,
@@ -59,6 +58,7 @@ export type ClaudeSessionMeta = GrokSessionMeta & {
 export type ClaudeLaunchSpec = Omit<GrokLaunchSpec, "sessionParams"> & {
   env?: Record<string, string>;
   permissionMode: ClaudePermissionMode;
+  credential: Pick<ClaudeCredential, "source" | "fingerprint">;
   // The builder puts a ClaudeSessionMeta here; say so, or callers only see Grok's.
   sessionParams: Omit<GrokLaunchSpec["sessionParams"], "_meta"> & { _meta?: ClaudeSessionMeta };
 };
@@ -183,22 +183,8 @@ export function buildClaudeLaunchSpec(input: ClaudeLaunchInput): ClaudeLaunchSpe
    * names are carried across on this spec too, because the desk now drops them
    * on the way to a child rather than letting four vendors share them.
    */
-  const outer = input.detect?.env ?? process.env;
-  const stored = (input.storedToken ?? storedClaudeToken)();
-  const ownOauth = outer.CLAUDE_CODE_OAUTH_TOKEN?.trim();
-  const ownKey = outer.ANTHROPIC_API_KEY?.trim();
-  const problem = input.detect?.tokenProblem === undefined ? claudeTokenProblem(stored) : input.detect.tokenProblem;
-  if (stored && !problem) env.CLAUDE_CODE_OAUTH_TOKEN = stored;
-  // Leave credentials off the child env when the CLI has its own login.
-  // An exported or Desktop token would take precedence over that store too.
-  else if (!hasClaudeCliLoginArtifact(input.detect)) {
-    if (ownOauth) env.CLAUDE_CODE_OAUTH_TOKEN = ownOauth;
-    else if (ownKey) env.ANTHROPIC_API_KEY = ownKey;
-    else {
-      const desktop = readClaudeDesktopOauth(input.detect);
-      if (desktop?.accessToken) env.CLAUDE_CODE_OAUTH_TOKEN = desktop.accessToken;
-    }
-  }
+  const selected = selectClaudeCredential(input.storedToken ? { ...input.detect, storedToken: input.storedToken } : input.detect);
+  Object.assign(env, selected.env);
   if (isElectronAcpCommand(command)) env.ELECTRON_RUN_AS_NODE = "1";
 
   return {
@@ -214,6 +200,7 @@ export function buildClaudeLaunchSpec(input: ClaudeLaunchInput): ClaudeLaunchSpe
     alwaysApprove,
     sandbox,
     permissionMode,
+    credential: { source: selected.source, fingerprint: selected.fingerprint },
     env,
     initializeParams: {
       protocolVersion: 1,

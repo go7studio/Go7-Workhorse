@@ -296,7 +296,7 @@ export function Settings() {
                     <span>{name}</span>
                     <em>{llmCardHint(id, link)}</em>
                   </button>
-                  {id === "claude" && (link.needsAuth || link.authProblem) ? (
+                  {id === "claude" && link.needsAuth ? (
                     <button
                       type="button"
                       className="tiny"

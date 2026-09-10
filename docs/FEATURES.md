@@ -26,6 +26,8 @@ When you add a feature, add it here in the same commit.
 
 ## Bots and logins
 
+When the desk token, Claude CLI login, and outer environment are unusable, Claude can fall back to a readable Claude Desktop login on macOS and Windows.
+
 | Bot | How it connects | Notes |
 | --- | --- | --- |
 | Grok | ACP over stdio | Runs the local Grok Build CLI |

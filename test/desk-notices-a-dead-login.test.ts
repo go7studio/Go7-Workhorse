@@ -164,3 +164,17 @@ test("the usage beat marks its token suspect without refusing a launch", async (
     setClaudeRefusalStore(null);
   }
 });
+
+test("source-less usage refusals migrate without forgiving old launch refusals", () => {
+  try {
+    for (const reason of ["Anthropic refused the desk's login (401).", "Anthropic refused the desk's login (403).", "Anthropic refused the desk's usage token (401).", "OAuth session expired"]) {
+      const raw = JSON.stringify({ fingerprint: claudeTokenFingerprint(TOKEN), reason, at: "2026-09-09" });
+      setClaudeRefusalStore({ read: () => raw, write: () => undefined });
+      const usage = reason.includes("Anthropic");
+      assert.equal(claudeTokenProblem(TOKEN), usage ? null : reason);
+      assert.equal(claudeMeterTokenProblem(TOKEN), usage ? reason : null);
+    }
+  } finally {
+    setClaudeRefusalStore(null);
+  }
+});

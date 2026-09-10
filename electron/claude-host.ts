@@ -14,10 +14,12 @@ import {
   type GrokSessionOpenInput,
 } from "./grok-host";
 import { CLAUDE_ACP_NOT_INSTALLED } from "./claude-login";
-import { buildClaudeLaunchSpec, claudeSpawnArgs } from "./claude-launch";
+import { buildClaudeLaunchSpec, claudeSpawnArgs, type ClaudeLaunchSpec } from "./claude-launch";
 import { composeVendorPrompt } from "../src/lib/context-preface";
 import { advertisedModelIds } from "../src/lib/advertised-models";
 import { titleFromRecord } from "./grok-title";
+import { claudeAuthFailure } from "../src/lib/claude-auth-failure";
+import { clearClaudeCredentialRejection, markClaudeCredentialRejected } from "./claude-stored-token";
 import type { PermissionAnswer } from "../src/lib/permissions";
 
 export type ClaudePromptInput = GrokPromptInput;
@@ -26,8 +28,7 @@ type ClaudeSpawnFn = (spec: ReturnType<typeof buildClaudeLaunchSpec>) => ChildPr
 
 export function claudeLaunchKey(
   input: Pick<GrokSessionOpenInput, "model" | "effort" | "fastMode" | "agentName" | "mode" | "cwd" | "sandbox" | "mcpServers">,
-): string {
-  const spec = buildClaudeLaunchSpec({
+  spec: ClaudeLaunchSpec = buildClaudeLaunchSpec({
     model: input.model,
     effort: input.effort,
     fastMode: input.fastMode,
@@ -36,8 +37,9 @@ export function claudeLaunchKey(
     mode: input.mode,
     sandbox: input.sandbox,
     mcpServers: input.mcpServers,
-  });
-  return `${spec.command}\0${spec.argv.join("\0")}\0${spec.cwd}\0${JSON.stringify(spec.sessionParams.mcpServers)}\0${spec.model}\0${spec.env?.ANTHROPIC_MODEL ?? ""}\0${spec.effort}\0${spec.sandbox}\0${input.mode}\0${spec.permissionMode}`;
+  }),
+): string {
+  return `${spec.command}\0${spec.argv.join("\0")}\0${spec.cwd}\0${JSON.stringify(spec.sessionParams.mcpServers)}\0${spec.model}\0${spec.env?.ANTHROPIC_MODEL ?? ""}\0${spec.effort}\0${spec.sandbox}\0${input.mode}\0${spec.permissionMode}\0${spec.credential.source}\0${spec.credential.fingerprint}`;
 }
 
 function isBareWindowsCmd(command: string): boolean {
@@ -85,7 +87,10 @@ export class ClaudeSessionHost {
   }
   private tails = new Map<string, Promise<unknown>>();
 
-  constructor(private readonly spawn: ClaudeSpawnFn = spawnClaudeProcess) {}
+  constructor(
+    private readonly spawn: ClaudeSpawnFn = spawnClaudeProcess,
+    private readonly build: typeof buildClaudeLaunchSpec = buildClaudeLaunchSpec,
+  ) {}
 
   async prompt(input: ClaudePromptInput, emit: ClaudeEventSink): Promise<GrokPromptResult> {
     const previous = this.tails.get(input.sessionId) ?? Promise.resolve();
@@ -104,28 +109,57 @@ export class ClaudeSessionHost {
   }
 
   private async promptUnlocked(input: ClaudePromptInput, emit: ClaudeEventSink): Promise<GrokPromptResult> {
-    await this.ensureAgent(input, emit);
-    const slot = this.slots.get(input.sessionId);
-    if (!slot) throw new Error("Claude agent is not running");
-    const text = composeVendorPrompt(input.text, input.preface, slot.agent.opened, {
-      mode: input.mode,
-      sandbox: input.sandbox,
-      role: input.role ?? (input.parentId || input.hidden ? "worker" : "orchestrator"),
-      crewMode: input.crewModes,
-      spawnNames: input.spawnNames,
-    }, input.visibleText);
-
-    try {
-      const result = await slot.agent.prompt(text, this.handlersFor(input, emit), input.images ?? []);
-      emit({ type: "done", sessionId: input.sessionId, stopReason: result.stopReason });
-      return result;
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      emit({ type: "error", sessionId: input.sessionId, message });
-      throw error;
-    } finally {
-      if (isWorkerRuntime(input)) this.dispose(input.sessionId);
+    let previousRefusal: { fingerprint: string; error: unknown } | undefined;
+    // Retry once, and only before output or actions could have reached the user.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const spec = this.build({
+        ...input,
+        unlistedModel: input.unlistedModel,
+        role: input.role ?? deskRoleOf({ parentId: input.parentId, hidden: input.hidden }),
+      });
+      if (previousRefusal && (spec.credential.source === "none" || spec.credential.fingerprint === previousRefusal.fingerprint)) {
+        const error = previousRefusal.error;
+        emit({ type: "error", sessionId: input.sessionId, message: error instanceof Error ? error.message : String(error) });
+        throw error;
+      }
+      let activity = false;
+      const forward: ClaudeEventSink = (event) => {
+        if (["chunk", "thought", "tool", "permission", "usage", "background-task"].includes(event.type)) activity = true;
+        emit(event);
+      };
+      try {
+        await this.ensureAgent(input, forward, spec);
+        const slot = this.slots.get(input.sessionId);
+        if (!slot) throw new Error("Claude agent is not running");
+        const text = composeVendorPrompt(input.text, input.preface, slot.agent.opened, {
+          mode: input.mode,
+          sandbox: input.sandbox,
+          role: input.role ?? (input.parentId || input.hidden ? "worker" : "orchestrator"),
+          crewMode: input.crewModes,
+          spawnNames: input.spawnNames,
+        }, input.visibleText);
+        const result = await slot.agent.prompt(text, this.handlersFor(input, forward), input.images ?? []);
+        if (result.stopReason !== "cancelled") clearClaudeCredentialRejection(spec.credential.fingerprint);
+        emit({ type: "done", sessionId: input.sessionId, stopReason: result.stopReason });
+        return result;
+      } catch (error) {
+        const problem = claudeAuthFailure(error);
+        if (problem) {
+          markClaudeCredentialRejected(problem, spec.credential.fingerprint);
+          this.dispose(input.sessionId);
+          if (attempt === 0 && !activity && spec.credential.source !== "none") {
+            previousRefusal = { fingerprint: spec.credential.fingerprint, error };
+            continue;
+          }
+        }
+        const message = error instanceof Error ? error.message : String(error);
+        emit({ type: "error", sessionId: input.sessionId, message });
+        throw error;
+      } finally {
+        if (isWorkerRuntime(input)) this.dispose(input.sessionId);
+      }
     }
+    throw new Error("Claude credential retry exhausted");
   }
 
   private handlersFor(
@@ -171,8 +205,8 @@ export class ClaudeSessionHost {
     };
   }
 
-  private async ensureAgent(input: GrokSessionOpenInput, emit: ClaudeEventSink): Promise<void> {
-    const key = claudeLaunchKey(input);
+  private async ensureAgent(input: GrokSessionOpenInput, emit: ClaudeEventSink, spec: ClaudeLaunchSpec): Promise<void> {
+    const key = claudeLaunchKey(input, spec);
     let slot = this.slots.get(input.sessionId);
     if (slot && !slot.agent.canReuse) {
       slot.agent.dispose();
@@ -187,17 +221,6 @@ export class ClaudeSessionHost {
     });
     if (action === "reuse" && slot) return;
     slot?.agent.dispose();
-    const spec = buildClaudeLaunchSpec({
-      sessionId: input.sessionId,
-      role: input.role ?? deskRoleOf({ parentId: input.parentId, hidden: input.hidden }),
-      model: input.model,
-      effort: input.effort,
-      cwd: input.cwd,
-      mode: input.mode,
-      sandbox: input.sandbox,
-      mcpServers: input.mcpServers,
-      unlistedModel: input.unlistedModel,
-    });
     const agent = new GrokAgent(spec, (launchSpec) => this.spawn(launchSpec as typeof spec));
     try {
       const started = await agent.start({
@@ -216,8 +239,6 @@ export class ClaudeSessionHost {
       if (models.length > 0) emit({ type: "vendor-models", sessionId: input.sessionId, provider: "claude", models });
     } catch (error) {
       agent.dispose();
-      const message = error instanceof Error ? error.message : String(error);
-      emit({ type: "error", sessionId: input.sessionId, message });
       throw error;
     }
     this.slots.set(input.sessionId, { key, agent });

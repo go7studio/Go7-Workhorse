@@ -21,6 +21,7 @@ export type ClaudeDesktopAuthInput = {
   listDir?: (dirPath: string) => string[];
   readFile?: (filePath: string) => string;
   unprotect?: (blob: Buffer) => Buffer;
+  readSafeStoragePassword?: () => string | null;
 };
 
 function listNames(dirPath: string, listDir?: (dirPath: string) => string[]): string[] {
@@ -68,21 +69,6 @@ export function findClaudeDesktopRoot(
   return null;
 }
 
-/** True when desktop config holds an oauth cache. Does not decrypt — scan only. */
-export function claudeDesktopConfigLooksLoggedIn(
-  root: string,
-  readFile: (filePath: string) => string,
-): boolean {
-  try {
-    const config = JSON.parse(readFile(path.join(root, "config.json"))) as Record<string, unknown>;
-    const v2 = typeof config["oauth:tokenCacheV2"] === "string" ? config["oauth:tokenCacheV2"] : "";
-    const v1 = typeof config["oauth:tokenCache"] === "string" ? config["oauth:tokenCache"] : "";
-    return Boolean(v2 || v1);
-  } catch {
-    return false;
-  }
-}
-
 function dpapiUnprotect(blob: Buffer): Buffer {
   const script = `
 Add-Type -AssemblyName System.Security
@@ -99,10 +85,14 @@ $dec = [System.Security.Cryptography.ProtectedData]::Unprotect($enc, $null, 'Cur
   return Buffer.from(out, "base64");
 }
 
-export function decryptElectronV10(payload: string, aesKey: Buffer): string {
+export function decryptElectronV10(payload: string, aesKey: Buffer, platform: NodeJS.Platform = "win32"): string {
   const data = Buffer.from(payload, "base64");
   if (data.subarray(0, 3).toString() !== "v10") {
     throw new Error("not an Electron v10 payload");
+  }
+  if (platform === "darwin") {
+    const decipher = crypto.createDecipheriv("aes-128-cbc", aesKey, Buffer.alloc(16, " "));
+    return Buffer.concat([decipher.update(data.subarray(3)), decipher.final()]).toString("utf8");
   }
   const nonce = data.subarray(3, 15);
   const rest = data.subarray(15);
@@ -148,40 +138,56 @@ export function pickClaudeCodeOauth(cache: unknown): ClaudeDesktopOauth | null {
   return null;
 }
 
+/** Bounded and private: denial, a locked keychain or a prompt timeout is no fallback. */
+function macSafeStoragePassword(): string | null {
+  try {
+    return execFileSync("security", ["find-generic-password", "-s", "Claude Safe Storage", "-w"], {
+      encoding: "utf8", stdio: ["ignore", "pipe", "ignore"],
+      timeout: 1500, killSignal: "SIGKILL", env: deskHelperEnv(),
+    }).replace(/\r?\n$/, "") || null;
+  } catch {
+    return null;
+  }
+}
+
 let cachedOauth: { at: number; value: ClaudeDesktopOauth | null } | null = null;
 
 export function readClaudeDesktopOauth(input: ClaudeDesktopAuthInput = {}): ClaudeDesktopOauth | null {
   const platform = input.platform ?? process.platform;
-  if (platform !== "win32") return null;
-  if (!input.readFile && !input.unprotect && cachedOauth && Date.now() - cachedOauth.at < 60_000) {
-    return cachedOauth.value;
-  }
+  if (platform !== "win32" && platform !== "darwin") return null;
+  const cacheable = Object.keys(input).length === 0;
+  if (cacheable && cachedOauth && Date.now() - cachedOauth.at < 60_000) return cachedOauth.value;
   const existsSync = input.existsSync ?? ((filePath: string) => fs.existsSync(filePath));
   const readFile = input.readFile ?? ((filePath: string) => fs.readFileSync(filePath, "utf8"));
-  const root = findClaudeDesktopRoot(input);
-  if (!root) return null;
-  const statePath = path.join(root, "Local State");
-  const configPath = path.join(root, "config.json");
-  if (!existsSync(statePath) || !existsSync(configPath)) return null;
   try {
-    const state = JSON.parse(readFile(statePath)) as { os_crypt?: { encrypted_key?: string } };
+    const root = findClaudeDesktopRoot(input);
+    if (!root) return null;
+    const statePath = path.join(root, "Local State");
+    const configPath = path.join(root, "config.json");
+    if (!existsSync(statePath) || !existsSync(configPath)) return null;
     const config = JSON.parse(readFile(configPath)) as Record<string, unknown>;
-    const encryptedKey = state.os_crypt?.encrypted_key;
-    const blob = typeof encryptedKey === "string" ? encryptedKey : "";
     const v2 = typeof config["oauth:tokenCacheV2"] === "string" ? config["oauth:tokenCacheV2"] : "";
     const v1 = typeof config["oauth:tokenCache"] === "string" ? config["oauth:tokenCache"] : "";
     const payload = v2 || v1;
-    if (!blob || !payload) return null;
-    let keyBuf = Buffer.from(blob, "base64");
-    if (keyBuf.subarray(0, 5).toString() === "DPAPI") keyBuf = keyBuf.subarray(5);
-    const unprotect = input.unprotect ?? dpapiUnprotect;
-    const aesKey = unprotect(keyBuf);
-    const cache = JSON.parse(decryptElectronV10(payload, aesKey));
-    const value = pickClaudeCodeOauth(cache);
-    if (!input.readFile && !input.unprotect) cachedOauth = { at: Date.now(), value };
+    if (!payload) return null;
+    let aesKey: Buffer;
+    if (platform === "darwin") {
+      const password = (input.readSafeStoragePassword ?? macSafeStoragePassword)();
+      if (!password) return null;
+      aesKey = crypto.pbkdf2Sync(password, "saltysalt", 1000, 16, "sha1");
+    } else {
+      const state = JSON.parse(readFile(statePath)) as { os_crypt?: { encrypted_key?: string } };
+      const blob = state.os_crypt?.encrypted_key;
+      if (!blob) return null;
+      let keyBuf = Buffer.from(blob, "base64");
+      if (keyBuf.subarray(0, 5).toString() === "DPAPI") keyBuf = keyBuf.subarray(5);
+      aesKey = (input.unprotect ?? dpapiUnprotect)(keyBuf);
+    }
+    const value = pickClaudeCodeOauth(JSON.parse(decryptElectronV10(payload, aesKey, platform)));
+    if (cacheable) cachedOauth = { at: Date.now(), value };
     return value;
   } catch {
-    if (!input.readFile && !input.unprotect) cachedOauth = { at: Date.now(), value: null };
+    if (cacheable) cachedOauth = { at: Date.now(), value: null };
     return null;
   }
 }

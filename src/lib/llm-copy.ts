@@ -6,8 +6,7 @@ const VENDOR_NAMES: Record<Exclude<ProviderId, "custom">, string> = { grok: "Gro
 /** The short word under a vendor's name on its Settings card. */
 export function llmCardHint(id: Exclude<ProviderId, "custom">, link: LlmLink): string {
   if (!vendorEnabled(link)) return "Disabled";
-  // Keep the desk token problem visible even when Claude can use a CLI login.
-  if (link.authProblem && (id === "claude" || link.needsAuth)) return "Sign in again";
+  if (link.authProblem && link.needsAuth) return "Sign in again";
   // Installed but signed out is a different problem from missing, and the
   // only one the person can fix from here.
   if (link.needsAuth && !link.connected) return "Needs auth";
@@ -26,8 +25,12 @@ export function llmDetailCopy(id: Exclude<ProviderId, "custom">, link: LlmLink):
   // line says that instead of promising a launch that will throw.
   // No usable login outranks a missing binary: it is the one thing the person
   // fixes from this card, and the vendor's own reason says why.
+  if (id === "claude" && link.authProblem && !link.needsAuth) {
+    return "Claude can use another login. A previous login was refused. Sign in to replace the desk token.";
+  }
   if (link.authProblem && (id === "claude" || link.needsAuth)) {
-    return `${VENDOR_NAMES[id]} refused the desk's login: ${link.authProblem}. ${id === "claude" ? "Log in with Claude mints a new one." : "Sign in again, then Recheck."}`;
+    if (id === "claude") return `Claude has no usable login: ${link.authProblem}. Sign in, then Recheck.`;
+    return `${VENDOR_NAMES[id]} refused the desk's login: ${link.authProblem}. Sign in again, then Recheck.`;
   }
   if (link.needsAuth) {
     if (id === "claude") return "Not signed in. Log in with Claude mints a token for this desk.";

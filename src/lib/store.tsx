@@ -263,6 +263,7 @@ import {
   maxRootWorkers,
   nextCampaignPhase,
   nextMissionIteration,
+  missionCapError,
   rootSpawnError,
   resolveSpawnSpec,
   missionForDeskSpawn,
@@ -303,6 +304,7 @@ import {
   applyVendorTurnIdle,
   brainStamp,
   formatChatSidebar,
+  normalizeMissionCaps,
   normalizeSession,
   parsePermissionMode,
   parseSandbox,
@@ -413,6 +415,7 @@ import type {
   Session,
   SessionEnvironment,
   SessionSecurityPolicy,
+  MissionCaps,
   MissionIteration,
   DeskExportKind,
   DeskExportResult,
@@ -468,6 +471,7 @@ export type Store = AppState & {
   setSessionModel: (provider: ProviderId, model: string, customBotId?: string) => void;
   setSessionRoutingMode: (mode: "auto" | "manual") => void;
   setCrewMode: (modes: CrewMode[] | undefined) => void;
+  setMissionCaps: (caps: MissionCaps | undefined) => void;
   setSpawnAllowlist: (ids: string[] | undefined) => void;
   /** Pick an interrupted worker back up. Returns why not, when it cannot. */
   resumeAgentRun: (sessionId: string) => { ok: boolean; message: string };
@@ -741,6 +745,24 @@ export function livePassForSpawn(
   return pass?.agentRun?.status === "running" ? pass : undefined;
 }
 
+/**
+ * The ceilings the person set under Mission on this chat. The desk applies
+ * them itself, so a bot cannot drop the person's stop by leaving loop out of
+ * the call. A ceiling the call named wins, because that is the newer answer.
+ */
+export function withDeskMissionCaps(
+  mission: MissionIteration | undefined,
+  caps: MissionCaps | undefined,
+): MissionIteration | undefined {
+  if (!mission) return undefined;
+  if (caps?.maxCostUsd === undefined && caps?.maxTokens === undefined) return mission;
+  return {
+    ...mission,
+    maxCostUsd: mission.maxCostUsd ?? caps.maxCostUsd,
+    maxTokens: mission.maxTokens ?? caps.maxTokens,
+  };
+}
+
 export function campaignSpawnGate(input: {
   campaignContext: boolean;
   requested: MissionIteration | undefined;
@@ -752,6 +774,12 @@ export function campaignSpawnGate(input: {
   return { mission, error, phase };
 }
 
+/**
+ * The mission contract the phase check rests on. maxCostUsd and maxTokens are
+ * left out on purpose: they are the caller's ceiling, not part of that
+ * contract, and a continuation is allowed to raise them. Comparing them would
+ * make a raised cap look like a different mission and knock a build pass back.
+ */
 function sameMissionIteration(left: MissionIteration, right: MissionIteration): boolean {
   return (
     left.id === right.id &&
@@ -1799,6 +1827,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       ...current,
       sessions: current.sessions.map((item) =>
         item.id === current.activeSessionId ? { ...item, crewModes: modes } : item,
+      ),
+    }));
+  }, []);
+
+  const setMissionCaps = useCallback((caps: MissionCaps | undefined) => {
+    const missionCaps = normalizeMissionCaps(caps);
+    setState((current) => ({
+      ...current,
+      sessions: current.sessions.map((item) =>
+        item.id === current.activeSessionId ? { ...item, missionCaps } : item,
       ),
     }));
   }, []);
@@ -5318,7 +5356,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               requested: requestedMission,
               desk: deskMission,
             });
-            const spawnMission = gate.mission;
+            const spawnMission = withDeskMissionCaps(gate.mission, caller.missionCaps);
             if (gate.error) {
               await replyAsk({ error: gate.error });
               return;
@@ -5333,6 +5371,31 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                       ...workerStatusSnapshot(existingPass as Session),
                       spawned: false,
                       note: `Pass ${mission.iteration} of this mission is already running as ${existingPass.id}. Nothing new was spawned.`,
+                    },
+                    null,
+                    2,
+                  ),
+                });
+                return;
+              }
+              // The stop is here, before the pass starts. A worker already
+              // running is left alone above; nothing below ends a live turn.
+              const capped = missionCapError({
+                sessions: latest.sessions,
+                parentId: caller.id,
+                mission,
+                usage: latest.usage,
+              });
+              if (capped) {
+                await replyAsk({
+                  text: JSON.stringify(
+                    {
+                      next: "failed",
+                      spawned: false,
+                      error: capped,
+                      mission: mission.id,
+                      pass: mission.iteration,
+                      how: "The mission met its ceiling. Report the spend. Continue only with a higher cap.",
                     },
                     null,
                     2,
@@ -8749,6 +8812,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       setSessionModel,
       setSessionRoutingMode,
       setCrewMode,
+      setMissionCaps,
       setSpawnAllowlist,
       resumeAgentRun,
       createCustomBot,
@@ -8888,6 +8952,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       setSessionModel,
       setSessionRoutingMode,
       setCrewMode,
+      setMissionCaps,
       setSpawnAllowlist,
       resumeAgentRun,
       createCustomBot,

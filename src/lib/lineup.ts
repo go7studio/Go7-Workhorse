@@ -2,7 +2,7 @@ import { OBJECTIVE_ASK_RULE } from "./ask-default";
 import { enqueuePrompt } from "./chats";
 import { uid } from "./id";
 import { redactText } from "./learning-redact";
-import { boundWorkerReport, crewHasParentTakeover, normalizeMissionIteration, normalizePathAllowlist, normalizeWorkerFindings, parseWorkerFindings, withSubagentStatus, workerNameFromTitle, workerTaskTitle } from "./subagents";
+import { boundWorkerReport, crewHasParentTakeover, missionCapError, normalizeMissionIteration, normalizePathAllowlist, normalizeWorkerFindings, parseWorkerFindings, withSubagentStatus, workerNameFromTitle, workerTaskTitle } from "./subagents";
 import type { AgentRun, ChatMessage, DeskLineup, DeskLineupRow, DeskLineupRowStatus, MissionIteration, Session, UsageEvent, WorkerFinding } from "./types";
 import { formatSpendLine, sessionSpend } from "./usage";
 import { isVendorEmptyReply, isVendorRateLimitError, vendorEmptyReply } from "./vendor-bridge";
@@ -341,7 +341,7 @@ export function markLineupNotified(lineup: DeskLineup, now = Date.now()): DeskLi
 
 export function lineupJoinPrompt(
   lineup: DeskLineup | undefined,
-  options?: { continuePlan?: boolean; parentTookOver?: boolean; usage?: UsageEvent[] },
+  options?: { continuePlan?: boolean; parentTookOver?: boolean; usage?: UsageEvent[]; missionCap?: string },
 ): string {
   const user = lineup?.userText?.trim() || "(unknown)";
   const id = lineup?.id?.trim() || "(none)";
@@ -374,6 +374,16 @@ export function lineupJoinPrompt(
     if (row.findings?.length) lines.push(`findings: ${JSON.stringify(row.findings)}`);
     lines.push("");
   });
+  // The mission met its ceiling. The parent hears why here, in the join it
+  // already gets, so it reports the stop instead of opening another pass.
+  if (options?.missionCap) {
+    lines.push(
+      `This mission stopped between passes: ${options.missionCap}.`,
+      "Do not start another pass. Say what was spent and what the cap was.",
+      "A continuation with a higher cap is the only way on.",
+      "",
+    );
+  }
   if (options?.continuePlan) {
     lines.push(
       "The auditor’s named gate at that worktree commit is what counts. You cannot mark a plan step done.",
@@ -961,11 +971,17 @@ export function maybeEnqueueLineupJoin(
   }
   const broken = applyLineupTurnBreak(sessions, parentId, now);
   const delay = joinDelayMs(parent.lineup);
+  // Read once the wave is terminal, which is the moment before the next pass
+  // would start. Nothing here stops a running worker.
+  const missionCap = parent.lineup.mission
+    ? missionCapError({ sessions, parentId, mission: parent.lineup.mission, usage })
+    : undefined;
   const queued = enqueuePrompt(broken, parentId, {
     text: lineupJoinPrompt(parent.lineup, {
       continuePlan: parent.planRun?.status === "running",
       parentTookOver: crewHasParentTakeover(sessions, parentId),
       ...(usage ? { usage } : {}),
+      ...(missionCap ? { missionCap } : {}),
     }),
     hideUser: true,
     joinAttempt: 1,

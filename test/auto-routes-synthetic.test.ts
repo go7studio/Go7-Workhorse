@@ -25,11 +25,13 @@ import {
   normalizeCustomBot,
   routingProfileEdit,
   ROUTING_ROLE_PRESETS,
+  TEST_ONLY_ROUTING,
   withoutMachineWrittenScores,
   writeBackTripleFor,
 } from "../src/lib/custom-bots";
 import { contextWindowFor } from "../src/lib/models";
 import { normalizeSettings } from "../src/lib/settings";
+import { shouldAutoRouteSpawn } from "../src/lib/subagents";
 import { planAfterRefresh, shouldRefreshPlansForRouting, watchVendorStatuses } from "../src/lib/watch";
 import type { GrokPlanUsage, RoutingSettings, Settings } from "../src/lib/types";
 import type { WatchPlans, WatchVendorStatus } from "../src/lib/watch";
@@ -433,6 +435,44 @@ test("ticking a box in the bot editor saves that box and no rating", () => {
   // And "Family default" takes the numbers back off without losing the rest.
   assert.deepEqual(routingProfileEdit({ intelligence: 4, speed: 4, cost: 3, local: true }, "family"), { local: true });
   assert.equal(routingProfileEdit({ intelligence: 4, speed: 4, cost: 3 }, "family"), undefined);
+  // Test only stores the skip. Switching to a live role drops it.
+  assert.deepEqual(routingProfileEdit(undefined, TEST_ONLY_ROUTING), TEST_ONLY_ROUTING);
+  assert.equal(routingProfileEdit(TEST_ONLY_ROUTING, "family"), undefined);
+  assert.equal(routingProfileEdit(TEST_ONLY_ROUTING, ROUTING_ROLE_PRESETS.quick)?.autoRoute, undefined);
+});
+
+test("Auto does not pick a test-only Spark model; a named call still can", () => {
+  const spark = normalizeCustomBot(
+    syntheticBot({
+      id: "bot_spark",
+      name: "DGX Spark",
+      baseUrl: "https://spark.example.ts.net/v1",
+      model: "qwen3.8-27b",
+      models: ["qwen3.8-27b", "bloom-v40-continue"],
+      routingProfiles: {
+        "qwen3.8-27b": TEST_ONLY_ROUTING,
+        "bloom-v40-continue": TEST_ONLY_ROUTING,
+      },
+    }),
+  )!;
+  assert.equal(spark.routingProfiles?.["bloom-v40-continue"]?.autoRoute, false);
+  const settings = deskWith([spark]);
+  settings.llms.grok = { ...settings.llms.grok, connected: true };
+  const pool = routingCandidatesForDesk(settings);
+  const bloom = pool.find((row) => row.model === "bloom-v40-continue");
+  const qwen = pool.find((row) => row.model === "qwen3.8-27b" && row.customBotId === "bot_spark");
+  assert.equal(bloom?.profile.autoRoute, false);
+  assert.equal(qwen?.profile.autoRoute, false);
+  const worker = chooseRoutingDecision(
+    pool,
+    { prompt: "Implement the login form", role: "worker", now: NOW },
+    settings.routing,
+  );
+  assert.notEqual(worker?.model, "bloom-v40-continue");
+  assert.notEqual(worker?.customBotId, "bot_spark");
+  assert.equal(shouldAutoRouteSpawn({ routingEnabled: true, model: "bloom-v40-continue" }), false);
+  const features = readFileSync(path.join(ROOT, "docs", "FEATURES.md"), "utf8");
+  assert.match(features, /Test only/);
 });
 
 // C — the rating, and the whole path end to end

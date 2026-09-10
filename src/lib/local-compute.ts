@@ -55,6 +55,8 @@ export type LocalComputeHostProbe = {
   runtimeId?: string;
   runtimeVersion?: string;
   capabilities: LocalComputeCapability[];
+  /** Ids from GET /v1/models. Empty when the host publishes none. Never the bearer. */
+  chatModels?: string[];
   errorCode?: string;
   message?: string;
 };

@@ -397,7 +397,7 @@ export function Settings() {
                 +
               </span>
               <span>Add bot</span>
-              <em>Grok Bot, Grok, Codex, Claude, Cursor</em>
+              <em>Grok Bot, DGX Spark, Grok, Codex, Claude, Cursor</em>
             </button>
           </div>
 

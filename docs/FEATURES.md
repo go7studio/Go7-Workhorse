@@ -56,9 +56,13 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
   `hermes/<profile>`. Those tasks join the lineup, with no Usage ring.
 - **Add a bot** lists MiniMax, Synthetic, OpenRouter, Groq, DeepSeek, Together,
   Fireworks, Hugging Face, Novita, Cerebras, AI/ML API, Vercel AI Gateway,
-  Kimi Code, Gemini API, and Grok Bot.
+  Kimi Code, Gemini API, Grok Bot, and DGX Spark.
 - Presets group as subscription plans, gateway credits or BYOK,
   direct API billing, and on this Mac.
+- **DGX Spark** is a local OpenAI-compatible bot on `127.0.0.1:8788`. NVIDIA
+  Sync is SSH: local-forward that port, paste the owner bearer, then Test API
+  collects `/v1/models` so Qwen (and anything else the box is serving) can be
+  ticked. The Spark gateway itself stays loopback-only.
 - One custom connection approves several models. Chats and Auto use that list;
   Usage keeps one ring with separate model rows.
 - Leftover pings only official key-only JSON meters: MiniMax, Synthetic,
@@ -437,8 +441,9 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
 
 ## Skills, MCP servers, Workshop, Local Compute
 
-- **Skills** two ship with the desk: `desk` for chat-to-chat control, `setup`
-  for adding bots and references.
+- **Skills** three ship with the desk: `desk` for chat-to-chat control, `setup`
+  for adding bots and references, `dgx-spark` for connecting one or more NVIDIA
+  DGX Spark boxes (NVIDIA Sync is SSH; collect `/v1/models`; call Qwen).
 - Skills are also listed from Grok, Codex, Claude and Cursor homes, and can be
   pushed back to a vendor.
 - A per-turn skill radar matches task language against installed names and
@@ -493,6 +498,9 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
 - **Local Compute** Settings → LLMs → Local Compute discovers each host's live
   capabilities and grants them separately to Workhorse, connected apps, workers
   and auditors.
+- Recheck also GETs `/v1/models` and lists the ids. That is how the desk
+  collects what a host is delivering as chat models; it is not a vendor slot
+  until you add DGX Spark (or Your own) under Add a bot.
 - MCP, the `workhorse` command and harnesses see only what is healthy and
   granted for their caller role.
 - A local host can discover profiles, accept asynchronous text or image-to-3D
@@ -516,6 +524,9 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
 - When a host goes offline, a known job read reports `Unknown` with its
   timestamped last-observed state, and stale continuations are not offered.
 - Only the token-file reference is stored, never the token itself.
+- Hosts must use HTTPS; plain HTTP is accepted only on loopback. A Spark
+  gateway is `http://127.0.0.1:8788` after NVIDIA Sync (or `ssh -L`) forwards
+  it. LAN HTTP to the box is refused.
 - **The `/` palette** new, project, link, model, effort, compact, plan, sandbox,
   usage, watch, schedule, goal, skills, review, context, rewind, export, memory,
   hooks, plugins, workflows, and more.

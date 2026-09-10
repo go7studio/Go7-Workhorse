@@ -337,6 +337,7 @@ test("Workhorse seeds its bundled skills into the Workhorse home", () => {
   const rows = listDeskSkills([], home);
   assert.ok(rows.some((row) => row.origin === "workhorse" && row.name === "desk"));
   assert.ok(rows.some((row) => row.origin === "workhorse" && row.name === "setup"));
+  assert.ok(rows.some((row) => row.origin === "workhorse" && row.name === "dgx-spark"));
   assert.equal(existsSync(path.join(shipped, "vendor-meter", "SKILL.md")), false);
   assert.match(readFileSync(path.join(home, ".workhorse", "skills", "desk", "SKILL.md"), "utf8"), /workhorse_ask_chat/);
   assert.match(readFileSync(path.join(home, ".workhorse", "skills", "setup", "SKILL.md"), "utf8"), /workhorse_setup_custom_bot/);

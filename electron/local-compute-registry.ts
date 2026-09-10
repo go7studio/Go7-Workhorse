@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import { parseLocalCapabilities } from "../src/lib/local-capability-contract";
+import { parseCustomModels } from "./custom-models";
 import {
   normalizeLocalComputeHost,
   type LocalComputeHostProbe,
@@ -30,6 +31,30 @@ const DEFAULT_DEPENDENCIES: LocalComputeProbeDependencies = {
 
 function endpoint(baseUrl: string): URL {
   return new URL("v1/capabilities", `${baseUrl.replace(/\/$/, "")}/`);
+}
+
+function modelsEndpoint(baseUrl: string): URL {
+  return new URL("v1/models", `${baseUrl.replace(/\/$/, "")}/`);
+}
+
+async function collectChatModels(
+  baseUrl: string,
+  token: string,
+  abort: AbortController,
+  dependencies: LocalComputeProbeDependencies,
+): Promise<string[]> {
+  try {
+    const response = await dependencies.fetchImpl(modelsEndpoint(baseUrl), {
+      method: "GET",
+      headers: { Accept: "application/json", Authorization: `Bearer ${token}` },
+      signal: abort.signal,
+      redirect: "error",
+    });
+    if (!response.ok) return [];
+    return parseCustomModels(await readJson(response)).slice(0, 128);
+  } catch {
+    return [];
+  }
 }
 
 function safeToken(host: LocalComputeHostSettings, dependencies: LocalComputeProbeDependencies): string {
@@ -129,6 +154,7 @@ export async function probeLocalComputeHost(
       );
     }
     const discovered = parseLocalCapabilities(await readJson(response));
+    const chatModels = await collectChatModels(host.baseUrl, token, abort, dependencies);
     return {
       hostId: host.id,
       status: "healthy",
@@ -152,6 +178,7 @@ export async function probeLocalComputeHost(
           })),
         } : {}),
       })),
+      ...(chatModels.length ? { chatModels } : {}),
     };
   } catch (error) {
     const code = error instanceof Error && error.name === "AbortError"

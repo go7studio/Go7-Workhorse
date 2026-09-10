@@ -6606,7 +6606,7 @@ test("transcript groups tools and thoughts above the final reply", () => {
   assert.doesNotMatch(pane, /CHAT_LOOKS/);
   assert.doesNotMatch(pane, /chat-look-/);
   const css = readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8");
-  assert.match(css, /\.turn-who \{[^}]*font-size:\s*15px/);
+  assert.match(css, /\.turn-who \{[^}]*font-size:\s*var\(--text-15\)/);
   assert.match(css, /@keyframes work-open/);
   assert.match(css, /\.work-body \{[^}]*animation:\s*work-open/);
   assert.match(css, /\.work-fold\[open\] > \.work-fold-body/);
@@ -6751,7 +6751,10 @@ test("transcript groups tools and thoughts above the final reply", () => {
   assert.doesNotMatch(foldBlock, /rotate\(-45deg\)/);
   assert.doesNotMatch(pane, /AgentThreadPane/);
   assert.doesNotMatch(pane, /has-thread/);
-  assert.match(readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8"), /\.crew-twist[\s\S]*z-index:\s*2/);
+  assert.match(
+    readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8"),
+    /\.crew-twist[\s\S]*z-index:\s*var\(--z-raised\)/,
+  );
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "ContextMeter.tsx"), "utf8"), /session: sessionProp/);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "UserTurn.tsx"), "utf8"), /readOnly/);
 

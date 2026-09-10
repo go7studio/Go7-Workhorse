@@ -77,7 +77,7 @@
 .horse-status.is-failed .horse-cube {
   background: transparent;
   box-shadow: none;
-  z-index: var(--pile-layer);
+  z-index: calc(var(--z-raised) + var(--pile-layer));
   transform: translate(var(--fall-x), var(--fall-y)) rotate(var(--fall-angle)) scale(.78);
   animation: horse-cube-fall 6200ms var(--fall-delay) linear 1 both;
 }

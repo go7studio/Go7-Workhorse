@@ -17,6 +17,24 @@ export const TRANSCRIPT_SIDECAR_VERSION = 1;
 
 export type TranscriptSidecarRow = { index: number; message: ChatMessage };
 
+/** One sidecar off disk. The main process and the Link helper each pass their own. */
+export type TranscriptSidecarReader = (file: string) => TranscriptSidecar | null;
+
+/**
+ * How many days a finished worker's transcript stays in the desk file.
+ *
+ * It lives here rather than with the store because Settings has to offer it and
+ * the main process has to apply it, and those two are not allowed to import each
+ * other. Nought turns retention off.
+ */
+export const RETENTION_DAYS_DEFAULT = 7;
+
+/** Days before a finished worker's transcript moves to disk. Nought is off; ten years is the ceiling. */
+export function normalizeRetentionDays(raw: unknown): number {
+  if (typeof raw !== "number" || !Number.isFinite(raw) || raw < 0) return RETENTION_DAYS_DEFAULT;
+  return Math.min(Math.round(raw), 3_650);
+}
+
 export type TranscriptSidecar = {
   version: number;
   sessionId: string;
@@ -109,4 +127,37 @@ export function mergeTranscriptRows(inline: ChatMessage[], sidecar: TranscriptSi
   }
   if (merged.some((message) => message === undefined)) return null;
   return [...(merged as ChatMessage[]), ...inline.slice(cursor)];
+}
+
+/**
+ * The rows a reader should work from, whether or not this chat still holds them.
+ *
+ * Retention moves a finished worker's whole transcript to disk, so every reader
+ * that used to reach for `session.messages` and get the conversation now gets an
+ * empty array instead. This is the one line those readers change to: hand it the
+ * chat and a way to read a file, and it gives back what the chat used to hold.
+ *
+ * It fails open in every direction — no pointer, no reader, an unreadable file,
+ * a sidecar for a different chat, a merge that will not line up — and returns
+ * the inline rows. A reader that shows less than it could is a nuisance; a
+ * reader that throws in the middle of a save or an export is an outage.
+ */
+export function sessionMessagesWithSidecar(
+  session: { id?: unknown; messages?: unknown; transcriptSidecar?: unknown },
+  read: TranscriptSidecarReader | undefined,
+): ChatMessage[] {
+  const inline = Array.isArray(session.messages) ? (session.messages as ChatMessage[]) : [];
+  const file = typeof session.transcriptSidecar === "string" ? session.transcriptSidecar.trim() : "";
+  if (!file || !read) return inline;
+  let sidecar: TranscriptSidecar | null = null;
+  try {
+    sidecar = read(file);
+  } catch {
+    return inline;
+  }
+  if (!sidecar) return inline;
+  // A sidecar naming another chat is a crossed pointer, not a transcript. Better
+  // to show the prose this chat still holds than another worker's reasoning.
+  if (typeof session.id === "string" && session.id && sidecar.sessionId !== session.id) return inline;
+  return mergeTranscriptRows(inline, sidecar) ?? inline;
 }

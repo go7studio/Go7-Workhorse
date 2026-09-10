@@ -628,6 +628,16 @@ export type Session = {
    */
   transcriptSidecar?: string;
   transcriptOffloaded?: number;
+  /**
+   * The bounded last report of a worker whose whole transcript has been retired
+   * to its sidecar. It is a copy, not the original — the full text is row-for-row
+   * on disk and comes back when the chat is opened or read.
+   *
+   * It exists so the cheap readers stay cheap. A worker board, a chat list, a
+   * status answer to a harness: none of those may turn into eight hundred file
+   * reads because the transcripts moved.
+   */
+  retainedReport?: string;
   /** Workhorse-owned lifecycle and review record for hidden cross-provider children. */
   agentRun?: AgentRun;
   /** Active worker crew for this orchestrator chat. */
@@ -968,6 +978,8 @@ export type Settings = {
   agentSystems?: AgentSystemsSettings;
   localCompute: LocalComputeSettings;
   workshop: import("./workshop-pack").WorkshopSettings;
+  /** Days a finished worker's transcript stays in the desk file. Nought keeps every row in it. */
+  retentionDays: number;
 };
 
 export type UsageRange = "today" | "week" | "month" | "all";

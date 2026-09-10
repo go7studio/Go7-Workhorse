@@ -12,6 +12,8 @@ import {
   workhorseSkillsHome,
 } from "../src/lib/skills-catalog";
 import { chatExportFiles, defaultExportRoot, sessionToMarkdown, slugTitle, vendorExportDirName } from "../src/lib/desk-export";
+import { sessionMessagesWithSidecar } from "../src/lib/transcript-sidecar";
+import { readTranscriptSidecar } from "./transcript-store";
 import { DEFAULT_SETTINGS } from "../src/lib/settings";
 import type {
   DeskExportKind,
@@ -136,7 +138,12 @@ export function exportVendorBundle(input: {
     }
   }
   if (input.kind === "chats") {
-    const files = chatExportFiles(provider, input.sessions ?? [], input.projects ?? [], input.customBotId);
+    const files = chatExportFiles(
+      provider,
+      (input.sessions ?? []).map(withStoredTranscript),
+      input.projects ?? [],
+      input.customBotId,
+    );
     for (const file of files) {
       const full = path.join(bundle, file.relPath);
       fs.mkdirSync(path.dirname(full), { recursive: true });
@@ -155,8 +162,23 @@ export function exportChatToFolder(input: {
   const destRoot = resolveExportRoot(input.dest);
   if (!destRoot) return { ok: false, message: "Could not create the export folder." };
   const file = path.join(destRoot, `${slugTitle(input.session.title, input.session.id.slice(-8))}.md`);
-  fs.writeFileSync(file, sessionToMarkdown(input.session, input.projectName), "utf8");
+  fs.writeFileSync(file, sessionToMarkdown(withStoredTranscript(input.session), input.projectName), "utf8");
   return { ok: true, dest: file, chats: 1 };
+}
+
+/**
+ * A chat with its retired rows put back, for the one reader that must have all
+ * of them.
+ *
+ * Export is what a person reaches for when they want the conversation out of
+ * the desk and into their own hands, so it is the last place that may hand back
+ * a file with the middle missing. It costs a file read per retired chat, which
+ * is affordable exactly once — nothing else in the desk does this per chat.
+ */
+function withStoredTranscript(session: Session): Session {
+  if (!session.transcriptSidecar) return session;
+  const messages = sessionMessagesWithSidecar(session, readTranscriptSidecar);
+  return messages === session.messages ? session : { ...session, messages };
 }
 
 export function importSkillFromPath(from: string, homedir = os.homedir()): DeskExportResult {

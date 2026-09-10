@@ -918,23 +918,25 @@ export function workerLastActivityAt(worker: Pick<Session, "agentRun" | "message
 }
 
 export function workerProgressCheckpoint(
-  worker: Pick<Session, "id" | "status" | "agentRun" | "messages">,
+  worker: Pick<Session, "id" | "status" | "agentRun" | "messages"> & Pick<Partial<Session>, "retainedReport">,
 ): WorkerProgressCheckpoint {
   const messages = worker.messages ?? [];
   const status = worker.agentRun?.status ?? worker.status;
   const lastTool = [...messages].reverse().find((message) => message.kind === "tool" && message.text.trim());
-  const lastNote = lastAssistantReport(messages);
+  // Same fallback as the status snapshot, so "this worker's last report" means
+  // one thing whether the rows are still in the chat or already on disk.
+  const note = lastAssistantReport(messages)?.text.trim() || worker.retainedReport?.trim() || "";
   const currentStep = lastTool?.text.trim().split("\n")[0]?.trim()
-    || lastNote?.text.trim().split("\n")[0]?.trim()
+    || note.split("\n")[0]?.trim()
     || (status === "running" ? "no vendor output" : status);
-  const bounded = lastNote ? boundWorkerReport(lastNote.text.trim(), { workerId: worker.id }) : null;
+  const bounded = note ? boundWorkerReport(note, { workerId: worker.id }) : null;
   return {
     phase: status,
     currentStep,
     lastActivityAt: workerLastActivityAt(worker),
     changedFiles: worker.agentRun?.changedFiles ?? [],
     checksRun: extractChecks(messages),
-    blockers: extractBlockers(lastNote?.text),
+    blockers: extractBlockers(note),
     partialReport: bounded?.report ?? null,
   };
 }
@@ -1214,12 +1216,18 @@ export function resolveAgentStatus(input: AgentStatusLookup): AgentStatusResult 
  * second ledger of its own.
  */
 export function workerStatusSnapshot(
-  worker: Pick<Session, "id" | "title" | "workerName" | "parentId" | "status" | "provider" | "model" | "effort" | "agentRun" | "routingMode" | "routingDecision" | "messages">,
+  worker: Pick<Session, "id" | "title" | "workerName" | "parentId" | "status" | "provider" | "model" | "effort" | "agentRun" | "routingMode" | "routingDecision" | "messages"> &
+    Pick<Partial<Session>, "retainedReport">,
   opts?: { usage?: UsageEvent[] },
 ): Record<string, unknown> {
   const spend = sessionSpend(opts?.usage, worker.id);
   const last = lastAssistantReport(worker.messages);
-  const raw = last?.text.trim();
+  // A retired worker keeps a shortened copy of its last report and nothing
+  // else. Reaching for the sidecar here would turn one harness question about
+  // one worker into a file read, and a list of them into hundreds; the copy is
+  // in the desk file precisely so this stays free. The full text comes back
+  // through `workhorse_read_chat`, which the truncation note names.
+  const raw = last?.text.trim() || worker.retainedReport?.trim();
   const bounded = raw ? boundWorkerReport(raw, { workerId: worker.id }) : null;
   const status = worker.agentRun?.status ?? worker.status;
   const checkpoint = workerProgressCheckpoint(worker);

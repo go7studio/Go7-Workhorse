@@ -4015,7 +4015,7 @@ export function linkCliCall(argv: string[]): { name: string; args: Record<string
  * instead of a list. The cut was never a cap the desk chose. The write callback
  * fires once the bytes are handed over, so exiting from there sends all of them.
  */
-async function writeCliLine(text: string): Promise<void> {
+export async function writeCliLine(text: string): Promise<void> {
   const line = text.endsWith("\n") ? text : `${text}\n`;
   await new Promise<void>((resolve) => {
     process.stdout.write(line, () => resolve());

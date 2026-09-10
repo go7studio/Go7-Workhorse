@@ -149,7 +149,7 @@ export type LinkCliPage = { limit?: number; cursor?: number };
  * harness that reads `[0]` still does. With one, the rows come wrapped with the
  * cursor to ask for next — `null` when this page is the last.
  */
-export function linkCliPageRows(rows: unknown[], page: LinkCliPage): {
+export function linkCliPageRows(rows: unknown[], page: LinkCliPage, maxBytes = LINK_CLI_MAX_BYTES): {
   rows: unknown[];
   cursor: number;
   nextCursor: number | null;
@@ -157,7 +157,21 @@ export function linkCliPageRows(rows: unknown[], page: LinkCliPage): {
 } {
   const cursor = Number.isFinite(page.cursor) && page.cursor! > 0 ? Math.floor(page.cursor!) : 0;
   const limit = Number.isFinite(page.limit) && page.limit! > 0 ? Math.floor(page.limit!) : rows.length;
-  const window = rows.slice(cursor, cursor + limit);
+  const asked = rows.slice(cursor, cursor + limit);
+  // A page the caller asked for can still be over the cap: 100 rows of a desk
+  // whose workers are named after a long brief is a quarter of a megabyte. Fit
+  // what the budget takes and point the cursor at the first row left out, so
+  // paging always moves forward instead of failing on every limit the caller
+  // tries. Row sizes are measured once, not by rebuilding the page each time.
+  const overhead = JSON.stringify({ chats: [], cursor, nextCursor: rows.length, chatCount: rows.length }).length;
+  const window: unknown[] = [];
+  let used = overhead;
+  for (const row of asked) {
+    const size = Buffer.byteLength(JSON.stringify(row) ?? "null", "utf8") + 1;
+    if (window.length > 0 && used + size > maxBytes) break;
+    used += size;
+    window.push(row);
+  }
   const end = cursor + window.length;
   return { rows: window, cursor, nextCursor: end < rows.length ? end : null, rowCount: rows.length };
 }
@@ -181,7 +195,7 @@ export function linkCliOutput(
     try {
       const parsed = JSON.parse(text) as unknown;
       if (Array.isArray(parsed)) {
-        const window = linkCliPageRows(parsed, page);
+        const window = linkCliPageRows(parsed, page, maxBytes);
         body = JSON.stringify({
           chats: window.rows,
           cursor: window.cursor,

@@ -239,7 +239,7 @@ import {
   setLineupRowStatus,
   stampLineupUserText,
 } from "./lineup";
-import { boundLinkReply } from "./link-reply";
+import { boundLinkReply, linkLabel } from "./link-reply";
 import { applyPlanAuditorSpawn, joinAndAdmit } from "./plan-admission";
 import {
   applyCancelWorker,
@@ -6256,7 +6256,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 text: JSON.stringify(
                   {
                     started: true,
-                    title: spec.title,
+                    // A label, not the brief. A mission names its workers after
+                    // its objective, so this field carried the whole task text
+                    // back to the caller that had just sent it.
+                    title: linkLabel(spec.title),
                     childSessionId: childId,
                     folder: admitted.cwd,
                     lineup: startedBoard.lineup,
@@ -6300,7 +6303,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                   completed: true,
                   childSessionId: childId,
                   worker: finished?.workerName ?? workerName,
-                  title: finished?.title ?? spec.title,
+                  title: linkLabel(finished?.title ?? spec.title),
                   provider: finished?.provider ?? spec.provider,
                   model: finished?.model ?? spec.model,
                   effort: finished?.effort ?? null,

@@ -1433,7 +1433,12 @@ test("a worker's CLI is launched with worker rules, an orchestrator's with the b
   const { AUDITOR_SESSION_RULES } = await import("../src/lib/workhorse-rules");
   assert.equal(sessionRulesFor("auditor"), AUDITOR_SESSION_RULES);
   assert.equal(rulesOf(buildGrokLaunchSpec({ ...base, role: "auditor" })), AUDITOR_SESSION_RULES);
-  assert.ok(WORKER_SESSION_RULES.length * 10 < WORKHORSE_SESSION_RULES.length, "the worker rules are an order of magnitude smaller");
+  // An orchestrator's full load is its core plus the spawn law it gets on a
+  // spawn-shaped turn. A worker carries neither, and stays an order of
+  // magnitude smaller than the pair.
+  const { DESK_SPAWN_LAW } = await import("../src/lib/workhorse-rules");
+  const orchestratorLoad = WORKHORSE_SESSION_RULES.length + DESK_SPAWN_LAW.length;
+  assert.ok(WORKER_SESSION_RULES.length * 10 < orchestratorLoad, "the worker rules are an order of magnitude smaller");
 });
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");

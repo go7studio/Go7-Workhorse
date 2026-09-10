@@ -4,6 +4,7 @@ import { upsertToolMessage } from "../src/lib/grok-events";
 import type { ChatMessage } from "../src/lib/types";
 import {
   CURSOR_SESSION_RULES,
+  DESK_SPAWN_LAW,
   SPAWN_TURN_HINT,
   WORKHORSE_SESSION_RULES,
   looksLikeGoalCommand,
@@ -126,11 +127,11 @@ test("an ordinary tool row is still free to rename itself", () => {
 test("the rule keeps both halves, and Cursor never sees it", () => {
   assert.match(WORKHORSE_SESSION_RULES, /Do not spawn workers for a \/goal that only names work/);
   assert.match(
-    WORKHORSE_SESSION_RULES,
+    DESK_SPAWN_LAW,
     /asks for bots, workers, agents, or subagents, spawn them with workhorse_spawn_agent/,
   );
   // It says why, so a model weighing it against an objective knows the cost.
-  assert.match(WORKHORSE_SESSION_RULES, /desk workers get names, keep their own usage rings/);
+  assert.match(DESK_SPAWN_LAW, /desk workers get names, keep their own usage rings/);
 
   // Cursor is not Grok, so the whole rule is stripped for it. That strip is a
   // literal string replace against the same text — if the two copies in

@@ -4,7 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import { findReusableWorker } from "../src/lib/subagents";
-import { CONTINUE_NAMED_WORKER_LAW, SPAWN_TURN_HINT, WORKHORSE_SESSION_RULES } from "../src/lib/workhorse-rules";
+import { CONTINUE_NAMED_WORKER_LAW, DESK_SPAWN_LAW, SPAWN_TURN_HINT, WORKHORSE_SESSION_RULES } from "../src/lib/workhorse-rules";
 import type { WorkerRecord } from "../src/lib/subagents";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -49,11 +49,12 @@ test("inherit still means what the schema says it means", () => {
 test("nothing still promises automatic reuse", () => {
   // The old copy told every orchestrator the desk reuses an idle worker by
   // itself. That sentence is why unrelated slices piled onto one context.
-  for (const text of [WORKHORSE_SESSION_RULES, read("electron/workhorse-mcp.ts")]) {
+  for (const text of [WORKHORSE_SESSION_RULES, DESK_SPAWN_LAW, read("electron/workhorse-mcp.ts")]) {
     assert.doesNotMatch(text, /reuses an idle worker automatically/);
     assert.doesNotMatch(text, /Leave empty and the desk reuses an idle worker/);
   }
-  assert.match(WORKHORSE_SESSION_RULES, /pass worker with that idle name so it keeps what it learned/);
+  // Since S11 the continue-vs-mint law travels with the spawn law, not the core.
+  assert.match(DESK_SPAWN_LAW, /pass worker with that idle name so it keeps what it learned/);
   assert.match(read("electron/workhorse-mcp.ts"), /a new worker starts with a clear head/);
 });
 
@@ -61,7 +62,7 @@ test("orchestrator surfaces teach named continuation, not pooling", () => {
   const skill = read("skills/desk/SKILL.md");
   const store = read("src/lib/store.tsx");
   const features = read("docs/FEATURES.md");
-  for (const text of [CONTINUE_NAMED_WORKER_LAW, SPAWN_TURN_HINT, WORKHORSE_SESSION_RULES, skill]) {
+  for (const text of [CONTINUE_NAMED_WORKER_LAW, SPAWN_TURN_HINT, DESK_SPAWN_LAW, skill]) {
     assert.match(text, /pass worker/);
     assert.match(text, /same topic/);
     assert.match(text, /clear head/);

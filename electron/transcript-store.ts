@@ -2,7 +2,10 @@ import fs from "node:fs";
 import path from "node:path";
 import { atomicWriteJson } from "./state-persistence";
 import {
+  RETENTION_DAYS_DEFAULT,
   TRANSCRIPT_SIDECAR_VERSION,
+  mergeTranscriptRows,
+  normalizeRetentionDays,
   normalizeTranscriptSidecar,
   type TranscriptSidecar,
 } from "../src/lib/transcript-sidecar";
@@ -42,6 +45,92 @@ const FINISHED_WORKER_STATUS = new Set(["completed", "failed", "cancelled", "tim
 
 /** The rows worth moving. Thinking and tool output are the bulk; prose is what a person opens the chat for. */
 const OFFLOADABLE_KIND = new Set(["thought", "tool"]);
+
+/**
+ * How old a finished worker's last activity has to be before the whole
+ * transcript goes, not just the steps.
+ *
+ * Seven days is the default because that is roughly when a worker stops being
+ * something anyone scrolls back through and starts being a row in a list. The
+ * person can move it in Settings; nought turns it off and nothing is retired.
+ */
+export { RETENTION_DAYS_DEFAULT };
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * How much of the last report stays in the desk file.
+ *
+ * The whole point is that eight hundred rows must fit in a few megabytes, and
+ * an unbounded report is how a cap becomes a suggestion. Two thousand
+ * characters is a paragraph or two — enough to see what the worker concluded
+ * from the chat list, and the note says where the rest is.
+ */
+export const RETAINED_REPORT_CHAR_LIMIT = 2_000;
+
+/** The agentRun fields a retired worker keeps. Everything else described a run that ended a week ago. */
+const RETAINED_RUN_FIELDS = [
+  "status",
+  "startedAt",
+  "finishedAt",
+  "error",
+  "changedFiles",
+  "mission",
+  "usedTokens",
+] as const;
+
+/**
+ * The session fields a retired worker keeps.
+ *
+ * An allowlist, not a delete list, for the same reason `normalizeSession` is
+ * one: a field added later must not start surviving retention because nobody
+ * remembered to name it. The first group is who this worker was, what it was
+ * for, and how it ended. The second is what the desk needs to still treat the
+ * row as a worker: drop `hidden` and eight hundred finished workers walk back
+ * into the sidebar. The last two are what a person wants a week later.
+ * `permissionGrants` is what the run was allowed to do and `vendorSessionId` is
+ * how the vendor is asked to pick the worker up again, and both are cheap: on
+ * this desk `vendorSessionId` is 38 bytes on each of 662 finished workers, and
+ * not one of the 865 carries a `permissionGrants` at all.
+ *
+ * What is dropped, measured on the same desk file:
+ *
+ * - `ledger`, 1.0 MB across 97 rows, the largest 70 KB. It is a reconstructable
+ *   turn log of a transcript that is already row for row in the sidecar. No
+ *   spend the desk shows reads it: `ChatSpend` and `workerStatusSnapshot` both
+ *   roll up `state.usage`, which retention never touches, and a mission's cap
+ *   sums `agentRun.usedTokens`, which stays on the row. Not one of those 865
+ *   ledgers carries a single usage event, so dropping it records no fewer
+ *   tokens per chat than before.
+ * - `contextCheckpoint`, a compaction summary of rows that are now on disk.
+ * - `routingDecision`, 65 KB across 293 rows, and `agentRun.findings`, 323 KB
+ *   across 218. Both describe a run that ended a week ago, and the findings come
+ *   back off `retainedReport` when a harness asks.
+ */
+const RETAINED_SESSION_FIELDS = [
+  "id",
+  "title",
+  "workerName",
+  "parentId",
+  "projectId",
+  "provider",
+  "model",
+  "effort",
+  "status",
+  "hidden",
+  "mode",
+  "sandbox",
+  "environment",
+  "customBotId",
+  "titleLocked",
+  "contextUsed",
+  "archivedAt",
+  "permissionGrants",
+  "vendorSessionId",
+  // A missing value reads as "manual" downstream, so an Auto-routed worker
+  // would answer a harness with the wrong word once retired.
+  "routingMode",
+] as const;
 
 export type { TranscriptSidecar };
 
@@ -187,6 +276,134 @@ export function offloadSessionTranscript(session: unknown, userData: string, io:
   };
 }
 
+/** Days from Settings, or the default. Anything unreadable, negative or absurd falls back. */
+export function retentionDaysFromSettings(settings: unknown): number {
+  return normalizeRetentionDays(record(settings)?.retentionDays);
+}
+
+/**
+ * When this worker last did anything.
+ *
+ * The last row it wrote, then the clock on the run. `worktreeKeepSet` ages
+ * finished workers the same way and for the same reason: a finished run with no
+ * clock on it cannot be aged, so it is never retired.
+ */
+function lastActivityAt(row: Record<string, unknown>): number | null {
+  const messages = Array.isArray(row.messages) ? row.messages : [];
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const at = record(messages[index])?.createdAt;
+    if (typeof at === "number" && Number.isFinite(at) && at > 0) return at;
+  }
+  const run = record(row.agentRun);
+  for (const value of [run?.finishedAt, run?.startedAt]) {
+    if (typeof value === "number" && Number.isFinite(value) && value > 0) return value;
+  }
+  return null;
+}
+
+/** A terminal worker that has been quiet longer than the retention window. */
+export function isRetiredWorkerDue(session: unknown, now: number, retentionDays: number): boolean {
+  if (retentionDays <= 0) return false;
+  const row = record(session);
+  if (!row || !isTerminalWorker(row)) return false;
+  if (!Array.isArray(row.messages) || row.messages.length === 0) return false;
+  const at = lastActivityAt(row);
+  return at !== null && now - at >= retentionDays * DAY_MS;
+}
+
+/**
+ * The last thing the worker said, cut to a length eight hundred rows can afford.
+ *
+ * `boundWorkerReport` in `src/lib/subagents.ts` does the same job for a harness
+ * asking about one worker. It is not imported here on purpose: this file is
+ * loaded by the Link helper as well as the desk, and pulling the renderer's
+ * subagent module across for one truncation would drag its whole import graph
+ * into a process that only wanted to read a file.
+ */
+function boundedFinalReport(messages: unknown[]): string | undefined {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = record(messages[index]);
+    if (!message || message.role !== "assistant") continue;
+    if (message.kind === "tool" || message.kind === "thought") continue;
+    const text = typeof message.text === "string" ? message.text.trim() : "";
+    if (!text) continue;
+    if (text.length <= RETAINED_REPORT_CHAR_LIMIT) return text;
+    const omitted = text.length - RETAINED_REPORT_CHAR_LIMIT;
+    return `${text.slice(0, RETAINED_REPORT_CHAR_LIMIT).trimEnd()}\n\n[report shortened: ${omitted} chars are in the transcript store. Open this chat, or read it with workhorse_read_chat.]`;
+  }
+  return undefined;
+}
+
+function retainedAgentRun(run: Record<string, unknown> | null): Record<string, unknown> | undefined {
+  if (!run) return undefined;
+  const kept: Record<string, unknown> = {};
+  for (const field of RETAINED_RUN_FIELDS) {
+    if (run[field] !== undefined) kept[field] = run[field];
+  }
+  return kept;
+}
+
+/**
+ * Retire one finished worker: the whole transcript to the sidecar, a bounded
+ * report and the run's summary left behind.
+ *
+ * Fails closed exactly as the step offload does. The one case worth naming is a
+ * worker whose steps already went: its sidecar holds the thinking and tool rows
+ * and the chat holds the prose, so writing a sidecar from the prose alone would
+ * overwrite the only copy of the steps. Those two halves are put back together
+ * first, and a merge that will not line up stops the retirement rather than
+ * guessing at an array.
+ */
+export function retireSessionTranscript(session: unknown, userData: string, io: TranscriptIo = diskIo): unknown {
+  const row = record(session);
+  if (!row || !userData.trim()) return session;
+  const sessionId = typeof row.id === "string" ? row.id.trim() : "";
+  if (!sessionId) return session;
+  const inline = Array.isArray(row.messages) ? (row.messages as ChatMessage[]) : [];
+  if (inline.length === 0) return session;
+
+  const existing = typeof row.transcriptSidecar === "string" ? row.transcriptSidecar.trim() : "";
+  let messages = inline;
+  if (existing) {
+    const held = readTranscriptSidecar(existing, io);
+    if (!held || held.sessionId !== sessionId) return session;
+    const whole = mergeTranscriptRows(inline, held);
+    if (!whole) return session;
+    messages = whole;
+  }
+
+  const file = transcriptSidecarPath(userData, sessionId);
+  const sidecar: TranscriptSidecar = {
+    version: TRANSCRIPT_SIDECAR_VERSION,
+    sessionId,
+    total: messages.length,
+    rows: messages.map((message, index) => ({ index, message })),
+  };
+  verifiedSidecars.delete(file);
+  try {
+    io.write(file, sidecar);
+  } catch {
+    return session; // every row stays in the chat, which is the whole point of failing closed
+  }
+  if (!sidecarMatches(file, sidecar, io)) return session;
+  verifiedSidecars.set(file, sidecarShape(sidecar));
+
+  const retired: Record<string, unknown> = {};
+  for (const field of RETAINED_SESSION_FIELDS) {
+    if (row[field] !== undefined) retired[field] = row[field];
+  }
+  const run = retainedAgentRun(record(row.agentRun));
+  const report = boundedFinalReport(messages);
+  return {
+    ...retired,
+    ...(run ? { agentRun: run } : {}),
+    ...(report ? { retainedReport: report } : {}),
+    messages: [],
+    transcriptSidecar: file,
+    transcriptOffloaded: messages.length,
+  };
+}
+
 /** Move every terminal worker's step rows out. Anything unreadable is left alone. */
 /**
  * How many sidecars one save may write.
@@ -202,14 +419,31 @@ export function offloadSessionTranscript(session: unknown, userData: string, io:
  */
 export const TRANSCRIPT_OFFLOAD_PER_SAVE = 25;
 
-export function offloadStateTranscripts<T>(state: T, userData: string, io: TranscriptIo = diskIo): T {
+export function offloadStateTranscripts<T>(
+  state: T,
+  userData: string,
+  io: TranscriptIo = diskIo,
+  opts: { now?: number; retentionDays?: number } = {},
+): T {
   if (!state || typeof state !== "object") return state;
-  const next = state as T & { sessions?: unknown };
+  const next = state as T & { sessions?: unknown; settings?: unknown };
   if (!Array.isArray(next.sessions) || !userData.trim()) return state;
+  const now = opts.now ?? Date.now();
+  const retentionDays = opts.retentionDays ?? retentionDaysFromSettings(next.settings);
   let budget = TRANSCRIPT_OFFLOAD_PER_SAVE;
   return {
     ...next,
     sessions: next.sessions.map((session) => {
+      // Retirement always pays. A worker due for it has a sidecar to write
+      // whether or not one is already there, so the budget is the only thing
+      // standing between a first launch on an aged desk and eight hundred
+      // synchronous flushes in a row.
+      if (isRetiredWorkerDue(session, now, retentionDays)) {
+        if (budget <= 0) return session;
+        const retired = retireSessionTranscript(session, userData, io);
+        if (retired !== session) budget -= 1;
+        return retired;
+      }
       // A chat whose sidecar is already written costs nothing and is never
       // charged for, so a settled desk keeps offloading every one of them.
       const free = alreadyVerified(session, userData, io);

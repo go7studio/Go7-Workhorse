@@ -2,6 +2,7 @@ import fs from "node:fs";
 import { offloadChatImage } from "./attachment-store";
 import { loadLinkState, readLinkState, runWithLinkState } from "./link-state";
 import { openMainLog } from "./main-log";
+import { readTranscriptSidecar } from "./transcript-store";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
@@ -3159,7 +3160,13 @@ async function callDeskTool(name: string, args: Record<string, unknown>, from?: 
     const resolved = matchListedChat(listed, chat);
     if (!("session" in resolved)) throw new Error(resolved.error);
     const limit = typeof args.limit === "number" ? args.limit : 40;
-    const transcript = sessionTranscript(readState(), resolved.session.id, limit, from);
+    // The helper reads the sidecar off disk itself. A worker retired a week ago
+    // holds no rows in the desk file, and answering a harness with an empty
+    // transcript for work that is sitting in `userData/transcripts/` would be
+    // worse than refusing. S8 will route this through the desk when it is up.
+    const transcript = sessionTranscript(readState(), resolved.session.id, limit, from, (file) =>
+      readTranscriptSidecar(file),
+    );
     if (!transcript) throw new Error(`No Workhorse chat matches “${chat}”`);
     return JSON.stringify(transcript, null, 2);
   }

@@ -302,6 +302,12 @@ export function normalizeSession(raw: unknown, liveRunIds?: ReadonlySet<string>)
           transcriptOffloaded: Math.round(record.transcriptOffloaded),
         }
       : {}),
+    // Same allowlist, same reason. A retired worker whose report is dropped here
+    // loads as a blank row: no preview, no report for a harness that asks, and
+    // nothing on screen to say the chat has anything in it at all.
+    ...(typeof record.retainedReport === "string" && record.retainedReport.trim()
+      ? { retainedReport: record.retainedReport }
+      : {}),
     contextUsed: typeof record.contextUsed === "number" ? Math.max(0, record.contextUsed) : 0,
     archivedAt: typeof record.archivedAt === "number" ? record.archivedAt : null,
     permissionGrants: normalizePermissionGrants(record.permissionGrants),

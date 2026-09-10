@@ -10,6 +10,7 @@ import type { AgentSystemsSettings, BotAccessDefaults, CustomBot, CustomLlm, Des
 import { migrateCustomBotRatings } from "./routing";
 import { normalizeWatch } from "./watch";
 import { DEFAULT_WATCH } from "./watch-defaults";
+import { RETENTION_DAYS_DEFAULT, normalizeRetentionDays } from "./transcript-sidecar";
 
 export const DEFAULT_SETTINGS: Settings = {
   profile: { name: "", handle: "" },
@@ -43,6 +44,7 @@ export const DEFAULT_SETTINGS: Settings = {
   learning: { ...DEFAULT_LEARNING },
   localCompute: structuredClone(DEFAULT_LOCAL_COMPUTE_SETTINGS),
   workshop: structuredClone(DEFAULT_WORKSHOP_SETTINGS),
+  retentionDays: RETENTION_DAYS_DEFAULT,
 };
 
 export function normalizeRouting(raw: unknown): RoutingSettings {
@@ -440,6 +442,7 @@ export function normalizeSettings(raw: unknown): Settings {
     agentSystems: normalizeAgentSystems((record as { agentSystems?: unknown }).agentSystems),
     localCompute: normalizeLocalComputeSettings((record as { localCompute?: unknown }).localCompute),
     workshop: normalizeWorkshopSettings((record as { workshop?: unknown }).workshop),
+    retentionDays: normalizeRetentionDays((record as { retentionDays?: unknown }).retentionDays),
   };
 }
 

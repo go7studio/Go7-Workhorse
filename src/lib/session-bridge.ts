@@ -1,4 +1,5 @@
 import { formatChatSidebar } from "./session";
+import { sessionMessagesWithSidecar, type TranscriptSidecarReader } from "./transcript-sidecar";
 
 export type BridgeMessage = {
   role: string;
@@ -73,6 +74,10 @@ export function chatPreview(messages: unknown): string {
   return previewFrom(messages);
 }
 
+function retainedPreview(report: unknown): string {
+  return typeof report === "string" ? report.replace(/\s+/g, " ").trim().slice(0, 160) : "";
+}
+
 function projectNames(state: LooseState): Map<string, string> {
   const projects = new Map<string, string>();
   if (Array.isArray(state.projects)) {
@@ -134,7 +139,12 @@ export function catalogSessions(state: LooseState, opts?: { fromSessionId?: stri
         : messages;
     const hiddenListedWorker =
       opts?.includeWorkers === true && session.hidden === true && Boolean(parentId) && liveParentIds.has(parentId!);
-    if (!messages.some((item) => asRecord(item).role === "user") && !hiddenListedWorker) continue;
+    // A retired worker holds no rows at all, so "it has never been spoken to"
+    // and "its transcript is on disk" look identical from here. The offload
+    // count is what tells them apart, and dropping the row on the strength of an
+    // empty array would hide a week's work from every list that uses this.
+    const offloaded = typeof session.transcriptOffloaded === "number" ? session.transcriptOffloaded : 0;
+    if (!messages.some((item) => asRecord(item).role === "user") && !hiddenListedWorker && offloaded <= 0) continue;
     const provider =
       session.provider === "codex" || session.provider === "claude" || session.provider === "custom"
         ? session.provider
@@ -156,14 +166,17 @@ export function catalogSessions(state: LooseState, opts?: { fromSessionId?: stri
             ? session.status
             : "idle",
       archived: typeof session.archivedAt === "number",
-      preview: previewFrom(previewMessages),
+      // The retained report, when the rows themselves have gone to disk. A
+      // preview is read for every chat in a list, so it may never cost a file
+      // read — that is the whole reason retirement leaves a copy behind.
+      preview: previewFrom(previewMessages) || retainedPreview(session.retainedReport),
       sidebar: formatChatSidebar({
         provider,
         model,
         effort: typeof session.effort === "string" ? session.effort : null,
         mode: typeof session.mode === "string" ? session.mode : "ask",
       }),
-      messageCount: messages.length,
+      messageCount: messages.length + offloaded,
       ...(parentId ? { parentId } : {}),
       ...(workerName ? { worker: workerName } : {}),
     });
@@ -228,11 +241,21 @@ export function findSessionForLink(sessions: SessionSnapshot[], query: string): 
   return titled.length === 1 ? titled[0] : null;
 }
 
+/**
+ * One chat's last N turns, for a harness that asked.
+ *
+ * `readSidecar` is how a retired worker still answers. Without it this returns
+ * the rows the chat still holds, which for a worker retired a week ago is none
+ * — so Link's `read_chat` would report an empty transcript for work that is
+ * sitting on disk, intact. The caller passes the reader because the desk and the
+ * helper reach the file by different routes.
+ */
 export function sessionTranscript(
   state: LooseState,
   query: string,
   limit = 40,
   fromSessionId?: string,
+  readSidecar?: TranscriptSidecarReader,
 ): SessionTranscript | null {
   const listed = catalogSessions(state, { fromSessionId, includeWorkers: true });
   const rawSessions = Array.isArray(state.sessions) ? state.sessions.map(asRecord) : [];
@@ -254,7 +277,7 @@ export function sessionTranscript(
       })();
   if (!match) return null;
   const raw = rawSessions.find((item) => item.id === match.id);
-  const messages = Array.isArray(raw?.messages) ? raw.messages : [];
+  const messages: unknown[] = raw ? sessionMessagesWithSidecar(raw, readSidecar) : [];
   const clipped = messages.slice(-Math.max(1, limit)).map((item) => {
     const message = asRecord(item);
     return {

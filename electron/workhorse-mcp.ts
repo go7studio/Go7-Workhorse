@@ -3746,7 +3746,11 @@ export async function runWorkhorseMcp(): Promise<void> {
   });
   process.stdin.on("end", () => {
     completions.stop();
-    process.exit(0);
+    // The CLI's race, on this side: a frame past what the pipe takes sits on
+    // Node's queue, and process.exit throws that queue away. An empty write is
+    // ordered behind the frames already queued, so exiting from its callback
+    // hands the host every byte of the last response.
+    process.stdout.write("", () => process.exit(0));
   });
   process.stdin.on("data", (chunk: Buffer | string) => {
     buffer = Buffer.concat([buffer, Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, "utf8")]);

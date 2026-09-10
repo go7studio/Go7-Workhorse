@@ -34,22 +34,32 @@ import {
   sweepStaleUserData,
 } from "../electron/user-data-hygiene";
 import {
+  RETAINED_REPORT_CHAR_LIMIT,
   TRANSCRIPT_OFFLOAD_PER_SAVE,
   isTerminalWorker,
   offloadSessionTranscript,
   offloadStateTranscripts,
   readTranscriptSidecar,
+  retentionDaysFromSettings,
   transcriptSidecarPath,
   type TranscriptIo,
 } from "../electron/transcript-store";
 import {
+  RETENTION_DAYS_DEFAULT,
   mergeTranscriptRows,
+  normalizeRetentionDays,
   normalizeTranscriptSidecar,
+  sessionMessagesWithSidecar,
   transcriptFetchPlan,
+  transcriptStillOnDisk,
   type TranscriptSidecar,
 } from "../src/lib/transcript-sidecar";
+import { catalogSessions, sessionTranscript } from "../src/lib/session-bridge";
+import { workerStartMessages, workerStatusSnapshot } from "../src/lib/subagents";
+import { exportChatToFolder } from "../electron/desk-export-host";
+import { normalizeSettings } from "../src/lib/settings";
 import { normalizeSession } from "../src/lib/session";
-import type { ChatMessage } from "../src/lib/types";
+import type { ChatMessage, Session } from "../src/lib/types";
 
 /*
  * Lane 2b: the desk's long-term health. Every test here stands for a number
@@ -1007,6 +1017,428 @@ test("rotation still holds once the log carries more event kinds", () => {
     assert.ok(fs.existsSync(`${log.file}.1`), "exactly one rotation is kept");
     assert.equal(fs.existsSync(`${log.file}.2`), false);
     assert.ok(MAIN_LOG_MAX_BYTES === 512 * 1024, "Lane 0's ceiling is unchanged");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+/* ------------------------------- item 5: finished work leaves on a clock */
+
+/*
+ * The desk this stands for: 29 MB of `workhorse-state.json`, 897 chats, over
+ * 800 of them workers whose runs had ended, most older than two days, and not
+ * one of them archived. The step offload above took the thinking and tool rows
+ * out. Retention takes the rest, on a clock, and every reader that used to
+ * reach for `session.messages` has to keep working while it does.
+ */
+
+function agedWorker(id: string, finishedAt: number, bulk = 400, report = "the final report"): Record<string, unknown> {
+  return {
+    id,
+    hidden: true,
+    parentId: "sess_parent",
+    projectId: "proj_1",
+    provider: "claude",
+    model: "claude-opus-5",
+    effort: "high",
+    status: "idle",
+    title: "S7 retention",
+    workerName: "Wren",
+    mode: "always-approve",
+    sandbox: "off",
+    environment: { kind: "local" },
+    contextUsed: 40_000,
+    archivedAt: null,
+    // The carriers that make a settled worker heavy. None of them describes
+    // anything anyone can act on a week after the run ended.
+    ledger: { turns: Array.from({ length: 5 }, (_, index) => ({ id: `t${index}`, text: "z".repeat(bulk) })) },
+    contextCheckpoint: { summary: "z".repeat(bulk), omittedMessages: 4 },
+    permissionGrants: [{ id: "g1", tool: "Bash", detail: "z".repeat(bulk) }],
+    agentRun: {
+      status: "completed",
+      startedAt: finishedAt - 60_000,
+      finishedAt,
+      changedFiles: ["src/lib/store.tsx"],
+      mission: "S7 retention",
+      usedTokens: 1234,
+      grantedAccess: { paths: ["/tmp"], source: "desk" },
+      constraints: ["z".repeat(bulk)],
+      events: [{ at: finishedAt, type: "budget-warn", detail: "z".repeat(bulk) }],
+    },
+    messages: [
+      { id: `${id}_m1`, role: "user", text: "the brief", createdAt: finishedAt - 60_000 },
+      { id: `${id}_m2`, role: "assistant", kind: "thought", text: "x".repeat(bulk), createdAt: finishedAt - 40_000 },
+      { id: `${id}_m3`, role: "assistant", kind: "tool", text: "y".repeat(bulk), createdAt: finishedAt - 20_000 },
+      { id: `${id}_m4`, role: "assistant", text: report, createdAt: finishedAt },
+    ],
+  };
+}
+
+function sessionsOf(state: unknown): Record<string, unknown>[] {
+  return (state as { sessions: Record<string, unknown>[] }).sessions;
+}
+
+function memoryIo(): { io: TranscriptIo; files: Map<string, string> } {
+  const files = new Map<string, string>();
+  return {
+    files,
+    io: {
+      write: (file, sidecar) => files.set(file, JSON.stringify(sidecar)),
+      read: (file) => {
+        const text = files.get(file);
+        if (text === undefined) throw new Error(`no sidecar at ${file}`);
+        return text;
+      },
+      exists: (file) => files.has(file),
+    },
+  };
+}
+
+test("a worker past the window keeps who it was and gives back every row", () => {
+  const dir = scratch("retention-round-trip");
+  try {
+    const original = agedWorker("sess_old", NOW - 8 * DAY);
+    const after = offloadStateTranscripts({ sessions: [original], settings: {} }, dir, undefined, { now: NOW });
+    const row = sessionsOf(after)[0];
+
+    assert.deepEqual(row.messages, [], "the whole transcript went, not just the steps");
+    assert.equal(row.transcriptOffloaded, 4);
+    assert.equal(row.transcriptSidecar, transcriptSidecarPath(dir, "sess_old"));
+
+    // Who this worker was, and how the run ended.
+    assert.equal(row.id, "sess_old");
+    assert.equal(row.title, "S7 retention");
+    assert.equal(row.workerName, "Wren");
+    assert.equal(row.parentId, "sess_parent");
+    assert.equal(row.projectId, "proj_1");
+    assert.equal(row.provider, "claude");
+    assert.equal(row.model, "claude-opus-5");
+    assert.equal(row.effort, "high");
+    assert.equal(row.hidden, true, "drop this and eight hundred workers walk back into the sidebar");
+    assert.deepEqual(Object.keys(row.agentRun as object).sort(), [
+      "changedFiles",
+      "finishedAt",
+      "mission",
+      "startedAt",
+      "status",
+      "usedTokens",
+    ]);
+    assert.equal(row.retainedReport, "the final report");
+
+    // The heavy carriers go. They describe a run that ended a week ago.
+    for (const gone of ["ledger", "contextCheckpoint", "permissionGrants"]) {
+      assert.equal(gone in row, false, `${gone} has no business surviving retirement`);
+    }
+
+    // And the transcript itself is intact, row for row, in the order it was in.
+    const sidecar = readTranscriptSidecar(row.transcriptSidecar as string)!;
+    assert.deepEqual(mergeTranscriptRows([], sidecar), original.messages);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a failed run keeps its reason, and the report is cut to a size a list can afford", () => {
+  const dir = scratch("retention-bounded");
+  try {
+    const failed = agedWorker("sess_failed", NOW - 9 * DAY, 400, "R".repeat(9_000));
+    (failed.agentRun as Record<string, unknown>).status = "failed";
+    (failed.agentRun as Record<string, unknown>).error = "the gate refused it";
+    const row = sessionsOf(offloadStateTranscripts({ sessions: [failed] }, dir, undefined, { now: NOW }))[0];
+
+    assert.equal((row.agentRun as Record<string, unknown>).error, "the gate refused it");
+    const kept = String(row.retainedReport);
+    assert.ok(kept.length < 9_000, "an unbounded report is how a cap becomes a suggestion");
+    assert.ok(kept.startsWith("R".repeat(RETAINED_REPORT_CHAR_LIMIT)));
+    assert.match(kept, /workhorse_read_chat/, "the note says where the rest of it is");
+
+    // The full text is on disk, untouched.
+    const sidecar = readTranscriptSidecar(row.transcriptSidecar as string)!;
+    assert.equal(mergeTranscriptRows([], sidecar)!.at(-1)!.text.length, 9_000);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("the clock decides, and nought turns retention off", () => {
+  const dir = scratch("retention-clock");
+  try {
+    // Inside the window the older rule still applies: steps go, prose stays.
+    const inside = sessionsOf(
+      offloadStateTranscripts({ sessions: [agedWorker("sess_new", NOW - 2 * DAY)] }, dir, undefined, { now: NOW }),
+    )[0];
+    assert.deepEqual((inside.messages as Array<{ id: string }>).map((row) => row.id), ["sess_new_m1", "sess_new_m4"]);
+    assert.equal("retainedReport" in inside, false);
+    assert.ok(inside.ledger, "a worker that finished on Tuesday is still a whole chat");
+
+    // Nought is the person saying they want every row kept where it is.
+    const off = sessionsOf(
+      offloadStateTranscripts(
+        { sessions: [agedWorker("sess_off", NOW - 30 * DAY)], settings: { retentionDays: 0 } },
+        dir,
+        undefined,
+        { now: NOW },
+      ),
+    )[0];
+    assert.ok(off.ledger, "retention off leaves the row whole");
+    assert.equal("retainedReport" in off, false);
+
+    // A setting the person moved is the setting that runs.
+    const shortened = sessionsOf(
+      offloadStateTranscripts(
+        { sessions: [agedWorker("sess_short", NOW - 2 * DAY)], settings: { retentionDays: 1 } },
+        dir,
+        undefined,
+        { now: NOW },
+      ),
+    )[0];
+    assert.deepEqual(shortened.messages, []);
+
+    assert.equal(retentionDaysFromSettings({ retentionDays: 30 }), 30);
+    assert.equal(retentionDaysFromSettings({}), RETENTION_DAYS_DEFAULT);
+    assert.equal(retentionDaysFromSettings({ retentionDays: -4 }), RETENTION_DAYS_DEFAULT);
+    assert.equal(normalizeSettings({}).retentionDays, RETENTION_DAYS_DEFAULT);
+    assert.equal(normalizeRetentionDays("soon"), RETENTION_DAYS_DEFAULT);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a worker whose steps already went is put back together, not written over", () => {
+  const dir = scratch("retention-restack");
+  try {
+    const original = agedWorker("sess_two", NOW - 8 * DAY);
+    // Two days after it finished: only the thinking and tool rows move.
+    const stepped = sessionsOf(
+      offloadStateTranscripts({ sessions: [original] }, dir, undefined, { now: NOW - 6 * DAY }),
+    )[0];
+    assert.equal(stepped.transcriptOffloaded, 2);
+
+    // A week later the rest follows. The sidecar has to end up holding all four
+    // rows: writing one from the prose alone would destroy the only copy of the
+    // steps, which is the whole failure this guards.
+    const retired = sessionsOf(offloadStateTranscripts({ sessions: [stepped] }, dir, undefined, { now: NOW }))[0];
+    assert.equal(retired.transcriptOffloaded, 4);
+    const sidecar = readTranscriptSidecar(retired.transcriptSidecar as string)!;
+    assert.deepEqual(mergeTranscriptRows([], sidecar), original.messages);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a sidecar that will not come back stops the retirement rather than guessing", () => {
+  const { io } = memoryIo();
+  const stepped = sessionsOf(offloadStateTranscripts({ sessions: [agedWorker("sess_bad", NOW - 8 * DAY)] }, "/desk", io, { now: NOW - 6 * DAY }))[0];
+  // The steps are on disk and then the file goes. Retiring on the prose alone
+  // would write a two-row sidecar over a two-row sidecar and lose both halves.
+  const broken: TranscriptIo = { ...io, read: () => "{}", exists: () => true };
+  const after = sessionsOf(offloadStateTranscripts({ sessions: [stepped] }, "/desk", broken, { now: NOW }))[0];
+  assert.equal(after, stepped, "fail closed: the same row back, still holding its prose");
+  assert.equal(after.transcriptOffloaded, 2);
+});
+
+test("eight hundred finished workers older than a week fit in five megabytes", () => {
+  const { io } = memoryIo();
+  let state: Record<string, unknown> = {
+    settings: { retentionDays: RETENTION_DAYS_DEFAULT },
+    sessions: Array.from({ length: 800 }, (_, index) =>
+      agedWorker(`sess_${index}`, NOW - (8 + (index % 20)) * DAY, 2_000, "R".repeat(8_000)),
+    ),
+  };
+  const before = JSON.stringify(state).length;
+  assert.ok(before > 5 * 1024 * 1024, `the desk being fixed is over the line to start with: ${before} bytes`);
+
+  // One save moves TRANSCRIPT_OFFLOAD_PER_SAVE workers, on purpose: the offload
+  // runs before the save's first await, so a desk this size clears over a few
+  // minutes of ordinary use rather than holding the loop once for all of it.
+  const saves = Math.ceil(800 / TRANSCRIPT_OFFLOAD_PER_SAVE);
+  for (let pass = 0; pass < saves; pass += 1) state = offloadStateTranscripts(state, "/desk", io, { now: NOW });
+
+  const after = JSON.stringify(state).length;
+  assert.ok(after < 5 * 1024 * 1024, `saved state after retention: ${after} bytes`);
+  for (const row of sessionsOf(state)) {
+    assert.deepEqual(row.messages, []);
+    assert.equal(row.transcriptOffloaded, 4);
+  }
+});
+
+test("a parent's join notice is untouched when its worker retires", () => {
+  const dir = scratch("retention-parent");
+  try {
+    const parent = {
+      id: "sess_parent",
+      messages: [
+        { id: "p1", role: "user", text: "run S7", createdAt: NOW - 9 * DAY },
+        { id: "p2", role: "assistant", kind: "subagent", text: "Wren joined: the final report", createdAt: NOW - 8 * DAY },
+      ],
+    };
+    const after = offloadStateTranscripts(
+      { sessions: [parent, agedWorker("sess_kid", NOW - 8 * DAY)] },
+      dir,
+      undefined,
+      { now: NOW },
+    );
+    assert.equal(sessionsOf(after)[0], parent, "a chat that is not a worker is the same object back");
+    assert.deepEqual(sessionsOf(after)[0].messages, parent.messages);
+    assert.deepEqual(sessionsOf(after)[1].messages, [], "and its worker did retire");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+/* ---------------------------------- item 5b: one reader at a time, retired */
+
+/** A retired worker and the file its rows are in, on a temp folder. */
+function retiredDesk(dir: string, report = "the final report") {
+  const original = agedWorker("sess_kid", NOW - 8 * DAY, 400, report);
+  const parent = { id: "sess_parent", title: "S7 wave", messages: [{ id: "p1", role: "user", text: "run S7" }] };
+  const state = offloadStateTranscripts({ sessions: [parent, original] }, dir, undefined, { now: NOW });
+  return { original, parent, state, row: sessionsOf(state)[1] };
+}
+
+test("reader: Link read_chat on a retired worker returns the transcript", () => {
+  const dir = scratch("retention-read-chat");
+  try {
+    const { original, state, row } = retiredDesk(dir);
+    assert.deepEqual(row.messages, []);
+
+    const transcript = sessionTranscript(state as { sessions: unknown[] }, "sess_kid", 40, undefined, (file) =>
+      readTranscriptSidecar(file),
+    )!;
+    assert.deepEqual(
+      transcript.messages.map((message) => message.text),
+      (original.messages as Array<{ text: string }>).map((message) => message.text),
+    );
+
+    // Without a reader it answers with what the chat holds and does not throw.
+    assert.deepEqual(sessionTranscript(state as { sessions: unknown[] }, "sess_kid", 40)!.messages, []);
+    // A sidecar naming another chat is a crossed pointer, not a transcript.
+    const crossed = sessionTranscript(state as { sessions: unknown[] }, "sess_kid", 40, undefined, () => ({
+      version: 1,
+      sessionId: "sess_someone_else",
+      total: 1,
+      rows: [{ index: 0, message: { id: "x", role: "assistant", text: "another worker's reasoning", createdAt: 1 } }],
+    }))!;
+    assert.deepEqual(crossed.messages, []);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("reader: the catalog still shows a retired worker, with a preview and a count", () => {
+  const dir = scratch("retention-catalog");
+  try {
+    const { state } = retiredDesk(dir, "held at the gate: the suite is green");
+    const listed = catalogSessions(state as { sessions: unknown[] }, { includeWorkers: true });
+    const kid = listed.find((session) => session.id === "sess_kid")!;
+    assert.ok(kid, "a row with no messages left is still a chat with a week's work in it");
+    assert.equal(kid.preview, "held at the gate: the suite is green");
+    assert.equal(kid.messageCount, 4, "the count is what the chat holds plus what moved");
+    assert.equal(kid.worker, "Wren");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("reader: a status snapshot answers from the retained report, with no file read", () => {
+  const dir = scratch("retention-status");
+  try {
+    const { row } = retiredDesk(dir, "held at the gate: the suite is green");
+    const snapshot = workerStatusSnapshot(row as unknown as Session);
+    assert.equal(snapshot.status, "completed");
+    assert.equal(snapshot.next, "done");
+    assert.equal(snapshot.report, "held at the gate: the suite is green");
+    assert.equal(snapshot.usedTokens, 1234);
+    assert.deepEqual(snapshot.changedFiles, ["src/lib/store.tsx"]);
+
+    // The same row with the copy gone is the failure this exists to stop: a
+    // finished worker reported as having produced nothing.
+    const stripped = workerStatusSnapshot({ ...row, retainedReport: undefined } as unknown as Session);
+    assert.equal(stripped.next, "failed");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("reader: exporting a retired chat writes the whole conversation", () => {
+  const dir = scratch("retention-export");
+  try {
+    const { row } = retiredDesk(dir, "held at the gate");
+    const dest = path.join(dir, "out");
+    const result = exportChatToFolder({ dest, session: row as unknown as Session });
+    assert.equal(result.ok, true);
+    const body = fs.readFileSync(result.dest!, "utf8");
+    assert.match(body, /the brief/, "the person asked for the conversation, not the half of it left in the file");
+    assert.match(body, /held at the gate/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("reader: a reused worker is seeded from its stored rows, not from the empty array", () => {
+  const dir = scratch("retention-reuse");
+  try {
+    const { original, row } = retiredDesk(dir);
+    const sidecar = readTranscriptSidecar(row.transcriptSidecar as string)!;
+    const prior = mergeTranscriptRows(row.messages as ChatMessage[], sidecar)!;
+    const seeded = workerStartMessages({
+      priorMessages: prior,
+      userId: "msg_u",
+      assistantId: "msg_a",
+      fromTitle: "S7 wave",
+      text: "second slice",
+      createdAt: NOW,
+    });
+    assert.deepEqual(seeded.slice(0, 4), original.messages, "the worker's past comes with it");
+    assert.match(seeded.at(-2)!.text, /second slice/);
+
+    // The wiring: the spawn path merges before it seeds, and does not hand the
+    // new run the old chat's pointer.
+    const store = source("src", "lib", "store.tsx");
+    assert.match(store, /priorMessages,\n/, "the seed reads the merged rows, not priorWorker.messages");
+    assert.match(store, /mergeTranscriptRows\(priorWorker\.messages, sidecar\)/);
+    assert.match(store, /transcriptSidecar: undefined,\n\s+transcriptOffloaded: undefined,/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("reader: compaction waits for a chat whose rows are still on disk", () => {
+  const dir = scratch("retention-compact");
+  try {
+    const { row, parent } = retiredDesk(dir);
+    assert.equal(transcriptStillOnDisk(row), true);
+    assert.equal(transcriptStillOnDisk(parent as { transcriptSidecar?: unknown }), false);
+    assert.equal(transcriptStillOnDisk({ transcriptSidecar: "   " }), false);
+
+    // Compaction summarises what it can see and drops it. On a chat holding half
+    // of itself that cuts the only pointer to the other half.
+    const store = source("src", "lib", "store.tsx");
+    const guard = store.indexOf("transcriptStillOnDisk(session)");
+    const compact = store.indexOf("createPortableCheckpoint(session.messages");
+    assert.ok(guard > 0 && guard < compact, "the guard runs before the checkpoint is built");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("reader: opening a retired chat asks once and merges what comes back", () => {
+  const dir = scratch("retention-open");
+  try {
+    const { original, row } = retiredDesk(dir);
+    const sessions = [{ id: "sess_kid", transcriptSidecar: row.transcriptSidecar as string, transcriptOffloaded: 4 }];
+    const plan = transcriptFetchPlan({ activeSessionId: "sess_kid", sessions, asked: new Set() });
+    assert.deepEqual(plan, { sessionId: "sess_kid", offloaded: 4 });
+    // One ask per chat per launch, whether it worked or not.
+    assert.equal(transcriptFetchPlan({ activeSessionId: "sess_kid", sessions, asked: new Set(["sess_kid"]) }), null);
+    // A board of finished workers is never a board of file reads.
+    assert.equal(transcriptFetchPlan({ activeSessionId: null, sessions, asked: new Set() }), null);
+
+    const sidecar = readTranscriptSidecar(row.transcriptSidecar as string)!;
+    assert.deepEqual(mergeTranscriptRows(row.messages as ChatMessage[], sidecar), original.messages);
+    assert.deepEqual(sessionMessagesWithSidecar(row, readTranscriptSidecar), original.messages);
+    // An unreadable file leaves the chat exactly as it is.
+    assert.deepEqual(sessionMessagesWithSidecar(row, () => null), []);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

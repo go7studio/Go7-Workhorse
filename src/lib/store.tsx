@@ -47,7 +47,7 @@ import {
 } from "./chats";
 import { workerJustSettled } from "./worker-settled";
 import { deskPersistBodyEqual } from "./desk-persist";
-import { mergeTranscriptRows, normalizeRetentionDays, transcriptFetchPlan } from "./transcript-sidecar";
+import { mergeTranscriptRows, normalizeRetentionDays, transcriptFetchPlan, transcriptStillOnDisk } from "./transcript-sidecar";
 import { autoTitleForSend, firstUserText, suggestedTitleForSession, titleAcceptsVendor, titleFromIntent } from "./titles";
 import {
   applyPermissionAnswer,
@@ -2596,7 +2596,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
          * pointer to the rest. Opening the chat merges them back; this only
          * fires when that merge has not happened or did not work.
          */
-        if (session.transcriptSidecar) {
+        if (transcriptStillOnDisk(session)) {
           setState((latest) => ({
             ...latest,
             sessions: latest.sessions.map((item) =>

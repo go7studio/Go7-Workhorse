@@ -210,6 +210,9 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
   the transcript.
 - A reused worker starts a new slice count; billed usage for the chat is the
   lifetime total.
+- Finished work older than a week moves to the transcript store and opens as
+  before. Settings → Profile sets the days, and nought keeps every row in the
+  desk file.
 - If the parent does the work itself, the run records that it took over.
 - A cancelled or failed worker still reports to its parent, in one line naming
   the worker, what happened and why.

@@ -130,6 +130,18 @@ export function mergeTranscriptRows(inline: ChatMessage[], sidecar: TranscriptSi
 }
 
 /**
+ * Is part of this chat still in the transcript store?
+ *
+ * The rule for readers that rewrite a chat rather than display it. Compaction
+ * summarises what it can see and drops it; run on a chat holding half of
+ * itself, it would summarise the half and cut the pointer to the rest, and the
+ * rows on disk would have nothing left naming them. Such a reader waits.
+ */
+export function transcriptStillOnDisk(session: { transcriptSidecar?: unknown }): boolean {
+  return typeof session.transcriptSidecar === "string" && session.transcriptSidecar.trim().length > 0;
+}
+
+/**
  * The rows a reader should work from, whether or not this chat still holds them.
  *
  * Retention moves a finished worker's whole transcript to disk, so every reader

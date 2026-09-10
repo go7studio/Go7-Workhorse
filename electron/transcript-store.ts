@@ -127,6 +127,9 @@ const RETAINED_SESSION_FIELDS = [
   "archivedAt",
   "permissionGrants",
   "vendorSessionId",
+  // A missing value reads as "manual" downstream, so an Auto-routed worker
+  // would answer a harness with the wrong word once retired.
+  "routingMode",
 ] as const;
 
 export type { TranscriptSidecar };

@@ -1038,6 +1038,7 @@ function agedWorker(id: string, finishedAt: number, bulk = 400, report = "the fi
     hidden: true,
     parentId: "sess_parent",
     projectId: "proj_1",
+    routingMode: "auto",
     provider: "claude",
     model: "claude-opus-5",
     effort: "high",
@@ -1120,6 +1121,7 @@ test("a worker past the window keeps who it was and gives back every row", () =>
     assert.equal(row.model, "claude-opus-5");
     assert.equal(row.effort, "high");
     assert.equal(row.hidden, true, "drop this and eight hundred workers walk back into the sidebar");
+    assert.equal(row.routingMode, "auto", "a retired Auto worker must not answer manual; the status snapshot fills a missing value with manual");
     assert.deepEqual(Object.keys(row.agentRun as object).sort(), [
       "changedFiles",
       "finishedAt",

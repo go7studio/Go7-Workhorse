@@ -18,6 +18,20 @@ export const ROUTING_ROLE_PRESETS: Record<"quick" | "balanced" | "deep", Routing
   deep: { intelligence: 5, speed: 2, cost: 5 },
 };
 
+/** Training / test: Auto never picks it. A person or a named call still can. */
+export const TEST_ONLY_ROUTING: StoredRoutingProfile = {
+  intelligence: 1,
+  speed: 2,
+  cost: 1,
+  autoRoute: false,
+};
+
+export function routingRoleChange(role: string): StoredRoutingProfile | "family" {
+  if (role === "family") return "family";
+  if (role === "test") return TEST_ONLY_ROUTING;
+  return ROUTING_ROLE_PRESETS[role as keyof typeof ROUTING_ROLE_PRESETS];
+}
+
 /**
  * The triple the pre-1-to-10 editor wrote when nobody touched the controls.
  *
@@ -112,11 +126,13 @@ export function routingProfileEdit(
   change: StoredRoutingProfile | "family",
 ): StoredRoutingProfile | undefined {
   if (change === "family") {
-    const { intelligence: _intelligence, speed: _speed, cost: _cost, ...rest } = saved ?? {};
+    const { intelligence: _intelligence, speed: _speed, cost: _cost, autoRoute: _autoRoute, ...rest } = saved ?? {};
     return Object.keys(rest).length > 0 ? rest : undefined;
   }
   const inputs = change.inputs ? { ...saved?.inputs, ...change.inputs } : saved?.inputs;
-  return { ...saved, ...change, ...(inputs ? { inputs } : {}) };
+  const next: StoredRoutingProfile = { ...saved, ...change, ...(inputs ? { inputs } : {}) };
+  if (change.autoRoute === undefined) delete next.autoRoute;
+  return next;
 }
 
 function normalizeRoutingProfile(raw: unknown): StoredRoutingProfile | undefined {
@@ -150,6 +166,7 @@ function normalizeRoutingProfile(raw: unknown): StoredRoutingProfile | undefined
     ...(speed ? { speed } : {}),
     ...(cost ? { cost } : {}),
     ...(typeof record.local === "boolean" ? { local: record.local } : {}),
+    ...(typeof record.autoRoute === "boolean" ? { autoRoute: record.autoRoute } : {}),
     ...(inputs ? { inputs } : {}),
   };
 }

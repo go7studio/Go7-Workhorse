@@ -1,7 +1,7 @@
 import { primaryFolder } from "../lib/project";
 import { useEffect, useRef, useState, type RefObject } from "react";
 import { LINK_HOSTS, LINK_HOST_LABEL, linkHostConnectsByOneshot } from "../lib/workhorse-link";
-import { armedDeleteId, BOT_COLORS, customBotEnabled, customBotModels, customModelRoutingOverride, routingProfileEdit, ROUTING_ROLE_PRESETS } from "../lib/custom-bots";
+import { armedDeleteId, BOT_COLORS, customBotEnabled, customBotModels, customModelRoutingOverride, routingProfileEdit, routingRoleChange, ROUTING_ROLE_PRESETS } from "../lib/custom-bots";
 import { isGrokBotUrl } from "../lib/custom-http-identity";
 import { formatWindow, modelsFor } from "../lib/models";
 import { PROVIDERS } from "../lib/providers";
@@ -676,16 +676,17 @@ function BotRoutingFields({ bot }: { bot: import("../lib/types").CustomBot }) {
   const current = routingProfileForModel("custom", bot.model, saved);
   const patch = (change: Parameters<typeof routingProfileEdit>[1]) =>
     store.updateCustomBot(bot.id, { routingProfile: routingProfileEdit(saved, change) });
-  const setRole = (role: string) =>
-    patch(role === "family" ? "family" : ROUTING_ROLE_PRESETS[role as keyof typeof ROUTING_ROLE_PRESETS]);
+  const setRole = (role: string) => patch(routingRoleChange(role));
   const rated = saved?.intelligence !== undefined;
-  const role = !rated
-    ? "family"
-    : current.intelligence >= 9
-      ? "deep"
-      : current.speed >= 5 && current.cost <= 2
-        ? "quick"
-        : "balanced";
+  const role = saved?.autoRoute === false
+    ? "test"
+    : !rated
+      ? "family"
+      : current.intelligence >= 9
+        ? "deep"
+        : current.speed >= 5 && current.cost <= 2
+          ? "quick"
+          : "balanced";
   // One tick is one key. Spreading `current.inputs` here was the last control
   // still laying its change over the resolved profile: the ratings were fixed
   // and this one was not, so ticking Docs on an unrated bot went on authoring
@@ -702,13 +703,16 @@ function BotRoutingFields({ bot }: { bot: import("../lib/types").CustomBot }) {
           <option value="quick">Quick</option>
           <option value="balanced">Balanced</option>
           <option value="deep">Deep</option>
+          <option value="test">Test only</option>
         </select>
         <label><input type="checkbox" checked={current.local} onChange={(event) => patch({ local: event.target.checked })} /> Local</label>
       </div>
       <p className="row-meta">
-        {rated
-          ? `Rated ${saved!.intelligence} of 5 · scores ${current.intelligence} of 10`
-          : `Family default · scores ${current.intelligence} of 10`}
+        {saved?.autoRoute === false
+          ? "Test only · Auto does not pick it. A person or a named call still can."
+          : rated
+            ? `Rated ${saved!.intelligence} of 5 · scores ${current.intelligence} of 10`
+            : `Family default · scores ${current.intelligence} of 10`}
       </p>
       <div className="actions">
         <label><input type="checkbox" checked={current.inputs.images} onChange={(event) => input("images", event.target.checked)} /> Images</label>
@@ -845,7 +849,8 @@ type StoredRoutingProfile = import("../lib/types").StoredRoutingProfile;
  * bot agree about what "Deep" means. An unrated model reads "family": the
  * rating beside it comes from the family table and nothing is stored.
  */
-function storedRole(stored?: StoredRoutingProfile): "family" | "quick" | "balanced" | "deep" {
+function storedRole(stored?: StoredRoutingProfile): "family" | "quick" | "balanced" | "deep" | "test" {
+  if (stored?.autoRoute === false) return "test";
   if (!stored || stored.intelligence === undefined) return "family";
   for (const [role, values] of Object.entries(ROUTING_ROLE_PRESETS)) {
     if (stored.intelligence === values.intelligence && stored.speed === values.speed && stored.cost === values.cost) {
@@ -942,10 +947,7 @@ function OfferedModels({ bot }: { bot: import("../lib/types").CustomBot }) {
 
   const setRole = (id: string, role: string) => {
     const next = { ...(bot.routingProfiles ?? {}) };
-    const edited = routingProfileEdit(
-      bot.routingProfiles?.[id],
-      role === "family" ? "family" : ROUTING_ROLE_PRESETS[role as keyof typeof ROUTING_ROLE_PRESETS],
-    );
+    const edited = routingProfileEdit(bot.routingProfiles?.[id], routingRoleChange(role));
     if (edited) next[id] = edited;
     else delete next[id];
     store.updateCustomBot(bot.id, { routingProfiles: next });
@@ -986,8 +988,8 @@ function OfferedModels({ bot }: { bot: import("../lib/types").CustomBot }) {
         </p>
       ) : (
         <p className="row-meta">
-          {listed.length} model{listed.length === 1 ? "" : "s"} on this host. Tick the ones this bot may offer; every
-          ticked model becomes a routing candidate.
+          {listed.length} model{listed.length === 1 ? "" : "s"} on this host. Tick the ones this bot may offer. Test only
+          keeps a model off Auto; a person or a named call can still use it.
         </p>
       )}
       {catalog || !live
@@ -1028,6 +1030,7 @@ function OfferedModels({ bot }: { bot: import("../lib/types").CustomBot }) {
                     <option value="quick">Quick</option>
                     <option value="balanced">Balanced</option>
                     <option value="deep">Deep</option>
+                    <option value="test">Test only</option>
                   </select>
                   {live ? (
                     <button

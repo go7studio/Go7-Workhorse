@@ -805,6 +805,12 @@ export type CustomBot = {
   apiKey: string;
   /** Reference to an OS-encrypted secret; apiKey is hydrated only in memory. */
   credentialId?: string;
+  /**
+   * A key exists, without saying which or where. Set only on a read reply, so a
+   * reader over `/link/capacity` can still be told the bot is attached: that
+   * route sends neither `apiKey` nor `credentialId` and never will. Never saved.
+   */
+  hasCredential?: boolean;
   api: "anthropic-messages" | "openai-completions";
   contextWindow: number;
   createdAt: number;

@@ -8,6 +8,8 @@ import { watchWorkerCompletions } from "../electron/link-watch";
 import { readSnapshotFor } from "../electron/workhorse-mcp";
 import { startWorkhorseBridge } from "../electron/workhorse-bridge";
 import { catalogSessions, matchListedChat, sessionTranscript } from "../src/lib/session-bridge";
+import { normalizeSettings } from "../src/lib/settings";
+import { deskCallCatalog } from "../src/lib/watch";
 import {
   boundLinkRead,
   LINK_SCRUB_MAX_DEPTH,
@@ -50,6 +52,12 @@ const SECRETS = {
   hostTokenFile: "/tmp/local-compute-token-must-never-travel",
   // Under thirteen wraps, which is one past the scrub's depth cap.
   deepKey: "sk-thirteen-deep-must-never-travel",
+  // A plain string past the cap, under a key the allowlist names. The scrub
+  // used to keep a scalar that deep on the reasoning that its own key had been
+  // read; the key had been, the value never was.
+  deepScalar: "sk-scalar-past-the-cap-must-never-travel",
+  // On usageBudgets, whose keys are the five providers and nothing else.
+  oauthHdr: "sk-usage-budgets-oauthhdr-must-never-travel",
 };
 
 /** `depth` objects stacked over one leaf, for measuring the scrub's cap. */
@@ -139,7 +147,14 @@ function deskState(): LinkReadState {
       },
     ],
     settings: {
-      customBots: [{ id: "bot", name: "Bot", baseUrl: "https://api.example.com", model: "m", apiKey: SECRETS.botKey, credentialId: SECRETS.credential, api: "openai-completions", contextWindow: 8, createdAt: 1, privateKey: SECRETS.botPrivate }],
+      // Three bots, attached three different ways: a plaintext key, a vaulted
+      // secret with the key hydrated, and a vaulted secret with no plaintext at
+      // all. Every one of them has to survive a desk-answered capacity read.
+      customBots: [
+        { id: "bot", name: "Bot", baseUrl: "https://api.example.com", model: "m", apiKey: SECRETS.botKey, credentialId: SECRETS.credential, api: "openai-completions", contextWindow: 8, createdAt: 1, privateKey: SECRETS.botPrivate },
+        { id: "bot_two", name: "Second Bot", baseUrl: "https://api.example.org", model: "m2", apiKey: SECRETS.botKey, api: "openai-completions", contextWindow: 16, createdAt: 2 },
+        { id: "bot_three", name: "Third Bot", baseUrl: "https://api.example.net", model: "m3", apiKey: "", credentialId: SECRETS.credential, api: "anthropic-messages", contextWindow: 32, createdAt: 3 },
+      ],
       llms: { custom: { connected: true, baseUrl: "https://api.example.com", model: "m", apiKey: SECRETS.llmKey, contextWindow: 8 } },
       mcpServers: [{ name: "s", command: "c", args: ["--api-key", SECRETS.mcpArg], env: { TOKEN: SECRETS.mcpEnv }, envCredentialIds: { TOKEN: SECRETS.credential } }],
       localCompute: {
@@ -158,11 +173,27 @@ function deskState(): LinkReadState {
         ],
         legacyEnvironmentFallback: false,
       },
-      // Thirteen wraps around a key, one past the scrub's depth cap, under a
-      // field the settings allowlist does name. The allowlist copies it, so
-      // this is the cap's own probe and not the allowlist's.
-      watch: { dailyLimitPercent: 20, lockDaily: true, desktopNotify: true, lockKeys: wrap(13, { apiKey: SECRETS.deepKey }) },
+      // `lockKeys` is a field the settings allowlist does name, so the allowlist
+      // copies whatever is under it and only the depth cap can stop it. The
+      // scrub reaches these values at depth 3, so ten wraps lands a leaf at
+      // depth 13 and eleven lands one at 14 — either way, past the cap of 12.
+      watch: {
+        dailyLimitPercent: 20,
+        lockDaily: true,
+        desktopNotify: true,
+        lockKeys: {
+          // A secret scalar at depth 13. This is the one that reached a reply.
+          scalarPastCap: wrap(10, SECRETS.deepScalar),
+          // A record at depth 13, which was already dropped for its marker.
+          recordPastCap: wrap(10, { apiKey: SECRETS.deepKey }),
+          // Fourteen deep: the record above it is the marker before the scalar
+          // is ever read, so this one never depended on the scalar rule.
+          fourteenWraps: wrap(11, SECRETS.deepScalar),
+        },
+      },
       workshop: { packs: [{ id: "pack", on: true, sources: [], deep: wrap(13, { apiKey: SECRETS.deepKey }) }] },
+      // Five known keys, one planted sixth. Walking own keys carried it out.
+      usageBudgets: { grok: 2_000_000, claude: 1_000_000, oauthHdr: SECRETS.oauthHdr },
     },
     usage: [
       { id: "u1", at: Date.now(), provider: "claude", model: "claude-opus-5", sessionId: "sess_worker", inputTokens: 10, outputTokens: 2, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0.5, privateKey: SECRETS.usagePrivate },
@@ -294,8 +325,9 @@ test("no read route carries a credential, an environment value or attachment byt
   // session, on its run, on a message, in the queue, on a project, on a bot
   // row, in the settings, on a ledger line, on a plan, on a permit, on a day
   // mark and on an external task. Two of them are named `privateKey` and
-  // `authToken`, which no scrub list knows, and one is thirteen wraps deep.
-  assert.ok(Object.keys(SECRETS).length >= 18, "the probe must cover every place a row can carry one");
+  // `authToken`, which no scrub list knows; one is a sixth key on a map with
+  // five; and two are past the depth cap, one of them a plain string.
+  assert.ok(Object.keys(SECRETS).length >= 20, "the probe must cover every place a row can carry one");
   for (const [route, id] of routes) {
     const reply = answer(full, route, id, 40, "sess_parent");
     assert.ok("text" in reply, `${route} must answer`);
@@ -338,11 +370,16 @@ test("the capacity settings are named field by field, so no key rides along", ()
   assert.equal(settings.mcpServers, undefined);
   assert.equal(settings.profile, undefined);
   const bots = settings.customBots as Array<Record<string, unknown>>;
-  assert.equal(bots.length, 1);
-  assert.equal(bots[0].name, "Bot");
-  assert.equal(bots[0].apiKey, undefined);
-  assert.equal(bots[0].credentialId, undefined);
-  assert.equal(bots[0].privateKey, undefined);
+  assert.deepEqual(bots.map((bot) => bot.name), ["Bot", "Second Bot", "Third Bot"]);
+  for (const bot of bots) {
+    assert.equal(bot.apiKey, undefined, "a key never travels, whatever else the row says");
+    assert.equal(bot.credentialId, undefined, "nor the id of the vaulted one");
+    assert.equal(bot.privateKey, undefined);
+    // The yes or no that replaces them. Attached three ways, true three times.
+    assert.equal(bot.hasCredential, true);
+  }
+  // usageBudgets is five known provider keys. A sixth is not one of them.
+  assert.deepEqual(settings.usageBudgets, { grok: 2_000_000, claude: 1_000_000 });
   // A local compute host keeps its address and loses the path to its token.
   const hosts = (settings.localCompute as { hosts: Array<Record<string, unknown>> }).hosts;
   assert.equal(hosts[0].baseUrl, "http://127.0.0.1:9");
@@ -360,10 +397,17 @@ test("a key added to a session later cannot ride out on a snapshot", () => {
 });
 
 test("the scrub's depth cap drops the shape it stopped reading, and never passes it", () => {
-  // At the cap the walk still reads keys, so the key goes and the rest stays.
-  const atCap = scrubLinkRead(wrap(LINK_SCRUB_MAX_DEPTH, { apiKey: SECRETS.deepKey, keep: "yes" }));
-  assert.deepEqual(secretsIn(JSON.stringify(atCap)), []);
-  assert.match(JSON.stringify(atCap), /"keep":"yes"/);
+  // A value travels as deep as the cap and no deeper. The last record whose own
+  // values are still inside it sits one level above: its keys are read, the key
+  // goes, and what is left is at the cap and kept.
+  const inside = scrubLinkRead(wrap(LINK_SCRUB_MAX_DEPTH - 1, { apiKey: SECRETS.deepKey, keep: "yes" }));
+  assert.deepEqual(secretsIn(JSON.stringify(inside)), []);
+  assert.match(JSON.stringify(inside), /"keep":"yes"/);
+  // At the cap the walk still reads keys, so the key still goes, but everything
+  // under it is past the cap and says so rather than travelling unchecked.
+  const atCap = JSON.stringify(scrubLinkRead(wrap(LINK_SCRUB_MAX_DEPTH, { apiKey: SECRETS.deepKey, keep: "yes" })));
+  assert.deepEqual(secretsIn(atCap), []);
+  assert.match(atCap, /"keep":"\[too deep to scrub\]"/);
   // One past it the walk has stopped, so the shape itself cannot travel.
   const pastCap = scrubLinkRead(wrap(LINK_SCRUB_MAX_DEPTH + 1, { apiKey: SECRETS.deepKey, keep: "yes" }));
   const text = JSON.stringify(pastCap);
@@ -373,14 +417,60 @@ test("the scrub's depth cap drops the shape it stopped reading, and never passes
   // A list that deep is dropped the same way.
   const list = scrubLinkRead(wrap(LINK_SCRUB_MAX_DEPTH + 1, [{ apiKey: SECRETS.deepKey }]));
   assert.deepEqual(secretsIn(JSON.stringify(list)), []);
-  // A plain value that deep is kept: its own key was read one level up.
-  assert.match(JSON.stringify(scrubLinkRead(wrap(LINK_SCRUB_MAX_DEPTH + 1, "plain"))), /"plain"/);
-  // And the cap holds on a real route: the same nest under a named field, so
-  // the allowlist copies it and only the cap can stop it.
-  const settings = projectLinkCapacity(deskState(), "sess_parent").settings as { watch: { lockKeys: unknown } };
-  const carried = JSON.stringify(settings.watch.lockKeys);
-  assert.deepEqual(secretsIn(carried), []);
-  assert.ok(carried.includes(LINK_SCRUB_TOO_DEEP));
+  // A plain value that deep goes too. Its key was read one level up; the value
+  // under that key never was, and a secret is a plain value like any other.
+  const scalar = scrubLinkRead(wrap(LINK_SCRUB_MAX_DEPTH + 1, SECRETS.deepScalar));
+  assert.deepEqual(secretsIn(JSON.stringify(scalar)), [], "a scalar past the cap is not checked, so it does not travel");
+  assert.deepEqual(scrubLinkRead(wrap(LINK_SCRUB_MAX_DEPTH + 1, "plain")), wrap(LINK_SCRUB_MAX_DEPTH + 1, LINK_SCRUB_TOO_DEEP));
+  // Fourteen wraps never depended on that rule: the record at thirteen is
+  // already the marker, so the walk stops before the scalar is reached.
+  const fourteen = JSON.stringify(scrubLinkRead(wrap(LINK_SCRUB_MAX_DEPTH + 2, SECRETS.deepScalar)));
+  assert.deepEqual(secretsIn(fourteen), []);
+  assert.ok(fourteen.includes(LINK_SCRUB_TOO_DEEP));
+  // And the cap holds on a real route: the same nests under a named field, so
+  // the allowlist copies them and only the cap can stop them.
+  const settings = projectLinkCapacity(deskState(), "sess_parent").settings as {
+    watch: { lockKeys: Record<string, unknown> };
+  };
+  for (const key of ["scalarPastCap", "recordPastCap", "fourteenWraps"]) {
+    const carried = JSON.stringify(settings.watch.lockKeys[key]);
+    assert.deepEqual(secretsIn(carried), [], `${key} carried a planted value past the cap`);
+    assert.ok(carried.includes(LINK_SCRUB_TOO_DEEP), `${key} says plainly that it was cut`);
+  }
+});
+
+test("a desk-answered capacity lists every custom bot the file path lists", () => {
+  const full = deskState();
+  const botRows = (settings: unknown) =>
+    deskCallCatalog({ settings: normalizeSettings(settings), usage: [], plans: {}, permits: {} })
+      .filter((row) => row.id.startsWith("bot:"))
+      .map((row) => ({ id: row.id, name: row.name, model: row.model, canCall: row.canCall }));
+
+  const compact = projectLinkCapacity(full, "sess_parent");
+  const fromDesk = botRows(compact.settings);
+  const fromFile = botRows(full.settings);
+
+  // Every bot, whichever way it is attached, on the path that answers when the
+  // desk is up. This is what a harness asking workhorse_query_capacity reads.
+  assert.deepEqual(fromDesk.map((row) => row.id), ["bot:bot", "bot:bot_two", "bot:bot_three"]);
+  assert.deepEqual(fromDesk, fromFile, "the desk-answered catalog must match the file one, row for row");
+  assert.ok(fromDesk.every((row) => row.canCall), "a bot with a key can be called on either path");
+
+  // And it said so without sending the key or the id of the vaulted one.
+  const bots = (compact.settings as { customBots: Array<Record<string, unknown>> }).customBots;
+  for (const bot of bots) {
+    assert.equal(bot.apiKey, undefined);
+    assert.equal(bot.credentialId, undefined);
+  }
+  assert.deepEqual(secretsIn(JSON.stringify(compact.settings)), []);
+
+  // The flag keeps the row. It never stands in for a secret: the normalized bot
+  // holds an empty key, so nothing downstream can mistake it for one.
+  for (const bot of normalizeSettings(compact.settings).customBots) {
+    assert.equal(bot.apiKey, "", "a read reply cannot invent a key");
+    assert.equal(bot.credentialId, undefined);
+    assert.equal(bot.hasCredential, true);
+  }
 });
 
 test("a capacity read sends the recent ledger and drops what is out of every plan window", () => {

@@ -114,17 +114,19 @@ export const LINK_SCRUB_TOO_DEEP = "[too deep to scrub]";
 /**
  * Drop a credential, an environment value or attachment bytes wherever they sit.
  *
- * Past the cap the walk stops, so a record or a list below it would travel with
- * its keys never read: thirteen wraps around an `apiKey` used to be enough to
- * carry one out. A cap has to drop what it cannot check, so a shape that deep
- * becomes a marker string and a reader sees plainly that something was cut. A
- * scalar is kept, because its own key was already tested one level up and a
- * scalar hides nothing beneath it.
+ * Past the cap the walk stops, so nothing below it can be checked and nothing
+ * below it travels: record, list or scalar, it becomes a marker string and a
+ * reader sees plainly that something was cut.
+ *
+ * Keeping a scalar down there used to look safe, on the reasoning that its own
+ * key was read one level up. The key was read; the value never was. A secret
+ * sitting at depth thirteen under a key the allowlist names — `watch.lockKeys`
+ * is the one that reached a capacity reply — passed that test and went out. A
+ * cap drops what it cannot check, and the name of a key is not a check on what
+ * is under it.
  */
 export function scrubLinkRead<T>(value: T, depth = 0): T {
-  if (depth > LINK_SCRUB_MAX_DEPTH) {
-    return (isRecord(value) || Array.isArray(value) ? LINK_SCRUB_TOO_DEEP : value) as unknown as T;
-  }
+  if (depth > LINK_SCRUB_MAX_DEPTH) return LINK_SCRUB_TOO_DEEP as unknown as T;
   if (Array.isArray(value)) return value.map((item) => scrubLinkRead(item, depth + 1)) as unknown as T;
   if (!isRecord(value)) return value;
   const out: Record<string, unknown> = {};
@@ -438,13 +440,43 @@ function compactProjects(projects: unknown): unknown[] {
   }));
 }
 
-/** A map the desk keyed itself, holding plain values. A shape under a key is dropped. */
-function scalarMap(source: Record<string, unknown>): Record<string, unknown> {
-  const out: Record<string, unknown> = {};
+/**
+ * A map whose keys the desk did not choose: a session id, a bot id, a day.
+ *
+ * Walking own keys is what let a planted `oauthHdr` ride out on `usageBudgets`.
+ * Where the keys are known they are written down and copied by name. Where they
+ * are genuinely dynamic there is nothing to name, so the value carries the test
+ * instead: only what `project` returns is copied and everything else is
+ * dropped. A key too long to be an id is dropped with it.
+ */
+const DYNAMIC_KEY_CHARS = 200;
+
+function projectedMap<T>(
+  source: Record<string, unknown>,
+  project: (value: unknown) => T | undefined,
+): Record<string, T> {
+  const out: Record<string, T> = {};
   for (const [key, value] of Object.entries(source)) {
-    if (value === null || typeof value !== "object") out[key] = value;
+    if (!key.trim() || key.length > DYNAMIC_KEY_CHARS) continue;
+    const kept = project(value);
+    if (kept !== undefined) out[key] = kept;
   }
   return out;
+}
+
+/** `Settings.usageBudgets`: one token bank per provider. Five known keys, five named. */
+function compactUsageBudgets(source: Record<string, unknown>): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const id of ["grok", "claude", "codex", "cursor", "custom"] as const) {
+    const value = source[id];
+    if (typeof value === "number" && Number.isFinite(value)) out[id] = value;
+  }
+  return out;
+}
+
+/** `WatchPermit.sessions`: a session id stamped with the local day it was let past. */
+function dayStamp(value: unknown): string | undefined {
+  return typeof value === "string" && value.length <= 40 ? value : undefined;
 }
 
 /** `UsageEvent`: one line of the desk ledger. All scalars. */
@@ -517,6 +549,28 @@ const CUSTOM_BOT_FIELDS = [
   "enabled",
 ] as const;
 
+/**
+ * The bots, each with a yes or no where its key would be.
+ *
+ * `apiKey` and `credentialId` are not on the list above and never will be, but
+ * a reader still has to be told the bot has one: `normalizeCustomBot` drops a
+ * row with neither, so a desk-answered capacity listed no custom bot at all and
+ * a harness asking `workhorse_query_capacity` was never told Grok Bot, MiniMax
+ * or the DGX Spark exist. Hiding the bots that exist is worse than the file
+ * fallback it replaced.
+ *
+ * So one boolean, and nothing else. Not the key, not the id of the vaulted
+ * secret: whether there is one. That is the whole of what the reader asked.
+ */
+function compactCustomBots(bots: unknown): Record<string, unknown>[] {
+  if (!Array.isArray(bots)) return [];
+  return bots.filter(isRecord).map((bot) => {
+    const key = typeof bot.apiKey === "string" ? bot.apiKey.trim() : "";
+    const credentialId = typeof bot.credentialId === "string" ? bot.credentialId.trim() : "";
+    return { ...pick(bot, CUSTOM_BOT_FIELDS), ...(key || credentialId ? { hasCredential: true } : {}) };
+  });
+}
+
 const WATCH_FIELDS = [
   "dailyLimitPercent",
   "lockDaily",
@@ -571,8 +625,8 @@ function compactSettings(settings: unknown): LooseMessage | undefined {
   const hosts = isRecord(settings.localCompute) ? pickRows(settings.localCompute.hosts, LOCAL_HOST_FIELDS) : undefined;
   return {
     llms: { ...stock, ...(custom ? { custom } : {}) },
-    customBots: pickRows(settings.customBots, CUSTOM_BOT_FIELDS) ?? [],
-    ...(isRecord(settings.usageBudgets) ? { usageBudgets: scalarMap(settings.usageBudgets) } : {}),
+    customBots: compactCustomBots(settings.customBots),
+    ...(isRecord(settings.usageBudgets) ? { usageBudgets: compactUsageBudgets(settings.usageBudgets) } : {}),
     ...(isRecord(settings.watch) ? { watch: pick(settings.watch, WATCH_FIELDS) } : {}),
     ...(isRecord(settings.routing) ? { routing: pick(settings.routing, ROUTING_FIELDS) } : {}),
     ...(isRecord(settings.learning) ? { learning: pick(settings.learning, LEARNING_FIELDS) } : {}),
@@ -608,41 +662,35 @@ function compactDeskPlans(plans: unknown): LooseMessage | undefined {
     const plan = compactPlan(plans[id]);
     if (plan) out[id] = plan;
   }
-  if (isRecord(plans.custom)) {
-    const custom: LooseMessage = {};
-    for (const [id, plan] of Object.entries(plans.custom)) {
-      const row = compactPlan(plan);
-      if (row) custom[id] = row;
-    }
-    out.custom = custom;
-  }
+  // Keyed by bot id, which the desk did not choose. `compactPlan` is the test:
+  // it names every field it copies and returns nothing for anything that is not
+  // a plan, so a scalar parked under a stray key is dropped rather than copied.
+  if (isRecord(plans.custom)) out.custom = projectedMap(plans.custom, compactPlan);
   return out;
 }
 
 /** `WatchPermit`: who was let past the daily bank, and for how long. */
 const WATCH_PERMIT_FIELDS = ["untilReset", "day"] as const;
 
+/** Keyed by provider or `bot:<id>`, so the value is what is tested, not the key. */
 function compactWatchPermits(permits: unknown): LooseMessage | undefined {
   if (!isRecord(permits)) return undefined;
-  const out: LooseMessage = {};
-  for (const [key, permit] of Object.entries(permits)) {
-    if (!isRecord(permit)) continue;
-    const sessions = isRecord(permit.sessions) ? scalarMap(permit.sessions) : undefined;
-    out[key] = { ...pick(permit, WATCH_PERMIT_FIELDS), ...(sessions ? { sessions } : {}) };
-  }
-  return out;
+  return projectedMap(permits, (permit) => {
+    if (!isRecord(permit)) return undefined;
+    // The inner map is keyed by session id, which the desk did not choose
+    // either, so its values are held to a day stamp and nothing else.
+    const sessions = isRecord(permit.sessions) ? projectedMap(permit.sessions, dayStamp) : undefined;
+    return { ...pick(permit, WATCH_PERMIT_FIELDS), ...(sessions ? { sessions } : {}) };
+  });
 }
 
 /** `WatchDayMark`: where a vendor's leftover stood when the day turned. */
 const DAY_MARK_FIELDS = ["day", "leftover"] as const;
 
+/** Keyed by provider, and the day and the leftover are the only fields copied. */
 function compactWatchDayMarks(marks: unknown): LooseMessage | undefined {
   if (!isRecord(marks)) return undefined;
-  const out: LooseMessage = {};
-  for (const [key, mark] of Object.entries(marks)) {
-    if (isRecord(mark)) out[key] = pick(mark, DAY_MARK_FIELDS);
-  }
-  return out;
+  return projectedMap(marks, (mark) => (isRecord(mark) ? pick(mark, DAY_MARK_FIELDS) : undefined));
 }
 
 /** `ExternalTask`: one slice sent out to OpenClaw or Hermes. */

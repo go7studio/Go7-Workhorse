@@ -28,6 +28,19 @@ import { CLAUDE_EFFORTS, effortsFor } from "../src/lib/models";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
+const launchDetect = {
+  env: { CLAUDE_ACP_BIN: path.join(ROOT, "fixture", "claude-agent-acp") },
+  homedir: path.join(ROOT, "fixture"),
+  platform: "linux" as const,
+  pathDirs: [],
+  extraDirs: [],
+  moduleDirs: [],
+  existsSync: (file: string) => file === path.join(ROOT, "fixture", "claude-agent-acp"),
+  readFile: () => "",
+  listDir: () => [],
+  keychainHasLogin: () => false,
+};
+
 test("vendorSendTarget routes claude live like grok and codex", () => {
   assert.equal(vendorSendTarget("claude"), "claude");
   assert.equal(vendorSendTarget("grok"), "grok");
@@ -186,6 +199,8 @@ test("buildClaudeLaunchSpec never spawns grok and maps permission modes", () => 
     assert.equal(resolveClaudePermissionMode("always-approve", "read-only"), "default");
 
     const spec = buildClaudeLaunchSpec({
+      detect: launchDetect,
+      storedToken: () => null,
       model: "claude-opus-5",
       effort: "high",
       cwd: ROOT,
@@ -202,6 +217,8 @@ test("buildClaudeLaunchSpec never spawns grok and maps permission modes", () => 
     assert.match(spec.argv.join(" ") + spec.command, /claude-agent-acp|index\.js/);
 
     const fable = buildClaudeLaunchSpec({
+      detect: launchDetect,
+      storedToken: () => null,
       model: "Fable 5",
       effort: "high",
       cwd: ROOT,
@@ -221,6 +238,8 @@ test("buildClaudeLaunchSpec never spawns grok and maps permission modes", () => 
     );
 
     const yolo = buildClaudeLaunchSpec({
+      detect: launchDetect,
+      storedToken: () => null,
       model: "claude-sonnet-5",
       effort: "medium",
       cwd: ROOT,
@@ -230,6 +249,8 @@ test("buildClaudeLaunchSpec never spawns grok and maps permission modes", () => 
     assert.equal(yolo.permissionMode, "bypassPermissions");
 
     const boxed = buildClaudeLaunchSpec({
+      detect: launchDetect,
+      storedToken: () => null,
       model: "claude-sonnet-5",
       effort: "medium",
       cwd: ROOT,
@@ -425,6 +446,7 @@ test("resolveClaudePlanToken refreshes an expired Claude Code OAuth token", asyn
 
 test("fetchClaudePlanUsage stays unknown without a token", async () => {
   const plan = await fetchClaudePlanUsage({
+      userAgent: "claude-code/test",
     env: {},
     homedir: "/Users/nobody",
     platform: "linux",
@@ -444,6 +466,7 @@ test("fetchClaudePlanUsage stays unknown without a token", async () => {
 test("fetchClaudePlanUsage sends the claude-code User-Agent", async () => {
   const seen: string[] = [];
   const plan = await fetchClaudePlanUsage({
+      userAgent: "claude-code/test",
     token: "test-token",
     fetchImpl: async (_url, init) => {
       const headers = new Headers(init?.headers);
@@ -576,6 +599,8 @@ test("a packaged build names the missing CLI instead of spawning into the archiv
       detect: {
         env: { CLAUDE_ACP_BIN: devAcp, PATH: "" },
         homedir: "/Users/nobody",
+        keychainHasLogin: () => false,
+        readFile: () => "",
         pathDirs: ["/opt/homebrew/bin"],
         moduleDirs: [],
         existsSync: (file: string) => file === devAcp || file === node,
@@ -625,8 +650,7 @@ test("an expired or unusable credential is not a login", () => {
     true,
   );
 
-  // Claude Desktop logged in, but its token is DPAPI-encrypted. Off Windows we
-  // cannot read it, so it is not a login this desk can use.
+  // An incomplete Desktop store is no usable login on either platform.
   const macConfig = path.join(home, "Library", "Application Support", "Claude", "config.json");
   assert.equal(
     hasClaudeLoginArtifact(
@@ -737,9 +761,9 @@ test("Claude ring stops lying when an unparseable 200 shadows the next fetch", a
       },
     };
   };
-  const first = await fetchClaudePlanUsage({ token: "sk-test", nodeGet });
+  const first = await fetchClaudePlanUsage({ userAgent: "claude-code/test", token: "sk-test", nodeGet });
   assert.equal(first, undefined, "an unparseable body returns undefined but must not poison the cache");
-  const second = await fetchClaudePlanUsage({ token: "sk-test", nodeGet });
+  const second = await fetchClaudePlanUsage({ userAgent: "claude-code/test", token: "sk-test", nodeGet });
   assert.ok(second, "a real fetch after an unparseable response must surface a plan");
   assert.equal(second?.usedPercent, 4);
   clearClaudePlanCache();
@@ -761,8 +785,8 @@ test("Claude ring caches successful plans but still re-reads after 180s", async 
     calls += 1;
     return { status: 200, json: planBody };
   };
-  const first = await fetchClaudePlanUsage({ token: "sk-test", nodeGet });
-  const second = await fetchClaudePlanUsage({ token: "sk-test", nodeGet });
+  const first = await fetchClaudePlanUsage({ userAgent: "claude-code/test", token: "sk-test", nodeGet });
+  const second = await fetchClaudePlanUsage({ userAgent: "claude-code/test", token: "sk-test", nodeGet });
   assert.equal(calls, 1, "a successful plan is served from the cache for the next caller");
   assert.deepEqual(first, second);
 
@@ -770,7 +794,7 @@ test("Claude ring caches successful plans but still re-reads after 180s", async 
   // hit the transport again. The cached value is still correct, but the
   // desk must not pretend it is fresh forever.
   clearClaudePlanCache();
-  const third = await fetchClaudePlanUsage({ token: "sk-test", nodeGet });
+  const third = await fetchClaudePlanUsage({ userAgent: "claude-code/test", token: "sk-test", nodeGet });
   assert.equal(calls, 2, "after the cache window the next fetch goes to the wire");
   assert.deepEqual(third, first);
   clearClaudePlanCache();
@@ -793,9 +817,9 @@ test("Claude ring still returns a 429 fallback when a real plan was cached", asy
     if (call === 1) return { status: 200, json: planBody };
     return { status: 429, json: null };
   };
-  const seeded = await fetchClaudePlanUsage({ token: "sk-test", nodeGet });
+  const seeded = await fetchClaudePlanUsage({ userAgent: "claude-code/test", token: "sk-test", nodeGet });
   assert.equal(seeded?.usedPercent, 11);
-  const rateLimited = await fetchClaudePlanUsage({ token: "sk-test", nodeGet });
+  const rateLimited = await fetchClaudePlanUsage({ userAgent: "claude-code/test", token: "sk-test", nodeGet });
   assert.deepEqual(rateLimited, seeded, "a 429 inside the cache window returns the last good plan");
   clearClaudePlanCache();
 });
@@ -820,12 +844,12 @@ test("Claude ring does not serve a first login's plan to a second login", async 
     return { status: 200, json: planBody(10) };
   };
   // First login: 10% reading.
-  const firstLogin = await fetchClaudePlanUsage({ token: "sk-first-login", nodeGet });
+  const firstLogin = await fetchClaudePlanUsage({ userAgent: "claude-code/test", token: "sk-first-login", nodeGet });
   assert.equal(firstLogin?.usedPercent, 10, "the first login gets its own reading");
   assert.equal(seen.length, 1, "the first login hit the wire once");
   // Second login must NOT be served the first login\'s cached plan. It has a
   // different identity, so the cache misses and the transport is called again.
-  const secondLogin = await fetchClaudePlanUsage({ token: "sk-second-login", nodeGet });
+  const secondLogin = await fetchClaudePlanUsage({ userAgent: "claude-code/test", token: "sk-second-login", nodeGet });
   assert.equal(seen.length, 2, "the second login hit the wire, did not inherit the cache");
   assert.equal(secondLogin?.usedPercent, 10, "the wire\'s answer is what the second login sees");
   clearClaudePlanCache();
@@ -851,9 +875,9 @@ test("Claude ring keys the cache by token identity, not by the token itself", as
       },
     };
   };
-  await fetchClaudePlanUsage({ token: "sk-test-A", nodeGet });
-  await fetchClaudePlanUsage({ token: "sk-test-B", nodeGet });
-  await fetchClaudePlanUsage({ token: "sk-test-A", nodeGet });
+  await fetchClaudePlanUsage({ userAgent: "claude-code/test", token: "sk-test-A", nodeGet });
+  await fetchClaudePlanUsage({ userAgent: "claude-code/test", token: "sk-test-B", nodeGet });
+  await fetchClaudePlanUsage({ userAgent: "claude-code/test", token: "sk-test-A", nodeGet });
   assert.equal(seen.length, 2, "tokens A and B each went to the wire once; A\'s second call came from the cache");
   clearClaudePlanCache();
 });
@@ -883,10 +907,10 @@ test("Claude ring drops an expired plan on the 429 fallback, not just on a fresh
       // unknown and the next beat inside the window reads fresh.
       return call === 1 ? { status: 200, json: planBody } : { status: 429, json: null };
     };
-    const seeded = await fetchClaudePlanUsage({ token: "sk-test", nodeGet });
+    const seeded = await fetchClaudePlanUsage({ userAgent: "claude-code/test", token: "sk-test", nodeGet });
     assert.equal(seeded?.usedPercent, 9);
     now += 181_000; // past CACHE_MS
-    const rateLimited = await fetchClaudePlanUsage({ token: "sk-test", nodeGet });
+    const rateLimited = await fetchClaudePlanUsage({ userAgent: "claude-code/test", token: "sk-test", nodeGet });
     assert.equal(rateLimited, undefined, "an expired plan must NOT survive a 429 fallback");
     // Inside a fresh window the 429 fallback still wins.
     now += 0; // still expired
@@ -896,9 +920,9 @@ test("Claude ring drops an expired plan on the 429 fallback, not just on a fresh
     clearClaudePlanCache();
     now = Date.parse("2026-09-07T12:00:00.000Z");
     call = 0;
-    await fetchClaudePlanUsage({ token: "sk-test", nodeGet });
+    await fetchClaudePlanUsage({ userAgent: "claude-code/test", token: "sk-test", nodeGet });
     now += 60_000; // inside CACHE_MS
-    const insideWindow = await fetchClaudePlanUsage({ token: "sk-test", nodeGet });
+    const insideWindow = await fetchClaudePlanUsage({ userAgent: "claude-code/test", token: "sk-test", nodeGet });
     assert.ok(insideWindow, "a 429 inside the cache window still returns the last good plan");
   } finally {
     Date.now = realDateNow;

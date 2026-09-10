@@ -3,8 +3,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { claudeDesktopConfigLooksLoggedIn, findClaudeDesktopRoot, readClaudeDesktopOauth } from "./claude-desktop-auth";
-import { claudeTokenProblem, storedClaudeToken } from "./claude-stored-token";
+import { readClaudeDesktopOauth, type ClaudeDesktopAuthInput } from "./claude-desktop-auth";
+import { claudeCredentialProblem, claudeTokenFingerprint, claudeTokenProblem, storedClaudeToken } from "./claude-stored-token";
 import { deskHelperEnv, extraDeskDirs, isInsideAsar, runningInElectron } from "./desk-path";
 import { detectClaudeAccessDefaults } from "./vendor-access";
 import type { BotAccessDefaults } from "../src/lib/types";
@@ -21,7 +21,7 @@ export const CLAUDE_CLI_NOT_INSTALLED =
 export const CLAUDE_CLI_NOT_ON_PATH = "Claude Code CLI not on the desk's PATH";
 export const CLAUDE_ACP_NOT_ON_PATH = "Claude ACP not on the desk's PATH";
 
-export type ClaudeLoginDetectInput = {
+export type ClaudeLoginDetectInput = ClaudeDesktopAuthInput & {
   env?: NodeJS.Dict<string>;
   homedir?: string;
   platform?: NodeJS.Platform;
@@ -327,17 +327,16 @@ export function oauthNotExpired(value: unknown, now: number): boolean {
   return expiresAt > now;
 }
 
-export function hasClaudeLoginArtifact(
-  claudeHome: string,
-  homedir: string,
-  existsSync: (filePath: string) => boolean,
-  readFile: (filePath: string) => string,
-  env: NodeJS.Dict<string>,
-  platform: NodeJS.Platform = process.platform,
-  now: number = Date.now(),
-  keychainHasLogin: () => boolean = macKeychainHasClaudeLogin,
-): boolean {
-  if (env.ANTHROPIC_API_KEY?.trim() || env.CLAUDE_CODE_OAUTH_TOKEN?.trim()) return true;
+/** Only the CLI's own store counts here. Exported and Desktop tokens override it. */
+export function hasClaudeCliLoginArtifact(input: ClaudeLoginDetectInput = {}, now = Date.now()): boolean {
+  if (claudeTokenProblem(null)) return false;
+  const env = input.env ?? process.env;
+  const homedir = input.homedir ?? os.homedir();
+  const platform = input.platform ?? process.platform;
+  const existsSync = input.existsSync ?? fs.existsSync;
+  const readFile = input.readFile ?? ((file: string) => fs.readFileSync(file, "utf8"));
+  const keychainHasLogin = input.keychainHasLogin ?? macKeychainHasClaudeLogin;
+  const claudeHome = env.CLAUDE_CONFIG_DIR?.trim() || env.CLAUDE_HOME?.trim() || path.join(homedir, ".claude");
   // Check the keychain before the file: on a Mac the file is often a stale
   // leftover from before the CLI moved its store, and reading it alone
   // reports a dead login for someone who is signed in.
@@ -353,13 +352,45 @@ export function hasClaudeLoginArtifact(
       /* ignore broken creds */
     }
   }
-  if (readClaudeDesktopOauth({ existsSync, readFile, homedir, platform, env })) return true;
-  // Claude Desktop being logged in only helps if we can read its token, and
-  // that decryption is Windows DPAPI. Elsewhere it is a login we cannot use,
-  // so counting it reports a connection that cannot carry a message.
-  if (platform !== "win32") return false;
-  const root = findClaudeDesktopRoot({ env, homedir, platform, existsSync });
-  return Boolean(root && claudeDesktopConfigLooksLoggedIn(root, readFile));
+  return false;
+}
+
+export function hasClaudeLoginArtifact(
+  claudeHome: string,
+  homedir: string,
+  existsSync: (filePath: string) => boolean,
+  readFile: (filePath: string) => string,
+  env: NodeJS.Dict<string>,
+  platform: NodeJS.Platform = process.platform,
+  now: number = Date.now(),
+  keychainHasLogin: () => boolean = macKeychainHasClaudeLogin,
+): boolean {
+  return selectClaudeCredential({ homedir, env: { ...env, CLAUDE_CONFIG_DIR: claudeHome }, platform, existsSync, readFile, keychainHasLogin, storedToken: () => null }, now).source !== "none";
+}
+
+export type ClaudeCredential = {
+  source: "desk" | "cli" | "environment" | "desktop" | "none";
+  fingerprint: string;
+  env: Record<string, string>;
+};
+
+/** Detection and launch walk the same chain and honor the same refusal records. */
+export function selectClaudeCredential(input: ClaudeLoginDetectInput = {}, now = Date.now()): ClaudeCredential {
+  const outer = input.env ?? process.env;
+  const stored = (input.storedToken ?? storedClaudeToken)();
+  const problem = input.tokenProblem === undefined ? claudeTokenProblem(stored) : input.tokenProblem;
+  const credential = (source: ClaudeCredential["source"], token: string, name = "CLAUDE_CODE_OAUTH_TOKEN"): ClaudeCredential => ({
+    source, fingerprint: claudeTokenFingerprint(token), env: { [name]: token },
+  });
+  if (stored && !problem) return credential("desk", stored);
+  if (hasClaudeCliLoginArtifact(input, now)) return { source: "cli", fingerprint: claudeTokenFingerprint(null), env: {} };
+  const ownOauth = outer.CLAUDE_CODE_OAUTH_TOKEN?.trim();
+  const ownKey = outer.ANTHROPIC_API_KEY?.trim();
+  if (ownOauth && !claudeTokenProblem(ownOauth)) return credential("environment", ownOauth);
+  if (ownKey && !claudeTokenProblem(ownKey)) return credential("environment", ownKey, "ANTHROPIC_API_KEY");
+  const desktop = readClaudeDesktopOauth(input);
+  if (desktop && !claudeTokenProblem(desktop.accessToken)) return credential("desktop", desktop.accessToken);
+  return { source: "none", fingerprint: "none", env: {} };
 }
 
 export function detectClaudeLogin(input: ClaudeLoginDetectInput = {}): ClaudeLoginDetectResult {
@@ -381,23 +412,10 @@ export function detectClaudeLogin(input: ClaudeLoginDetectInput = {}): ClaudeLog
   // is where it lives now, and reading it here keeps sign-in on this desk
   // working without spreading the token to do it.
   const stored = (input.storedToken ?? storedClaudeToken)();
-  // A login the vendor refused is not a login, however it got here. The card
-  // then says Sign in again and offers the button, until a different token is
-  // stored; a token that merely exists used to read as On for good.
-  const authProblem = input.tokenProblem === undefined ? claudeTokenProblem(stored) : input.tokenProblem || null;
-  const loggedIn =
-    !authProblem &&
-    (Boolean(stored) ||
-    hasClaudeLoginArtifact(
-      claudeHome,
-      homedir,
-      existsSync,
-      readFile,
-      env,
-      platform,
-      Date.now(),
-      input.keychainHasLogin ?? macKeychainHasClaudeLogin,
-    ));
+  const credential = selectClaudeCredential(input);
+  const launchProblem = input.tokenProblem === undefined ? claudeTokenProblem(stored) : input.tokenProblem || null;
+  const authProblem = launchProblem ?? claudeCredentialProblem("none");
+  const loggedIn = credential.source !== "none";
   const connected = Boolean(acpBinary && loggedIn);
   // Same split as Codex: claude-launch.ts reads cliBinary as
   // CLAUDE_CODE_EXECUTABLE and throws CLAUDE_CLI_NOT_INSTALLED without it, so a

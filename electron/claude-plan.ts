@@ -9,7 +9,7 @@ import { readClaudeDesktopOauth } from "./claude-desktop-auth";
 import { storedClaudeToken } from "./claude-stored-token";
 import { oauthNotExpired, resolveClaudeCliBinary } from "./claude-login";
 import { deskHelperEnv } from "./desk-path";
-import { clearClaudeTokenRejection, markClaudeTokenRejected } from "./claude-stored-token";
+import { clearClaudeTokenRejection, markClaudeMeterTokenSuspect } from "./claude-stored-token";
 
 /**
  * `security` is the desk asking macOS for one keychain item. It is not a
@@ -404,17 +404,9 @@ export function clearClaudePlanCache(): void {
   cachedPlans = {};
 }
 
-/**
- * What the usage ring's own answer says about the login behind it.
- *
- * The desk already asks Anthropic for this on its own beat, with the same
- * login every chat uses, and used to throw a 401 away with every other bad
- * status — so a dead token stayed invisible until a chat failed. A refusal is
- * recorded and a success clears one, which keeps a single blip from stranding
- * a good login. Every other status says nothing about the login.
- */
+/** The meter can question its credential, but only a launch can refuse a login. */
 export function judgeClaudeRingStatus(status: number, token: string | null = null): void {
-  if (status === 401 || status === 403) markClaudeTokenRejected(`Anthropic refused the desk's login (${status}).`, token);
+  if (status === 401 || status === 403) markClaudeMeterTokenSuspect(`Anthropic refused the desk's usage token (${status}).`, token);
   else if (status >= 200 && status < 300) clearClaudeTokenRejection(token);
 }
 
@@ -423,6 +415,8 @@ export async function fetchClaudePlanUsage(input?: ClaudePlanTokenInput & {
   token?: string;
   /** Tests inject a transport to exercise the cache path without a real socket. */
   nodeGet?: NodeGetJson;
+  /** Tests avoid probing the installed CLI for its version. */
+  userAgent?: string;
 }): Promise<ClaudePlanUsage | undefined> {
   try {
     const token = input?.token?.trim() || (await resolveClaudePlanToken(input));
@@ -430,7 +424,7 @@ export async function fetchClaudePlanUsage(input?: ClaudePlanTokenInput & {
     const headers = {
       Authorization: `Bearer ${token}`,
       "anthropic-beta": "oauth-2025-04-20",
-      "User-Agent": claudeCodeUserAgent(),
+      "User-Agent": input?.userAgent ?? claudeCodeUserAgent(),
       Accept: "application/json",
       "anthropic-version": "2023-06-01",
     };

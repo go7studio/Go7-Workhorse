@@ -319,7 +319,7 @@ export function Settings() {
                         startClaudeAuth();
                       }}
                     >
-                      {claudeAuth.stage === "running" ? "Signing in…" : "Log in"}
+                      {claudeAuth.stage === "running" ? "Signing in…" : link.authProblem ? "Sign in again" : "Log in"}
                     </button>
                   ) : null}
                 </div>
@@ -530,7 +530,7 @@ function ClaudeSignIn({
     <div className="claude-sign-in">
       <div className="actions">
         <button type="button" className="ghost" onClick={onStart} disabled={running}>
-          {running ? "Signing in…" : link.needsAuth ? "Log in with Claude" : "Mint a new token"}
+          {running ? "Signing in…" : (link.needsAuth || link.authProblem) ? "Log in with Claude" : "Mint a new token"}
         </button>
         {auth.message ? <span className="row-meta">{auth.message}</span> : null}
       </div>

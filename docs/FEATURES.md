@@ -26,6 +26,8 @@ When you add a feature, add it here in the same commit.
 
 ## Bots and logins
 
+When the desk token, Claude CLI login, and outer environment are unusable, Claude can fall back to a readable Claude Desktop login on macOS and Windows.
+
 | Bot | How it connects | Notes |
 | --- | --- | --- |
 | Grok | ACP over stdio | Runs the local Grok Build CLI |
@@ -40,6 +42,9 @@ When you add a feature, add it here in the same commit.
   **Grok 4.6** and **Grok 4.5**.
 - The CLI's live catalog is authoritative. The desk shows the model, never the
   client name.
+- The desk keeps its own Claude token so signing in here never signs out your
+  own Claude Code. If that token is refused, Claude falls back to the login the
+  CLI already holds, and a meter the desk cannot read never stops a chat from running.
 - Claude names its models at every session start, so new ones reach the picker
   at once.
 - An id no list knows still counts when it names a vendor's family. Claude

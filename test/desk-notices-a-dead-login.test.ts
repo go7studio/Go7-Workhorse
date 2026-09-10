@@ -7,6 +7,7 @@ import { fetchClaudePlanUsage, judgeClaudeRingStatus } from "../electron/claude-
 import {
   clearClaudeTokenRejection,
   claudeTokenFingerprint,
+  claudeMeterTokenProblem,
   claudeTokenProblem,
   forgetClaudeRefusalWithoutToken,
   markClaudeTokenRejected,
@@ -105,27 +106,33 @@ test("Recheck clears a refusal of the CLI login, and writes that down too", () =
   }
 });
 
-test("the usage beat is what notices, without asking Anthropic anything extra", async () => {
+test("the usage beat marks its token suspect without refusing a launch", async () => {
   const disk = paperStore();
   try {
     setClaudeRefusalStore(disk);
-    // The ring's own call, refused. This runs on the desk's beat, so the card
-    // can say Sign in again before the person has clicked anything at all.
+    // A meter refusal questions its token without deciding whether inference works.
     const refused = await fetchClaudePlanUsage({
+      userAgent: "claude-code/test",
       token: TOKEN,
       fetchImpl: (async () => ({ ok: false, status: 401, json: async () => ({}) })) as never,
     });
     assert.equal(refused, undefined, "no reading, as before");
 
-    assert.equal(claudeTokenProblem(TOKEN), "Anthropic refused the desk's login (401).", "the injected path judges it too");
+    assert.equal(claudeTokenProblem(TOKEN), null, "a meter refusal cannot refuse a launch");
+    assert.equal(claudeMeterTokenProblem(TOKEN), "Anthropic refused the desk's usage token (401).");
+    setClaudeRefusalStore(disk);
+    assert.equal(claudeTokenProblem(TOKEN), null, "a restart cannot promote suspicion into a launch refusal");
+    assert.ok(claudeMeterTokenProblem(TOKEN));
 
     // A blip must not condemn a good login for ever: the same call that
     // refused it is the one that clears it.
     await fetchClaudePlanUsage({
+      userAgent: "claude-code/test",
       token: TOKEN,
       fetchImpl: (async () => ({ ok: true, status: 200, json: async () => ({}) })) as never,
     });
-    assert.equal(claudeTokenProblem(TOKEN), null, "one 401 from a proxy or an incident heals on the next good beat");
+    assert.equal(claudeTokenProblem(TOKEN), null, "one 401 from a proxy or an incident never blocks launch");
+    assert.equal(claudeMeterTokenProblem(TOKEN), null, "the next good beat clears suspicion");
 
     // Every other status says nothing about the login, either way.
     markClaudeTokenRejected("Anthropic refused the desk's login (401).", TOKEN);
@@ -153,6 +160,20 @@ test("the usage beat is what notices, without asking Anthropic anything extra", 
 
     assert.match(main, /claude-login-refusal\.json/, "the desk keeps the note under its own userData");
     assert.match(main, /setClaudeRefusalStore\(\{/, "and loads it at startup");
+  } finally {
+    setClaudeRefusalStore(null);
+  }
+});
+
+test("source-less usage refusals migrate without forgiving old launch refusals", () => {
+  try {
+    for (const reason of ["Anthropic refused the desk's login (401).", "Anthropic refused the desk's login (403).", "Anthropic refused the desk's usage token (401).", "OAuth session expired"]) {
+      const raw = JSON.stringify({ fingerprint: claudeTokenFingerprint(TOKEN), reason, at: "2026-09-09" });
+      setClaudeRefusalStore({ read: () => raw, write: () => undefined });
+      const usage = reason.includes("Anthropic");
+      assert.equal(claudeTokenProblem(TOKEN), usage ? null : reason);
+      assert.equal(claudeMeterTokenProblem(TOKEN), usage ? reason : null);
+    }
   } finally {
     setClaudeRefusalStore(null);
   }

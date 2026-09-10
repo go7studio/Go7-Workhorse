@@ -1,11 +1,19 @@
 import assert from "node:assert/strict";
+import crypto from "node:crypto";
+import { EventEmitter } from "node:events";
+import { PassThrough } from "node:stream";
+import type { ChildProcessWithoutNullStreams } from "node:child_process";
+import { ClaudeSessionHost, type ClaudePromptInput } from "../electron/claude-host";
+import { readClaudeDesktopOauth } from "../electron/claude-desktop-auth";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { buildClaudeLaunchSpec, claudeSpawnArgs } from "../electron/claude-launch";
-import { detectClaudeLogin } from "../electron/claude-login";
-import { claudeTokenProblem, forgetClaudeRefusalWithoutToken, markClaudeTokenRejected, resetClaudeTokenRejection, setStoredClaudeTokenReader, storedClaudeToken } from "../electron/claude-stored-token";
+import { detectClaudeLogin, hasClaudeCliLoginArtifact, type ClaudeLoginDetectInput } from "../electron/claude-login";
+import { claudeTokenProblem, clearClaudeCredentialRejection, markClaudeCredentialRejected, setClaudeRefusalStore, forgetClaudeRefusalWithoutToken, markClaudeTokenRejected, resetClaudeTokenRejection, setStoredClaudeTokenReader, storedClaudeToken } from "../electron/claude-stored-token";
+import { clearClaudePlanCache, fetchClaudePlanUsage, judgeClaudeRingStatus } from "../electron/claude-plan";
+import { llmCardHint, llmDetailCopy } from "../src/lib/llm-copy";
 import { claudeAuthFailure } from "../src/lib/claude-auth-failure";
 import { normalizeSettings, vendorLaunchGate } from "../src/lib/settings";
 import { deskCallCatalog, formatDeskRoster, spawnIsNoGo } from "../src/lib/watch";
@@ -194,7 +202,7 @@ test("no shell the desk starts for a person or an agent gets the desk's own envi
 test("a login the vendor refused is not a login until a different token is stored", async () => {
   const refused = "OAuth session expired and could not be refreshed";
   const dead = detectClaudeLogin({ ...detect, storedToken: () => CLAUDE_TOKEN, tokenProblem: refused });
-  assert.equal(dead.connected, false, "a refused token is not a login, whatever artifact exists");
+  assert.equal(dead.connected, false, "a refused desk token with no CLI artifact is not a login");
   assert.equal(dead.needsAuth, true, "so the card offers Log in with Claude");
   assert.equal(dead.authProblem, refused);
   assert.equal(dead.launchable, true, "the binaries are still there; only the login is the problem");
@@ -237,14 +245,16 @@ test("a login the vendor refused is not a login until a different token is store
   // On the desk the card stays connected (it exists); detection drops available and raises needsAuth.
   const link = { connected: true, enabled: true, available: false, needsAuth: true, authProblem: refused };
   assert.equal(llmCardHint("claude", link), "Sign in again");
-  assert.match(llmDetailCopy("claude", link), /refused the desk's login: OAuth session expired and could not be refreshed\. Log in with Claude mints a new one\./);
+  assert.match(llmDetailCopy("claude", link), /has no usable login: OAuth session expired and could not be refreshed\. Sign in, then Recheck\./);
   assert.equal(llmCardHint("claude", { connected: true, enabled: true, available: true }), "Local login", "a working login reads as before");
 
   // The refusal is remembered where it passes through main, and the renderer
   // re-detects the moment a call is refused, so no Recheck is needed.
   const main = readFileSync(path.join(ROOT, "electron", "main.ts"), "utf8").replace(/\r\n/g, "\n");
   const handler = main.slice(main.indexOf('ipcMain.handle("claude:prompt"'), main.indexOf('ipcMain.handle("claude:answer-permission"'));
-  assert.match(handler, /const problem = claudeAuthFailure\(error\);\n\s+if \(problem\) markClaudeTokenRejected\(problem\);\n\s+throw error;/, "a refused login is remembered, and the error still reaches the chat");
+  assert.doesNotMatch(handler, /markClaudeTokenRejected/, "main must not guess which credential the host used");
+  const host = readFileSync(path.join(ROOT, "electron", "claude-host.ts"), "utf8");
+  assert.match(host, /markClaudeCredentialRejected\(problem, spec\.credential\.fingerprint\)/, "the host records the launch identity");
   const store = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8").replace(/\r\n/g, "\n");
   assert.equal((store.match(/if \(claudeAuthFailure\(error\)\) refreshClaudeLogin\(\);/g) ?? []).length, 2, "both Claude prompt paths re-detect on a refusal");
   assert.match(store, /authProblem: \(detected as \{ authProblem\?: string \}\)\.authProblem,/, "the reason reaches settings.llms.claude");
@@ -320,4 +330,343 @@ test("a vendor with no usable login is not callable, and Recheck clears a refusa
   assert.match(settingsUi, /store\.refreshClaudeLogin\(\{ recheck: true \}\)/, "the Recheck button says so");
   const preload = readFileSync(path.join(ROOT, "electron", "preload.ts"), "utf8").replace(/\r\n/g, "\n");
   assert.match(preload, /ipcRenderer\.invoke\("claude:detect-login", input \?\? \{\}\)/);
+});
+
+/** No real paths or credentials participate in these launch and roster checks. */
+function claudeFixture(platform: NodeJS.Platform, cliLogin: boolean): ClaudeLoginDetectInput {
+  const home = path.join(ROOT, "fixture");
+  const acp = path.join(home, "claude-agent-acp");
+  const cli = path.join(home, platform === "win32" ? "claude.exe" : "claude");
+  const credentials = path.join(home, ".claude", ".credentials.json");
+  return {
+    homedir: home, platform, pathDirs: [], extraDirs: [], moduleDirs: [], listDir: () => [],
+    env: { CLAUDE_ACP_BIN: acp, CLAUDE_CODE_EXECUTABLE: cli },
+    existsSync: (file) => file === acp || file === cli || (cliLogin && file === credentials),
+    readFile: (file) => file === credentials
+      ? JSON.stringify({ claudeAiOauth: { accessToken: "fixture-cli-login", expiresAt: Date.now() + 60_000 } }) : "",
+    keychainHasLogin: () => platform === "darwin" && cliLogin,
+    storedToken: () => CLAUDE_TOKEN,
+  };
+}
+
+function fixtureLaunch(input: ClaudeLoginDetectInput) {
+  return buildClaudeLaunchSpec({ model: "claude-sonnet-5", effort: "medium", cwd: ROOT, mode: "ask", detect: input, storedToken: input.storedToken });
+}
+
+function fixtureRoster(input: ClaudeLoginDetectInput) {
+  const detected = detectClaudeLogin(input);
+  const link = { ...detected, ...vendorLaunchGate(detected), connected: true, enabled: true, available: detected.connected };
+  const settings = normalizeSettings({ llms: { claude: link } });
+  const row = deskCallCatalog({ settings, usage: [], plans: {}, permits: {} }).find((item) => item.provider === "claude");
+  return { detected, link, row };
+}
+
+test("a refused desk token leaves a separate CLI login callable on each platform", () => {
+  try {
+    markClaudeTokenRejected("Desk token expired", CLAUDE_TOKEN);
+    for (const platform of ["darwin", "win32", "linux"] as const) {
+      const input = claudeFixture(platform, true);
+      // Both outer credentials must stay behind too, or they shadow the CLI store.
+      input.env = { ...input.env, CLAUDE_CODE_OAUTH_TOKEN: "fixture-outer-oauth", ANTHROPIC_API_KEY: "fixture-outer-key" };
+      const { detected, link, row } = fixtureRoster(input);
+      assert.equal(detected.connected, true, platform);
+      assert.equal(detected.needsAuth, false, platform);
+      assert.equal(link.launchable, true, platform);
+      assert.equal(row?.canCall, true, platform);
+      assert.equal(spawnIsNoGo(row), null, platform);
+      assert.equal(llmCardHint("claude", link), "Local login", "a callable fallback does not demand sign-in");
+      assert.match(llmDetailCopy("claude", link), /Claude can use another login.*Sign in/);
+      const spec = fixtureLaunch(input);
+      assert.equal(spec.env?.CLAUDE_CODE_OAUTH_TOKEN, undefined, platform);
+      assert.equal(spec.env?.ANTHROPIC_API_KEY, undefined, platform);
+    }
+  } finally {
+    resetClaudeTokenRejection();
+  }
+});
+
+test("a healthy desk token wins, and outer credentials only fill in without a CLI login", () => {
+  const input = claudeFixture("linux", true);
+  input.env = { ...input.env, CLAUDE_CODE_OAUTH_TOKEN: "fixture-outer-oauth", ANTHROPIC_API_KEY: "fixture-outer-key" };
+  assert.ok(fixtureLaunch(input).env?.CLAUDE_CODE_OAUTH_TOKEN === CLAUDE_TOKEN, "the desk keeps its independent login");
+  try {
+    markClaudeTokenRejected("Desk token expired", CLAUDE_TOKEN);
+    const empty = claudeFixture("linux", false);
+    assert.equal(fixtureLaunch(empty).env?.CLAUDE_CODE_OAUTH_TOKEN, undefined);
+    empty.env = { ...empty.env, CLAUDE_CODE_OAUTH_TOKEN: "fixture-outer-oauth", ANTHROPIC_API_KEY: "fixture-outer-key" };
+    assert.ok(fixtureLaunch(empty).env?.CLAUDE_CODE_OAUTH_TOKEN === "fixture-outer-oauth");
+    delete empty.env.CLAUDE_CODE_OAUTH_TOKEN;
+    assert.ok(fixtureLaunch(empty).env?.ANTHROPIC_API_KEY === "fixture-outer-key");
+  } finally {
+    resetClaudeTokenRejection();
+  }
+});
+
+test("no usable credential keeps the card actionable and the roster blocked", () => {
+  try {
+    markClaudeTokenRejected("Desk token expired", CLAUDE_TOKEN);
+    const { detected, link, row } = fixtureRoster(claudeFixture("linux", false));
+    assert.equal(detected.connected, false);
+    assert.equal(detected.needsAuth, true);
+    assert.equal(link.launchable, false);
+    assert.equal(row?.canCall, false);
+    assert.equal(row?.status, "cannot_start");
+    assert.equal(llmCardHint("claude", link), "Sign in again");
+    assert.match(llmDetailCopy("claude", link), /Sign in, then Recheck/);
+    const expired = claudeFixture("linux", true);
+    expired.readFile = () => JSON.stringify({ claudeAiOauth: { accessToken: "fixture-expired-cli", expiresAt: 1 } });
+    assert.equal(fixtureRoster(expired).row?.status, "cannot_start", "an expired CLI artifact cannot rescue a refused desk token");
+  } finally {
+    resetClaudeTokenRejection();
+  }
+});
+
+test("a 401 or 403 usage response leaves the ring unknown and the vendor callable", async () => {
+  try {
+    for (const status of [401, 403]) {
+      for (const transport of ["fetch", "node"] as const) {
+        clearClaudePlanCache();
+        const plan = await fetchClaudePlanUsage({
+          token: CLAUDE_TOKEN, userAgent: "claude-code/test",
+          ...(transport === "fetch"
+            ? { fetchImpl: (async () => new Response("{}", { status })) as typeof fetch }
+            : { nodeGet: async () => ({ status, json: {} }) }),
+        });
+        assert.equal(plan, undefined, "missing usage stays unknown");
+        const input = claudeFixture("linux", false);
+        const { detected, link, row } = fixtureRoster(input);
+        assert.equal(claudeTokenProblem(CLAUDE_TOKEN), null, "meter permission does not prove inference permission");
+        assert.equal(detected.needsAuth, false);
+        assert.equal(link.launchable, true);
+        assert.equal(row?.canCall, true);
+        assert.ok(fixtureLaunch(input).env?.CLAUDE_CODE_OAUTH_TOKEN === CLAUDE_TOKEN);
+        assert.equal(detected.authProblem, undefined, "meter suspicion does not become login copy");
+        assert.equal(llmCardHint("claude", link), "Local login");
+        assert.equal(llmDetailCopy("claude", link), "Local Claude ready.");
+      }
+    }
+    markClaudeTokenRejected("Turn authentication failed", CLAUDE_TOKEN);
+    judgeClaudeRingStatus(403, CLAUDE_TOKEN);
+    assert.equal(claudeTokenProblem(CLAUDE_TOKEN), "Turn authentication failed", "meter suspicion cannot weaken an actual turn refusal");
+    assert.equal(fixtureRoster(claudeFixture("linux", false)).row?.status, "cannot_start");
+  } finally {
+    resetClaudeTokenRejection();
+    clearClaudePlanCache();
+  }
+});
+
+/** All decrypted material below is generated in memory from invented fixtures. */
+function desktopFixture(platform: "darwin" | "win32" = "darwin") {
+  const input = claudeFixture(platform, true);
+  const root = platform === "darwin"
+    ? path.join(input.homedir!, "Library", "Application Support", "Claude")
+    : path.join(input.homedir!, "AppData", "Local", "Packages", "Claude_fixture", "LocalCache", "Roaming", "Claude");
+  const config = path.join(root, "config.json");
+  const state = path.join(root, "Local State");
+  const password = "invented-safe-storage-password";
+  const token = "invented-desktop-oauth";
+  const key = platform === "darwin" ? crypto.pbkdf2Sync(password, "saltysalt", 1000, 16, "sha1") : Buffer.alloc(32, 7);
+  const iv = platform === "darwin" ? Buffer.alloc(16, " ") : Buffer.alloc(12, 3);
+  const clear = JSON.stringify({ "user:inference claude_code": { token, expiresAt: Date.now() + 60_000 } });
+  let payload: Buffer;
+  if (platform === "darwin") {
+    const cipher = crypto.createCipheriv("aes-128-cbc", key, iv);
+    payload = Buffer.concat([Buffer.from("v10"), cipher.update(clear), cipher.final()]);
+  } else {
+    const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
+    payload = Buffer.concat([Buffer.from("v10"), iv, cipher.update(clear), cipher.final(), cipher.getAuthTag()]);
+  }
+  const exists = input.existsSync!;
+  const read = input.readFile!;
+  input.existsSync = (file) => file === config || file === state || file.endsWith("Packages") || exists(file);
+  input.listDir = () => ["Claude_fixture"];
+  input.readFile = (file) => file === config ? JSON.stringify({ "oauth:tokenCacheV2": payload.toString("base64") })
+    : file === state ? JSON.stringify({ os_crypt: { encrypted_key: Buffer.from("DPAPI-fixture").toString("base64") } }) : read(file);
+  let keyReads = 0;
+  input.readSafeStoragePassword = () => { keyReads++; return password; };
+  input.unprotect = () => { keyReads++; return key; };
+  return { input, token, keyReads: () => keyReads };
+}
+
+test("a refused CLI artifact cannot keep the roster callable after a restart", () => {
+  let saved: string | null = null;
+  const io = { read: () => saved, write: (text: string | null) => { saved = text; } };
+  try {
+    setClaudeRefusalStore(io);
+    const input = claudeFixture("darwin", true);
+    input.readFile = () => JSON.stringify({ claudeAiOauth: { accessToken: "expired-fixture", expiresAt: 1 } });
+    markClaudeTokenRejected("Desk token expired", CLAUDE_TOKEN);
+    const cli = fixtureLaunch(input);
+    assert.equal(cli.credential.source, "cli");
+    assert.equal(cli.env?.CLAUDE_CODE_OAUTH_TOKEN, undefined);
+    markClaudeCredentialRejected("OAuth session expired and could not be refreshed", cli.credential.fingerprint);
+    setClaudeRefusalStore(io);
+    assert.ok(claudeTokenProblem(CLAUDE_TOKEN), "the CLI refusal must not replace the desk refusal");
+    assert.ok(claudeTokenProblem(null));
+    assert.equal(hasClaudeCliLoginArtifact(input), false, "existence cannot override the vendor's refusal");
+    const { detected, link, row } = fixtureRoster(input);
+    assert.equal(detected.needsAuth, true);
+    assert.equal(row?.canCall, false);
+    assert.equal(llmCardHint("claude", link), "Sign in again");
+    assert.equal(fixtureLaunch(input).credential.source, "none");
+    forgetClaudeRefusalWithoutToken();
+    assert.equal(fixtureLaunch(input).credential.source, "cli", "Recheck retries the CLI only");
+    assert.ok(claudeTokenProblem(CLAUDE_TOKEN));
+    markClaudeTokenRejected("CLI refused again", null);
+    resetClaudeTokenRejection();
+    input.storedToken = () => "fresh-desk-fixture";
+    assert.equal(claudeTokenProblem(null), null, "storing a fresh desk token resets refusals");
+    assert.equal(fixtureLaunch(input).credential.source, "desk");
+  } finally {
+    setClaudeRefusalStore(null);
+  }
+});
+
+test("Desktop decrypts on macOS and Windows and stays last in the credential chain", () => {
+  try {
+    for (const platform of ["darwin", "win32"] as const) {
+      resetClaudeTokenRejection();
+      const fixture = desktopFixture(platform);
+      assert.equal(fixtureLaunch(fixture.input).credential.source, "desk");
+      assert.equal(fixture.keyReads(), 0);
+      markClaudeTokenRejected("Desk token expired", CLAUDE_TOKEN);
+      assert.equal(fixtureLaunch(fixture.input).credential.source, "cli");
+      assert.equal(fixture.keyReads(), 0);
+      markClaudeTokenRejected("CLI refused", null);
+      fixture.input.env = { ...fixture.input.env, CLAUDE_CODE_OAUTH_TOKEN: "outer-fixture", ANTHROPIC_API_KEY: "key-fixture" };
+      assert.equal(fixtureLaunch(fixture.input).credential.source, "environment");
+      markClaudeTokenRejected("Outer refused", "outer-fixture");
+      assert.ok(fixtureLaunch(fixture.input).env?.ANTHROPIC_API_KEY === "key-fixture");
+      assert.equal(fixture.keyReads(), 0, "outer environment precedes Desktop too");
+      markClaudeTokenRejected("Key refused", "key-fixture");
+      const spec = fixtureLaunch(fixture.input);
+      assert.equal(spec.credential.source, "desktop", platform);
+      assert.ok(spec.env?.CLAUDE_CODE_OAUTH_TOKEN === fixture.token, "the fixture decrypts into the child env");
+      assert.ok(fixture.keyReads() > 0);
+      assert.equal(fixtureRoster(fixture.input).row?.canCall, true);
+      markClaudeCredentialRejected("Desktop refused", spec.credential.fingerprint);
+      assert.equal(fixtureLaunch(fixture.input).credential.source, "none");
+      assert.equal(fixtureRoster(fixture.input).row?.canCall, false, "a decryptable but refused Desktop token is not callable");
+    }
+  } finally {
+    resetClaudeTokenRejection();
+  }
+});
+
+test("a denied or throwing macOS keychain reader quietly leaves no fallback", () => {
+  try {
+    markClaudeTokenRejected("Desk refused", CLAUDE_TOKEN);
+    markClaudeTokenRejected("CLI refused", null);
+    for (const reader of [() => null, () => { throw new Error("keychain denied"); }]) {
+      const { input } = desktopFixture();
+      input.readSafeStoragePassword = reader;
+      assert.equal(readClaudeDesktopOauth(input), null);
+      assert.equal(fixtureLaunch(input).credential.source, "none", "the launch builder does not throw");
+      assert.equal(fixtureRoster(input).row?.canCall, false);
+    }
+  } finally {
+    resetClaudeTokenRejection();
+  }
+});
+
+function fakeClaudeAcp(options: { fail?: "start" | "prompt"; activity?: boolean; onPrompt?: () => void }) {
+  const stdin = new PassThrough();
+  const stdout = new PassThrough();
+  const stderr = new PassThrough();
+  const child = Object.assign(new EventEmitter(), { stdin, stdout, stderr, kill() { child.emit("exit", 0, null); } }) as unknown as ChildProcessWithoutNullStreams;
+  let buffer = "";
+  stdin.on("data", (chunk) => {
+    buffer += String(chunk);
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      const message = JSON.parse(line);
+      if (message.id === undefined) continue;
+      if (message.method === "session/prompt") {
+        options.onPrompt?.();
+        if (options.activity) stdout.write(`${JSON.stringify({ jsonrpc: "2.0", method: "session/update", params: {
+          sessionId: "fixture-session", update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Already started" } },
+        } })}\n`);
+      }
+      const fail = (options.fail === "start" && message.method === "session/new") || (options.fail === "prompt" && message.method === "session/prompt");
+      const response = fail ? { error: { code: -32000, message: "Failed to authenticate: OAuth session expired and could not be refreshed" } }
+        : { result: message.method === "session/new" ? { sessionId: "fixture-session" } : message.method === "session/prompt" ? { stopReason: "end_turn" } : {} };
+      stdout.write(`${JSON.stringify({ jsonrpc: "2.0", id: message.id, ...response })}\n`);
+    }
+  });
+  return child;
+}
+
+const promptFixture: ClaudePromptInput = {
+  sessionId: "fixture-chat", projectId: "fixture-project", model: "claude-sonnet-5", effort: "medium", cwd: ROOT, mode: "ask", text: "fixture request",
+};
+
+test("the host retries a refused CLI once with Desktop during the same turn", async () => {
+  for (const fail of ["start", "prompt"] as const) {
+    const { input } = desktopFixture();
+    const sources: string[] = [];
+    const events: string[] = [];
+    const host = new ClaudeSessionHost((spec) => {
+      sources.push(spec.credential.source);
+      return fakeClaudeAcp(spec.credential.source === "cli" ? { fail } : {});
+    }, (launch) => buildClaudeLaunchSpec({ ...launch, detect: input }));
+    try {
+      markClaudeTokenRejected("Desk refused", CLAUDE_TOKEN);
+      const result = await host.prompt(promptFixture, (event) => events.push(event.type));
+      assert.equal(result.stopReason, "end_turn");
+      assert.deepEqual(sources, ["cli", "desktop"]);
+      assert.equal(events.filter((type) => type === "error").length, 0, "the first auth failure stays inside this turn");
+      assert.equal(events.filter((type) => type === "done").length, 1);
+      assert.ok(claudeTokenProblem(null), "the successful fallback does not forgive the CLI");
+      assert.ok(claudeTokenProblem(CLAUDE_TOKEN), "nor the desk token");
+    } finally {
+      host.disposeAll();
+      resetClaudeTokenRejection();
+    }
+  }
+});
+
+test("retry is capped at one and never repeats a turn after visible activity", async () => {
+  for (const activity of [false, true]) {
+    const { input } = desktopFixture();
+    const sources: string[] = [];
+    const errors: string[] = [];
+    const host = new ClaudeSessionHost((spec) => {
+      sources.push(spec.credential.source);
+      return fakeClaudeAcp({ fail: "prompt", activity });
+    }, (launch) => buildClaudeLaunchSpec({ ...launch, detect: input }));
+    try {
+      // Desk then CLI both fail. Desktop remains available for the next turn.
+      await assert.rejects(host.prompt(promptFixture, (event) => { if (event.type === "error") errors.push(event.type); }), /OAuth session expired/);
+      assert.deepEqual(sources, activity ? ["desk"] : ["desk", "cli"]);
+      assert.equal(errors.length, 1);
+      assert.ok(claudeTokenProblem(CLAUDE_TOKEN));
+      if (!activity) assert.equal(fixtureLaunch(input).credential.source, "desktop");
+    } finally {
+      host.disposeAll();
+      resetClaudeTokenRejection();
+    }
+  }
+});
+
+test("a successful turn clears only the credential that actually ran", async () => {
+  const input = claudeFixture("darwin", true);
+  let used = "";
+  const host = new ClaudeSessionHost((spec) => {
+    used = spec.credential.source;
+    return fakeClaudeAcp({ onPrompt: () => markClaudeCredentialRejected("Concurrent refusal", spec.credential.fingerprint) });
+  }, (launch) => buildClaudeLaunchSpec({ ...launch, detect: input }));
+  try {
+    markClaudeTokenRejected("Desk refused", CLAUDE_TOKEN);
+    await host.prompt(promptFixture, () => undefined);
+    assert.equal(used, "cli");
+    assert.equal(claudeTokenProblem(null), null);
+    assert.ok(claudeTokenProblem(CLAUDE_TOKEN));
+    clearClaudeCredentialRejection("unrelated");
+    assert.ok(claudeTokenProblem(CLAUDE_TOKEN));
+  } finally {
+    host.disposeAll();
+    resetClaudeTokenRejection();
+  }
 });

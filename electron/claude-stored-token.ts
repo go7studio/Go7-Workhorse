@@ -29,8 +29,8 @@ export function storedClaudeToken(): string | null {
 
 import { createHash } from "node:crypto";
 
-type Refusal = { fingerprint: string; reason: string; at: string };
-let rejected: Refusal | null = null;
+type Refusal = { fingerprint: string; reason: string; at: string; source: "usage" | "launch" };
+const rejected = new Map<string, Refusal>();
 let store: { read: () => string | null; write: (text: string | null) => void } | null = null;
 
 /**
@@ -50,7 +50,7 @@ export function claudeTokenFingerprint(token: string | null): string {
  */
 export function setClaudeRefusalStore(io: { read: () => string | null; write: (text: string | null) => void } | null): void {
   store = io;
-  rejected = null;
+  rejected.clear();
   let raw: string | null = null;
   try {
     raw = io?.read() ?? null;
@@ -61,9 +61,17 @@ export function setClaudeRefusalStore(io: { read: () => string | null; write: (t
   }
   if (!raw) return;
   try {
-    const parsed = JSON.parse(raw) as Partial<Refusal>;
-    if (typeof parsed.fingerprint === "string" && typeof parsed.reason === "string" && parsed.reason.trim()) {
-      rejected = { fingerprint: parsed.fingerprint, reason: parsed.reason, at: typeof parsed.at === "string" ? parsed.at : "" };
+    const parsed = JSON.parse(raw);
+    const rows = Array.isArray(parsed?.refusals) ? parsed.refusals : [parsed];
+    for (const row of rows) {
+      if (typeof row?.fingerprint !== "string" || typeof row.reason !== "string" || !row.reason.trim()) continue;
+      // Older meters wrote no source. Migrate only their known refusal copy.
+      const usage = row.source === "usage" || (!row.source && /usage token|refused the desk's login \((?:401|403)\)/i.test(row.reason));
+      rejected.set(row.fingerprint, {
+        fingerprint: row.fingerprint, reason: row.reason,
+        at: typeof row.at === "string" ? row.at : "",
+        source: usage ? "usage" : "launch",
+      });
     }
   } catch {
     /* a torn file is no refusal */
@@ -72,7 +80,7 @@ export function setClaudeRefusalStore(io: { read: () => string | null; write: (t
 
 function keep(): void {
   try {
-    store?.write(rejected ? JSON.stringify(rejected) : null);
+    store?.write(rejected.size ? JSON.stringify({ refusals: [...rejected.values()] }) : null);
   } catch {
     /* a desk that cannot write still knows within this run */
   }
@@ -84,14 +92,38 @@ function keep(): void {
  * restart does not turn a dead login back into a green card.
  */
 export function markClaudeTokenRejected(reason: string, current: string | null = storedClaudeToken()): void {
+  markClaudeCredentialRejected(reason, claudeTokenFingerprint(current));
+}
+
+/** The launch carries this identity, never a credential value, to its handler. */
+export function markClaudeCredentialRejected(reason: string, fingerprint: string): void {
   const text = reason.trim();
-  rejected = text ? { fingerprint: claudeTokenFingerprint(current), reason: text, at: new Date().toISOString() } : null;
+  if (text) rejected.set(fingerprint, { fingerprint, reason: text, at: new Date().toISOString(), source: "launch" });
+  else rejected.delete(fingerprint);
   keep();
 }
 
-/** Why the current login cannot be used, or null once a different token is stored. */
+export function claudeCredentialProblem(fingerprint: string): string | null {
+  const refusal = rejected.get(fingerprint);
+  return refusal?.source === "launch" ? refusal.reason : null;
+}
+
+/** Why this login cannot be used. Other credentials retain their own records. */
 export function claudeTokenProblem(current: string | null = storedClaudeToken()): string | null {
-  return rejected && rejected.fingerprint === claudeTokenFingerprint(current) ? rejected.reason : null;
+  return claudeCredentialProblem(claudeTokenFingerprint(current));
+}
+
+/** A refused meter is suspect, but it is not evidence that inference fails. */
+export function markClaudeMeterTokenSuspect(reason: string, current: string | null): void {
+  if (claudeTokenProblem(current)) return;
+  const fingerprint = claudeTokenFingerprint(current);
+  rejected.set(fingerprint, { fingerprint, reason, at: new Date().toISOString(), source: "usage" });
+  keep();
+}
+
+export function claudeMeterTokenProblem(current: string | null): string | null {
+  const refusal = rejected.get(claudeTokenFingerprint(current));
+  return refusal?.source === "usage" ? refusal.reason : null;
 }
 
 /**
@@ -101,24 +133,19 @@ export function claudeTokenProblem(current: string | null = storedClaudeToken())
  * in again for good, since nothing else clears it.
  */
 export function clearClaudeTokenRejection(current: string | null = storedClaudeToken()): void {
-  if (!rejected || rejected.fingerprint !== claudeTokenFingerprint(current)) return;
-  rejected = null;
-  keep();
+  clearClaudeCredentialRejection(claudeTokenFingerprint(current));
+}
+
+export function clearClaudeCredentialRejection(fingerprint: string): void {
+  if (rejected.delete(fingerprint)) keep();
 }
 
 export function resetClaudeTokenRejection(): void {
-  rejected = null;
+  rejected.clear();
   keep();
 }
 
-/**
- * Recheck's word. A refusal remembered with no desk token of its own is the
- * CLI login's, and the person may have signed that in again; one keyed to a
- * desk token stays until a different token is stored.
- */
+/** Recheck retries the CLI store without forgiving a refused desk token. */
 export function forgetClaudeRefusalWithoutToken(): void {
-  if (rejected && rejected.fingerprint === claudeTokenFingerprint(null)) {
-    rejected = null;
-    keep();
-  }
+  clearClaudeCredentialRejection(claudeTokenFingerprint(null));
 }

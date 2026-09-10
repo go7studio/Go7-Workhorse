@@ -17,6 +17,21 @@ function tracked(): { mode: string; file: string }[] {
     });
 }
 
+/** The lines of one named step in a workflow job, up to the next step. */
+function testStep(workflow: string): string {
+  const lines = workflow.split("\n");
+  const start = lines.findIndex((line) => /^\s*-\s+name:\s*Test\s*$/.test(line));
+  assert.ok(start >= 0, "ci.yml has no step named Test, so this pin proves nothing");
+  const indent = lines[start].search(/\S/);
+  let end = start + 1;
+  while (end < lines.length) {
+    const line = lines[end];
+    if (line.trim() && line.search(/\S/) <= indent) break;
+    end += 1;
+  }
+  return lines.slice(start, end).join("\n");
+}
+
 /** Top level is a closed list. Widening it is a decision, so it changes here too. */
 const TOP_LEVEL = new Set([
   ".github",
@@ -179,6 +194,40 @@ test("`npm test` runs every suite by name pattern", () => {
   assert.ok(smokes.length > 0, "no live smoke files found, so this pin proves nothing any more");
   const caught = smokes.filter((name) => name.endsWith(".test.ts"));
   assert.deepEqual(caught, [], `a live smoke is named as a suite, so CI would run it against a real vendor: ${caught.join(", ")}`);
+});
+
+/**
+ * A ceiling shorter than the suite it guards fails on load, not on a fault.
+ * Two of six pushes to main went red on Windows with whole files killed at
+ * 30000ms: eval-kit, learning-memory, project-diff, session-environment. Run
+ * alone those four take 2.22s, 0.55s, 1.03s and 0.60s, and the whole Windows
+ * test step finishes in 47 seconds. Nothing was hanging. What catches a real
+ * hang is the step's own `timeout-minutes`, so the ceiling only has to be long
+ * enough that no honest file reaches it, and short enough that the runner
+ * still names the test that hung instead of the step dying with no name.
+ */
+test("the per-test ceiling outlasts the suite and still names a hang", () => {
+  const pkg = JSON.parse(readFileSync(path.join(ROOT, "package.json"), "utf8")) as {
+    scripts: Record<string, string>;
+  };
+  const found = /--test-timeout=(\d+)/.exec(pkg.scripts.test);
+  assert.ok(found, `the "test" script must set --test-timeout. Got: ${pkg.scripts.test}`);
+  const ceilingMs = Number(found[1]);
+
+  const step = testStep(readFileSync(path.join(ROOT, ".github", "workflows", "ci.yml"), "utf8"));
+  assert.match(step, /run: npm test/, "the CI step named Test no longer runs npm test, so this pin reads the wrong step");
+  const budget = /timeout-minutes: (\d+)/.exec(step);
+  assert.ok(budget, "the Test step has no timeout-minutes, so nothing at all catches a hung suite");
+  const budgetMs = Number(budget[1]) * 60_000;
+
+  assert.ok(
+    ceilingMs < budgetMs,
+    `--test-timeout is ${ceilingMs}ms and the step allows ${budgetMs}ms. A ceiling at or over the step budget means the step dies first and no test is ever named.`,
+  );
+  assert.ok(
+    ceilingMs >= 90_000,
+    `--test-timeout is ${ceilingMs}ms. The whole Windows step runs in about 47 seconds, so anything under 90000ms is a stopwatch on the runner's load rather than a guard against a hang.`,
+  );
 });
 
 /**

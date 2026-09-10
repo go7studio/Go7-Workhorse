@@ -65,7 +65,7 @@
     "try": "tsx scripts/try-desk.ts",
     "try:dry": "tsx scripts/try-desk.ts --dry",
     "preview": "vite preview",
-    "test": "tsx --test --test-timeout=30000 \"test/*.test.ts\"",
+    "test": "tsx --test --test-timeout=120000 \"test/*.test.ts\"",
     "eval:learning-smoke": "node scripts/learning-packaged-smoke.mjs",
     "probe:sqlite": "node scripts/learning-sqlite-probe.mjs",
     "notices": "node scripts/third-party-notices.mjs"

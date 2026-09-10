@@ -10653,7 +10653,10 @@ test("packages use platform Electron and mac release builds require a stable sig
   assert.match(workflow, /secrets\.MAC_APP_SPECIFIC_PASSWORD/);
   // 0.5.1's Mac Test sat on a dead 127.0.0.1:9 fetch whose abort is ten
   // minutes. The suite must time a test out, and the job must kill the step.
-  assert.match(pkg.scripts?.test ?? "", /--test-timeout=30000/);
+  // How long the ceiling is belongs with the step budget it has to sit under,
+  // in repo-shape's "the per-test ceiling outlasts the suite" test. Here it
+  // only has to exist, so a number pinned in two places cannot disagree.
+  assert.match(pkg.scripts?.test ?? "", /--test-timeout=\d+/);
   assert.match(workflow, /timeout-minutes: 6/);
   assert.match(readFileSync(path.join(ROOT, "test", "workhorse.test.ts"), "utf8"), /timeoutMs: 1_500/);
   assert.match(pkg.build?.mac?.extendInfo?.NSDocumentsFolderUsageDescription ?? "", /project folders you link/);

@@ -7,8 +7,13 @@ import { formatTokens, planRingView, planWindowChip } from "../src/lib/usage";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
+/**
+ * File text, CRLF normalised so a Windows checkout reads the same. The project
+ * row test below slices at a literal `\n`; without this `indexOf` returns -1 on
+ * Windows and the slice starts at the end of the sheet.
+ */
 function source(...parts: string[]): string {
-  return readFileSync(path.join(ROOT, ...parts), "utf8");
+  return readFileSync(path.join(ROOT, ...parts), "utf8").replace(/\r\n/g, "\n");
 }
 
 test("a big number is a number a person can hold", () => {

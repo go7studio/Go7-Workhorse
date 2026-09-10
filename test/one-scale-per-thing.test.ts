@@ -65,24 +65,51 @@ function resolve(value: string, tokens: Map<string, string>, depth = 0): string 
   return next === undefined ? value.trim() : resolve(next, tokens, depth + 1);
 }
 
-/**
- * A step on the type scale is an absolute size. `inherit` takes its parent's
- * step, an `em` is a multiple of one, `0` is no text at all, and the one
- * `clamp()` is a container query — none of them add a size to the scale.
- */
+/** A step on the type scale is an absolute size. */
 const TYPE_LADDER = ["11px", "12px", "13px", "15px", "17px", "20px", "28px"];
 const TYPE_CAP = 8;
+
+/**
+ * The exact sizes allowed off the scale today, each with the reason it is
+ * allowed. This used to be a shape test: anything ending `em`, anything
+ * starting `clamp(`, `inherit` and `0` all walked past the cap, so a new
+ * off-scale size never reached it either. Named one at a time, a new value
+ * fails until someone adds it here and says why.
+ */
+const TYPE_EXEMPT = new Map([
+  ["inherit", "takes its parent's step: .thought .md and .workshop-advanced-title read at the size around them"],
+  ["0", "no text at all: .file-close-x draws its cross in ::before and ::after"],
+  ["0.86em", "code set in prose tracks the prose: .md code, .md-file"],
+  [
+    "clamp(11.5px, 1.05cqi + 0.22cqh, 13.5px)",
+    "the session setup card sizes from its own container, so the card scales as one piece",
+  ],
+  ["0.83em", "a step under the size around it: setup section labels, slider marks, grid captions"],
+  ["0.92em", "a step under the size around it: setup notes, intro copy, security labels"],
+  ["1.08em", "a step over the size around it: the setup intro's one strong line"],
+  ["1em", "exactly the size around it: setup effort keys and grid headings"],
+]);
 
 test("the stylesheets set type on one scale", () => {
   const tokens = tokenValues();
   const sizes = new Map<string, string[]>();
+  const claimed = new Set<string>();
   for (const row of declarations("font-size")) {
     const value = resolve(row.value, tokens);
-    if (value === "inherit" || value === "0" || value.endsWith("em") || value.startsWith("clamp(")) continue;
+    if (TYPE_EXEMPT.has(value)) {
+      claimed.add(value);
+      continue;
+    }
     const seen = sizes.get(value) ?? [];
     seen.push(`${row.file}:${row.line}`);
     sizes.set(value, seen);
   }
+
+  assert.deepEqual(
+    [...TYPE_EXEMPT.keys()].filter((value) => !claimed.has(value)),
+    [],
+    "an exemption nothing declares any more is a door left open for the next value that fits it",
+  );
 
   const distinct = [...sizes.keys()].sort();
   assert.ok(
@@ -100,20 +127,36 @@ test("the stylesheets set type on one scale", () => {
 });
 
 /**
- * A corner is a length. `50%` and the four-value organic shapes are shapes,
- * not steps, and `0` is a square corner. A shorthand is counted by each
- * length in it, so `18px 18px 6px 18px` puts both 18px and 6px on the scale.
+ * A corner is a length. `0` is a square corner, and a shorthand is counted by
+ * each length in it, so `18px 18px 6px 18px` puts both 18px and 6px on the
+ * scale.
  */
 const RADIUS_LADDER = ["6px", "10px", "14px", "999px", "50%"];
 const RADIUS_CAP = 5;
 
+/**
+ * The exact corners allowed off the scale today. A slash means an ellipse per
+ * corner: a drawn shape rather than a step. Skipping every value with a slash
+ * in it let any new shape through, so each one is named with what it draws.
+ */
+const RADIUS_EXEMPT = new Map([
+  ["inherit", "takes its parent's corner: .setup-tide fills the card and clips to it"],
+  ["42% 58% 52% 48% / 48% 42% 58% 52%", "the horse blob at rest, and the stop horse-drift returns it to"],
+  ["68% 32% 58% 42% / 36% 64% 40% 60%", "horse-drift at 22%"],
+  ["32% 68% 38% 62% / 62% 38% 58% 42%", "horse-drift at 48%"],
+  ["58% 42% 32% 68% / 48% 52% 68% 32%", "horse-drift at 73%"],
+  ["48% 52% 48% 52% / 70% 80% 40% 50%", "the crest of .setup-tide-wave"],
+]);
+
 test("the stylesheets round corners on one scale", () => {
   const tokens = tokenValues();
   const radii = new Map<string, string[]>();
+  const claimed = new Set<string>();
   for (const row of declarations("border-radius")) {
-    if (row.value === "inherit") continue;
-    // A slash means an ellipse per corner: an organic shape, not a corner step.
-    if (row.value.includes("/")) continue;
+    if (RADIUS_EXEMPT.has(row.value)) {
+      claimed.add(row.value);
+      continue;
+    }
     for (const part of row.value.split(/\s+/)) {
       const corner = resolve(part, tokens);
       if (corner === "0") continue;
@@ -122,6 +165,12 @@ test("the stylesheets round corners on one scale", () => {
       radii.set(corner, seen);
     }
   }
+
+  assert.deepEqual(
+    [...RADIUS_EXEMPT.keys()].filter((value) => !claimed.has(value)),
+    [],
+    "an exemption nothing declares any more is a door left open for the next shape that fits it",
+  );
 
   const distinct = [...radii.keys()].sort();
   assert.ok(

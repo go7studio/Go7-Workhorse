@@ -2598,11 +2598,16 @@ html.pane-dragging * {
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
 }
 
+/* The drop hint is generated content on `.session`, so it comes after
+   `.composer-wrap` in tree order and would cover the composer at the same rung.
+   Raised puts it over the transcript and under the composer: the composer is
+   what you are dropping onto, and what you have already typed has to stay
+   readable while you do it. */
 .session.drop-over::after {
   content: "Drop files or folders to send";
   position: absolute;
   inset: 12px;
-  z-index: var(--z-sticky);
+  z-index: var(--z-raised);
   display: grid;
   place-items: center;
   pointer-events: none;
@@ -3018,19 +3023,21 @@ html.pane-dragging * {
   color: var(--text-tertiary);
 }
 
+/* The permission ask, and the only rule that wears this class. It paints over
+   `.sheet-backdrop` because a sheet can raise an ask, and an ask you cannot
+   reach stops the desk. Both are fixed and both fill the viewport, so the rung
+   is what decides it: at the same rung the later sibling in `.app` wins, and
+   the sheets are rendered after the ask. `.permission-overlay` is only ever
+   worn with this class, so it takes this rung with it. */
 .palette-overlay {
   position: fixed;
   inset: 0;
-  z-index: var(--z-sticky);
+  z-index: var(--z-popover);
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 24px;
   background: rgba(29, 29, 31, 0.28);
-}
-
-.permission-overlay {
-  z-index: var(--z-sticky);
 }
 
 .permission-overlay.elevate-overlay {
@@ -3992,6 +3999,8 @@ html.pane-dragging * {
   font-weight: 510;
 }
 
+/* A sheet, on the sheet rung, over everything the workspace paints. The
+   permission ask stays above it on popover. */
 .sheet-backdrop {
   position: fixed;
   inset: 0;
@@ -4000,7 +4009,7 @@ html.pane-dragging * {
   justify-content: center;
   background: rgba(0, 0, 0, 0.32);
   backdrop-filter: blur(8px);
-  z-index: var(--z-sticky);
+  z-index: var(--z-sheet);
   animation: rise 180ms var(--ease);
 }
 
@@ -8319,6 +8328,10 @@ html.pane-dragging * {
   color: var(--setup-muted);
 }
 
+/* 11px, up from 9px. 11 is the floor of the type scale, and one badge is not
+   worth an eighth step on it. The mark still fits: a 16px circle with a 1px
+   border leaves a 14px box, and 11px at the inherited `normal` leading draws a
+   line box of about 13px. */
 .setup-access-note > span {
   display: grid;
   place-items: center;

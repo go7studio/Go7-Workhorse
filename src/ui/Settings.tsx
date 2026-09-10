@@ -271,6 +271,27 @@ export function Settings() {
                 </button>
               </div>
             </div>
+            <label className="settings-row">
+              <div className="settings-row-copy">
+                <strong>Finished work</strong>
+                <span>
+                  {settings.retentionDays > 0
+                    ? `A worker's transcript moves to the transcript store ${settings.retentionDays} days after it finishes. Opening the chat brings it back.`
+                    : "Every finished worker keeps its whole transcript in the desk file."}
+                </span>
+              </div>
+              <div className="settings-control">
+                <input
+                  type="number"
+                  min={0}
+                  max={3650}
+                  step={1}
+                  value={settings.retentionDays}
+                  aria-label="Days before a finished worker's transcript moves to disk"
+                  onChange={(event) => store.setRetentionDays(Number(event.target.value))}
+                />
+              </div>
+            </label>
           </div>
         </>
       )}

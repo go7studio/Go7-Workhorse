@@ -47,7 +47,7 @@ import {
 } from "./chats";
 import { workerJustSettled } from "./worker-settled";
 import { deskPersistBodyEqual } from "./desk-persist";
-import { mergeTranscriptRows, transcriptFetchPlan } from "./transcript-sidecar";
+import { mergeTranscriptRows, normalizeRetentionDays, transcriptFetchPlan } from "./transcript-sidecar";
 import { autoTitleForSend, firstUserText, suggestedTitleForSession, titleAcceptsVendor, titleFromIntent } from "./titles";
 import {
   applyPermissionAnswer,
@@ -557,6 +557,7 @@ export type Store = AppState & {
   setThreadWidth: (width: number) => void;
 
   setUsageBudget: (provider: ProviderId, tokens: number | null) => void;
+  setRetentionDays: (days: number) => void;
   updateWatch: (patch: Partial<WatchSettings>) => void;
   updateRouting: (patch: Partial<RoutingSettings>) => void;
   updateSkillDiscovery: (patch: Partial<SkillDiscoverySettings>) => void;
@@ -2588,6 +2589,31 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         const snapshot = stateRef.current;
         const session = snapshot.sessions.find((item) => item.id === snapshot.activeSessionId);
         if (!session) return;
+        /*
+         * Compaction rewrites a chat down to a summary and drops what it
+         * summarised. A chat whose rows are still in its sidecar holds only part
+         * of itself, so compacting now would summarise the part and cut the
+         * pointer to the rest. Opening the chat merges them back; this only
+         * fires when that merge has not happened or did not work.
+         */
+        if (session.transcriptSidecar) {
+          setState((latest) => ({
+            ...latest,
+            sessions: latest.sessions.map((item) =>
+              item.id === session.id
+                ? {
+                    ...item,
+                    messages: [...item.messages, {
+                      id: uid("msg"), role: "system" as const, kind: "compact" as const,
+                      text: "This chat's earlier rows are still in the transcript store. Reopen it so they load, then compact.",
+                      createdAt: Date.now(),
+                    }],
+                  }
+                : item,
+            ),
+          }));
+          return;
+        }
         if (session.provider !== "grok") {
           const checkpoint = createPortableCheckpoint(session.messages, note);
           setState((latest) => ({
@@ -5816,6 +5842,20 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             const priorWorker = reusedWorker
               ? latest.sessions.find((item) => item.id === reusedWorker.id)
               : undefined;
+            /*
+             * What the reused worker remembers.
+             *
+             * A worker handed a second slice inherits the first one's messages,
+             * and a worker that finished a week ago holds none of them: they are
+             * in its sidecar. Seeding the new run from the empty array would
+             * hand the vendor a worker with no past and call it continuity. The
+             * rows come back first, and only a merge that lines up is used.
+             */
+            let priorMessages = priorWorker?.messages;
+            if (priorWorker?.transcriptSidecar && window.workhorse?.loadTranscript) {
+              const sidecar = await window.workhorse.loadTranscript(priorWorker.id).catch(() => null);
+              priorMessages = (sidecar && mergeTranscriptRows(priorWorker.messages, sidecar)) || priorWorker.messages;
+            }
             if (priorWorker) {
               // A reused worker stays where it already worked. Legacy saves
               // may lack environment; treat that as the project folder, do
@@ -5942,6 +5982,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               // the run and the new message are fresh. Slice spend starts at
               // zero on this assignment; billed usage for the chat stays on the meter.
               ...(priorWorker ?? {}),
+              // The pointer belongs to the transcript that was retired, and the
+              // new run's messages start from that transcript already merged
+              // back in. Carrying it forward would have the desk fetch those
+              // rows a second time and splice them into an array they are
+              // already in.
+              transcriptSidecar: undefined,
+              transcriptOffloaded: undefined,
+              retainedReport: undefined,
               id: childId,
               workerName,
               projectId: spawnProjectId,
@@ -5994,7 +6042,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               ...(spawnSeed === "fresh" ? { vendorSessionId: undefined, vendorProvider: undefined } : {}),
               messages: workerStartMessages({
                 seed: spawnSeed,
-                priorMessages: priorWorker?.messages,
+                priorMessages,
                 userId: uid("msg"),
                 assistantId,
                 fromTitle: parent.title?.trim() || "another agent",
@@ -8363,6 +8411,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     if (ready) refreshAllPlans();
   }, [ready, refreshAllPlans]);
 
+  const setRetentionDays = useCallback((days: number) => {
+    setState((current) => ({
+      ...current,
+      settings: { ...current.settings, retentionDays: normalizeRetentionDays(days) },
+    }));
+  }, []);
+
   const setUsageBudget = useCallback((provider: ProviderId, tokens: number | null) => {
     setState((current) => {
       const usageBudgets = { ...current.settings.usageBudgets };
@@ -8805,6 +8860,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       setSidebarWidth,
       setThreadWidth,
       setUsageBudget,
+      setRetentionDays,
       updateWatch,
       updateRouting,
       updateSkillDiscovery,
@@ -8942,6 +8998,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       setSidebarWidth,
       setThreadWidth,
       setUsageBudget,
+      setRetentionDays,
       updateWatch,
       updateRouting,
       updateSkillDiscovery,

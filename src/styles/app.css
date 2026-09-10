@@ -9006,7 +9006,7 @@ html.pane-dragging * {
   width: 84px;
   padding: 4px 6px;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius-10);
   background: var(--bg-solid);
   color: var(--text);
   font-size: 12px;

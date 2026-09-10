@@ -1058,7 +1058,10 @@ export function planWindowChip(
       // Once the allowance is judged unmetered, its gauge stops being a
       // number worth printing: "Weekly: 0%" is the fiction we just saw through.
       const uncapped = item.unlimited || (deadGauge && ALLOWANCE_WINDOW.test(item.product));
-      return uncapped ? `${item.label}: ∞` : `${item.label}: ${Math.round(item.usagePercent)}%`;
+      // Leftover, like the ring above it. This line used to print spend, so a
+      // card read "53%" in the ring and "Weekly: 47%" underneath: two numbers,
+      // opposite meanings, one card.
+      return uncapped ? `${item.label}: ∞` : `${item.label}: ${Math.round(clampLeftover(100 - item.usagePercent))}%`;
     })
     .join(" · ");
 }
@@ -1081,13 +1084,13 @@ export function planRingView(
     if (chosen) {
       if (chosen.unlimited) return { value: 1, label: "∞", plan, unmetered: true };
       const left = clampLeftover(100 - chosen.usagePercent);
-      return { value: left / 100, label: `${Math.round(left)}%`, plan };
+      return { value: left / 100, label: `${Math.round(left)}% left`, plan };
     }
   }
   const allowance = planAllowance(plan, { ...options, provider: row.provider });
   if (allowance.status === "unmetered") return { value: 1, label: "∞", plan, unmetered: true };
   if (allowance.status === "known") {
-    return { value: allowance.leftPercent / 100, label: `${Math.round(allowance.leftPercent)}%`, plan };
+    return { value: allowance.leftPercent / 100, label: `${Math.round(allowance.leftPercent)}% left`, plan };
   }
   return undefined;
 }
@@ -1819,7 +1822,10 @@ export function formatTokens(value: number): string {
   if (value < 1000) return String(Math.round(value));
   if (value < 10_000) return `${(value / 1000).toFixed(1)}k`;
   if (value < 1_000_000) return `${Math.round(value / 1000)}k`;
-  return `${(value / 1_000_000).toFixed(1)}M`;
+  // A desk that has run for a year read 1657.5M, which is a number nobody can
+  // hold. A billion gets its own letter.
+  if (value < 1_000_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
+  return `${(value / 1_000_000_000).toFixed(2)}B`;
 }
 
 /** Settings → Usage drill-in facts. Empty billed events stay "-" / 0, not leftover %. */

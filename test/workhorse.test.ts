@@ -3698,7 +3698,7 @@ test("parseGrokPlanUsage reads weekly SuperGrok pool remaining", () => {
   assert.equal(spent?.leftPercent, 0);
   assert.equal(
     planRingView({ focus: "grok", provider: "grok", key: "grok" }, { grok: spent })?.label,
-    "0%",
+    "0% left",
   );
 
   const spentBuildOnly = parseGrokPlanUsage({
@@ -3722,7 +3722,7 @@ test("parseGrokPlanUsage reads weekly SuperGrok pool remaining", () => {
   assert.equal(spentRemaining?.leftPercent, 0);
   assert.equal(
     planRingView({ focus: "grok", provider: "grok", key: "grok" }, { grok: spentRemaining })?.label,
-    "0%",
+    "0% left",
   );
   const spentVal = parseGrokPlanUsage({ config: { creditRemainingPercent: { val: 0 } } });
   assert.equal(spentVal?.leftPercent, 0);
@@ -3794,7 +3794,8 @@ test("parseCodexPlanUsage reads weekly leftover the same way as SuperGrok", () =
   const preload = readFileSync(path.join(ROOT, "electron", "preload.ts"), "utf8");
   const main = readFileSync(path.join(ROOT, "electron", "main.ts"), "utf8");
   assert.match(pane, /leftoverForCard/);
-  assert.match(pane, /showCodexLeftover/);
+  // Every card reads leftover now, not Codex alone.
+  assert.doesNotMatch(pane, /showCodexLeftover/);
   assert.match(pane, /\$\{planName\} ·/);
   assert.match(store, /codexPlanUsage/);
   assert.match(store, /refreshCodexPlan/);
@@ -5814,7 +5815,7 @@ test("UsagePane ships the Figma fuel-ring overview, not the old token line", asy
   assert.match(pane, /usage-limits/);
   assert.match(pane, /claudeWindowTabs/);
   assert.match(pane, /setClaudeWindow/);
-  assert.match(pane, /showCodexLeftover \? "left" : "used"/);
+  assert.match(pane, /% left/);
   assert.match(pane, /Unlimited/);
   assert.match(pane, /ContextMeter/);
   assert.match(pane, /referenceOnly/);
@@ -6217,7 +6218,7 @@ test("Usage rings include every desk LLM even with no spend", () => {
   });
   assert.equal(planRingView(claudeCard, {
     claude: { usedPercent: 7, leftPercent: 93, period: "weekly", prepaidBalance: 0, products: [{ product: "weekly_all", label: "All models", usagePercent: 7 }] },
-  })?.label, "93%");
+  })?.label, "93% left");
   assert.equal(leftoverForCard({ focus: "cursor:cursor-models", provider: "cursor", key: "cursor:cursor-models" }, {}), undefined);
   const mini = leftoverForCard(cards.find((card) => card.label === "MiniMax")!, {
     custom: {
@@ -6264,11 +6265,11 @@ test("Usage rings include every desk LLM even with no spend", () => {
   assert.equal(pickClaudeWindow(claudePlan, "weekly_scoped")?.label, "Fable");
   assert.equal(
     planRingView(claudeCard, { claude: claudePlan }, "session")?.label,
-    "77%",
+    "77% left",
   );
   assert.equal(
     planRingView(claudeCard, { claude: claudePlan })?.label,
-    "93%",
+    "93% left",
   );
   assert.equal(
     planRingView(cards.find((card) => card.label === "MiniMax")!, {
@@ -6276,7 +6277,7 @@ test("Usage rings include every desk LLM even with no spend", () => {
         bot_mini: { usedPercent: 0, leftPercent: 100, period: "weekly", prepaidBalance: 0, products: [] },
       },
     })?.label,
-    "100%",
+    "100% left",
   );
   const miniWindows = {
     usedPercent: 0,
@@ -6288,7 +6289,8 @@ test("Usage rings include every desk LLM even with no spend", () => {
       { product: "weekly", label: "Weekly", usagePercent: 0, unlimited: true },
     ],
   };
-  assert.equal(planWindowChip(miniWindows), "5h: 17% · Weekly: ∞");
+  // Leftover, like the ring: 17% of the burst spent is 83% of it left.
+  assert.equal(planWindowChip(miniWindows), "5h: 83% · Weekly: ∞");
   assert.equal(weeklyPlanLeftover(miniWindows), undefined);
   assert.equal(pickPlanWindow(miniWindows, undefined, "custom")?.label, "5h");
   // The ring is the allowance, and this one has no cap. It used to show the

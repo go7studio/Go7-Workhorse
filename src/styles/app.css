@@ -4558,6 +4558,9 @@ html.pane-dragging * {
   transform: none;
 }
 
+/* Two icon buttons on every row at rest is two hundred buttons in a full
+   sidebar. They keep their space so the name never reflows; they only take
+   ink when the pointer, the keyboard or the selection is on the row. */
 .project-new,
 .project-info {
   align-self: center;
@@ -4567,6 +4570,19 @@ html.pane-dragging * {
   margin-right: 2px;
   line-height: 1;
   color: var(--text-secondary);
+  opacity: 0;
+  transition: opacity var(--motion-120) var(--ease);
+}
+
+.project-head:hover .project-new,
+.project-head:hover .project-info,
+.project-head:focus-within .project-new,
+.project-head:focus-within .project-info,
+.project-head:has(.row.active) .project-new,
+.project-head:has(.row.active) .project-info,
+.project-folder.selected .project-new,
+.project-folder.selected .project-info {
+  opacity: 1;
 }
 
 .project-new {
@@ -4972,13 +4988,17 @@ html.pane-dragging * {
   background: var(--bg-active);
 }
 
+/* On is a word. This wore an 8px stroke on a circle, which is the shape a
+   leftover ring uses, so a bot with no meter still read as metered and a
+   full ring said nothing about spend. The box keeps its size so no card
+   moves; only the ring is gone. */
 .llm-mark {
   display: grid;
   place-items: center;
   width: 88px;
   height: 88px;
-  border: 8px solid rgba(127, 127, 127, 0.22);
-  border-radius: 50%;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-14);
   font-family: var(--display);
   font-size: var(--text-15);
   font-weight: 620;
@@ -5006,9 +5026,11 @@ html.pane-dragging * {
   color: var(--text);
 }
 
+/* Add a bot is a mark, not a meter reading, so it keeps its circle. */
 .llm-mark.plus {
   border-style: dashed;
   border-width: 2px;
+  border-radius: 50%;
   font-size: var(--text-28);
   font-weight: 400;
   color: var(--text-secondary);
@@ -7006,6 +7028,17 @@ html.pane-dragging * {
   line-height: 1.45;
   color: var(--text-secondary);
   white-space: normal;
+}
+
+/* One line under a control, then the way to the rest of it. */
+.settings-learn {
+  color: var(--accent);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.settings-learn:hover {
+  text-decoration: underline;
 }
 
 .local-compute-add {
@@ -9038,6 +9071,7 @@ html.pane-dragging * {
   align-items: center;
   gap: 8px;
   height: 32px;
+  min-width: 0;
 }
 
 .composer-crew-chip {
@@ -9052,8 +9086,23 @@ html.pane-dragging * {
   font-size: var(--text-12);
   font-weight: 590;
   line-height: 1.25;
-  flex-shrink: 0;
+  /* The chip would not shrink, and the rail it sits in clips, so at 1280px
+     the name was cut mid-word. It gives ground down to a floor that still
+     shows the icon and the cross, then the name ellipsises. */
+  flex: 0 1 auto;
+  min-width: 72px;
   animation: crew-chip-in 220ms var(--ease);
+}
+
+/* Beats `.composer-crew-chip span`, which paints the icon and the cross. */
+.composer-crew-chip .crew-chip-name {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--text);
+  font-size: var(--text-12);
+  line-height: 1.25;
 }
 
 @keyframes crew-chip-in {

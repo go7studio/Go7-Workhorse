@@ -117,6 +117,10 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
   the full time.
 - A parent folds its workers on the count button, and closing the project hides
   them even when it stays pinned.
+- A project row shows its info and new-chat buttons when the pointer, the
+  keyboard or the selection is on it, and keeps their space at rest.
+- A crew chip in the composer shortens its name with an ellipsis rather than
+  cutting it off at a narrow window.
 - A chat that ran a wave says who called it and how it went, such as
   `OpenClaw · Working…`, or nothing once every worker finished clean.
 - Failure is the only word in red. Interrupted and timed-out work is unfinished,
@@ -365,6 +369,9 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
 - Composer and API stay two separate pools. Grok, Claude, and Codex stay unknown
   if they omit a bill.
 - Leftover rings, billed tokens, and retained context stay distinct meters.
+- Every percentage on the Usage page is leftover, and says so. The ring and the
+  line under it count the same way, for every vendor.
+- Big totals read 1.66B, not 1657.5M.
 - This chat's billed total sits in white on the left of the transcript.
   Orchestrated bots combine into one grey Crew total under it, and a click opens
   each bot with in, cached and out.
@@ -511,6 +518,9 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
   after Workhorse quits.
 - When one is ready, a blue control appears at the far right of Settings. Hover
   it for Update now and the version it will install.
+- A control gets one line of explanation, then a Learn more link to the docs.
+- In Settings → LLMs a vendor is switched with a word, On or Off. Only a meter
+  draws a ring.
 
 ## Platforms
 

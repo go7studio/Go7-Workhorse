@@ -176,7 +176,11 @@ export function catalogSessions(state: LooseState, opts?: { fromSessionId?: stri
         effort: typeof session.effort === "string" ? session.effort : null,
         mode: typeof session.mode === "string" ? session.mode : "ask",
       }),
-      messageCount: messages.length + offloaded,
+      // A desk read sends the count beside a handful of messages, because
+      // shipping a whole transcript just to length it put one reply at 6.5 MB.
+      // The saved file has no such field, so it still counts what it holds, plus
+      // the rows retirement already moved to disk.
+      messageCount: typeof session.messageCount === "number" ? session.messageCount : messages.length + offloaded,
       ...(parentId ? { parentId } : {}),
       ...(workerName ? { worker: workerName } : {}),
     });

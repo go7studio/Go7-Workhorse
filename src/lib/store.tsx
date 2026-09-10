@@ -214,7 +214,17 @@ import {
   upsertThoughtMessage,
   upsertToolMessage,
 } from "./grok-events";
-import { chatPreview, formatPeerPrompt, sameSessionCrew } from "./session-bridge";
+import { catalogSessions, chatPreview, formatPeerPrompt, matchListedChat, sameSessionCrew } from "./session-bridge";
+import {
+  boundLinkRead,
+  linkReadMaxBytes,
+  projectLinkCapacity,
+  projectLinkChat,
+  projectLinkChats,
+  projectLinkStatus,
+  type LinkReadRoute,
+  type LinkReadState,
+} from "./link-read";
 import {
   addLineupRow,
   applyChildIdleSync,
@@ -5079,6 +5089,44 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                   2,
                 ),
               });
+              return;
+            }
+            if (action === "link-read") {
+              // A Link helper reads through the desk while the desk is up. The
+              // answer comes from the state already held here, so the helper
+              // never parses the saved file and never catches one half written.
+              const route = payload.name ?? "";
+              const id = (payload.message ?? "").trim();
+              const fromId = payload.fromSessionId?.trim() || "";
+              const live: LinkReadState = {
+                sessions: latest.sessions,
+                projects: latest.projects,
+                settings: latest.settings,
+                usage: latest.usage,
+                deskPlans: latest.deskPlans ?? plansRef.current,
+                watchPermits: latest.watchPermits,
+                watchDayMarks: latest.watchDayMarks,
+                externalTasks: latest.externalTasks,
+              };
+              const snapshot: LinkReadState | { error: string } =
+                route === "chats"
+                  ? projectLinkChats(live, fromId)
+                  : route === "capacity"
+                    ? projectLinkCapacity(live, fromId)
+                    : route === "status"
+                      ? projectLinkStatus(live, id, fromId)
+                      : route === "chat"
+                        ? projectLinkChat(live, id, payload.limit ?? 40, fromId, (state, query, caller) => {
+                            const listed = catalogSessions(state, { fromSessionId: caller, includeWorkers: true });
+                            const resolved = matchListedChat(listed, query);
+                            return "session" in resolved ? { id: resolved.session.id } : { error: resolved.error };
+                          })
+                        : { error: `unknown link read route “${route}”` };
+              if ("error" in snapshot) {
+                await replyAsk({ error: snapshot.error });
+                return;
+              }
+              await replyAsk(boundLinkRead(JSON.stringify(snapshot), linkReadMaxBytes(route as LinkReadRoute)));
               return;
             }
             if (action === "agent-status") {

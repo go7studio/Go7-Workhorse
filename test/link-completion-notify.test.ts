@@ -120,7 +120,7 @@ test("unannounced is at-most-once per helper", () => {
   assert.equal(unannounced(settled, seen).length, 0, "a rewritten state file does not re-announce");
 });
 
-test("the watcher binds to the directory, so an atomic replace cannot mute it", () => {
+test("the watcher binds to the directory, so an atomic replace cannot mute it", async () => {
   // writeVersionedState replaces the state file, so the inode the path pointed
   // at is gone after the first write. A watcher bound to the file stops firing
   // and it looks exactly like "no worker ever finished". Asserting the watched
@@ -142,14 +142,19 @@ test("the watcher binds to the directory, so an atomic replace cannot mute it", 
   });
   try {
     assert.deepEqual(watched, [dir], "the directory, not the file");
+    // A read goes to the desk first, so waiting on the handle is how a test
+    // waits for one. The clock is never the seam.
+    await handle.idle();
     // Now drive the change the way an atomic replace does.
     fs.writeFileSync(statePath, JSON.stringify({ sessions: [persisted("w1", "completed")] }));
     fire?.("rename", "workhorse-state.json");
+    await handle.idle();
     assert.equal(frames.length, 1, "the replace produced one notification");
     assert.equal(frames[0]?.params.id, "w1");
     assert.equal(frames[0]?.params.status, "completed");
     // A second identical write announces nothing more.
     fire?.("rename", "workhorse-state.json");
+    await handle.idle();
     assert.equal(frames.length, 1, "at most once per finish");
   } finally {
     handle.stop();

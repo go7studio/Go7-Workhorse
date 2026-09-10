@@ -139,6 +139,63 @@ reads still answer from the last saved state, delegation does not.
 | `workhorse_local_materialize` | byte-range download into Workhorse's SHA-verified cache | yes |
 | `workhorse_local_continue` | dispatch one approved, allowlisted continuation as a visible worker | yes |
 
+## Where a read comes from
+
+While the desk is running, a read comes from the desk and not from the saved
+file. The helper asks over the same loopback bridge the writes already use,
+with the same bearer token, on four routes:
+
+| Route | Answers | Reply bound |
+| --- | --- | --- |
+| `GET /link/chats` | `workhorse_list_chats`, and the finished-worker watch | 1 MB |
+| `GET /link/chat/:id` | `workhorse_read_chat`. The id may be an id, a worker name or a title | 256 KB |
+| `GET /link/capacity` | `workhorse_query_capacity` | 256 KB |
+| `GET /link/status/:id` | `workhorse_agent_status`, and the caller's own row for `workhorse_capabilities` | 256 KB |
+
+These routes read. They change nothing. They are bearer authenticated like
+every other bridge route. A request body is bounded at 256 KB and every reply
+is bounded too. Over the bound the caller gets an error object naming the size.
+No reply is ever cut short in silence.
+
+The desk answers from the state it already holds in memory. A helper is never
+handed a file caught halfway through a save, and never holds a whole file to
+answer one question. The roster is one row per live chat, so it grows with the
+desk and is bounded wider than the other three. A desk of 587 chats measures
+407 KB there.
+
+A reply carries a subset of the saved shape: the same field names, fewer
+fields. That is what lets one reader serve both paths. No route carries a
+credential, an environment value or attachment bytes. The desk drops those
+before it answers, so a helper never holds them at all.
+
+Each projector in `src/lib/link-read.ts` names the fields it copies and copies
+nothing else, down through every field that carries a shape of its own: the
+session row, its run, its findings, its mission, the settings, each bot, each
+local compute host, each ledger line, each plan and each external task. A field
+added to any of them cannot reach a helper until someone writes its name there.
+The scrub that drops any key called `apiKey`, `credentialId`, `env`, `token`,
+`bearer`, `secret`, `tokenFile`, `bookmark` or `data` runs after that, as the
+second net rather than the first. Past the depth the scrub will walk, nothing
+travels at all: record, list or plain value, it becomes `[too deep to scrub]`
+and the reader sees that something was cut. Reading a key is not a check on the
+value under it, so a value the scrub never reached does not go out.
+
+A few maps are keyed by something the desk did not choose, such as a session id
+or a bot id. Those copy no key blindly. Where the keys are known they are named
+and copied by name, which is how `usageBudgets` became the five providers and
+nothing else. Where they are genuinely dynamic the value carries the test: only
+what the named projector returns is copied, and the rest is dropped.
+
+A bot row carries `hasCredential` where its key would be. `/link/capacity` sends
+neither `apiKey` nor `credentialId` and never will, so the flag is how a reader
+is told the bot is attached. It says a key exists and nothing more: not which,
+not where. Without it a desk-answered capacity listed no custom bots at all,
+which told a harness less than the file it replaced.
+
+When the desk is down the helper reads the saved file, as it did before, and
+`desk` is `offline`. A desk that cannot answer a route does the same. Both
+paths run the same reader, so the answers match.
+
 ### The seat a worker runs under
 
 Permission and Sandbox are the person's settings — This chat, or Settings ›

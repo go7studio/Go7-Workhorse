@@ -199,9 +199,17 @@ export const EMPTY_CUSTOM_DRAFT: CustomLlm = {
   source: "manual",
 };
 
-/** On the desk: URL plus a vaulted or present key. Persist may omit plaintext. */
-export function customBotAttached(bot: Pick<CustomBot, "baseUrl" | "apiKey" | "credentialId">): boolean {
-  return Boolean(bot.baseUrl?.trim() && (bot.apiKey?.trim() || bot.credentialId?.trim()));
+/**
+ * On the desk: URL plus a vaulted or present key. Persist may omit plaintext.
+ *
+ * A read reply carries neither the key nor the id of the vaulted one, only
+ * `hasCredential`, so that flag counts as attached too. It is set nowhere but
+ * on a reply, and a bot on disk always answers on the two fields above.
+ */
+export function customBotAttached(
+  bot: Pick<CustomBot, "baseUrl" | "apiKey" | "credentialId" | "hasCredential">,
+): boolean {
+  return Boolean(bot.baseUrl?.trim() && (bot.apiKey?.trim() || bot.credentialId?.trim() || bot.hasCredential === true));
 }
 
 export function normalizeCustomBot(raw: unknown): CustomBot | null {
@@ -212,7 +220,12 @@ export function normalizeCustomBot(raw: unknown): CustomBot | null {
   const model = typeof record.model === "string" ? record.model.trim() : "";
   const apiKey = typeof record.apiKey === "string" ? record.apiKey.trim() : "";
   const credentialId = typeof record.credentialId === "string" ? record.credentialId.trim() : "";
-  if (!id || !baseUrl || !model || (!apiKey && !credentialId)) return null;
+  // A row off `/link/capacity` says a key exists and stops there, because that
+  // route sends neither the key nor the id of the vaulted one. The flag is
+  // enough to keep the bot listed; it is never enough to invent a secret, so
+  // `apiKey` stays empty and the desk is still the only place that holds one.
+  const hasCredential = record.hasCredential === true;
+  if (!id || !baseUrl || !model || (!apiKey && !credentialId && !hasCredential)) return null;
   const name = typeof record.name === "string" && record.name.trim() ? record.name.trim() : model;
   const color =
     typeof record.color === "string" && /^#[0-9a-f]{6}$/i.test(record.color) ? record.color : BOT_COLORS[0].value;
@@ -231,6 +244,7 @@ export function normalizeCustomBot(raw: unknown): CustomBot | null {
     model,
     apiKey,
     ...(credentialId ? { credentialId } : {}),
+    ...(hasCredential ? { hasCredential: true } : {}),
     api: record.api === "openai-completions" ? "openai-completions" : inferCustomApi(baseUrl),
     contextWindow:
       typeof record.contextWindow === "number" && record.contextWindow > 0 ? Math.round(record.contextWindow) : 128_000,

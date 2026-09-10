@@ -1,6 +1,12 @@
 import fs from "node:fs";
 import { offloadChatImage } from "./attachment-store";
-import { loadLinkState, readLinkState, runWithLinkState } from "./link-state";
+import { loadLinkState, readLinkState, runWithLinkState, type LinkDeskState } from "./link-state";
+import {
+  linkReadMaxBytes,
+  linkReadPath,
+  linkReadRouteForTool,
+  type LinkReadRequest,
+} from "../src/lib/link-read";
 import { openMainLog } from "./main-log";
 import { readTranscriptSidecar } from "./transcript-store";
 import path from "node:path";
@@ -109,6 +115,7 @@ import {
 } from "../src/lib/learning-inbound";
 import { runGrokBotInboxCli } from "./grok-bot-inbox";
 import { watchWorkerCompletions } from "./link-watch";
+import type { WorkerRunRow } from "../src/lib/worker-settled";
 import { createFramedSender } from "../src/lib/link-notify";
 
 type JsonRpc = {
@@ -1389,6 +1396,127 @@ async function postBridge(
   return askViaInbox(live.inbox, body, timeoutMs);
 }
 
+/** A read route is a snapshot, not a turn. It answers or it does not. */
+const LINK_READ_TIMEOUT_MS = 8_000;
+
+/**
+ * Ask the desk for the compact shape one read needs.
+ *
+ * Null means the desk did not answer. A dropped socket, a desk too old to know
+ * these routes and a reply over the bound all land here, and the caller reads
+ * the file instead. The tool then behaves as it did before these routes
+ * existed, which is the only safe way to fail: a helper that refused the call
+ * would break a read the desk can still serve from disk. A refusal the desk
+ * means, like a worker name two chats answer to, comes back the same either
+ * way, because both paths run the same reader.
+ */
+async function deskRead(route: LinkReadRequest, from: string): Promise<LinkDeskState | null> {
+  const ask: PeerAsk = {
+    toSessionId: "",
+    fromSessionId: from,
+    message: route.id,
+    mode: "bots",
+    action: "link-read",
+    name: route.route,
+    ...(route.limit ? { limit: route.limit } : {}),
+  };
+  const max = linkReadMaxBytes(route.route);
+  const parse = (text: string | undefined): LinkDeskState | null => {
+    if (typeof text !== "string" || !text.trim()) return null;
+    if (Buffer.byteLength(text, "utf8") > max) return null;
+    const parsed = JSON.parse(text) as unknown;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as LinkDeskState) : null;
+  };
+  if (deskAsk) {
+    const result = await deskAsk(ask);
+    return result.error ? null : parse(result.text);
+  }
+  const live = readBridgeRecord(process.env.WORKHORSE_STATE_PATH);
+  const url = live?.url || process.env.WORKHORSE_BRIDGE_URL;
+  const token = live?.token || process.env.WORKHORSE_BRIDGE_TOKEN;
+  if (!url || !token) return null;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), LINK_READ_TIMEOUT_MS);
+  try {
+    const response = await fetch(`${url.replace(/\/$/, "")}${linkReadPath(route, from)}`, {
+      headers: { authorization: `Bearer ${token}` },
+      signal: controller.signal,
+    });
+    const payload = (await response.json().catch(() => null)) as { text?: string; error?: string } | null;
+    if (!response.ok || payload?.error) return null;
+    return parse(payload?.text);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * The state one tool call reads.
+ *
+ * While the desk is up a read asks it for the exact compact shape that call
+ * needs, so this helper never parses the state file and is never handed one
+ * caught mid save. When the desk is down the file is the source, as before.
+ * Both answers share the saved field names, so the same reader serves either.
+ */
+export async function readSnapshotFor(
+  name: string,
+  args: Record<string, unknown>,
+  from?: string,
+): Promise<LinkDeskState> {
+  const caller = fromSessionId(from);
+  return readSnapshot(linkReadRouteForTool(name, args, caller), caller);
+}
+
+export async function readSnapshot(route: LinkReadRequest | null, caller: string): Promise<LinkDeskState> {
+  if (route && deskIsOnline()) {
+    try {
+      const snapshot = await deskRead(route, caller);
+      if (snapshot) return snapshot;
+    } catch {
+      // A dropped socket is the desk going down mid call, not an answer.
+    }
+  }
+  return loadLinkState(process.env.WORKHORSE_STATE_PATH ?? "");
+}
+
+/**
+ * Run rows for the completion watcher, from the desk.
+ *
+ * The roster already carries the id, the parent and the agent run of every
+ * chat, so the watcher needs no route of its own. Null means the desk is down
+ * and the caller should read the file.
+ */
+export async function deskWorkerRows(): Promise<WorkerRunRow[] | null> {
+  if (!deskIsOnline()) return null;
+  const snapshot = await deskRead({ route: "chats", id: "" }, "").catch(() => null);
+  if (!snapshot || !Array.isArray(snapshot.sessions)) return null;
+  const rows: WorkerRunRow[] = [];
+  for (const entry of snapshot.sessions) {
+    if (!entry || typeof entry !== "object") continue;
+    const row = entry as { id?: unknown; parentId?: unknown; agentRun?: unknown };
+    if (typeof row.id !== "string" || !row.id) continue;
+    const run = (row.agentRun && typeof row.agentRun === "object" ? row.agentRun : {}) as {
+      status?: unknown;
+      finishedAt?: unknown;
+      correlationId?: unknown;
+    };
+    rows.push({
+      id: row.id,
+      ...(typeof row.parentId === "string" ? { parentId: row.parentId } : {}),
+      ...(typeof run.status === "string"
+        ? {
+            agentRun: {
+              status: run.status,
+              ...(typeof run.finishedAt === "number" ? { finishedAt: run.finishedAt } : {}),
+              ...(typeof run.correlationId === "string" ? { correlationId: run.correlationId } : {}),
+            },
+          }
+        : {}),
+    });
+  }
+  return rows;
+}
+
 function formatProjectRows(rows: unknown): string {
   const list = Array.isArray(rows) ? rows : [];
   const named = list
@@ -1495,11 +1623,14 @@ function fromSessionId(override?: string): string {
 }
 
 export function resolveExternalSpawnFrom(from?: string): string {
-  const state = readState();
+  const caller = fromSessionId(from);
+  // The state holds one field this wants, and only when the caller named no
+  // chat of its own. Reading it either way parsed the whole file on every
+  // frame the host sent, which is most of what a Link helper used to hold.
   const hit = resolveMcpSpawnFrom({
     profile: currentMcpProfile(),
-    fromSessionId: fromSessionId(from),
-    inboundSessionId: inboundSessionIdFromState(state),
+    fromSessionId: caller,
+    inboundSessionId: caller ? "" : inboundSessionIdFromState(readState()),
   });
   return "parentId" in hit ? hit.parentId : "";
 }
@@ -3688,7 +3819,14 @@ export async function handleWorkhorseRpc(
     // The list a caller sees is the list it should learn. Forbidden names stay
     // off it. Link shows the versioned contract tools; older names still answer
     // at dispatch so a harness that already calls them is not refused.
-    const profile = profileForCaller(currentMcpProfile(), deskRoleOf(callerSession(ctx?.fromSessionId)));
+    // What is listed turns on the caller's desk role, and that is one row. Ask
+    // the desk for that row rather than parsing the file to find it.
+    const listCaller = fromSessionId(ctx?.fromSessionId);
+    const callerState = listCaller ? await readSnapshot({ route: "status", id: listCaller }, listCaller) : {};
+    const profile = profileForCaller(
+      currentMcpProfile(),
+      deskRoleOf(runWithLinkState(callerState, () => callerSession(ctx?.fromSessionId))),
+    );
     const localDiscovery = await discoverLocalRuntime(profile);
     const capabilityIds = localDiscovery?.capabilityIds ?? new Set<string>();
     const listed = TOOLS.filter((tool) =>
@@ -3765,14 +3903,18 @@ export async function handleWorkhorseRpc(
         }),
       );
     };
+    // The capture reads the desk's learning setting, so it runs inside the same
+    // snapshot as the call. Left outside it, it went to the file for that one
+    // field and pulled the whole 29 MB back into this helper.
+    let snap: LinkDeskState = {};
     try {
-      const snap = loadLinkState(process.env.WORKHORSE_STATE_PATH ?? "");
+      snap = await readSnapshotFor(toolName, toolArgs, ctx?.fromSessionId);
       const text = await runWithLinkState(snap, () => callTool(toolName, toolArgs, ctx?.fromSessionId));
-      captureCall(true, text);
+      runWithLinkState(snap, () => captureCall(true, text));
       return { jsonrpc: "2.0", id: message.id, result: { content: [{ type: "text", text }] } };
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
-      captureCall(false, undefined, detail);
+      runWithLinkState(snap, () => captureCall(false, undefined, detail));
       const delegation = currentMcpProfile() === "external-runtime" &&
         (toolName === "workhorse_delegate" || toolName === "workhorse_spawn_agent");
       const delegationDetail = detail.trim().replace(/[.\s]+$/, "");
@@ -3818,6 +3960,7 @@ export async function runWorkhorseMcp(): Promise<void> {
   const completions = watchWorkerCompletions({
     statePath: process.env.WORKHORSE_STATE_PATH ?? "",
     emit: sender.send,
+    deskRows: deskWorkerRows,
   });
   process.stdin.on("error", (error) => {
     console.error("workhorse mcp stdin", error);

@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { loadLinkState } from "./link-state";
+import { loadLinkRunRows } from "./link-state";
 import { settledWorkers, type WorkerRunRow } from "../src/lib/worker-settled";
 import { unannounced, workerTerminalNotification } from "../src/lib/link-notify";
 
@@ -16,7 +16,15 @@ import { unannounced, workerTerminalNotification } from "../src/lib/link-notify"
  * first write and a watcher bound to the file silently stops firing — which
  * looks exactly like "no workers ever finished".
  */
-export type LinkWatchHandle = { stop: () => void };
+export type LinkWatchHandle = {
+  stop: () => void;
+  /**
+   * Settles once the watcher has finished every read it has been asked for.
+   * Reading through the desk made these reads asynchronous, and this is how a
+   * caller waits for one without racing a clock.
+   */
+  idle: () => Promise<void>;
+};
 
 /**
  * Read what was written, not what a restarting desk would infer.
@@ -27,10 +35,14 @@ export type LinkWatchHandle = { stop: () => void };
  * that rule: every currently-running worker would read as already finished,
  * get marked announced, and its real completion would never be sent. So this
  * takes the raw rows.
+ *
+ * Rows, not state. This runs on every desk write, so it parses without the
+ * transcripts and holds nothing between calls. Going through the shared
+ * snapshot instead pinned the whole 29 MB file in every helper.
  */
 function readWorkerRows(statePath: string): WorkerRunRow[] {
   try {
-    const raw = loadLinkState(statePath);
+    const raw = loadLinkRunRows(statePath);
     if (!Array.isArray(raw.sessions)) return [];
     const rows: WorkerRunRow[] = [];
     for (const entry of raw.sessions) {
@@ -69,12 +81,32 @@ export function watchWorkerCompletions(input: {
   emit: (frame: object) => void;
   /** Injected in tests. */
   watch?: typeof fs.watch;
+  /**
+   * Run rows from the live desk. Returns null when the desk is down, and then
+   * the file is read instead.
+   *
+   * The state file only changes while a desk is running, so a watch tick has a
+   * desk to ask nearly every time. Asking is what keeps this helper small: the
+   * file read costs a 29 MB parse on every desk write.
+   */
+  deskRows?: () => Promise<WorkerRunRow[] | null>;
 }): LinkWatchHandle {
   const statePath = input.statePath.trim();
-  if (!statePath) return { stop: () => undefined };
+  if (!statePath) return { stop: () => undefined, idle: () => Promise.resolve() };
   const directory = path.dirname(statePath);
   const basename = path.basename(statePath);
   const announced = new Set<string>();
+  const rows = async (): Promise<WorkerRunRow[]> => {
+    if (input.deskRows) {
+      try {
+        const live = await input.deskRows();
+        if (live) return live;
+      } catch {
+        // The desk went down mid call. The file still answers.
+      }
+    }
+    return readWorkerRows(statePath);
+  };
 
   // The first read is a baseline, not an announcement: workers already
   // terminal when this helper started belong to somebody else's turn, and
@@ -86,21 +118,36 @@ export function watchWorkerCompletions(input: {
   // existed, and guessing wrong wakes a host for someone else's slice.
   // workhorse_agent_status is the answer for that, which is why the pull stays
   // the contract rather than being replaced by this.
-  let previous = readWorkerRows(statePath);
-  for (const worker of previous) {
-    if (worker.agentRun?.status && worker.agentRun.status !== "running") announced.add(worker.id);
-  }
+  let previous: WorkerRunRow[] = [];
+  let stopped = false;
+
+  // One read at a time, in order. A desk write raises several events, and a
+  // second read starting inside the first would diff against a roster nobody
+  // has yet. `pending` is every read asked for so far.
+  let pending: Promise<void> = rows().then((seed) => {
+    previous = seed;
+    for (const worker of seed) {
+      if (worker.agentRun?.status && worker.agentRun.status !== "running") announced.add(worker.id);
+    }
+  });
+  let queued = false;
 
   const onChange = (_event: string, filename: string | Buffer | null) => {
     const name = typeof filename === "string" ? filename : filename?.toString();
     // Atomic replace shows up as a rename of the real name or its temp files.
     if (name && !name.startsWith(basename)) return;
-    const next = readWorkerRows(statePath);
-    if (next.length === 0) return;
-    for (const worker of unannounced(settledWorkers(previous, next), announced)) {
-      input.emit(workerTerminalNotification(worker));
-    }
-    previous = next;
+    if (queued) return;
+    queued = true;
+    pending = pending.then(async () => {
+      queued = false;
+      if (stopped) return;
+      const next = await rows();
+      if (stopped || next.length === 0) return;
+      for (const worker of unannounced(settledWorkers(previous, next), announced)) {
+        input.emit(workerTerminalNotification(worker));
+      }
+      previous = next;
+    });
   };
 
   let watcher: fs.FSWatcher | undefined;
@@ -109,16 +156,18 @@ export function watchWorkerCompletions(input: {
   } catch {
     // No watch (unsupported filesystem, missing directory): the caller still
     // has workhorse_agent_status, which is the contract either way.
-    return { stop: () => undefined };
+    return { stop: () => undefined, idle: () => pending };
   }
   watcher.on("error", () => undefined);
   return {
     stop: () => {
+      stopped = true;
       try {
         watcher?.close();
       } catch {
         // already gone
       }
     },
+    idle: () => pending,
   };
 }

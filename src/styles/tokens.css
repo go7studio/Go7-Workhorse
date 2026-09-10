@@ -24,8 +24,56 @@
   --display: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", system-ui, sans-serif;
   --mono: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
   --ease: cubic-bezier(0.22, 1, 0.36, 1);
-  --radius: 12px;
-  --radius-sm: 8px;
+
+  /* Six steps of space. Every gap, pad and margin picks one of these. */
+  --space-4: 4px;
+  --space-8: 8px;
+  --space-12: 12px;
+  --space-16: 16px;
+  --space-24: 24px;
+  --space-32: 32px;
+
+  /* Seven type steps, each with the line height it is set on. A size and
+     its leading travel together, so a row never has to guess. */
+  --text-11: 11px;
+  --leading-11: 16px;
+  --text-12: 12px;
+  --leading-12: 16px;
+  --text-13: 13px;
+  --leading-13: 18px;
+  --text-15: 15px;
+  --leading-15: 20px;
+  --text-17: 17px;
+  --leading-17: 24px;
+  --text-20: 20px;
+  --leading-20: 26px;
+  --text-28: 28px;
+  --leading-28: 34px;
+
+  /* Three corners and a pill. A circle is `50%`, which is a shape, not a
+     step on this scale. */
+  --radius-6: 6px;
+  --radius-10: 10px;
+  --radius-14: 14px;
+  --radius-pill: 999px;
+  --radius: var(--radius-14);
+  --radius-sm: var(--radius-10);
+
+  /* One ladder for the whole desk. Each rung is far enough above the last
+     that nothing in a lower band can reach the band above it. */
+  --z-base: 0;
+  --z-raised: 1;
+  --z-sticky: 10;
+  --z-sheet: 100;
+  --z-popover: 1000;
+  --z-toast: 10000;
+
+  /* Three durations. 120 for a state flip, 240 for a move, 480 for a
+     panel that opens. */
+  --motion-120: 120ms;
+  --motion-240: 240ms;
+  --motion-480: 480ms;
+
   --titlebar: 48px;
   --sidebar: 268px;
   --grok: #1d1d1f;

@@ -192,6 +192,8 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
   want. Each pin is a chip next to +; two collapse to +2 you can expand.
 - Orchestrate makes this chat the orchestrator, and it must spawn desk workers.
   Auto ranks, fan-out only when asked.
+- Either pin also hands the chat the spawn rules. An unpinned chat gets them
+  the moment it is asked for workers, and opens lighter for not carrying them.
 - One assignment is one worker, or a
   named continuation on this parent for the same topic; a bare spawn still
   starts clear-headed.

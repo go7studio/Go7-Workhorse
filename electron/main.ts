@@ -818,7 +818,7 @@ function runHousekeeping(sessions: readonly unknown[]) {
   // removal is the only thing this sweep does that a person cannot undo, so it
   // is the one thing the log may not summarise.
   for (const name of pruned.removed) {
-    mainLog.record("prune:removed", `${name}: clean and on a remote`);
+    mainLog.record("prune:removed", `${name}: clean and holding nothing unsaved`);
   }
   for (const held of pruned.kept) {
     console.info(`Kept the worktree for ${held.name}: ${held.reason}.`);

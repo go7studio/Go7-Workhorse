@@ -1505,5 +1505,8 @@ test("every worktree the sweep takes writes its own line", () => {
   for (const refusal of ["headIsReachable", "ignoredWorkAtRisk", "holdsNoFiles", "worktreeIsDirty", "headIsOnARemote"]) {
     assert.match(host, new RegExp(`${refusal}\\(`), `${refusal} must be called before a folder goes`);
   }
+  // The one check that clears a refusal rather than making one. Without it a
+  // squash merged worker's tree is held for ever, which is most of them.
+  assert.match(host, /headContentIsOnDefaultBranch\(/, "a merged tree has a way to be let go of");
   assert.equal(/fs\.rmSync\([^)]*force: true/.test(host), false, "the sweep never forces a directory away");
 });

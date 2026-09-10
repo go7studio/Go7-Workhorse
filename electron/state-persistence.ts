@@ -243,9 +243,10 @@ export const WORKTREE_KEEP_AFTER_FINISH_MS = 7 * 24 * 60 * 60 * 1000;
  * not retired — it still holds its prose — and is aged as before.
  *
  * Being a candidate is not permission to delete. Every refusal in
- * `worktree-host.ts` still runs on the tree itself: uncommitted changes,
- * commits no remote branch has, unreachable commits, ignored work git would
- * silently take, and a `.git`-less folder that still holds files.
+ * `worktree-host.ts` still runs on the tree itself: uncommitted changes, work
+ * that is on no remote branch and not in the default branch either, unreachable
+ * commits, ignored work git would silently take, and a `.git`-less folder that
+ * still holds files.
  */
 export function worktreeKeepSet(
   sessions: readonly unknown[],

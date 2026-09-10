@@ -1,6 +1,12 @@
 import fs from "node:fs";
 import { offloadChatImage } from "./attachment-store";
-import { loadLinkState, readLinkState, runWithLinkState } from "./link-state";
+import { loadLinkState, readLinkState, runWithLinkState, type LinkDeskState } from "./link-state";
+import {
+  LINK_READ_MAX_BYTES,
+  linkReadPath,
+  linkReadRouteForTool,
+  type LinkReadRequest,
+} from "../src/lib/link-read";
 import { openMainLog } from "./main-log";
 import { readTranscriptSidecar } from "./transcript-store";
 import path from "node:path";
@@ -1387,6 +1393,90 @@ async function postBridge(
   }
   if (!allowInbox || !live?.inbox) throw new Error("Workhorse bridge is not running");
   return askViaInbox(live.inbox, body, timeoutMs);
+}
+
+/** A read route is a snapshot, not a turn. It answers or it does not. */
+const LINK_READ_TIMEOUT_MS = 8_000;
+
+class DeskReadRefused extends Error {}
+
+/**
+ * Ask the desk for the compact shape one read needs.
+ *
+ * A refusal from the desk — an ambiguous chat name, a reply over the bound — is
+ * the desk's answer and is raised. A transport failure is not an answer, so it
+ * returns null and the caller falls back to the file.
+ */
+async function deskRead(route: LinkReadRequest, from: string): Promise<LinkDeskState | null> {
+  const ask: PeerAsk = {
+    toSessionId: "",
+    fromSessionId: from,
+    message: route.id,
+    mode: "bots",
+    action: "link-read",
+    name: route.route,
+    ...(route.limit ? { limit: route.limit } : {}),
+  };
+  const parse = (text: string | undefined): LinkDeskState | null => {
+    if (typeof text !== "string" || !text.trim()) return null;
+    if (Buffer.byteLength(text, "utf8") > LINK_READ_MAX_BYTES) {
+      throw new DeskReadRefused(`Workhorse desk read is over the ${LINK_READ_MAX_BYTES} byte bound.`);
+    }
+    const parsed = JSON.parse(text) as unknown;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as LinkDeskState) : null;
+  };
+  if (deskAsk) {
+    const result = await deskAsk(ask);
+    if (result.error) throw new DeskReadRefused(result.error);
+    return parse(result.text);
+  }
+  const live = readBridgeRecord(process.env.WORKHORSE_STATE_PATH);
+  const url = live?.url || process.env.WORKHORSE_BRIDGE_URL;
+  const token = live?.token || process.env.WORKHORSE_BRIDGE_TOKEN;
+  if (!url || !token) return null;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), LINK_READ_TIMEOUT_MS);
+  try {
+    const response = await fetch(`${url.replace(/\/$/, "")}${linkReadPath(route, from)}`, {
+      headers: { authorization: `Bearer ${token}` },
+      signal: controller.signal,
+    });
+    const payload = (await response.json().catch(() => null)) as { text?: string; error?: string } | null;
+    if (response.status === 404 || response.status === 401) return null;
+    if (!response.ok || payload?.error) {
+      throw new DeskReadRefused(payload?.error || `Workhorse desk read failed with ${response.status}`);
+    }
+    return parse(payload?.text);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * The state one tool call reads.
+ *
+ * While the desk is up a read asks it for the exact compact shape that call
+ * needs, so this helper never parses the state file and is never handed one
+ * caught mid save. When the desk is down the file is the source, as before.
+ * Both answers share the saved field names, so the same reader serves either.
+ */
+export async function readSnapshotFor(
+  name: string,
+  args: Record<string, unknown>,
+  from?: string,
+): Promise<LinkDeskState> {
+  const caller = fromSessionId(from);
+  const route = linkReadRouteForTool(name, args, caller);
+  if (route && deskIsOnline()) {
+    try {
+      const snapshot = await deskRead(route, caller);
+      if (snapshot) return snapshot;
+    } catch (error) {
+      if (error instanceof DeskReadRefused) throw error;
+      // A dropped socket is the desk going down mid call, not an answer.
+    }
+  }
+  return loadLinkState(process.env.WORKHORSE_STATE_PATH ?? "");
 }
 
 function formatProjectRows(rows: unknown): string {
@@ -3766,7 +3856,7 @@ export async function handleWorkhorseRpc(
       );
     };
     try {
-      const snap = loadLinkState(process.env.WORKHORSE_STATE_PATH ?? "");
+      const snap = await readSnapshotFor(toolName, toolArgs, ctx?.fromSessionId);
       const text = await runWithLinkState(snap, () => callTool(toolName, toolArgs, ctx?.fromSessionId));
       captureCall(true, text);
       return { jsonrpc: "2.0", id: message.id, result: { content: [{ type: "text", text }] } };

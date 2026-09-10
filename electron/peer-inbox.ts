@@ -25,7 +25,9 @@ export type PeerAction =
   | "agent-status"
   | "cancel-agent"
   | "list-agents"
-  | "list-external-agents";
+  | "list-external-agents"
+  /** A read route answered from the desk's live state. See src/lib/link-read.ts. */
+  | "link-read";
 
 export type PeerAsk = {
   fromSessionId: string;
@@ -54,6 +56,8 @@ export type PeerAsk = {
   apiKey?: string;
   api?: string;
   contextWindow?: number;
+  /** How many messages a `/link/chat/:id` read asks the desk to send back. */
+  limit?: number;
   bot?: string;
   /** Name of the worker to hand this slice back to — Wren, Dexter, Marlow. */
   worker?: string;

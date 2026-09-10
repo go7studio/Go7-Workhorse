@@ -233,6 +233,110 @@ export function backfillCursorUsage(
   return extras;
 }
 
+export type CursorLedgerJoinRow = {
+  eventId: string;
+  at: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  costUsd?: number;
+};
+
+export type CursorLedgerSession = {
+  id: string;
+  vendorSessionId?: string;
+  model: string;
+  projectId?: string | null;
+};
+
+export function cursorLedgerUsageId(at: number, eventId: string): string {
+  const safe = eventId.replace(/[^a-zA-Z0-9._-]/g, "_");
+  return `use_cursor_ledger_${Math.round(at)}_${safe}`;
+}
+
+function cursorLedgerFingerprint(
+  event: Pick<UsageEvent, "sessionId" | "inputTokens" | "outputTokens" | "cacheReadTokens" | "cacheWriteTokens">,
+): string {
+  return `${event.sessionId ?? ""}:${event.inputTokens}:${event.outputTokens}:${event.cacheReadTokens}:${event.cacheWriteTokens}`;
+}
+
+/** Keep a dashboard row only when its id is this desk's Cursor ACP session id. */
+export function joinCursorLedgerEvents(input: {
+  events: CursorLedgerJoinRow[];
+  sessions: CursorLedgerSession[];
+}): UsageEvent[] {
+  const byVendor = new Map<string, CursorLedgerSession>();
+  for (const session of input.sessions) {
+    const vendorId = session.vendorSessionId?.trim();
+    if (!vendorId) continue;
+    byVendor.set(vendorId, session);
+  }
+  const booked: UsageEvent[] = [];
+  const seen = new Set<string>();
+  for (const event of input.events) {
+    const session = byVendor.get(event.eventId);
+    if (!session) continue;
+    if (!usageHasBilledTokens(event)) continue;
+    const id = cursorLedgerUsageId(event.at, event.eventId);
+    if (seen.has(id)) continue;
+    seen.add(id);
+    booked.push({
+      id,
+      at: event.at > 0 ? event.at : Date.now(),
+      provider: "cursor",
+      model: session.model,
+      projectId: session.projectId ?? undefined,
+      sessionId: session.id,
+      lane: cursorUsageLane(session.model),
+      inputTokens: event.inputTokens,
+      outputTokens: event.outputTokens,
+      cacheReadTokens: event.cacheReadTokens,
+      cacheWriteTokens: event.cacheWriteTokens,
+      costUsd: event.costUsd,
+      source: "request",
+    });
+  }
+  return booked;
+}
+
+/**
+ * Append joined ledger rows. Drop already-stored ids, ACP bills with the same
+ * token fingerprint, and one Cursor estimate per new ledger row (oldest first).
+ */
+export function applyCursorLedger(existing: UsageEvent[], incoming: UsageEvent[]): UsageEvent[] {
+  const ids = new Set(existing.map((event) => event.id));
+  const fingerprints = new Set(
+    existing
+      .filter((event) => event.provider === "cursor" && event.source !== "estimate" && event.source !== "gauge")
+      .map(cursorLedgerFingerprint),
+  );
+  const accepted: UsageEvent[] = [];
+  for (const event of incoming) {
+    if (ids.has(event.id)) continue;
+    const fingerprint = cursorLedgerFingerprint(event);
+    if (fingerprints.has(fingerprint)) continue;
+    accepted.push(event);
+    ids.add(event.id);
+    fingerprints.add(fingerprint);
+  }
+  if (accepted.length === 0) return existing;
+  const dropCount = new Map<string, number>();
+  for (const event of accepted) {
+    if (!event.sessionId) continue;
+    dropCount.set(event.sessionId, (dropCount.get(event.sessionId) ?? 0) + 1);
+  }
+  const dropIds = new Set<string>();
+  for (const [sessionId, count] of dropCount) {
+    const estimates = existing
+      .filter((event) => event.provider === "cursor" && event.source === "estimate" && event.sessionId === sessionId)
+      .sort((left, right) => left.at - right.at);
+    for (const event of estimates.slice(0, count)) dropIds.add(event.id);
+  }
+  const kept = existing.filter((event) => !dropIds.has(event.id));
+  return [...accepted.sort((left, right) => right.at - left.at), ...kept];
+}
+
 function cursorLaneFromRecord(record: Record<string, unknown>, model: string): CursorUsageLane {
   const lane = record.lane;
   if (
@@ -334,11 +438,11 @@ export function applyUsageContext(sessions: Session[], usage: UsageEvent[]): Ses
   return sessions.map((session) => {
     const event = latest.get(session.id);
     if (!event) {
-      const window = contextWindowFor(session.provider, session.model);
+      const window = contextWindowFor(session.provider, session.model, undefined, session.customBotId);
       if (window > 0 && session.contextUsed > window) return { ...session, contextUsed: 0 };
       return session;
     }
-    const window = contextWindowFor(session.provider, session.model);
+    const window = contextWindowFor(session.provider, session.model, undefined, session.customBotId);
     const occupancy = occupancyFromUsage(
       {
         contextUsed:
@@ -373,8 +477,23 @@ export function rangeStart(range: UsageRange, now = Date.now()): number {
   return new Date(date.getFullYear(), date.getMonth(), 1).getTime();
 }
 
+/**
+ * Clock for Usage buckets. `at: 0` and unix-seconds survived on disk, so the
+ * chat meter counted them and This Stretch dropped them. Missing clocks land
+ * on `now` (today). Seconds from 2020 onward become milliseconds.
+ */
+export function usageTimestamp(at: unknown, now = Date.now()): number {
+  if (typeof at !== "number" || !Number.isFinite(at) || at <= 0) return now;
+  if (at < 1e12) {
+    const asMs = Math.round(at * 1000);
+    const earliest = Date.UTC(2020, 0, 1);
+    if (asMs >= earliest && asMs <= now + 24 * 60 * 60 * 1000) return asMs;
+  }
+  return at;
+}
+
 export function inRange(event: UsageEvent, range: UsageRange, now = Date.now()): boolean {
-  return event.at >= rangeStart(range, now);
+  return usageTimestamp(event.at, now) >= rangeStart(range, now);
 }
 
 function add(base: UsageTotals, event: UsageEvent): UsageTotals {
@@ -393,6 +512,53 @@ function add(base: UsageTotals, event: UsageEvent): UsageTotals {
 
 export function rollup(events: UsageEvent[]): UsageTotals {
   return events.reduce(add, { ...EMPTY });
+}
+
+/** Billed spend for one chat. Total is in + out, same as Settings → Usage. */
+export function chatSpend(events: UsageEvent[], sessionId: string | undefined): UsageTotals {
+  if (!sessionId) return { ...EMPTY };
+  return rollup(events.filter((event) => event.sessionId === sessionId));
+}
+
+export type CrewSpendRow = {
+  sessionId: string;
+  label: string;
+  kind: "chat" | "worker";
+  totals: UsageTotals;
+};
+
+/** This chat first, then each orchestrated bot on its own session. */
+export function crewSpendRows(
+  events: UsageEvent[],
+  chatId: string | undefined,
+  workers: Array<{ id: string; label: string }>,
+): CrewSpendRow[] {
+  if (!chatId) return [];
+  return [
+    { sessionId: chatId, label: "This chat", kind: "chat", totals: chatSpend(events, chatId) },
+    ...workers.map((worker) => ({
+      sessionId: worker.id,
+      label: worker.label,
+      kind: "worker" as const,
+      totals: chatSpend(events, worker.id),
+    })),
+  ];
+}
+
+export function crewSpendTotal(rows: CrewSpendRow[]): UsageTotals {
+  return rows.reduce(
+    (sum, row) => ({
+      inputTokens: sum.inputTokens + row.totals.inputTokens,
+      outputTokens: sum.outputTokens + row.totals.outputTokens,
+      cacheReadTokens: sum.cacheReadTokens + row.totals.cacheReadTokens,
+      cacheWriteTokens: sum.cacheWriteTokens + row.totals.cacheWriteTokens,
+      totalTokens: sum.totalTokens + row.totals.totalTokens,
+      costUsd: sum.costUsd + row.totals.costUsd,
+      costKnown: sum.costKnown || row.totals.costKnown,
+      events: sum.events + row.totals.events,
+    }),
+    { ...EMPTY },
+  );
 }
 
 export function byProvider(events: UsageEvent[]): UsageGroup[] {
@@ -995,7 +1161,10 @@ export function stretchBuckets(events: UsageEvent[], range: UsageRange, now = Da
       return {
         key: part.key,
         letter: part.letter,
-        totalTokens: rollup(events.filter((event) => event.at >= from && event.at < to)).totalTokens,
+        totalTokens: rollup(events.filter((event) => {
+          const at = usageTimestamp(event.at, now);
+          return at >= from && at < to;
+        })).totalTokens,
       };
     });
   }
@@ -1012,7 +1181,10 @@ export function stretchBuckets(events: UsageEvent[], range: UsageRange, now = Da
       days.push({
         key: `${day.getFullYear()}-${day.getMonth() + 1}-${day.getDate()}`,
         letter: DAY_NAMES[day.getDay()] ?? "Monday",
-        totalTokens: rollup(events.filter((event) => event.at >= from && event.at < to)).totalTokens,
+        totalTokens: rollup(events.filter((event) => {
+          const at = usageTimestamp(event.at, now);
+          return at >= from && at < to;
+        })).totalTokens,
       });
     }
     return days;
@@ -1030,7 +1202,10 @@ export function stretchBuckets(events: UsageEvent[], range: UsageRange, now = Da
       weeks.push({
         key: `${first.getFullYear()}-${first.getMonth() + 1}-w${startDate}`,
         letter: `${startDate}–${endDate}`,
-        totalTokens: rollup(events.filter((event) => event.at >= from && event.at < to)).totalTokens,
+        totalTokens: rollup(events.filter((event) => {
+          const at = usageTimestamp(event.at, now);
+          return at >= from && at < to;
+        })).totalTokens,
       });
     }
     return weeks;
@@ -1047,7 +1222,10 @@ export function stretchBuckets(events: UsageEvent[], range: UsageRange, now = Da
     months.push({
       key: `${stamp.getFullYear()}-${stamp.getMonth() + 1}`,
       letter: MONTH_LETTERS[stamp.getMonth()] ?? "J",
-      totalTokens: rollup(events.filter((event) => event.at >= from && event.at < to)).totalTokens,
+      totalTokens: rollup(events.filter((event) => {
+        const at = usageTimestamp(event.at, now);
+        return at >= from && at < to;
+      })).totalTokens,
     });
   }
   return months;
@@ -1061,6 +1239,7 @@ export type HeatBot = {
   tokens: number;
   inputTokens: number;
   outputTokens: number;
+  cacheReadTokens?: number;
 };
 
 type HeatBotHint = Pick<CustomBot, "id" | "name" | "model" | "color">;
@@ -1090,6 +1269,7 @@ export function heatCellBots(
     const tokens = (current?.tokens ?? 0) + eventTotal(event);
     const inputTokens = (current?.inputTokens ?? 0) + event.inputTokens;
     const outputTokens = (current?.outputTokens ?? 0) + event.outputTokens;
+    const cacheReadTokens = (current?.cacheReadTokens ?? 0) + (event.cacheReadTokens ?? 0);
     rows.set(key, {
       provider,
       key: bot?.id ?? current?.key,
@@ -1098,6 +1278,7 @@ export function heatCellBots(
       tokens,
       inputTokens,
       outputTokens,
+      cacheReadTokens,
     });
   }
   return [...rows.values()].filter((row) => row.tokens > 0);
@@ -1304,6 +1485,7 @@ export type HeatCell = {
   tokens: number;
   inputTokens: number;
   outputTokens: number;
+  cacheReadTokens?: number;
   bots: HeatBot[];
   label: string;
   pad?: boolean;
@@ -1346,17 +1528,22 @@ function sliceCell(
   pad = false,
   customBots: HeatBotHint[] = [],
   looks: VendorLooks = {},
+  now = Date.now(),
 ): HeatCell {
   if (pad) {
-    return { key, tokens: 0, inputTokens: 0, outputTokens: 0, bots: [], label, pad: true };
+    return { key, tokens: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, bots: [], label, pad: true };
   }
-  const slice = events.filter((event) => event.at >= from && event.at < to);
+  const slice = events.filter((event) => {
+    const at = usageTimestamp(event.at, now);
+    return at >= from && at < to;
+  });
   const totals = rollup(slice);
   return {
     key,
     tokens: totals.totalTokens,
     inputTokens: totals.inputTokens,
     outputTokens: totals.outputTokens,
+    cacheReadTokens: totals.cacheReadTokens,
     bots: heatCellBots(slice, customBots, looks),
     label,
     pad: false,
@@ -1369,6 +1556,7 @@ function weekGrid(
   to: Date,
   customBots: HeatBotHint[] = [],
   looks: VendorLooks = {},
+  now = Date.now(),
 ): StretchHeatmap {
   const columns: HeatCell[][] = [];
   const labels: { text: string; column: number }[] = [];
@@ -1394,6 +1582,7 @@ function weekGrid(
           pad,
           customBots,
           looks,
+          now,
         ),
       );
     }
@@ -1424,7 +1613,7 @@ export function stretchHeatmap(
       const from = start.getTime() + hour * 60 * 60 * 1000;
       const clock = hour % 12 === 0 ? 12 : hour % 12;
       const stamp = `${clock} ${hour < 12 ? "AM" : "PM"}`;
-      columns.push([sliceCell(events, from, from + 60 * 60 * 1000, `h${hour}`, stamp, false, customBots, looks)]);
+      columns.push([sliceCell(events, from, from + 60 * 60 * 1000, `h${hour}`, stamp, false, customBots, looks, now)]);
       if (hour % 6 === 0) labels.push({ text: stamp, column: hour });
     }
     return { rows: 1, columns, labels };
@@ -1449,6 +1638,7 @@ export function stretchHeatmap(
           false,
           customBots,
           looks,
+          now,
         ),
       ]);
       labels.push({ text: name, column: index });
@@ -1476,6 +1666,7 @@ export function stretchHeatmap(
           false,
           customBots,
           looks,
+          now,
         ),
       ]);
       if (index === 0 || day.getDate() === 1 || index % 5 === 0) {
@@ -1493,7 +1684,7 @@ export function stretchHeatmap(
   start.setMonth(start.getMonth() - 11);
   const end = startOfDay(now);
   end.setDate(end.getDate() + 1);
-  return weekGrid(events, start, end, customBots, looks);
+  return weekGrid(events, start, end, customBots, looks, now);
 }
 
 export function heatmapPeak(map: StretchHeatmap): HeatCell | null {
@@ -1505,6 +1696,18 @@ export function heatmapPeak(map: StretchHeatmap): HeatCell | null {
     }
   }
   return peak && peak.tokens > 0 ? peak : null;
+}
+
+/** Billed in + out across every live cell. Same total as the chat meter for events in this range. */
+export function heatmapTotal(map: StretchHeatmap): number {
+  let tokens = 0;
+  for (const column of map.columns) {
+    for (const cell of column) {
+      if (cell.pad) continue;
+      tokens += cell.tokens;
+    }
+  }
+  return tokens;
 }
 
 export function heatLevel(tokens: number, peak: number): 0 | 1 | 2 | 3 | 4 {
@@ -2070,7 +2273,7 @@ export function normalizeUsage(raw: unknown): UsageEvent[] {
       record.provider === "cursor" ? asCursorLane(record.lane) ?? cursorUsageLane(model) : undefined;
     events.push({
       id: typeof record.id === "string" ? record.id : `use_${events.length}`,
-      at: typeof record.at === "number" && Number.isFinite(record.at) ? record.at : Date.now(),
+      at: usageTimestamp(record.at),
       provider: record.provider,
       model,
       projectId: typeof record.projectId === "string" ? record.projectId : undefined,

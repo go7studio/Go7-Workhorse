@@ -14,6 +14,7 @@ import { normalizeAgentRun, workerNameFromTitle } from "./subagents";
 import { closeOpenTurn, normalizeLedger } from "./session-ledger";
 import { normalizePortableCheckpoint } from "./portable-compaction";
 import { normalizeRoutingDecision } from "./routing";
+import { normalizeSpawnAllowlist } from "./spawn-allowlist";
 import { normalizeCrewModes } from "./workhorse-rules";
 import type { ChatMessage, CustomBot, EffortLevel, PermissionMode, ProviderId, SandboxProfile, Session } from "./types";
 
@@ -114,6 +115,28 @@ export function applySessionElevation(
   };
 }
 
+/**
+ * A standing grant raises the seat AND the record the lineage reads. Without
+ * the second half, the next ask classifies against a stale grant, finds a
+ * raise, then finds nothing missing from the seat, and denies work the desk
+ * had just allowed.
+ */
+export function applyStandingGrant(
+  session: Session,
+  standing: { mode?: PermissionMode; sandbox?: SandboxProfile },
+): Session {
+  const raised = applySessionElevation(session, standing);
+  const granted = session.agentRun?.grantedAccess;
+  if (!session.agentRun || !granted) return raised;
+  return {
+    ...raised,
+    agentRun: {
+      ...session.agentRun,
+      grantedAccess: { ...granted, mode: raised.mode, sandbox: raised.sandbox },
+    },
+  };
+}
+
 export function applySessionModelChange(
   session: Session,
   next: { provider: ProviderId; model: string; effort: EffortLevel | null; customBotId?: string },
@@ -162,7 +185,13 @@ export function brainCaption(
 export const SANDBOX_PROFILES: SandboxProfile[] = ["off", "workspace", "read-only", "strict"];
 
 export function parsePermissionMode(value: string): PermissionMode | null {
-  if (value === "ask" || value === "accept-edits" || value === "always-approve" || value === "plan") return value;
+  const parsed = value.trim().toLowerCase().replace(/[\s_]+/g, "-");
+  if (parsed === "ask" || parsed === "default") return "ask";
+  if (parsed === "accept-edits" || parsed === "accept" || parsed === "auto") return "accept-edits";
+  if (parsed === "always-approve" || parsed === "always" || parsed === "always-allow" || parsed === "yolo") {
+    return "always-approve";
+  }
+  if (parsed === "plan") return "plan";
   return null;
 }
 
@@ -224,7 +253,7 @@ export function normalizeSession(raw: unknown, liveRunIds?: ReadonlySet<string>)
     provider,
     typeof record.model === "string" && record.model ? record.model : defaultModel(provider).id,
   );
-  const mode = parsePermissionMode(String(record.mode ?? "")) ?? "ask";
+  const mode = parsePermissionMode(String(record.mode ?? "")) ?? "always-approve";
   return {
     id: record.id,
     projectId: typeof record.projectId === "string" && record.projectId ? record.projectId : null,
@@ -281,6 +310,8 @@ export function normalizeSession(raw: unknown, liveRunIds?: ReadonlySet<string>)
       return rows.length > 0 ? rows : undefined;
     })(),
     scheduledRuns: normalizeScheduledRuns(record.scheduledRuns),
+    // Grok ACP Tasks/Watchers are live-only. A restart kills the CLI, so a
+    // saved "running" row would be a ghost. ACP events refill the strip.
     contextCheckpoint: normalizePortableCheckpoint(record.contextCheckpoint),
     ledger: normalizeLedger(record.ledger),
     composerDraft:
@@ -309,6 +340,7 @@ export function normalizeSession(raw: unknown, liveRunIds?: ReadonlySet<string>)
       const modes = normalizeCrewModes(raw.crewModes ?? raw.crewMode);
       return modes.length > 0 ? modes : undefined;
     })(),
+    spawnAllowlist: normalizeSpawnAllowlist((record as { spawnAllowlist?: unknown }).spawnAllowlist),
   };
 }
 

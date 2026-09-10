@@ -80,7 +80,14 @@ test("no gauge means no gauge, so a meterless box gets no spare-capacity credit"
 test("free stays a tie-break: fit still decides", () => {
   // The rule both reviews defended. A local box does not take work it does not
   // fit just because it costs nothing.
-  const settings = settingsWith([bot({}), bot({ id: "bot_big", name: "Deep", model: "deep-model", baseUrl: "https://api.example.com/v1", routingProfile: { intelligence: 5, speed: 3, cost: 3 } })]);
+  //
+  // The rival's rating is the pane's Deep preset. It used to be 5/3/3, which is
+  // exactly what one tick in the old bot editor stored for an unrated model on
+  // this family, so the write-back migration now takes it back off and the
+  // fixture no longer had a deep-fitting rival to make its point with. No
+  // control in the pane can author 5/3/3; Deep is what a person picking "this
+  // is my strong model" actually saves.
+  const settings = settingsWith([bot({}), bot({ id: "bot_big", name: "Deep", model: "deep-model", baseUrl: "https://api.example.com/v1", routingProfile: { intelligence: 5, speed: 2, cost: 5 } })]);
   const ranked = rankRoutingCandidates(
     routingCandidatesForDesk(settings),
     { prompt: "Architect and review this production migration end-to-end", tier: "deep" },

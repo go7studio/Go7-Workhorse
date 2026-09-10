@@ -223,7 +223,7 @@ test("restart: a mission and its mid-flight workers reconcile instead of failing
   const continuation = nextMissionIteration(healed, parent.id, [coordinator.id, reviewerA.id, reviewerB.id]);
   assert.equal(continuation.ok, false);
   if (continuation.ok) return;
-  assert.match(continuation.error, /resume the interrupted worker/);
+  assert.match(continuation.error, /did not finish/);
 });
 
 test("cancellation: mid-mission cancel is terminal, keeps partial work, and is idempotent", () => {

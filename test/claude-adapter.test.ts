@@ -172,6 +172,10 @@ test("buildClaudeLaunchSpec never spawns grok and maps permission modes", () => 
     assert.equal(resolveClaudeModel("fable"), "claude-fable-5");
     assert.equal(resolveClaudeModel("claude-fable-5"), "claude-fable-5");
     assert.equal(resolveClaudeModel("claude-fable-5[1m]"), "claude-fable-5");
+    assert.equal(resolveClaudeModel("Fable 5.1"), "claude-fable-5-1");
+    assert.equal(resolveClaudeModel("fable-5.1"), "claude-fable-5-1");
+    assert.equal(resolveClaudeModel("claude-fable-5.1"), "claude-fable-5-1");
+    assert.equal(resolveClaudeModel("claude-fable-5-1[1m]"), "claude-fable-5-1");
     assert.notEqual(resolveClaudeModel("Fable 5"), "claude-opus-5");
     assert.notEqual(resolveClaudeModel("Fable 5"), "claude-sonnet-5");
     assert.equal(resolveClaudeEffort("extra"), "xhigh");
@@ -697,9 +701,11 @@ test("the desk mints its own token instead of taking over the shared login", () 
 
   const main = readFileSync(path.join(ROOT, "electron", "main.ts"), "utf8");
   assert.match(main, /claude:setup-token/);
-  // Stored in the desk's own vault and put on the env the child inherits.
+  // Stored in the desk's own vault, and read from there. It is never copied
+  // onto `process.env`, which every vendor child inherits.
   assert.match(main, /credentialStore\(\)\.put\(result\.token, CLAUDE_TOKEN_ID\)/);
-  assert.match(main, /process\.env\.CLAUDE_CODE_OAUTH_TOKEN = token/);
+  assert.match(main, /setStoredClaudeTokenReader\(/);
+  assert.doesNotMatch(main, /process\.env\.CLAUDE_CODE_OAUTH_TOKEN\s*=/);
 
   assert.equal(findClaudeOauthToken("token: sk-ant-oat01-ABCDEFGHIJKLMNOPQRSTUVWXYZ012345"), "sk-ant-oat01-ABCDEFGHIJKLMNOPQRSTUVWXYZ012345");
   assert.equal(findClaudeOauthToken("no token here"), null);

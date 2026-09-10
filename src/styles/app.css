@@ -128,7 +128,7 @@ button {
   min-height: 0;
   overflow: hidden;
   display: grid;
-  grid-template-columns: var(--sidebar) 1fr;
+  grid-template-columns: var(--sidebar) minmax(0, 1fr) auto;
 }
 
 .sidebar {
@@ -1228,10 +1228,18 @@ html.pane-dragging * {
   border-radius: 980px;
 }
 
+.session-header-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  justify-content: flex-start;
+}
+
 .session-status {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: flex-start;
   flex-wrap: wrap;
   gap: 10px;
   min-width: 0;
@@ -1784,10 +1792,13 @@ html.pane-dragging * {
   align-items: flex-end;
   max-width: min(520px, 86%);
   min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .turn.user .say {
   max-width: 100%;
+  min-width: 0;
+  overflow-wrap: anywhere;
   padding: 10px 14px;
   background: var(--bg-solid);
   border: 1px solid var(--line);
@@ -1805,7 +1816,9 @@ html.pane-dragging * {
 
 .turn.user .command-line {
   margin: 0;
+  min-width: 0;
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .turn.user .chat-command {
@@ -1950,9 +1963,18 @@ html.pane-dragging * {
   font-size: 12px;
   font-weight: 560;
   letter-spacing: 0.01em;
-  color: var(--text-secondary);
+  color: var(--text);
   text-align: center;
   white-space: nowrap;
+}
+
+.crew-done-card span {
+  display: block;
+  margin-top: 2px;
+  font-size: 12px;
+  font-weight: 510;
+  color: var(--text-secondary);
+  text-align: center;
 }
 
 .crew-done.failed .crew-done-card strong {
@@ -1993,6 +2015,15 @@ html.pane-dragging * {
   font-weight: 560;
   color: var(--text-secondary);
   list-style: none;
+  transition: color 180ms var(--ease);
+}
+
+.work-pop[data-state="done"] > summary {
+  color: var(--text);
+}
+
+.work-pop[data-state="failed"] > summary {
+  color: var(--danger);
 }
 
 .work-pop > summary::-webkit-details-marker {
@@ -2366,6 +2397,7 @@ html.pane-dragging * {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  min-width: 0;
 }
 
 .md p,
@@ -2374,10 +2406,12 @@ html.pane-dragging * {
 .md ol {
   margin: 0;
   line-height: 1.5;
+  min-width: 0;
 }
 
 .md p {
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .md strong {
@@ -2391,6 +2425,7 @@ html.pane-dragging * {
 .md a {
   color: var(--accent);
   text-decoration: none;
+  overflow-wrap: anywhere;
 }
 
 .md a:hover {
@@ -2404,6 +2439,7 @@ html.pane-dragging * {
   padding: 1px 5px;
   border-radius: 5px;
   background: var(--bg-hover);
+  overflow-wrap: anywhere;
 }
 
 .md-file {
@@ -3696,6 +3732,39 @@ html.pane-dragging * {
   gap: 6px;
 }
 
+/* Workshop as a chat basic: the same drawer geometry as the terminal, its own scroll. */
+.workshop-panel {
+  margin: 0 18px 10px;
+  max-height: 46vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--bg-solid) 94%, black);
+  box-shadow: var(--shadow);
+}
+.workshop-panel-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line);
+}
+.workshop-panel-head .row-meta { margin: 0; flex: 1 1 auto; min-width: 0; }
+.workshop-panel-actions { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }
+.workshop-panel-body { overflow: auto; padding: 10px 12px 12px; }
+.workshop-panel-pack + .workshop-panel-pack { margin-top: 12px; }
+.workshop-panel-why { margin: 2px 0 0; color: var(--text-secondary); white-space: normal; }
+.workshop-panel-grid {
+  margin-top: 8px;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+.workshop-panel-manage { margin-top: 10px; border-top: 1px solid var(--line); padding-top: 10px; }
+.workshop-panel-manage .workshop-settings { margin-bottom: 0; }
+
 .terminal-pane {
   margin: 0 18px 10px;
   min-height: 190px;
@@ -3794,6 +3863,68 @@ html.pane-dragging * {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.vendor-tasks {
+  margin: 0 22px 8px;
+  padding: 6px 0 2px;
+  display: grid;
+  gap: 8px;
+  border-top: 1px solid var(--line);
+}
+
+.vendor-tasks-group {
+  display: grid;
+  gap: 3px;
+}
+
+.vendor-tasks-label {
+  color: var(--text-tertiary);
+  font-size: 11px;
+  font-weight: 620;
+  letter-spacing: 0.01em;
+}
+
+.vendor-task {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: baseline;
+  min-width: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.vendor-task.live {
+  color: var(--text);
+}
+
+.vendor-task-kind {
+  color: var(--text-tertiary);
+  font-size: 11px;
+}
+
+.vendor-task.live .vendor-task-kind {
+  color: var(--text-secondary);
+}
+
+.vendor-task-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vendor-task-meta {
+  color: var(--text-tertiary);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.vendor-task.killed .vendor-task-name,
+.vendor-task.failed .vendor-task-name {
+  color: var(--text-tertiary);
 }
 
 .codex-native-status {
@@ -4401,6 +4532,22 @@ html.pane-dragging * {
   background: var(--bg-active);
 }
 
+.project-folder.drop-before {
+  box-shadow: 0 -2px 0 var(--accent);
+}
+
+.project-folder.drop-after {
+  box-shadow: 0 2px 0 var(--accent);
+}
+
+.project-folder.dragging-project {
+  opacity: 0.42;
+}
+
+.project-folder.dragging-project .project-head .row {
+  cursor: grabbing;
+}
+
 .project-folder {
   margin: 1px 0 4px;
 }
@@ -4428,6 +4575,7 @@ html.pane-dragging * {
   flex: 1;
   min-width: 0;
   width: auto;
+  cursor: grab;
 }
 
 .project-head .row,
@@ -5197,7 +5345,8 @@ html.pane-dragging * {
   margin-bottom: 12px;
 }
 
-.skills-list {
+.skills-list,
+.pack-list {
   list-style: none;
   margin: 0;
   padding: 0;
@@ -5206,7 +5355,8 @@ html.pane-dragging * {
   gap: 8px;
 }
 
-.skill-row {
+.skill-row,
+.pack-row {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
@@ -5231,7 +5381,8 @@ html.pane-dragging * {
   text-underline-offset: 3px;
 }
 
-.skill-row-side {
+.skill-row-side,
+.pack-row-side {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
@@ -5270,13 +5421,15 @@ html.pane-dragging * {
   background: var(--bg-hover);
 }
 
-.skill-row strong {
+.skill-row strong,
+.pack-row strong {
   display: block;
   font-size: 13px;
   font-weight: 560;
 }
 
-.skill-row em {
+.skill-row em,
+.pack-row em {
   display: block;
   margin-top: 2px;
   font-style: normal;
@@ -5284,7 +5437,8 @@ html.pane-dragging * {
   color: var(--text-secondary);
 }
 
-.skill-row .row-meta {
+.skill-row .row-meta,
+.pack-row .row-meta {
   margin-top: 4px;
   white-space: normal;
   overflow: visible;
@@ -6317,6 +6471,53 @@ html.pane-dragging * {
   border-top: 5px solid var(--text-tertiary);
 }
 
+.chat-spend-wrap {
+  position: relative;
+  flex-shrink: 0;
+  z-index: 12;
+}
+
+.chat-spend {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0;
+  min-width: 0;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 10px;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.chat-spend:hover {
+  background: var(--bg-hover);
+}
+
+.chat-spend strong {
+  font-size: 12px;
+  font-weight: 590;
+  letter-spacing: -0.02em;
+  color: var(--text);
+}
+
+.chat-spend em {
+  display: block;
+  max-width: min(42vw, 420px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-style: normal;
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.chat-spend-pop {
+  width: 320px;
+}
+
 .context-meter-wrap {
   position: relative;
   flex-shrink: 0;
@@ -6432,6 +6633,10 @@ html.pane-dragging * {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  margin-bottom: 10px;
+}
+
+.context-pop header.context-spend {
   margin-bottom: 10px;
 }
 
@@ -7251,6 +7456,7 @@ html.pane-dragging * {
     animation: none;
   }
 
+  .work-pop > summary,
   .work-pop > summary::before {
     transition: none;
   }
@@ -8456,7 +8662,308 @@ html.pane-dragging * {
 
 @media (max-width: 760px) {
   .goal-bar { margin-inline: 16px; }
+  .vendor-tasks { margin-inline: 16px; }
   .goal-bar-copy { grid-template-columns: 1fr; gap: 1px; }
+}
+
+.mission-board {
+  display: grid;
+  grid-template-rows: auto 0fr;
+  width: 72%;
+  margin: 0 auto 8px;
+  padding: 10px 18px 10px 16px;
+  border-radius: 999px;
+  background: var(--bg-solid);
+  border: 1px solid var(--line);
+  transition:
+    width 240ms var(--ease),
+    padding 220ms var(--ease),
+    border-radius 240ms var(--ease),
+    grid-template-rows 240ms var(--ease);
+}
+
+.mission-board.open {
+  width: calc(100% - 44px);
+  grid-template-rows: auto 1fr;
+  padding: 8px 9px 8px 11px;
+  border-radius: 11px;
+}
+
+.mission-board.live {
+  border-color: color-mix(in srgb, var(--accent) 28%, var(--line));
+}
+
+.mission-board-toggle {
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr) auto 10px;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.mission-board-toggle:hover,
+.mission-board-toggle:focus,
+.mission-board-toggle:focus-visible,
+.mission-board-toggle:active {
+  background: transparent;
+  box-shadow: none;
+  transform: none;
+}
+
+.mission-board.open .mission-board-toggle {
+  grid-template-columns: 8px minmax(0, 1fr) auto 10px;
+  gap: 10px;
+}
+
+.mission-board-mark {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-tertiary);
+}
+
+.mission-board.live .mission-board-mark {
+  background: var(--accent);
+}
+
+.mission-board.open.live .mission-board-mark {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+.mission-board-mark.pulse {
+  animation: pulse 1.1s var(--ease) infinite;
+}
+
+.mission-board-copy {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.mission-board-copy strong {
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 620;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mission-board-copy span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-tertiary);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mission-board-status {
+  color: var(--text-tertiary);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.mission-board-status.bad {
+  color: var(--danger);
+}
+
+.mission-board-twist {
+  position: relative;
+  width: 8px;
+  height: 16px;
+}
+
+.mission-board-twist::before {
+  content: "";
+  position: absolute;
+  inset: 50% auto auto 50%;
+  width: 6px;
+  height: 6px;
+  border-right: 1.5px solid var(--text-tertiary);
+  border-bottom: 1.5px solid var(--text-tertiary);
+  transform: translate(-70%, -50%) rotate(-45deg);
+  transition: transform 220ms var(--ease);
+}
+
+.mission-board.open .mission-board-twist::before {
+  transform: translate(-50%, -70%) rotate(45deg);
+}
+
+.mission-board-slot {
+  min-height: 0;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 180ms var(--ease);
+}
+
+.mission-board.open .mission-board-slot {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.mission-board-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 0;
+  max-height: 132px;
+  margin-top: 6px;
+  padding-top: 6px;
+  overflow: auto;
+  border-top: 1px solid var(--line);
+}
+
+.mission-phases {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mission-phases li {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-tertiary);
+  font-size: 10px;
+  font-weight: 560;
+  letter-spacing: 0.02em;
+}
+
+.mission-phases li.done,
+.mission-phases li.current {
+  color: var(--text);
+}
+
+.mission-phases li::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--line);
+}
+
+.mission-phases li.done::before {
+  background: var(--ok);
+}
+
+.mission-phases li.current::before {
+  background: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+.mission-criteria {
+  margin: 0;
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mission-layers {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.mission-layer {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.mission-layer.prior {
+  color: var(--text-secondary);
+}
+
+.mission-layer-label {
+  padding: 1px 4px 2px;
+  color: var(--text-tertiary);
+  font-size: 10px;
+  font-weight: 560;
+  letter-spacing: 0.02em;
+}
+
+.mission-layer-empty {
+  margin: 0;
+  padding: 2px 4px;
+  color: var(--text-tertiary);
+  font-size: 11px;
+}
+
+.mission-slice {
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 3px 4px;
+  border-radius: 7px;
+  text-align: left;
+}
+
+.mission-slice:hover {
+  background: var(--bg-hover);
+}
+
+.mission-slice-copy {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.mission-slice-copy strong {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 560;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mission-slice-copy span {
+  color: var(--text-tertiary);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.mission-slice-copy span.bad,
+.mission-slice.bad .mission-slice-copy span {
+  color: var(--danger);
+}
+
+@media (max-width: 760px) {
+  .mission-board.open { width: calc(100% - 32px); }
+  .mission-board.open .mission-board-toggle { grid-template-columns: 8px minmax(0, 1fr) 10px; }
+  .mission-board-status { display: none; }
+  .mission-board-copy,
+  .mission-slice-copy { grid-template-columns: 1fr; gap: 1px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mission-board,
+  .mission-board-slot,
+  .mission-board-twist::before {
+    transition: none;
+  }
 }
 
 .watch-banners {
@@ -8697,6 +9204,51 @@ html.pane-dragging * {
   margin: 4px 6px;
 }
 
+.composer-crew-chip-group {
+  display: inline-flex;
+  align-items: center;
+  height: 32px;
+  border-radius: 999px;
+  background: var(--bg-hover);
+  flex-shrink: 0;
+  animation: crew-chip-in 220ms var(--ease);
+}
+
+.composer-crew-chip-group .composer-crew-chip {
+  background: transparent;
+  animation: none;
+}
+
+.composer-crew-gear {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 32px;
+  margin-right: 2px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-tertiary);
+}
+
+.composer-crew-gear:hover,
+.composer-crew-gear[aria-expanded="true"] {
+  color: var(--text);
+}
+
+.composer-spawn-menu {
+  left: 40px;
+  width: min(260px, calc(100% - 48px));
+}
+
+.composer-spawn-menu .plus-row[aria-checked="true"] {
+  background: color-mix(in srgb, var(--peer) 14%, transparent);
+}
+
+.composer-spawn-menu .plus-row[aria-checked="true"]:hover {
+  background: color-mix(in srgb, var(--peer) 22%, transparent);
+}
+
 .composer-crew {
   flex-shrink: 0;
   overflow: hidden;
@@ -8745,7 +9297,8 @@ html.pane-dragging * {
   }
 }
 
-.composer-crew.leaving .composer-crew-chip {
+.composer-crew.leaving .composer-crew-chip,
+.composer-crew.leaving .composer-crew-chip-group {
   animation: crew-chip-out 180ms var(--ease) forwards;
 }
 
@@ -8887,4 +9440,1088 @@ html.pane-dragging * {
 
 .subagent-resume:hover {
   background: var(--bg-active);
+}
+
+
+/* Workshop — a read-only add-on rail on the desk. Manage opens a sheet for
+   install/grant/catalog (Settings → Workshop is secondary). Breakout remains
+   an optional detach of the same cards. Hairlines are --line so the rail takes
+   the desk theme; the accent is the one colour. */
+.workshop-rail {
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--line);
+  background: var(--bg-sidebar);
+  -webkit-app-region: no-drag;
+  transition: width 160ms var(--ease);
+}
+
+.workshop-rail.is-collapsed { width: 76px; }
+.workshop-rail.is-expanded { width: 296px; }
+
+/* Head: the word, the feed age, the way out. */
+.workshop-rail-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 8px 8px 6px 12px;
+  border-bottom: 1px solid var(--line);
+  flex-shrink: 0;
+}
+
+.workshop-rail-head .section-label {
+  margin: 0;
+  font-size: 10px;
+}
+
+.workshop-rail-head-side {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.workshop-rail-toggle,
+.workshop-fold {
+  min-width: 24px;
+  min-height: 22px;
+  padding: 0 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  line-height: 1;
+}
+
+/* Collapsed: label + Manage in the head; the strip below expands. */
+.workshop-rail.is-collapsed .workshop-rail-head {
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 4px 6px;
+  border-radius: 0;
+  width: 100%;
+}
+
+.workshop-rail.is-collapsed .workshop-rail-head .section-label {
+  font-size: 9px;
+  letter-spacing: 0.02em;
+}
+
+.workshop-rail-head-expand {
+  min-width: 0;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  justify-content: center;
+}
+
+.workshop-rail-manage {
+  min-height: 22px;
+  padding: 0 6px;
+  font-size: 10px;
+  line-height: 1.2;
+}
+
+.workshop-rail.is-collapsed .workshop-rail-manage {
+  width: 100%;
+  max-width: 68px;
+}
+
+/* Quiet empty chrome: thin hairline stub (~56–64px), not a tall empty card. */
+.workshop-rail.is-empty {
+  width: 60px;
+  align-self: stretch;
+}
+
+.workshop-rail.is-empty .workshop-rail-empty-stub {
+  flex: 0 0 auto;
+  min-height: 56px;
+  max-height: 64px;
+  height: 60px;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 4px;
+  border-bottom: 1px solid var(--line);
+}
+
+.workshop-rail-add-packs {
+  width: 100%;
+  max-width: 56px;
+  min-height: 28px;
+  padding: 4px 4px;
+  white-space: normal;
+  line-height: 1.2;
+  font-size: 10px;
+}
+
+.workshop-rail-strip {
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  padding: 10px 6px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  text-align: center;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  overflow: hidden;
+  -webkit-app-region: no-drag;
+  transition: background 160ms var(--ease);
+}
+
+.workshop-rail-strip:hover { background: var(--bg-hover); }
+
+.workshop-rail-kv {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  font-size: 11px;
+  line-height: 1.25;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The number right under the ring is the strip's second headline (watts on the Spark pack). */
+.workshop-rail-watts,
+.workshop-rail-strip .workshop-ring + .workshop-rail-kv {
+  font-size: 13px;
+  font-weight: 590;
+  margin-top: 2px;
+}
+
+/* One pack's strip widgets; packs stack with a hairline between them. */
+.workshop-pack-strip {
+  width: 100%;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.workshop-rail-strip > * + .workshop-pack-strip {
+  border-top: 1px solid var(--line);
+  padding-top: 6px;
+}
+
+.workshop-rail-models {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+  width: 100%;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+  font-size: 10px;
+  line-height: 1.3;
+  color: var(--text-secondary);
+  /* Break at spaces; only split a token when it alone exceeds the 64px column. */
+  overflow-wrap: break-word;
+  word-break: normal;
+}
+
+.workshop-pack-strip > .workshop-rail-models:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.workshop-rail-age,
+.workshop-rail-log {
+  width: 100%;
+  padding-top: 6px;
+  border-top: 1px solid var(--line);
+  text-align: center;
+  white-space: normal;
+}
+
+.workshop-rail.is-collapsed .row-meta { font-size: 10px; }
+
+.workshop-tone-ok { color: var(--ok); }
+.workshop-tone-warn { color: var(--warn); }
+
+/* Expanded body: one scroll column. Modules stack; they never scroll on their own. */
+.workshop-rail-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 0 12px 8px;
+}
+
+.workshop-rail-foot {
+  display: flex;
+  justify-content: center;
+  padding: 6px 8px 8px;
+  border-top: 1px solid var(--line);
+  flex-shrink: 0;
+}
+
+.workshop-module + .workshop-module {
+  margin-top: 8px;
+  border-top: 1px solid var(--line);
+  padding-top: 4px;
+}
+
+.workshop-module-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0 4px;
+}
+
+.workshop-module-head strong {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 590;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workshop-module.is-folded .workshop-module-head { padding-bottom: 8px; }
+
+/* Cards: hairline top, section-label heading, dense rows. */
+.workshop-rail .workshop-card { padding: 8px 0 10px; }
+.workshop-rail .workshop-card p { margin: 0; }
+.workshop-rail .workshop-card .workshop-chip-row + .row-meta { margin-top: 4px; }
+
+.workshop-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.workshop-card-head .section-label { margin: 0; }
+
+.workshop-label-name {
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.workshop-kv {
+  display: grid;
+  grid-template-columns: 5.5rem minmax(0, 1fr);
+  gap: 8px;
+  align-items: baseline;
+  padding: 2px 0;
+  font-size: 12px;
+}
+
+.workshop-kv > span { color: var(--text-secondary); }
+
+.workshop-kv > strong {
+  font-weight: 500;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.workshop-box {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 14px;
+  align-items: center;
+  padding: 4px 0 2px;
+}
+
+.workshop-box-kv { min-width: 0; }
+
+.workshop-ring {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.workshop-ring svg { display: block; }
+.workshop-ring circle { fill: none; }
+.workshop-ring-track { stroke: var(--line); }
+
+.workshop-ring-arc {
+  stroke: var(--accent);
+  stroke-linecap: round;
+  transition: stroke-dasharray 160ms var(--ease);
+}
+
+.workshop-ring-value {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.workshop-ring-value strong {
+  font-size: 15px;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+}
+
+.workshop-ring-value small {
+  font-size: 8px;
+  color: var(--text-tertiary);
+  margin-top: 1px;
+}
+
+.workshop-ring.is-unknown .workshop-ring-value strong { color: var(--text-tertiary); }
+
+/* Progress toward target tokens: one snapshot bar, the two numbers that matter under it. */
+.workshop-bar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  padding: 4px 0 2px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+}
+
+.workshop-bar-track {
+  height: 4px;
+  border-radius: 999px;
+  background: var(--line);
+  overflow: hidden;
+}
+
+.workshop-bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accent);
+  transition: width 160ms var(--ease);
+}
+
+.workshop-bar.is-unknown span { color: var(--text-tertiary); }
+
+.workshop-progress {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  padding: 4px 0 6px;
+}
+
+.workshop-progress > div {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.workshop-progress strong {
+  font-size: 17px;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+
+.workshop-progress .row-meta { font-size: 10px; }
+
+.workshop-identity { margin-bottom: 2px; }
+
+.workshop-flags { padding: 0; justify-content: flex-end; }
+
+.workshop-rail-glance {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding-top: 6px;
+  border-top: 1px solid var(--line);
+}
+
+.workshop-rail-glance .workshop-bar {
+  width: 100%;
+  grid-template-columns: minmax(0, 1fr);
+  padding: 0 0 2px;
+}
+
+.workshop-rail-glance .workshop-bar > span { display: none; }
+
+/* A bar in the strip opens the glance group: hairline above, the numbers under it sit tight. */
+.workshop-rail-strip .workshop-bar {
+  width: 100%;
+  grid-template-columns: minmax(0, 1fr);
+  padding: 6px 0 2px;
+  border-top: 1px solid var(--line);
+}
+
+.workshop-rail-strip .workshop-bar ~ .workshop-rail-kv { margin-top: -5px; }
+
+.workshop-rail-tpp,
+.workshop-rail-strip .workshop-bar + .workshop-rail-kv { font-weight: 590; }
+
+.workshop-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  vertical-align: middle;
+  margin: 0 3px 1px 0;
+}
+
+.workshop-dot-ok { background: var(--ok); }
+.workshop-dot-warn { background: var(--warn); }
+.workshop-dot-mute { background: var(--text-tertiary); }
+
+.workshop-line {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+/* A pack's note: the read-only law, or a host note. It may take two lines; it never clips. */
+.workshop-law {
+  margin-top: 4px;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  line-height: 1.4;
+}
+
+/* Children side by side when the first is not a ring. */
+.workshop-hbox {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+  padding: 2px 0;
+}
+
+.workshop-feed-note {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-tertiary);
+}
+
+.workshop-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 2px 0 2px;
+}
+
+.workshop-chip {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  font-size: 10px;
+  line-height: 1.2;
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.workshop-chip-ok {
+  border-color: color-mix(in srgb, var(--ok) 60%, var(--line));
+  color: var(--text);
+}
+
+.workshop-chip-warn {
+  border-color: color-mix(in srgb, var(--warn) 60%, var(--line));
+  color: var(--text);
+}
+
+.workshop-chip-mute { color: var(--text-tertiary); }
+
+/* Shared with the breakout window. */
+.workshop-breakout { padding: 24px 28px 40px; overflow: auto; height: 100%; }
+.workshop-card { border-top: 1px solid var(--line); padding: 12px 0 16px; }
+.workshop-meter { display: grid; grid-template-columns: 7.5rem 1fr auto; gap: 10px; align-items: center; font-size: 13px; padding: 4px 0; }
+.workshop-track { height: 1px; background: var(--line); }
+
+.workshop-log {
+  margin: 0;
+  max-height: 160px;
+  overflow: auto;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-solid);
+  border: 1px solid var(--line);
+  white-space: pre-wrap;
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+
+.workshop-breakout .workshop-log { max-height: none; font-size: 12px; }
+.workshop-breakout .workshop-card p { margin: 0; }
+.workshop-breakout .workshop-kv { font-size: 13px; padding: 3px 0; }
+.workshop-breakout .actions { display: flex; align-items: center; gap: 8px; }
+
+/* One section per pack; its cards in two columns. */
+.workshop-breakout-pack + .workshop-breakout-pack { margin-top: 20px; }
+
+.workshop-breakout-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 28px;
+}
+
+.workshop-breakout-grid > .workshop-card { min-width: 0; }
+
+.workshop-gallery {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.workshop-gallery-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 0;
+  border-top: 1px solid var(--border);
+}
+.workshop-gallery-item:first-child { border-top: none; padding-top: 0; }
+.workshop-gallery-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.workshop-gallery-meta strong {
+  font-weight: 590;
+  overflow-wrap: anywhere;
+}
+.workshop-gallery-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.media-create-panel {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.media-create-field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+}
+.media-create-field span { color: var(--muted); }
+.media-create-field input,
+.media-create-field select {
+  font: inherit;
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: inherit;
+}
+.media-create-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.media-create-refuse {
+  margin: 0;
+  font-size: 12px;
+  color: var(--warn, var(--muted));
+}
+.media-create-message { margin: 0; }
+
+
+/* Manage packs: non-blocking right drawer — chat/composer stay usable (no full-window modal blur). */
+.workshop-manage-drawer {
+  position: fixed;
+  inset: 0;
+  z-index: 24;
+  display: flex;
+  align-items: stretch;
+  justify-content: flex-end;
+  padding: 24px 24px 24px 0;
+  pointer-events: none;
+  background: transparent;
+  /* Explicitly no full-window dim/blur — desk stays sharp and clickable. */
+  backdrop-filter: none;
+}
+
+.workshop-manage-rail-dim {
+  /* Optional rail-adjacent wash only; does not cover chat/composer. */
+  width: 76px;
+  flex: 0 0 76px;
+  margin-right: auto;
+  pointer-events: none;
+  background: color-mix(in srgb, var(--bg-solid) 55%, transparent);
+}
+
+.workshop-manage-sheet {
+  width: min(520px, calc(100% - 100px));
+  max-height: calc(100% - 48px);
+  margin: auto 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 16px;
+  pointer-events: auto;
+  box-shadow: var(--shadow);
+}
+
+.workshop-manage-sheet-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 18px 12px;
+  border-bottom: 1px solid var(--line);
+  flex-shrink: 0;
+}
+
+.workshop-manage-sheet-head h3 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.workshop-manage-sheet-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.workshop-manage-sheet-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 12px 18px 18px;
+}
+
+.workshop-manage-sheet-body .workshop-settings {
+  margin-bottom: 0;
+}
+
+.workshop-sheet-intro {
+  margin: 0 0 10px;
+}
+
+.workshop-blurb,
+.workshop-pack-blurb,
+.workshop-pack-summary,
+.workshop-active-empty,
+.workshop-pending-empty {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: unset;
+  -webkit-line-clamp: unset;
+  line-clamp: unset;
+}
+
+.workshop-manage-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 0 10px;
+}
+
+.workshop-active-empty,
+.workshop-pending-empty {
+  margin: 0 0 8px;
+}
+
+.workshop-peer-add {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 0 6px;
+}
+
+.workshop-peer-url {
+  margin-bottom: 10px;
+}
+
+/* Advanced: whisper — no competing weight with Available section-label. */
+.workshop-advanced-title {
+  margin: 22px 0 0;
+  font-size: inherit;
+  font-weight: inherit;
+  opacity: 0.55;
+}
+
+.workshop-advanced-toggle {
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0.01em;
+  text-transform: none;
+  color: var(--text-tertiary);
+  opacity: 0.9;
+}
+
+.workshop-settings .skill-row-side .tiny.primary,
+.workshop-settings .pack-row-side .tiny.primary {
+  min-width: 4.5rem;
+}
+
+.workshop-section-title:focus {
+  outline: none;
+}
+
+.workshop-section-title:focus-visible {
+  outline: 2px solid var(--accent, var(--line));
+  outline-offset: 2px;
+}
+
+.workshop-settings { margin-bottom: 8px; }
+.workshop-invite-head { margin-bottom: 4px; }
+.workshop-empty-on {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+  margin: 0 0 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg-solid);
+}
+.workshop-empty-on .workshop-active-empty { margin: 0; flex: 1 1 16rem; }
+.workshop-settings .pack-row.pack-card {
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg-solid);
+  margin: 0 0 8px;
+  gap: 6px;
+}
+.workshop-settings .pack-row.pack-card.is-expanded { gap: 8px; }
+.workshop-settings .pack-row.pack-card .workshop-row-one-liner {
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  color: var(--text-secondary);
+}
+.workshop-catalog-search {
+  width: 100%;
+  max-width: 22rem;
+  margin: 0 0 10px;
+}
+.workshop-settings .pack-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(14.5rem, 1fr));
+  gap: 10px;
+  margin: 0 0 12px;
+}
+.workshop-settings .pack-card-grid > .pack-row.pack-card {
+  margin: 0;
+  min-height: 9.5rem;
+  height: 100%;
+}
+.workshop-pack-status {
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  color: var(--text-tertiary);
+}
+.workshop-grant-refuse {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+  margin: 2px 0 4px;
+}
+.workshop-grant-refuse .row-meta { margin: 0; flex: 1 1 12rem; }
+/* The preflight names every gap, so it wraps instead of ellipsing like .row-meta. */
+.workshop-preflight-copy {
+  margin: 0;
+  flex: 1 1 14rem;
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: break-word;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.workshop-grant-refuse + .local-compute-add { margin: 0 0 8px; }
+.workshop-catalog-no-match { margin: 0 0 10px; }
+/* On this desk / Available: rail section-label weight, not Settings h3. */
+.workshop-settings .workshop-section-title.section-label,
+.workshop-section-title.section-label {
+  margin: 12px 0 4px;
+  font-size: 10px;
+  font-weight: 590;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+.workshop-catalog-empty { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.workshop-advanced { margin-bottom: 12px; }
+
+
+/* Settings → Workshop: Add pack row, pack rows, the confirm panel and its source list. */
+.workshop-add { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+.workshop-add .settings-search { flex: 1 1 auto; margin: 0; }
+.workshop-pack { flex: 1 1 auto; min-width: 0; }
+.workshop-pack > .row-meta { display: block; }
+.workshop-pack strong .row-meta { display: inline; margin: 0 0 0 4px; font-weight: 400; }
+.workshop-collector .tiny { margin-left: 0; }
+.workshop-collector {
+  display: flex;
+  align-items: center;
+  gap: 0;
+}
+
+/* Manage simple rows: collapsed = mark + title + one-liner; detail only when expanded. */
+.workshop-settings .pack-row {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0;
+  padding: 5px 8px;
+}
+.workshop-settings .pack-row.is-expanded {
+  gap: 6px;
+}
+.workshop-row-chrome {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+}
+.workshop-row-action-slot {
+  flex: 0 0 4.75rem;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  min-height: 22px;
+  padding-top: 2px;
+}
+.workshop-row-action-slot .tiny.primary {
+  min-width: 4.5rem;
+}
+.workshop-turn-on-quiet {
+  font-weight: 400;
+  color: var(--text-secondary);
+  background: transparent;
+  border-color: transparent;
+}
+.workshop-turn-on-quiet:hover:not(:disabled) {
+  color: var(--text);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.workshop-row-hit {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  padding: 2px 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.workshop-row-hit .workshop-pack-mark {
+  margin-top: 1px;
+}
+.workshop-row-hit:hover .workshop-row-title {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+/* Letter marks: small muted circle — identity, not error badge. */
+.workshop-pack-mark {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0;
+  background: color-mix(in srgb, var(--text-tertiary, rgba(127, 127, 127, 0.55)) 16%, transparent);
+  color: var(--text-tertiary, var(--muted));
+}
+.workshop-row-copy {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  align-items: stretch;
+}
+.workshop-row-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+/* Structured one-liner under title — JS clamps ~90 chars; CSS line-clamp 1 is backup. */
+.workshop-row-one-liner {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 1;
+  line-clamp: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: normal;
+  max-width: 100%;
+  margin: 0;
+}
+.workshop-row-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 0 0 2px 28px;
+}
+.workshop-row-detail > .row-meta,
+.workshop-row-detail > .workshop-pack-summary {
+  display: block;
+  margin: 0;
+}
+.workshop-pack-summary {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 1;
+  line-clamp: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: normal;
+  max-width: 100%;
+}
+.workshop-row-actions {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  margin-top: 2px;
+}
+.workshop-row-more {
+  margin: 2px 0 0;
+}
+.workshop-row-more > summary {
+  cursor: pointer;
+  list-style: none;
+  color: var(--text-tertiary);
+  font-size: 11px;
+}
+.workshop-row-more > summary::-webkit-details-marker {
+  display: none;
+}
+.workshop-row-more[open] > summary {
+  margin-bottom: 4px;
+}
+/* Expanded rail: soften long null-feed pack notes to one status line. */
+.workshop-rail .workshop-law {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 1;
+  line-clamp: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: normal;
+}
+.workshop-confirm { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
+.workshop-confirm select {
+  margin-left: 8px;
+  padding: 3px 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg-solid);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+}
+.workshop-sources-label { margin: 8px 0 0; }
+.workshop-sources { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.workshop-sources label { display: flex; align-items: baseline; gap: 8px; }
+.workshop-sources strong { display: inline; font-size: 12px; }
+.workshop-sources .row-meta { margin: 0; }
+.workshop-url {
+  display: block;
+  margin: 2px 0 0 24px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: calc(100% - 24px);
+}
+
+
+/* Offered models on a multi-model host. One row per model the host publishes:
+   what it costs, what Auto thinks of it, and a test that proves the key really
+   reaches it. The row carries its own result so a failure names its model. */
+.bot-offered {
+  gap: 4px;
+}
+
+.bot-offered > .row-meta {
+  margin: 0 0 4px;
+}
+
+.bot-offered-row {
+  display: grid;
+  gap: 2px;
+  padding: 6px 2px;
+  border-top: 1px solid var(--line);
+  min-width: 0;
+}
+
+.bot-offered-pick {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.bot-offered-pick strong {
+  overflow-wrap: anywhere;
+  font-weight: 510;
+}
+
+.bot-offered-row .actions {
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.bot-offered-ok {
+  color: var(--ok);
+}
+
+.bot-offered-failed {
+  color: var(--danger);
 }

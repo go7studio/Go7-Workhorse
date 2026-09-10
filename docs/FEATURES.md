@@ -43,8 +43,9 @@ covers the rest. Every app gets the same versioned Link contract:
 eight core collaboration tools for capabilities, list/read/ask chats, query leftover and availability,
 delegation, continuation, and worker status, plus typed local
 capability tools when a host is configured. The first call,
-`workhorse_capabilities`, names follow-through: new slice, named worker, later
-status. Status says wait, done, or failed. List chats is compact by default (id,
+`workhorse_capabilities`, names follow-through: new slice, named worker or live
+chat, later status. Status follows workers and asked chats: wait, done, or
+failed. The done report is that turn's reply. List chats is compact by default (id,
 title, worker, parentId, status, next, project) so a host output cap does not clip
 the roster; `parents` omits workers and `full` adds preview. Duplicate worker
 names need that row’s `id`. Link never waits on a long worker.
@@ -150,6 +151,8 @@ transcript rather than as a path.
 ## Chats and projects
 
 - A project is a name. Folders and references are optional, added later.
+- Drag a project to another place in the list. Live and archived stay in their
+  own groups.
 - Chats belong to a project, and can be renamed, archived, deleted, or dragged
   to another project.
 - Vendor, model and thinking effort are set per chat, not per app.
@@ -161,8 +164,12 @@ transcript rather than as a path.
   folder — the same isolation subagents use.
 - Rewind to an earlier turn.
 - While a turn is running, Enter queues the next prompt. It stays on Next
-  until this turn ends and is not a chat line yet. Steer interrupts and
-  sends now.
+  until this turn ends and is not a chat line yet. Steer interrupts the
+  in-flight prompt and sends now — a redirect, not a stop. The chat stays
+  working and does not say Stopped.
+- Cancelling one worker stops that worker only. The desk does not prompt
+  the parent with that worker's report, and it does not say the wave
+  finished while the parent or other workers are still going.
 - A long transcript opens on the latest turns. Scrolling up pages in the next older window without jumping.
 - A portable transcript follows a chat when its vendor changes.
 - Search runs over chat titles and message text across every project.
@@ -177,13 +184,20 @@ transcript rather than as a path.
   here takes the work's own name instead of the prompt's first few words, so
   long as its workers agree on one.
 - User and assistant turns in the transcript use the same clock.
-- A turn’s work stays on one compact line while it runs. Open it when you
-  want the ordered detail: think, tools, think. Consecutive tool calls share
+- A turn’s work stays on one compact line while it runs, named for the live
+  action (`Working · 19s · Read GOAL.md`). When the turn ends it lists the
+  tools that ran (`Worked 19s · Read · Grep`), or the workers if it had a crew
+  (`Worked 38s · Hazel · Piper`). That line is primary ink when the turn has
+  ended. Open it when you want the ordered detail: think, tools, think. Consecutive tool calls share
   one fold labelled "3 tools"; expand it to see the calls listed underneath, not
   a row of "1 tool". A single call shows its name. A later thought starts a new
   hop. When a turn runs long, earlier thoughts and tools roll into an Earlier
   fold you can open again. The current hop stays open. The visible reply stays
   below that.
+- Grok Build background **Tasks** and **Watchers** (a script or monitor the
+  agent started) stay on the chat as a small strip: name, elapsed time, and
+  whether they are still running or were killed. That is the Grok ACP session,
+  not Settings → Watch leftover pools. Other vendors do not report this yet.
 - Grok tables keep their real columns. Empty `| |` / `|---|` chrome is
   dropped, and a path with a size suffix such as `foo.md (34441 chars)`
   still opens.
@@ -233,10 +247,16 @@ transcript rather than as a path.
 ## Spend
 
 - Usage recorded per vendor and per chat, from each vendor's own count: the
-  ACP turn total, or the HTTP response's usage block. Cursor is estimated at
-  four characters a token only when ACP sent no count — Composer and API stay
-  two separate pools. Grok, Claude, and Codex stay unknown if they omit a bill.
+  ACP turn total, or the HTTP response's usage block. Cursor is billed from
+  Cursor's dashboard event log, joined to this desk's ACP session id — not the
+  whole Cursor account. A four-characters-per-token estimate is used only until
+  that join covers the turn. Composer and API stay two separate pools. Grok, Claude, and Codex stay unknown if they omit a bill.
   Leftover rings, billed tokens, and retained context stay distinct meters.
+  This chat's billed total sits in white on the left of the transcript.
+  Orchestrated bots combine into one grey Crew total under it. Click for each
+  bot plus in, cached, and out. A chat with no crew still shows its own billed
+  total there. Retained context stays on the ring to the right. It is not a
+  stop.
 - **In** is fresh input — what the model read for the first time. **Cached** is
   context served back from cache, named apart so a long chat does not read as
   millions of new tokens. **Out** is what it wrote. The total is in + out.
@@ -246,7 +266,9 @@ transcript rather than as a path.
   leftover ring.
 - Budgets per vendor.
 - A weekly pace that tells you when you are ahead of it, before the bill does.
-- A usage view by day, week, month, or all time.
+- A usage view by day, week, month, or all time. This stretch shows billed in +
+  out for the selected range — the same total as the chat meter — not only the
+  peak cell. Events missing a clock still count on today.
 
 ## Work that outlives a turn
 
@@ -261,15 +283,12 @@ transcript rather than as a path.
   (`seed: fresh`) and no parent conversation.
 - **Turn log** — a chat can reconstruct model history from its own turn and
   step log. The log is per chat. It is never shared across vendors.
-- **Subagents** — lifecycle records, runtime and token ceilings, cascading
+- **Subagents** — lifecycle records, cascading
   cancellation, changed-file review, and worktree isolation where the project
-  supports it. A token ceiling meters this slice’s new work, not leftover or
-  the size of the repo the worker read. One pass cannot spend the whole
-  mission. The last fifth is for verifying and handing off, not more producing.
-  The run is warned before it stops, and the stop report says what was left
-  unfinished. No ceiling means no limit. A reused worker starts a new count.
-  Workhorse reads the ceiling when the vendor reports usage, so it stops a run
-  at the next meter, not part-way through a turn: one long turn can pass it.
+  supports it. The desk does not stop a worker on a token ceiling or a runtime
+  limit. Billed spend for that chat and each orchestrated bot is on the left
+  of the transcript. A reused worker starts a new slice
+  count; billed usage for the chat is the lifetime total.
   If the parent then does the work itself, the run records that the parent took
   over instead of a fully Workhorse-owned completion.
   A worker gets a worker's context: the
@@ -288,7 +307,11 @@ transcript rather than as a path.
   when Mission or an adaptive loop is requested: passes advance one phase at a
   time on their own results, with no approval prompt. A caller cannot claim the
   build phase; build is honoured only when the desk itself holds that mission at
-  build.
+  build. A live mission sits above the composer as a compact chip. Click it to
+  grow into the usual board: pass, phase, and status on the header, then
+  campaign phases, acceptance criteria, and each pass’s workers. The open board
+  stays short and scrolls. Click a worker to open that chat. Type
+  `/demo-mission` on a chat to pin a sample board.
 - **Worker path scope** — assigned repo-relative paths appear with the worker.
   Workhorse checks supported edit events and reports Git-visible changes outside
   that scope when the run ends. This is review evidence, not containment:
@@ -318,9 +341,15 @@ transcript rather than as a path.
   pin stays as a chip next to + until you clear it. Two pins collapse to +2 on
   the bar; click it to expand them. Orchestrate tells this chat
   it is the orchestrator and must spawn desk workers (one assignment is one
-  worker, Auto ranks, fan-out only when asked). Mission is the adaptive loop:
-  spawn the first wave, then continue remaining work with
-  `workhorse_continue_mission`. With both on, the chat spawns as orchestrator
+  worker or a named continuation on this parent for the same topic; a bare spawn
+  still starts clear-headed. Auto ranks, fan-out only when asked). A gear on that chip, or a
+  right-click, opens a this-chat list of which connected bots it may spawn.
+  All bots is the default; a subset stays on this chat until you clear it, and
+  a new chat starts at all again. Left-click still clears the pin. Mission is
+  mission-board tracking for an adaptive loop, not a spawn request. When the
+  work needs desk workers, spawn a wave, then continue remaining work with
+  `workhorse_continue_mission`. The chat then shows that loop as a compact
+  chip above the composer; click it to open the usual board. With both on, the chat spawns as orchestrator
   and then continues unmet work as a mission.
 - **Routing** — your own chat keeps the model you picked until you set it to
   **Auto**; Auto picks the bot and effort for each message. Auto does not pick
@@ -328,9 +357,14 @@ transcript rather than as a path.
   an image, Auto prefers Grok (`/imagine`) over text models that only accept
   image *input*. The desk routes the work it hands out on its own: when a chat
   spawns a worker without naming a model, the desk ranks the slice and picks
-  bot and effort. A named model or bot is used as named. A named vendor without
-  a model still ranks that vendor’s models. One assignment is one worker; a
-  second only to check that output, unless you asked for every vendor, all
+  bot and effort. A named model or bot is used as named, except a model that
+  exists on more than one vendor (Grok 4.6 on Grok Build and on Cursor) still
+  ranks those vendors by leftover. Naming the vendor locks that login. A named
+  vendor without a model still ranks that vendor’s models. Composer high on the
+  parent, spawn `effort`, or “on high” in the ask is kept on the worker; Auto
+  infers effort only when nobody assigned one. One assignment is one worker, or a
+  named continuation on this parent for the same topic; a bare spawn still
+  starts clear-headed. A second spawn only to check that output, unless you asked for every vendor, all
   bots, several independent reviews, or a named list. Equal-intelligence picks
   go to the cheaper slot. A model with its own extra pool is kept for visual,
   creative, or complex work. A bot served from this machine is local because of
@@ -363,7 +397,9 @@ transcript rather than as a path.
   Codex, Claude and Cursor homes, and can be pushed back to a vendor. A small
   per-turn skill radar matches natural task language against installed names
   and descriptions, then asks the agent to read and verify only the strongest
-  candidates. Slash commands remain the explicit, exact route.
+  candidates. Settings → Skills can turn that wording match off, and can
+  include plugin packs in the auto-load catalog. Slash commands remain the
+  explicit, exact route.
 - **MCP servers** — Settings → Skills can add and test local stdio servers,
   attach each one only to selected runtimes, and choose the tools exposed to
   custom HTTP models. Calls use the same approval and result path as built-in
@@ -377,17 +413,50 @@ transcript rather than as a path.
   one is sent. It keeps no count of its own — the host is the only thing that
   knows who else is using it. Large catalogs are grouped, frontier-first, searchable, and
   explicitly approved; one key keeps one ring with separate model rows.
+  A multi-model host is asked what it serves: the editor lists the host's own
+  models with the window and price it publishes, each is ticked to offer it,
+  tested on its own for a reply, a latency and token counts, and rated for
+  Auto — so every offered model is a routing candidate at the window its host
+  gave. A host that publishes no list says so, and its ids stay hand-typed.
   Qwen 3.8 bots use the model's native Off/Low/Medium/Extra reasoning levels
   and its published thinking/direct-mode sampling profiles.
   Dev shells keep a pasted key on the bot itself, because their credential
   vault is memory-only and used to drop leftover tracking on restart.
+- **Workshop** — an optional, read-only rail on the right edge of the desk.
+  Settings → Workshop is the install/grant home. **Manage** on the live rail
+  opens the same panel, and so does **Workshop** in a chat header, beside
+  Review and Terminal (Skills is not the Workshop home; no dock row). A pack is
+  desk-wide, so that button needs no project and no folder. Add a
+  pack from that sheet: catalog
+  Install, paste a public GitHub repo URL (the highest tagged release is
+  downloaded), or pick a folder. A pack is data only — one `pack.json` naming
+  what it reads and how its cards look, plus an optional collector the
+  operator installs on the remote box. Nothing from a pack runs in Workhorse.
+  Turn a pack on, pick the Local Compute host it reads through, and confirm
+  the exact URLs, cadence, and byte cap it will GET; the rail paints its cards
+  collapsed to a 76px strip and expanded. With no packs On the rail is hidden
+  — Install and Turn on live in Settings → Workshop, the rail's Manage sheet,
+  and the chat Workshop panel. A Turn on that cannot go through says what is
+  still missing — a Local Compute host, a host that is switched on, at least
+  one source — and adds the host in place rather than sending you to Settings →
+  LLMs. A source that is not painting names its reason, so a host that refuses
+  the credential reads as that instead of as a dash. Packs stack as
+  modules and fold on their own. Update re-reads the repo's tags; when any pack's sources in that
+  archive change, those packs turn off before polling restarts and you confirm
+  again (grants are bound to source fingerprints). Everything is the current
+  snapshot — no history is kept — and nothing on the rail starts, stops,
+  routes, or leases anything. When two On packs grant the same Local Compute
+  URL, main issues one shared GET at the faster cadence rather than polling
+  twice. Detach opens the same cards in their own window. Workhorse ships no
+  packs; the DGX Spark monitor lives at
+  github.com/go7studio/workshop-pack-dgx-spark.
 - **The `/` palette** — new, project, link, model, effort, compact, plan,
   sandbox, usage, watch, schedule, goal, skills, review, context, rewind,
   export, memory, hooks, plugins, workflows, and more.
 
 ## Settings
 
-Profile, connected LLMs, skills, routing, learning, usage, watch.
+Profile, connected LLMs, skills, workshop, routing, learning, usage, watch.
 
 The profile shows the Workhorse mark as tiny moving blobs of the bots you
 have called. Spend sets how many of each color; blobs merge in space without

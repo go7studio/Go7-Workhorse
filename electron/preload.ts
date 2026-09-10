@@ -79,6 +79,8 @@ contextBridge.exposeInMainWorld("workhorse", {
   loadState: () => ipcRenderer.invoke("state:load") as Promise<Record<string, unknown>>,
   liveRunIds: () => ipcRenderer.invoke("runs:live") as Promise<string[]>,
   saveState: (state: Record<string, unknown>) => ipcRenderer.invoke("state:save", state),
+  /** One routing:decision line in the desk's own main.log. Identities and numbers only. */
+  recordRoutingDecision: (detail: string) => ipcRenderer.invoke("routing:record-decision", detail),
   /** A finished worker's offloaded thinking and tool rows, each with the seat it held. */
   loadTranscript: (sessionId: string) =>
     ipcRenderer.invoke("transcript:load", sessionId) as Promise<
@@ -140,8 +142,8 @@ contextBridge.exposeInMainWorld("workhorse", {
     ipcRenderer.invoke("codex:list-native-threads", limit) as Promise<import("./codex-app-server").CodexNativeThread[]>,
   codexCapabilities: (projectRoot?: string) =>
     ipcRenderer.invoke("codex:capabilities", projectRoot) as Promise<ReturnType<typeof import("./codex-capabilities").codexCapabilitySummary>>,
-  detectClaudeLogin: () =>
-    ipcRenderer.invoke("claude:detect-login") as Promise<import("./claude-login").ClaudeLoginDetectResult>,
+  detectClaudeLogin: (input?: { recheck?: boolean }) =>
+    ipcRenderer.invoke("claude:detect-login", input ?? {}) as Promise<import("./claude-login").ClaudeLoginDetectResult>,
   claudeSetupToken: () =>
     ipcRenderer.invoke("claude:setup-token") as Promise<{ ok: boolean; message?: string }>,
   claudePrompt: (input: GrokPromptInput) => ipcRenderer.invoke("claude:prompt", input),
@@ -162,6 +164,8 @@ contextBridge.exposeInMainWorld("workhorse", {
     ipcRenderer.invoke("cursor:answer-permission", { requestId, answer }),
   cursorCancel: (sessionId: string) => ipcRenderer.invoke("cursor:cancel", sessionId),
   cursorPlanUsage: () => ipcRenderer.invoke("cursor:plan-usage") as Promise<import("../src/lib/types").GrokPlanUsage | null>,
+  cursorLedgerEvents: (input?: { startDate?: number; endDate?: number }) =>
+    ipcRenderer.invoke("cursor:ledger-events", input) as Promise<import("../src/lib/usage").CursorLedgerJoinRow[] | null>,
   onCursorEvent: (handler: (event: GrokIpcEvent) => void) => {
     const listener = (_event: IpcRendererEvent, payload: GrokIpcEvent) => handler(payload);
     ipcRenderer.on("cursor:event", listener);
@@ -173,6 +177,15 @@ contextBridge.exposeInMainWorld("workhorse", {
   customModels: (config: { baseUrl: string; apiKey: string }) => ipcRenderer.invoke("custom:models", config),
   probeCustom: (config: { baseUrl: string; apiKey: string; model: string; api?: "anthropic-messages" | "openai-completions" }) =>
     ipcRenderer.invoke("custom:probe", config),
+  /** What this bot's host lists, by bot id. The key is resolved in main and never crosses. */
+  customBotCatalog: (botId: string, refresh?: boolean) =>
+    ipcRenderer.invoke("customBot:catalog", { botId, refresh }) as Promise<
+      import("./custom-catalog").CustomCatalog | null
+    >,
+  testCustomBotModel: (botId: string, model: string) =>
+    ipcRenderer.invoke("customBot:test-model", { botId, model }) as Promise<
+      import("./custom-http").CustomModelTestResult
+    >,
   customPrompt: (input: import("./custom-host").CustomPromptInput) => ipcRenderer.invoke("custom:prompt", input),
   probeMcpServer: (serverName: string) =>
     ipcRenderer.invoke("mcp:probe", serverName) as Promise<import("../src/lib/types").McpProbeResult>,
@@ -242,4 +255,34 @@ contextBridge.exposeInMainWorld("workhorse", {
   learningForget: (target: unknown) => ipcRenderer.invoke("learning:forget", target),
   learningPurge: (target: unknown) => ipcRenderer.invoke("learning:purge", target),
   learningExport: (dest: string) => ipcRenderer.invoke("learning:export", dest),
+  workshopList: () => ipcRenderer.invoke("workshop:list"),
+  workshopView: () => ipcRenderer.invoke("workshop:view"),
+  workshopCatalog: () => ipcRenderer.invoke("workshop:catalog"),
+  workshopInstallCatalog: (input: { id: string }) => ipcRenderer.invoke("workshop:install-catalog", input),
+  workshopInstallRepo: (input: { url: string }) => ipcRenderer.invoke("workshop:install-repo", input),
+  workshopInstallFolder: () => ipcRenderer.invoke("workshop:install-folder"),
+  workshopRemove: (input: { id: string }) => ipcRenderer.invoke("workshop:remove", input),
+  workshopCheckUpdate: (input: { id: string }) => ipcRenderer.invoke("workshop:check-update", input),
+  workshopUpdate: (input: { id: string }) => ipcRenderer.invoke("workshop:update", input),
+  workshopRevealCollector: (input: { id: string }) => ipcRenderer.invoke("workshop:reveal-collector", input),
+  workshopOpenBreakout: () => ipcRenderer.invoke("workshop:open-breakout"),
+  workshopCloseBreakout: () => ipcRenderer.invoke("workshop:close-breakout"),
+  deskOpenLocalPath: (path: string) => ipcRenderer.invoke("desk:open-local-path", path) as Promise<boolean>,
+  deskRevealLocalPath: (path: string) => ipcRenderer.invoke("desk:reveal-local-path", path) as Promise<boolean>,
+  localMediaCreate: (input: {
+    hostId: string;
+    capability: string;
+    templateId: string;
+    fields?: Record<string, string | number | boolean>;
+  }) =>
+    ipcRenderer.invoke("localMedia:create", input) as Promise<
+      { ok: true; jobId?: string; message: string } | { ok: false; reason: string }
+    >,
+  onWorkshopChanged: (handler: () => void) => {
+    const listener = () => handler();
+    ipcRenderer.on("workshop:changed", listener);
+    return () => {
+      ipcRenderer.removeListener("workshop:changed", listener);
+    };
+  },
 });

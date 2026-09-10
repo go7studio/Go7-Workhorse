@@ -8,6 +8,169 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.6.66](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.65...v0.6.66) (2026-09-07)
+
+
+### Bug Fixes
+
+* follow through on asked chats with agent_status ([#279](https://github.com/go7studio/Go7-Workhorse/issues/279)) ([2076744](https://github.com/go7studio/Go7-Workhorse/commit/2076744eef60f554b9804c4844ab4be77936f0ae))
+
+## [0.6.65](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.64...v0.6.65) (2026-09-07)
+
+
+### Features
+
+* **models:** Fable 5.1 and GPT-6 Astra reach the picker, routing, and Link ([fa76bfd](https://github.com/go7studio/Go7-Workhorse/commit/fa76bfdef9a66bfe1c17ef309577c5b3be755428))
+
+
+### Bug Fixes
+
+* **llms:** a login Claude refused reads Sign in again and offers the button ([edaf62b](https://github.com/go7studio/Go7-Workhorse/commit/edaf62baecff058fd037946a1e567a64554c8947))
+
+## [0.6.64](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.63...v0.6.64) (2026-09-07)
+
+
+### Features
+
+* show this chat spend and a Crew total on the left ([539ef92](https://github.com/go7studio/Go7-Workhorse/commit/539ef92163b42648828acc2a92d15512ba1e5642))
+
+## [0.6.63](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.62...v0.6.63) (2026-09-07)
+
+
+### Features
+
+* bill Cursor chats from the dashboard ledger join ([a38d46d](https://github.com/go7studio/Go7-Workhorse/commit/a38d46d1073f53686ad23daefd7dd94ed80e55b1))
+* continue named workers, spawn picker, project drag, unbounded runs ([004c75b](https://github.com/go7studio/Go7-Workhorse/commit/004c75bf11791125f66654cd848cd93d8f757f86))
+* continue named workers, spawn picker, project drag, unbounded runs ([5d1f497](https://github.com/go7studio/Go7-Workhorse/commit/5d1f4974c14e124a12e3d1a322416c8c0deefe0e))
+
+
+### Bug Fixes
+
+* **ci:** keep spawn wait bound and roster allowlist ([14ca3e2](https://github.com/go7studio/Go7-Workhorse/commit/14ca3e2a413adc60af3318659e5aa5da4ff6898a))
+
+## [0.6.62](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.61...v0.6.62) (2026-09-06)
+
+
+### Bug Fixes
+
+* **custom:** a deleted or switched-off custom bot drops its slot everywhere ([bda6f37](https://github.com/go7studio/Go7-Workhorse/commit/bda6f37947ea6dd44b41d504b5582e7fa7a17601))
+* keep slice titles off the finished-crew banner ([4c6b7a0](https://github.com/go7studio/Go7-Workhorse/commit/4c6b7a08fff330bd25f3a3d44bdb4cce61a43e7e))
+* keep slice titles off the finished-crew banner ([ad286cf](https://github.com/go7studio/Go7-Workhorse/commit/ad286cf1674aa6d744eb742c0270b5d0cb46a3c5))
+* **workshop:** catalog Install skips monorepo siblings and root docs ([09aa950](https://github.com/go7studio/Go7-Workhorse/commit/09aa950f3be3ba28b0c0c6b812b597ec2e5632e7))
+* **workshop:** catalog Install skips monorepo siblings and root docs ([3d3cf03](https://github.com/go7studio/Go7-Workhorse/commit/3d3cf03ad3b7aa059a901d02b253056adf15eaad))
+
+## [0.6.61](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.60...v0.6.61) (2026-09-06)
+
+
+### Features
+
+* name finished workers on the work line ([2bbeddb](https://github.com/go7studio/Go7-Workhorse/commit/2bbeddb87c295a7b2366eaf7791c02618ec32707))
+* name finished workers on the work line ([2b73055](https://github.com/go7studio/Go7-Workhorse/commit/2b730555721c98a79070d45e6ea727f189ae9163))
+
+
+### Bug Fixes
+
+* This stretch shows billed in+out, not only the peak cell ([efa8e56](https://github.com/go7studio/Go7-Workhorse/commit/efa8e5695a856a056b21d170c2094fe0c0701588))
+* This stretch total still counts today on UTC CI ([f899eed](https://github.com/go7studio/Go7-Workhorse/commit/f899eedb05661c41c582af9ddae767840302d4b0))
+
+## [0.6.60](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.59...v0.6.60) (2026-09-06)
+
+
+### Features
+
+* **workshop:** first-party catalog with pin verify and digest Install ([5782785](https://github.com/go7studio/Go7-Workhorse/commit/57827854012992a14ffae9c70cdb9ac284147513))
+* **workshop:** rail Manage sheet as Workshop home ([#261](https://github.com/go7studio/Go7-Workhorse/issues/261)) ([b3b783d](https://github.com/go7studio/Go7-Workhorse/commit/b3b783d3b9c9810ba19076e8addd86d8f02b65e9))
+* **workshop:** Workshop Catalog — pin verify + digest Install ([fc94690](https://github.com/go7studio/Go7-Workhorse/commit/fc946906b4b196bc684746dfebf5c23f9f8b8370))
+
+
+### Bug Fixes
+
+* **routing:** keep Grok Build out of Cursor session rules ([5d2dace](https://github.com/go7studio/Go7-Workhorse/commit/5d2dace00e5f3e03c492d63d5e5d5847140023ec))
+* **routing:** pick Grok 4.6 by leftover and keep assigned effort ([801683f](https://github.com/go7studio/Go7-Workhorse/commit/801683f3a49c250c3e766501d00840f8d68caec1))
+* **routing:** pick Grok 4.6 by leftover and keep assigned effort ([1c67a1d](https://github.com/go7studio/Go7-Workhorse/commit/1c67a1d324f6ec6f1b15b5f5f9956b836e353e8e))
+* **workshop:** LF-normalize catalog seed before pin sha256 ([30128b1](https://github.com/go7studio/Go7-Workhorse/commit/30128b12b7bb10edbdb86deaf82e19ca66ad49f1))
+* **workshop:** Opus catalog SEC — Update Off, yank at Turn-on, archive fence ([d4b3f00](https://github.com/go7studio/Go7-Workhorse/commit/d4b3f001d690d22edc0e409e1f2155dcdfd95458))
+
+## [0.6.59](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.58...v0.6.59) (2026-09-05)
+
+
+### Bug Fixes
+
+* **permissions:** a read-only seat runs read-only shell commands, and judges the word the shell builds ([dcd4f3b](https://github.com/go7studio/Go7-Workhorse/commit/dcd4f3b58c428fc312c39a99adc25c436d66d6d8))
+
+## [0.6.58](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.57...v0.6.58) (2026-09-05)
+
+
+### Features
+
+* Workshop Settings tab, chat spend on the meter, and skill discovery ([05820a0](https://github.com/go7studio/Go7-Workhorse/commit/05820a0059646062b9ea05260e4a2dd01e090134))
+* Workshop Settings tab, chat spend on the meter, and skill discovery ([f517f26](https://github.com/go7studio/Go7-Workhorse/commit/f517f26647f1dcdb7b12aee61a176c62851d4d80))
+
+## [0.6.57](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.56...v0.6.57) (2026-09-05)
+
+
+### Features
+
+* **custom:** pick, test and route every model a multi-model host serves ([66e788c](https://github.com/go7studio/Go7-Workhorse/commit/66e788c3024a25417dbebb09a8f65c1a6cf0e015))
+
+
+### Bug Fixes
+
+* **routing:** Auto can route ordinary work to a Synthetic bot, and says why ([f9ef6f7](https://github.com/go7studio/Go7-Workhorse/commit/f9ef6f719bde10008f5d5bbe4502e496dcc9e115))
+
+## [0.6.56](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.55...v0.6.56) (2026-09-05)
+
+
+### Features
+
+* **workshop:** gallery widget + media create via Local Compute ([ee1346e](https://github.com/go7studio/Go7-Workhorse/commit/ee1346ede8707a852e9de7c1eb1f212d351c43d3))
+* **workshop:** Spark media gallery + Local Compute create ([13a54c1](https://github.com/go7studio/Go7-Workhorse/commit/13a54c1ba84d187ff3c3651e6c285b7497ec5044))
+
+
+### Bug Fixes
+
+* **missions:** a pass is earned by finishing it, and the wave is the desk's record ([c9888f7](https://github.com/go7studio/Go7-Workhorse/commit/c9888f76e927f5e15483ec61996ab9d2d5f5f072))
+* **permissions:** the desk default is the standing permission for system-started work ([e39a71a](https://github.com/go7studio/Go7-Workhorse/commit/e39a71af4d4dcae49d8356abbcf9e42dd252a343))
+* **vendors:** keep each vendor's login out of every other vendor's process ([6126df4](https://github.com/go7studio/Go7-Workhorse/commit/6126df47246084e36d1e77d4e01c129d61863b37))
+* **workshop:** share identical gateway GETs across packs ([6094d54](https://github.com/go7studio/Go7-Workhorse/commit/6094d5416c85fcde968500d1da31f1c39634c361))
+* **workshop:** share identical gateway GETs across packs ([0ac3f39](https://github.com/go7studio/Go7-Workhorse/commit/0ac3f3954bc7264030a65754fd6f0ecbabcbdf9f))
+* **workshop:** type dedupe share-key fixture as JsonSource ([30d8c9a](https://github.com/go7studio/Go7-Workhorse/commit/30d8c9a15f06e4b33f83e2af71d12e37e9704358))
+* **workshop:** type galleryItems limit as number ([abe92fa](https://github.com/go7studio/Go7-Workhorse/commit/abe92fa5ea64b49a09dca7215c3a25a8e4c2f6b9))
+
+## [0.6.55](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.54...v0.6.55) (2026-09-04)
+
+
+### Features
+
+* **workshop:** add-on v0 desk breakout + Spark feed packs ([acb2b22](https://github.com/go7studio/Go7-Workhorse/commit/acb2b22c723884179da70fe61fb79744c7edd16b))
+* **workshop:** add-on v0 desk breakout + Spark feed packs ([2580c8e](https://github.com/go7studio/Go7-Workhorse/commit/2580c8e2a84f6c2771af91089b4b5ab981572b82))
+* **workshop:** Box monitor Models + Router soak labels ([101e878](https://github.com/go7studio/Go7-Workhorse/commit/101e878771b7955466695ef03465eca90c0ce514))
+* **workshop:** Box monitor Models + Router soak labels ([8fc17cd](https://github.com/go7studio/Go7-Workhorse/commit/8fc17cd9d99fb3ab8597f56b3e8d9abbc64837d2))
+* **workshop:** desk rail live watch (collapsed strip → expand) ([aee3baf](https://github.com/go7studio/Go7-Workhorse/commit/aee3bafd87fda8afd9a0f402c23dcf788774a86a))
+* **workshop:** desk rail live watch (RAIL.md) ([d85b4b2](https://github.com/go7studio/Go7-Workhorse/commit/d85b4b25e5752fbd4680eeb975021d130450e896))
+* **workshop:** host + installed packs — the DGX box leaves the app ([02dde34](https://github.com/go7studio/Go7-Workhorse/commit/02dde34197a672c5871e6ec6b4434b5f7d7a95bb))
+* **workshop:** rail paint — ring gauge, module stack, tokened hairlines ([39f8e33](https://github.com/go7studio/Go7-Workhorse/commit/39f8e33f26a51ae327e6e118c20d547a31a2a2e8))
+
+
+### Bug Fixes
+
+* **workshop:** breakout polls liveSettings and workshop:changed ([d3bd409](https://github.com/go7studio/Go7-Workhorse/commit/d3bd4094bcea92f24679f10dcfc003d3ce443719))
+* **workshop:** close pack grant/update race before refresh ([8f3f802](https://github.com/go7studio/Go7-Workhorse/commit/8f3f802fde6ac30209351dc94f3d3c91b14be9e5))
+* **workshop:** dedupe paintModelsLine helpers ([4f58239](https://github.com/go7studio/Go7-Workhorse/commit/4f58239640c491b0c6027f9d47c97aef507aab8b))
+* **workshop:** distinguish empty Local Compute caps on Models ([38603f8](https://github.com/go7studio/Go7-Workhorse/commit/38603f8bde5143a6e34bcd4d9adfde91c9846199))
+* **workshop:** don't let sidecar grant clobber live GPU meters ([62d218e](https://github.com/go7studio/Go7-Workhorse/commit/62d218ec648306c1eeb0aea04564e51be9237ddd))
+* **workshop:** flush grants before breakout; inherit desk theme ([ed498f3](https://github.com/go7studio/Go7-Workhorse/commit/ed498f3a0c851e2c57d160c4abd5a26fd38631e5))
+* **workshop:** Models line includes http-502 during train exclusive ([4c1ce48](https://github.com/go7studio/Go7-Workhorse/commit/4c1ce48afd34caf7c570d92633d97fcb6e5ae5ed))
+* **workshop:** Models train-exclusive line includes http-502 ([eb8fa50](https://github.com/go7studio/Go7-Workhorse/commit/eb8fa50dc758415f68df153d1e876b8b68795fce))
+* **workshop:** refresh Skills list on turn-off; document optin/revoke ([ac34aee](https://github.com/go7studio/Go7-Workhorse/commit/ac34aeed68822f7432cf42645684743286fbc6d6))
+* **workshop:** restore soak Models label to train-exclusive wording ([fb53ec1](https://github.com/go7studio/Go7-Workhorse/commit/fb53ec1b7bb563a3513d2fbc23e48775870eba6f))
+* **workshop:** sidecar grant must not clobber live GPU meters ([27bb6f6](https://github.com/go7studio/Go7-Workhorse/commit/27bb6f60aa291e0a769ac52b9f54c7ebb7fe7b1e))
+* **workshop:** silence unused input in host test ([8e50095](https://github.com/go7studio/Go7-Workhorse/commit/8e50095e585b81eaadf98725e9c59f56406f88fd))
+* **workshop:** unblock never-test tripped by revoke mention in comment ([6aff430](https://github.com/go7studio/Go7-Workhorse/commit/6aff43013896748532c856f5e7e358a9bbd00b50))
+* **workshop:** wrap models strip at spaces, not mid-token ([7cebfa2](https://github.com/go7studio/Go7-Workhorse/commit/7cebfa2507619c9adcf9a56935a38b8fb8dd059d))
+* wrap long URLs in the user prompt bubble ([b90d308](https://github.com/go7studio/Go7-Workhorse/commit/b90d3088ccde36a691d7db353cc00b460e3ed5b1))
+* wrap long URLs in the user prompt bubble ([598823e](https://github.com/go7studio/Go7-Workhorse/commit/598823e544b88621d3e7b5f36efcb7dcf704f6f6))
+
 ## [0.6.54](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.53...v0.6.54) (2026-09-03)
 
 

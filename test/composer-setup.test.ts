@@ -63,6 +63,12 @@ test("/providers names the vendor and model sheet", () => {
   assert.doesNotMatch(providers.hint, /home/i);
 });
 
+test("crew chips do not restage a new modes array on every render", () => {
+  const composer = read("src/ui/Composer.tsx");
+  assert.match(composer, /useMemo\(\(\) => orderedCrewModes\(session\?\.crewModes\)/);
+  assert.match(composer, /setShownCrew\(\(current\) => \(sameCrewModes\(current, crewModes\) \? current : crewModes\)\)/);
+});
+
 test("the model chip is wide enough for Cursor Grok 4.6 · Medium · Ask", () => {
   const css = read("src/styles/app.css");
   const trigger = css.match(/\.setup-trigger \{([^}]+)\}/)?.[1] ?? "";

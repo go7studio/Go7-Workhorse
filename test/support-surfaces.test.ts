@@ -87,7 +87,7 @@ test("settings blurbs wrap and skill paths keep the folder name from a fixture",
   const mcp = css.match(/\.mcp-settings \.link-head p,\s*\.mcp-settings > \.row-meta,\s*\.skills-heading \.row-meta\s*\{[^}]+\}/)?.[0] ?? "";
   assert.match(mcp, /white-space:\s*normal/);
   assert.match(mcp, /overflow:\s*visible/);
-  const skillMeta = css.match(/\.skill-row \.row-meta\s*\{[^}]+\}/)?.[0] ?? "";
+  const skillMeta = css.match(/\.skill-row \.row-meta(?:,\s*\.pack-row \.row-meta)?\s*\{[^}]+\}/)?.[0] ?? "";
   assert.match(skillMeta, /white-space:\s*normal/);
   assert.match(skillMeta, /overflow:\s*visible/);
   const sidebarMeta = css.match(/^\.row-meta \{[^}]+\}/m)?.[0] ?? "";

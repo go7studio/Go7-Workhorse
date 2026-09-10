@@ -1,8 +1,10 @@
 import { isExternalAgentAddress } from "./agent-runtime";
 import { isGrokBotModel, isGrokBotName } from "./custom-http-identity";
 import { uid } from "./id";
-import { defaultModel, findChoice, modelsFor, normalizeModelId, parseEffort, withEffort } from "./models";
+import { cursorUsageLane } from "./cursor-lane";
+import { defaultModel, findChoice, findChoiceOnProvider, modelsFor, normalizeModelId, parseEffort, withEffort } from "./models";
 import type { RoutingCandidate } from "./routing";
+import { routingModelFamily, spawnModelFamilyKey } from "./routing";
 import { findSession, type SessionSnapshot } from "./session-bridge";
 import { sessionExecutionCwd } from "./session-environment";
 import type {
@@ -23,6 +25,7 @@ import type {
   WorkerFindingSeverity,
   WorkerHandoff,
   WorkerSeed,
+  SandboxProfile,
 } from "./types";
 import { beginAssignmentBudget } from "./worker-budget";
 import { looksLikeWorkerBrief, type DeskRole } from "./workhorse-rules";
@@ -437,6 +440,77 @@ function takenWorkerNames(workers: WorkerRecord[], parentId: string): string[] {
     .map((worker) => worker.workerName as string);
 }
 
+/** Enough for the first name round plus a few suffixes, without dumping transcripts. */
+export const PARENT_CREW_CAP = 24;
+
+export type ParentCrewMember = {
+  worker: string;
+  slice: string;
+  status: string;
+  free: boolean;
+};
+
+export type ParentCrewRecord = Pick<
+  WorkerRecord,
+  "id" | "workerName" | "parentId" | "hidden" | "status" | "agentRun"
+> & { title?: string; archivedAt?: number | null };
+
+/** Slice label after `Wanda · `, or the whole title when there is no name prefix. */
+export function workerSliceFromTitle(title: string, workerName?: string): string {
+  const trimmed = title.trim();
+  const name = (workerName?.trim() || workerNameFromTitle(trimmed) || "").trim();
+  if (name) {
+    const prefix = `${name} · `;
+    if (trimmed.startsWith(prefix)) return trimmed.slice(prefix.length).trim();
+    if (trimmed.toLowerCase() === name.toLowerCase()) return "";
+  }
+  const sep = trimmed.indexOf("·");
+  if (sep >= 0) return trimmed.slice(sep + 1).trim();
+  return trimmed;
+}
+
+/**
+ * This parent's live workers only. Wanda on another chat is a different address.
+ * Latest workers stay when the crew is longer than the cap.
+ */
+export function parentCrewSnapshot(
+  workers: readonly ParentCrewRecord[],
+  parentId: string,
+  cap = PARENT_CREW_CAP,
+): ParentCrewMember[] {
+  const mine = workers.filter(
+    (worker) =>
+      worker.parentId === parentId &&
+      worker.hidden &&
+      typeof worker.archivedAt !== "number" &&
+      (worker.workerName?.trim() || workerNameFromTitle(worker.title ?? "")),
+  );
+  const rows = mine.map((worker) => {
+    const name = worker.workerName?.trim() || workerNameFromTitle(worker.title ?? "") || "worker";
+    return {
+      worker: name,
+      slice: workerSliceFromTitle(worker.title ?? "", name),
+      status: worker.agentRun?.status || worker.status || "idle",
+      free: workerIsFree(worker),
+    };
+  });
+  return rows.length > cap ? rows.slice(rows.length - cap) : rows;
+}
+
+export function formatParentCrewLine(crew: readonly ParentCrewMember[]): string | undefined {
+  if (crew.length === 0) return undefined;
+  return `Crew on this chat: ${crew
+    .map((row) => `${row.worker}${row.slice ? ` · ${row.slice}` : ""} (${row.free ? "idle" : "busy"})`)
+    .join("; ")}`;
+}
+
+export function spawnContinuationHowToUse(workerName: string, reused: boolean): string {
+  const who = reused
+    ? `${workerName} picked this up with what it already knew.`
+    : `${workerName} is new to this work.`;
+  return `Worker is running in its own chat. ${who} For the same topic pass worker="${workerName}" so it keeps what it learned. Leave worker empty to mint a new name for a new topic. A busy worker still gets a colleague. Spawn the rest with wait=false, then stop. The desk joins reports later. Do not sit on workhorse_await_agents or ask the user to pick.`;
+}
+
 /**
  * The desk tools a worker may call. A worker does its slice in the bound
  * folder: read and ask other chats, spawn one bounded helper and wait for it,
@@ -574,18 +648,30 @@ export function shouldAutoRouteSpawn(input: {
     return false;
   }
   if (!input.routingEnabled) return false;
-  if (namedSpawnPick(input.model) || namedSpawnPick(input.chat) || namedSpawnPick(input.customBotId)) return false;
+  if (namedSpawnPick(input.chat) || namedSpawnPick(input.customBotId)) return false;
+  if (namedSpawnPick(input.model)) {
+    const family = spawnModelFamilyKey(input.model);
+    const provider = parseProviderId(typeof input.provider === "string" ? input.provider : undefined);
+    // grok-4.6 without a vendor is a family, not a Grok Build lock. Cursor
+    // Grok and ACP Grok still compete on leftover. A named vendor keeps
+    // Auto inside that login.
+    if (family && !provider) return true;
+    return false;
+  }
   return true;
 }
 
-/** Keep Auto inside a named vendor; unnamed spawn still ranks the whole desk. */
+/** Keep Auto inside a named vendor; a family name without a vendor ranks those vendors. */
 export function constrainRouteCandidatesForSpawn(
   candidates: RoutingCandidate[],
-  input: { provider?: unknown },
+  input: { provider?: unknown; model?: unknown },
 ): RoutingCandidate[] {
   const provider = parseProviderId(typeof input.provider === "string" ? input.provider : undefined);
-  if (!provider) return candidates;
-  return candidates.filter((row) => row.provider === provider);
+  const family = spawnModelFamilyKey(input.model);
+  let rows = candidates;
+  if (provider) rows = rows.filter((row) => row.provider === provider);
+  else if (family) rows = rows.filter((row) => routingModelFamily(row) === family);
+  return rows;
 }
 
 export function spawnExclusions(
@@ -807,11 +893,22 @@ function extractBlockers(text: string | undefined): string[] {
   return blockers;
 }
 
+export type MissionReportOutcome = "complete" | "continue" | "blocked";
+
+/** Last `Mission status:` / `status:` line in a worker report. */
+export function workerMissionOutcome(text: string | undefined): MissionReportOutcome | undefined {
+  if (!text) return undefined;
+  const declarations = [...text.matchAll(/^\s*(?:mission\s+)?status:\s*(blocked|continue|complete(?:d)?)\s*[.!]?\s*$/gim)];
+  const last = declarations.at(-1)?.[1]?.toLowerCase();
+  if (last === "blocked") return "blocked";
+  if (last === "continue") return "continue";
+  if (last === "complete" || last === "completed") return "complete";
+  return undefined;
+}
+
 /** A model may finish its turn while explicitly saying the assigned work did not finish. */
 export function workerReportedBlocked(text: string | undefined): boolean {
-  if (!text) return false;
-  const declarations = [...text.matchAll(/^\s*(?:mission\s+)?status:\s*(blocked|continue|complete(?:d)?)\s*[.!]?\s*$/gim)];
-  return declarations.at(-1)?.[1]?.toLowerCase() === "blocked";
+  return workerMissionOutcome(text) === "blocked";
 }
 
 export function workerProgressCheckpoint(
@@ -888,6 +985,225 @@ export function withFollowThrough<T extends Record<string, unknown>>(payload: T)
   const status = typeof payload.status === "string" ? payload.status : "";
   const follow = workerFollowThrough(status);
   return { ...payload, next: follow.next, how: follow.how };
+}
+
+const ASKED_WAIT_HOW =
+  "Call workhorse_agent_status with this id later. Do not spawn another worker for the same slice.";
+const ASKED_PERMISSION_HOW =
+  "This chat is waiting on permission. Call workhorse_agent_status with this id later. Do not treat partial text as the answer.";
+const ASKED_DONE_HOW = "The report is in this payload. workhorse_ask_chat to talk to this chat.";
+const ASKED_FAIL_HOW =
+  "This chat did not finish the asked turn. Do not treat an older report as the new response.";
+const ASKED_INTERRUPTED_HOW =
+  "This ask was interrupted. workhorse_ask_chat on this chat to continue. Do not treat partial text as the answer.";
+
+type StatusSession = Pick<
+  Session,
+  | "id"
+  | "parentId"
+  | "status"
+  | "title"
+  | "workerName"
+  | "provider"
+  | "model"
+  | "effort"
+  | "agentRun"
+  | "routingMode"
+  | "routingDecision"
+  | "messages"
+>;
+
+function isPeerAsk(message: ChatMessage, fromSessionId?: string): boolean {
+  if (message.kind !== "peer" || message.role !== "user") return false;
+  const from = fromSessionId?.trim();
+  if (!from) return true;
+  return message.peerFromSessionId === from;
+}
+
+function latestPeerAsk(messages: ChatMessage[] | undefined, fromSessionId?: string): ChatMessage | undefined {
+  return [...(messages ?? [])].reverse().find((message) => isPeerAsk(message, fromSessionId));
+}
+
+function isAskedTurnAssistant(message: ChatMessage, peer: ChatMessage): boolean {
+  if (message.role !== "assistant" || message.kind === "tool" || message.kind === "thought") return false;
+  if (peer.correlationId && message.correlationId && message.correlationId !== peer.correlationId) return false;
+  return true;
+}
+
+/** Messages after the asked peer until the next user/peer turn. */
+function askedTurnWindow(messages: ChatMessage[] | undefined, peer: ChatMessage): {
+  turn: ChatMessage[];
+  closedByLaterUser: boolean;
+} {
+  const list = messages ?? [];
+  const start = list.findIndex((message) => message.id === peer.id);
+  const rest = start >= 0 ? list.slice(start + 1) : list.filter((message) => message.createdAt >= peer.createdAt);
+  const boundary = rest.findIndex((message) => message.role === "user");
+  return {
+    turn: boundary >= 0 ? rest.slice(0, boundary) : rest,
+    closedByLaterUser: boundary >= 0,
+  };
+}
+
+function lastAskedTurnReply(turn: ChatMessage[], peer: ChatMessage): ChatMessage | undefined {
+  const assistants = turn.filter((message) => isAskedTurnAssistant(message, peer));
+  return [...assistants].reverse().find((message) => message.text.trim()) ?? assistants.at(-1);
+}
+
+export function askedChatAllows(session: Pick<Session, "messages">, fromSessionId?: string): boolean {
+  return Boolean(latestPeerAsk(session.messages, fromSessionId));
+}
+
+function askedRunFailed(status: string | undefined): boolean {
+  return (
+    status === "failed" ||
+    status === "cancelled" ||
+    status === "timed-out" ||
+    status === "budget-exceeded" ||
+    status === "interrupted"
+  );
+}
+
+function askedRunForPeer(run: Session["agentRun"], peer: ChatMessage): Session["agentRun"] {
+  if (!run) return undefined;
+  if (peer.correlationId && run.correlationId) {
+    return run.correlationId === peer.correlationId ? run : undefined;
+  }
+  if (typeof run.finishedAt === "number" && run.finishedAt < peer.createdAt) return undefined;
+  if (run.startedAt < peer.createdAt) return undefined;
+  return run;
+}
+
+function askedFollowChip(
+  sessions: StatusSession[],
+  callerId: string | undefined,
+  targetId: string,
+  peer?: ChatMessage,
+): ChatMessage | undefined {
+  const from = callerId?.trim();
+  if (!from || from === targetId) return undefined;
+  const parent = sessions.find((row) => row.id === from);
+  if (!parent) return undefined;
+  const chips = (parent.messages ?? []).filter(
+    (message) => message.kind === "subagent" && message.subagentSessionId === targetId,
+  );
+  if (peer?.correlationId) {
+    const matched = chips.filter((chip) => !chip.correlationId || chip.correlationId === peer.correlationId);
+    if (matched.length) return matched.at(-1);
+  }
+  return chips.at(-1);
+}
+
+function chipFailed(status?: string): boolean {
+  const value = (status ?? "").toLowerCase();
+  return value === "failed" || value === "error" || value === "cancelled" || value === "canceled" || value === "denied";
+}
+
+function chipRunning(status?: string): boolean {
+  const value = (status ?? "").toLowerCase();
+  return value === "running" || value === "queued" || value === "working";
+}
+
+/** Status of the latest asked turn only. Older assistant text is never the new report. */
+export function askedChatStatusSnapshot(
+  session: StatusSession,
+  fromSessionId?: string,
+  sessions: StatusSession[] = [],
+): Record<string, unknown> | null {
+  const peer = latestPeerAsk(session.messages, fromSessionId);
+  if (!peer) return null;
+  const { turn, closedByLaterUser } = askedTurnWindow(session.messages, peer);
+  const reply = lastAskedTurnReply(turn, peer);
+  const replyText = reply?.text.trim() ?? "";
+  const bounded = replyText ? boundWorkerReport(replyText, { workerId: session.id }) : null;
+  const run = askedRunForPeer(session.agentRun, peer);
+  const callerId = fromSessionId?.trim() || peer.peerFromSessionId;
+  const chip = askedFollowChip(sessions, callerId, session.id, peer);
+  const failed = askedRunFailed(run?.status) || chipFailed(chip?.toolStatus);
+  const waitingOnPermission = !closedByLaterUser && session.status === "needs-input";
+  const sessionLive = session.status === "running" || session.status === "needs-input";
+  const live = !closedByLaterUser && sessionLive;
+  const interrupted = !closedByLaterUser && !sessionLive && chipRunning(chip?.toolStatus);
+  let next: WorkerFollowNext;
+  let how: string;
+  let status: string;
+  if (failed) {
+    next = "failed";
+    how = ASKED_FAIL_HOW;
+    status = run?.status ?? "failed";
+  } else if (waitingOnPermission) {
+    next = "wait";
+    how = ASKED_PERMISSION_HOW;
+    status = "needs-input";
+  } else if (live) {
+    next = "wait";
+    how = ASKED_WAIT_HOW;
+    status = "running";
+  } else if (interrupted) {
+    next = "failed";
+    how = ASKED_INTERRUPTED_HOW;
+    status = "interrupted";
+  } else if (!replyText) {
+    next = "failed";
+    how = ASKED_FAIL_HOW;
+    status = "failed";
+  } else {
+    next = "done";
+    how = ASKED_DONE_HOW;
+    status = "completed";
+  }
+  const failText = failed ? (chip?.text.trim() || "") : "";
+  const failBounded = failText && failText !== replyText ? boundWorkerReport(failText, { workerId: session.id }) : null;
+  return {
+    id: session.id,
+    title: session.title,
+    ...(session.workerName ? { worker: session.workerName } : {}),
+    ...(session.parentId ? { parentId: session.parentId } : {}),
+    status,
+    next,
+    how,
+    provider: session.provider,
+    model: session.model,
+    effort: session.effort,
+    ...(next === "wait" && bounded ? { partialReport: bounded.report } : {}),
+    ...(status === "interrupted" && bounded ? { partialReport: bounded.report } : {}),
+    ...(next === "failed" && status !== "interrupted" && failBounded ? { report: failBounded.report } : {}),
+    ...(next === "done" && bounded ? { report: bounded.report } : {}),
+  };
+}
+
+export type AgentStatusLookup = {
+  id: string;
+  fromSessionId?: string;
+  sessions: StatusSession[];
+  externalTask?: (Record<string, unknown> & { id: string; status: string }) | null;
+};
+
+export type AgentStatusResult =
+  | { ok: true; snapshot: Record<string, unknown> }
+  | { ok: false; error: "unknown" };
+
+/**
+ * Follow-through for delegated workers, asked chats, and external tasks.
+ * `fromSessionId` is the parent that spawned or asked; it never broadens access.
+ */
+export function resolveAgentStatus(input: AgentStatusLookup): AgentStatusResult {
+  const id = input.id.trim();
+  if (!id) return { ok: false, error: "unknown" };
+  const from = input.fromSessionId?.trim() || "";
+  const session = input.sessions.find((row) => row.id === id);
+  if (session) {
+    const isWorker = Boolean(session.parentId);
+    const descendantOk = isWorker && (!from || descendantSessionIds(input.sessions, from).includes(session.id));
+    if (descendantOk) return { ok: true, snapshot: workerStatusSnapshot(session) };
+    const asked = askedChatStatusSnapshot(session, from || undefined, input.sessions);
+    if (asked) return { ok: true, snapshot: asked };
+    return { ok: false, error: "unknown" };
+  }
+  if (input.externalTask && input.externalTask.id === id) {
+    return { ok: true, snapshot: { ...input.externalTask, status: input.externalTask.status } };
+  }
+  return { ok: false, error: "unknown" };
 }
 
 export function workerStatusSnapshot(
@@ -1314,6 +1630,16 @@ function exactCustomBot(bots: CustomBotHint[] | undefined, query: string): Custo
   );
 }
 
+/**
+ * Cursor · API is the other leftover pool on the Cursor login. Fable, Opus,
+ * GPT, and Gemini keep their Claude/Codex ids there; that is not a vendor
+ * mismatch the way grok-4.6 on Codex is. A custom-bot id is a different login.
+ */
+function cursorHostsForeignModel(hint: { provider: ProviderId; model: string }): boolean {
+  if (hint.provider === "custom" || hint.provider === "grok") return false;
+  return cursorUsageLane(hint.model) === "other-models";
+}
+
 /** Resolve only an explicit model value; surrounding task copy must not influence identity. */
 function explicitModelHint(
   rawModel: string,
@@ -1324,10 +1650,18 @@ function explicitModelHint(
   if (provider) {
     const canonical = normalizeModelId(provider, raw);
     if (canonical !== raw) return { provider, model: canonical };
-  } else {
-    const legacyGrok = normalizeModelId("grok", raw);
-    if (legacyGrok !== raw) return { provider: "grok", model: legacyGrok };
+    const onVendor = findChoiceOnProvider(provider, raw);
+    if (onVendor) return { provider, model: onVendor.model };
+    const exact = findChoice(raw);
+    if (exact && provider === "cursor" && cursorHostsForeignModel(exact)) {
+      const listed = findChoiceOnProvider("cursor", exact.model);
+      return { provider: "cursor", model: listed?.model ?? exact.model };
+    }
+    if (exact) return { provider: exact.provider, model: exact.model };
+    return isBareVendorOrModel(raw) ? resolveModelHint(raw) : null;
   }
+  const legacyGrok = normalizeModelId("grok", raw);
+  if (legacyGrok !== raw) return { provider: "grok", model: legacyGrok };
   const exact = findChoice(raw);
   if (exact) return { provider: exact.provider, model: exact.model };
   return isBareVendorOrModel(raw) ? resolveModelHint(raw) : null;
@@ -1379,7 +1713,15 @@ export function resolveSpawnSpec(
     };
   }
   const modelHint = explicitModelHint(rawModel, explicit);
-  if (explicit && explicit !== "custom" && modelHint && modelHint.provider !== explicit) {
+  if (
+    explicit &&
+    explicit !== "custom" &&
+    modelHint &&
+    modelHint.provider !== explicit &&
+    !(explicit === "cursor" && cursorHostsForeignModel(modelHint)) &&
+    !findChoiceOnProvider(explicit, rawModel) &&
+    !findChoiceOnProvider(explicit, modelHint.model)
+  ) {
     throw new Error(`Model ${rawModel} belongs to ${modelHint.provider}, not ${explicit}.`);
   }
   const chatHint = chat && isBareVendorOrModel(chat) ? resolveModelHint(chat) : null;
@@ -1483,22 +1825,46 @@ export function formatSubagentPrompt(fromTitle: string, text: string, folder = "
   return formatWorkerPrompt({ fromTitle, text, folder });
 }
 
+/** Settle the ask that owns this assistant, never a historical peer from another turn. */
+export function withFinishedTurnSubagentStatus(
+  sessions: Session[],
+  childId: string,
+  status: string,
+  assistantId: string | undefined,
+): Session[] {
+  const child = sessions.find((session) => session.id === childId);
+  const assistantIndex = child?.messages.findIndex((message) => message.id === assistantId) ?? -1;
+  const user = assistantIndex >= 0
+    ? [...child!.messages.slice(0, assistantIndex)].reverse().find((message) => message.role === "user")
+    : undefined;
+  if (user?.kind === "peer") {
+    return withSubagentStatus(sessions, childId, status,
+      user.correlationId ? { correlationId: user.correlationId } : undefined);
+  }
+  // Delegated workers still settle their parent link on ordinary worker turns.
+  return child?.parentId ? withSubagentStatus(sessions, childId, status) : sessions;
+}
+
 export function withSubagentStatus(
   sessions: Session[],
   childId: string,
   status: string,
+  match?: { correlationId?: string; toolCallId?: string },
 ): Session[] {
+  const correlationId = match?.correlationId?.trim() ?? "";
+  const toolCallId = match?.toolCallId?.trim() ?? "";
   return sessions.map((session) => {
     if (!session.messages.some((message) => message.kind === "subagent" && message.subagentSessionId === childId)) {
       return session;
     }
     return {
       ...session,
-      messages: session.messages.map((message) =>
-        message.kind === "subagent" && message.subagentSessionId === childId
-          ? { ...message, toolStatus: status }
-          : message,
-      ),
+      messages: session.messages.map((message) => {
+        if (message.kind !== "subagent" || message.subagentSessionId !== childId) return message;
+        if (correlationId && message.correlationId && message.correlationId !== correlationId) return message;
+        if (toolCallId && message.toolCallId && message.toolCallId !== toolCallId) return message;
+        return { ...message, toolStatus: status };
+      }),
     };
   });
 }
@@ -1565,7 +1931,7 @@ export function normalizeMissionIteration(raw: unknown): MissionIteration | unde
   };
 }
 
-const CAMPAIGN_PHASES: CampaignPhase[] = ["scout", "review", "approve", "build"];
+export const CAMPAIGN_PHASES: CampaignPhase[] = ["scout", "review", "approve", "build"];
 
 export function nextCampaignPhase(phase: unknown): CampaignPhase | undefined {
   const index = (CAMPAIGN_PHASES as unknown[]).indexOf(phase);
@@ -1580,13 +1946,12 @@ export function nextCampaignPhase(phase: unknown): CampaignPhase | undefined {
  * build is where workers write.
  */
 /**
- * Workers whose runtime limit has passed.
+ * Workers whose persisted runtime limit has passed.
  *
- * The caller's reply promise cannot enforce this. On Link the desk answers a
- * delegation immediately with the worker id, and that reply clears the caller-side
- * timer while the worker runs on — so a `timeoutSeconds` of 30 bounded nothing and a
- * pass measured at 251s ran to completion. The deadline belongs to the desk, which
- * is the only party still watching once the caller has its id.
+ * The desk no longer stops a worker on that clock. A timeoutSeconds on spawn is
+ * ignored the same way a tokenBudget is: spend stays on the meter, the worker
+ * runs until it finishes or is cancelled. This helper still names the ids so a
+ * saved timeoutMs can be read; nothing in the desk uses it as a kill list.
  */
 export function expiredWorkerIds(
   sessions: Array<{
@@ -1842,11 +2207,66 @@ export function resolveMissionManifest(
   return { mission: first, coordinatorId: coordinator.id };
 }
 
+/**
+ * Every worker the desk seated in that mission pass: the caller's ids plus
+ * every sibling on the same parent carrying the same mission id and
+ * iteration. Phase, running and unfinished checks read the wave, so a caller
+ * cannot shape the verdict by choosing which workers to mention.
+ */
+export function missionWave(
+  sessions: Session[],
+  parentId: string,
+  ids: readonly string[],
+  mission: { id: string; iteration: number },
+): string[] {
+  const bearing = sessions.filter(
+    (session) =>
+      session.parentId === parentId &&
+      session.agentRun?.mission?.id === mission.id &&
+      session.agentRun?.mission?.iteration === mission.iteration,
+  );
+  // A supporting worker the parent ran during the pass may carry no mission
+  // metadata at all (a plain delegation beside the coordinator). It is still
+  // part of what the desk ran for that pass, so it counts from the moment the
+  // pass began. Anything that started before the pass belongs to an earlier
+  // one and is left out.
+  const passStart = bearing.reduce(
+    (min, session) => Math.min(min, session.agentRun?.startedAt ?? Number.POSITIVE_INFINITY),
+    Number.POSITIVE_INFINITY,
+  );
+  // The window closes when the next pass begins: the earliest start of any
+  // same-parent worker carrying this mission at a later iteration. A helper of
+  // a later pass must not make this one look unfinished or still running.
+  const passEnd = sessions.reduce((min, session) => {
+    const run = session.agentRun;
+    if (session.parentId !== parentId || run?.mission?.id !== mission.id) return min;
+    if ((run.mission?.iteration ?? 0) <= mission.iteration || typeof run.startedAt !== "number") return min;
+    return Math.min(min, run.startedAt);
+  }, Number.POSITIVE_INFINITY);
+  const plain = sessions.filter(
+    (session) =>
+      session.parentId === parentId &&
+      !session.agentRun?.mission &&
+      typeof session.agentRun?.startedAt === "number" &&
+      session.agentRun.startedAt >= passStart &&
+      session.agentRun.startedAt < passEnd,
+  );
+  return [...new Set([...ids, ...bearing.map((session) => session.id), ...plain.map((session) => session.id)])];
+}
+
 export function nextMissionIteration(
   sessions: Session[],
   parentId: string,
   previousWorkerIds: string[],
   previousIteration?: number,
+  /**
+   * A caller asking to CONTINUE may carry on past a worker that ended badly:
+   * one dead worker must not strand a mission's id, pass count and acceptance
+   * criteria forever. Phase derivation must not, because the desk holding a
+   * mission at a phase is what forgery rejection rests on — a pass nobody
+   * finished is not proof the desk reached the next one.
+   */
+  options?: { allowUnfinished?: boolean },
 ): MissionContinuationDecision {
   const ids = [...new Set(previousWorkerIds.map((id) => id.trim()).filter(Boolean))];
   if (ids.length === 0) return { ok: false, error: "previous worker ids are required" };
@@ -1856,25 +2276,44 @@ export function nextMissionIteration(
   if (ids.some((id) => !sessions.find((session) => session.id === id && session.parentId === parentId))) {
     return { ok: false, error: "unknown worker in this mission" };
   }
-  if (ids.some((id) => sessions.find((session) => session.id === id)?.agentRun?.status === "running")) {
+  if (missionWave(sessions, parentId, ids, first).some((id) => sessions.find((session) => session.id === id)?.agentRun?.status === "running")) {
     return { ok: false, error: "previous mission pass is still running" };
   }
-  if (ids.some((id) => sessions.find((session) => session.id === id)?.agentRun?.status === "interrupted")) {
-    return { ok: false, error: "resume the interrupted worker before continuing the mission" };
+  // A pass that ENDED badly is not a reason to end the mission. It used to be:
+  // an interrupted worker refused the continuation, and no tool could resume
+  // one, so the caller was told to do something it had no way to do. The
+  // mission's id, pass count and acceptance criteria were stranded with it.
+  // A continuation may carry on and inherit that work; deriving a phase may
+  // not, because the desk holding a mission at a phase is what stops a caller
+  // forging the build phase.
+  // Anything short of completed is unfinished: interrupted, failed, timed out,
+  // cancelled, over budget. Deriving a phase from any of them would let a
+  // caller claim a phase the desk never reached.
+  // The wave is the desk's own record of that pass, not the caller's list. A
+  // caller who names only the sibling that completed must not earn the next
+  // phase for a wave whose reviewer failed; the omitted worker still counts.
+  const wave = missionWave(sessions, parentId, ids, first);
+  const unfinished = wave.filter((id) => sessions.find((session) => session.id === id)?.agentRun?.status !== "completed");
+  if (!options?.allowUnfinished && unfinished.length > 0) {
+    return { ok: false, error: "that pass did not finish; continue the mission to pick its work up" };
   }
   const latest = sessions
     .filter((session) => session.parentId === parentId && session.agentRun?.mission?.id === first.id)
     .reduce((max, session) => Math.max(max, session.agentRun?.mission?.iteration ?? 0), 0);
   if (latest > first.iteration) return { ok: false, error: "this mission pass already continued" };
   if (first.iteration >= first.maxIterations) return { ok: false, error: "mission iteration limit reached" };
-  const phase = nextCampaignPhase(first.phase);
+  // A phase is earned by finishing it. A continuation that carries a dead
+  // worker's slice forward re-runs the SAME phase; only a pass every worker
+  // completed moves the mission on. Without this a failed approve pass rolled
+  // straight into build, which is the forgery the campaign gate exists to stop.
+  const phase = unfinished.length > 0 ? first.phase : nextCampaignPhase(first.phase);
   if (!phase) return { ok: false, error: "mission campaign phase is missing or invalid" };
   return {
     ok: true,
     mission: {
       ...first,
       iteration: first.iteration + 1,
-      previousWorkerIds: ids,
+      previousWorkerIds: wave,
       phase,
       clearance: undefined,
     },
@@ -1925,8 +2364,17 @@ export function nestedWorkerPolicy(input: {
   };
 }
 
-export function workerMayWrite(role?: DeskRole): boolean {
-  return role !== "auditor" && role !== "helper";
+/**
+ * The seat decides. A role is a routing hint — auditor routes deep, helper is
+ * bounded — not a second permission system. Refusing every auditor and helper
+ * outright meant a review that needed to write its own report under a desk
+ * default of always-approve / off was told "Review-only agents cannot write"
+ * and then asked the person to elevate. Only a sandbox that is actually
+ * read-only or strict refuses a write.
+ */
+export function workerMayWrite(role?: DeskRole, sandbox?: SandboxProfile): boolean {
+  void role;
+  return sandbox !== "read-only" && sandbox !== "strict";
 }
 
 export type CancelWorkerResult = {
@@ -2184,11 +2632,12 @@ export function claimSharedFiles(input: {
   sessionId: string;
   isolation?: "worktree" | "shared";
   role?: DeskRole;
+  sandbox?: SandboxProfile;
   files: Array<{ path: string; fingerprint: string }>;
   now?: number;
 }): { ok: true; leases: FileLease[] } | { ok: false; error: string; conflicts: string[] } {
-  if (!workerMayWrite(input.role)) {
-    return { ok: false, error: "Review-only agents cannot write.", conflicts: input.files.map((file) => file.path) };
+  if (!workerMayWrite(input.role, input.sandbox)) {
+    return { ok: false, error: "This worker's sandbox is read-only, so it cannot write.", conflicts: input.files.map((file) => file.path) };
   }
   const now = input.now ?? Date.now();
   const next = [...input.leases];
@@ -2222,11 +2671,12 @@ export function assertSharedWrite(input: {
   sessionId: string;
   isolation?: "worktree" | "shared";
   role?: DeskRole;
+  sandbox?: SandboxProfile;
   path: string;
   currentFingerprint: string;
 }): { ok: true } | { ok: false; error: string } {
-  if (!workerMayWrite(input.role)) {
-    return { ok: false, error: "Review-only agents cannot write." };
+  if (!workerMayWrite(input.role, input.sandbox)) {
+    return { ok: false, error: "This worker's sandbox is read-only, so it cannot write." };
   }
   const key = normalizeLeasePath(input.path).toLowerCase();
   const lease = input.leases.find((item) => item.sessionId === input.sessionId && normalizeLeasePath(item.path).toLowerCase() === key);
@@ -2262,6 +2712,7 @@ export function assertAgentPathWrite(input: {
   root?: string;
   currentFingerprint: string;
   role?: DeskRole;
+  sandbox?: SandboxProfile;
 }): { ok: true } | { ok: false; error: string } {
   const path = leasePathForWrite(input.path, input.root);
   const allowed = normalizePathAllowlist(input.paths);
@@ -2272,6 +2723,7 @@ export function assertAgentPathWrite(input: {
     leases: input.leases,
     sessionId: input.sessionId,
     role: input.role,
+    sandbox: input.sandbox,
     path,
     currentFingerprint: input.currentFingerprint,
   });

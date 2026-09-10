@@ -1,0 +1,65 @@
+{
+  "id": "sample-box",
+  "name": "Sample box",
+  "version": "1.0.0",
+  "contract": 1,
+  "description": "Fixture pack for the host tests. One json feed, one probe list, every widget kind once.",
+  "homepage": "https://example.test/sample-box",
+  "collector": "collector",
+  "sources": [
+    { "id": "feed", "kind": "json", "path": "feed", "pollMs": 2000, "freshMs": 120000, "asOf": "/asOf", "schema": "sample-feed/v1", "maxBytes": 65536 },
+    { "id": "infer", "kind": "probes", "probes": ["healthz", "readyz", "models"], "pollMs": 5000 }
+  ],
+  "strip": [
+    { "w": "ring", "of": "feed:/loadPercent", "size": 44 },
+    { "w": "text", "of": "feed:/watts", "fmt": "watts" },
+    { "w": "text", "of": "feed:/oneWriter", "fmt": "writer" },
+    { "w": "switch", "cases": [
+      { "when": "desk:/host/emptyCapabilities", "is": true, "paint": { "w": "text", "value": "host has no allowed capabilities" } },
+      { "when": "infer:/models/ids", "has": true, "paint": { "w": "chips", "of": "infer:/models/ids", "tone": "mute" } }
+    ], "else": { "w": "text", "of": "infer:/readyz/status", "fmt": "map", "map": { "down": "infer down", "ok": "infer up" } } },
+    { "w": "bar", "num": "feed:/job/done", "den": "feed:/job/total", "showPct": false },
+    { "w": "text", "of": "feed:/job/hoursLeft", "fmt": "hours" },
+    { "w": "flags", "of": "feed:/flags", "words": { "two-writers": "two writers", "idle": "idle" } }
+  ],
+  "cards": [
+    { "title": "Box", "rows": [
+      { "w": "hbox", "children": [
+        { "w": "ring", "of": "feed:/loadPercent", "size": 56 },
+        { "w": "kv", "label": "Watts", "of": "feed:/watts", "fmt": "watts" },
+        { "w": "kv", "label": "Writer", "of": "feed:/oneWriter", "fmt": "writer" },
+        { "w": "kv", "label": "Unit", "of": "feed:/unitName", "fmt": "strip", "strip": "ACME " }
+      ] }
+    ] },
+    { "title": "Models", "name": { "of": "infer:/models/count", "fmt": "int" }, "rows": [
+      { "w": "switch", "cases": [
+        { "when": "infer:/models/ids", "has": true, "paint": { "w": "chips", "of": "infer:/models/ids", "tone": "mute" } }
+      ], "else": { "w": "text", "value": "—" } }
+    ] },
+    { "title": "Infer", "rows": [ { "w": "probes", "of": "infer" } ] },
+    { "title": "Job", "name": { "of": "status:/feed/present", "fmt": "map", "map": { "true": "sample job" } },
+      "aside": { "w": "flags", "of": "feed:/flags", "words": { "two-writers": "two writers", "idle": "idle" } },
+      "rows": [
+        { "w": "meta", "parts": [ { "of": "feed:/job/config", "fmt": "basename" }, { "of": "feed:/job/kind" }, { "of": "feed:/job/pid", "fmt": "int", "prefix": "pid " }, { "of": "feed:/job/startedUtc", "fmt": "wall" } ] },
+        { "w": "bar", "num": "feed:/job/done", "den": "feed:/job/total", "label": "done toward total" },
+        { "w": "pair",
+          "a": { "of": "feed:/job/ratio", "fmt": "fixed2", "sub": { "of": "feed:/job/ratioTarget", "fmt": "fixed1", "prefix": "/ ", "suffix": " ratio" } },
+          "b": { "of": "feed:/job/done", "fmt": "tokens", "sub": { "of": "feed:/job/total", "fmt": "tokens", "prefix": "/ ", "suffix": " units" } } },
+        { "w": "kv", "label": "Live", "parts": [ { "of": "feed:/job/step", "fmt": "int" }, { "of": "feed:/job/loss", "fmt": "fixed2", "prefix": "loss " } ] },
+        { "w": "kv", "label": "Saved", "parts": [ { "of": "feed:/job/savedStep", "fmt": "int" }, { "of": "feed:/job/savedAt", "fmt": "clock" } ] },
+        { "w": "kv", "label": "Rate", "of": "feed:/job/rate", "fmt": "int", "suffix": " u/s" },
+        { "w": "kv", "label": "Left", "of": "feed:/job/hoursLeft", "fmt": "hours" },
+        { "w": "switch", "cases": [
+          { "when": "feed:/job/complete", "is": true, "paint": { "w": "kv", "label": "Gate", "value": "complete" } },
+          { "when": "feed:/job/complete", "is": false, "paint": { "w": "kv", "label": "Gate", "value": "open" } }
+        ], "else": { "w": "kv", "label": "Gate", "value": "—" } },
+        { "w": "note", "value": "labels only, never route/lease/start/stop" }
+      ] },
+    { "title": "Log", "rows": [ { "w": "log", "of": "feed:/logTail", "lines": 20 } ] },
+    { "title": "Feed", "rows": [
+      { "w": "switch", "cases": [
+        { "when": "status:/feed/present", "is": true, "paint": { "w": "meta", "parts": [ { "value": "present" }, { "of": "status:/feed/asOf", "fmt": "age" } ] } }
+      ], "else": { "w": "note", "value": "Feed not present. Every meter is —." } }
+    ] }
+  ]
+}

@@ -156,10 +156,13 @@ test("a failed critical invariant withholds an otherwise complete score", () => 
   assert.deepEqual(report.failedReleaseBlockers, [suite.releaseBlockers[0]]);
 });
 
-test("usage contract preserves the Cursor-only estimate exception", () => {
+test("usage contract bills Cursor from the dashboard join and keeps the estimate fallback", () => {
   const usage = json("eval/usage-contract.json");
   const cursor = usage.profiles.find((profile: any) => profile.id === "cursor-acp");
-  assert.match(cursor.tokenSource, /Cursor-only.*(?:estimate|four-characters)/i);
+  assert.match(cursor.tokenSource, /dashboard event log/i);
+  assert.match(cursor.tokenSource, /ACP session id/i);
+  assert.match(cursor.tokenSource, /four-characters-per-token estimate/i);
+  assert.match(usage.unknownUsagePolicy, /joined to this desk's ACP session id/i);
   for (const profile of usage.profiles.filter((item: any) => item.id !== "cursor-acp" && item.id.endsWith("-acp"))) {
     assert.doesNotMatch(profile.tokenSource, /estimate/i);
   }

@@ -58,7 +58,7 @@ test("both sidebar lists share the one rule", () => {
   assert.doesNotMatch(loose.slice(0, 400), /isHiddenSession/);
 });
 
-test("a nested worker subtitle is model and effort only", () => {
+test("a nested worker subtitle names a clean finish as Done", () => {
   assert.equal(
     workerSidebarLabel({
       id: "worker_terra",
@@ -75,7 +75,7 @@ test("a nested worker subtitle is model and effort only", () => {
       messages: [],
       agentRun: { status: "completed", startedAt: 1, isolation: "worktree" },
     }),
-    "GPT-5.6-Terra · Medium",
+    "GPT-5.6-Terra · Medium · Done",
   );
   assert.equal(
     workerSidebarLabel({
@@ -113,6 +113,7 @@ test("a nested worker subtitle is model and effort only", () => {
     }),
     "Composer 2.5 · High · Cancelled",
   );
+  assert.match(read("src/ui/ChatRow.tsx"), /status === "completed" && session\.agentRun\.executionOwner !== "parent"/);
 });
 
 test("a running chat keeps model and effort on the row, not Working…", () => {
@@ -245,6 +246,8 @@ test("the desk routes a spawn unless the orchestrator names a bot, and picks eff
   assert.equal(shouldAutoRouteSpawn({ routingEnabled: true, provider: "claude" }), true, "a named vendor still ranks its models");
   assert.equal(shouldAutoRouteSpawn({ routingEnabled: true, provider: "custom" }), true, "a named vendor is not a named model");
   assert.equal(shouldAutoRouteSpawn({ routingEnabled: true, model: "MiniMax-M3" }), false, "a named model wins");
+  assert.equal(shouldAutoRouteSpawn({ routingEnabled: true, model: "grok-4.6" }), true, "Grok 4.6 is a family across vendors");
+  assert.equal(shouldAutoRouteSpawn({ routingEnabled: true, provider: "grok", model: "grok-4.6" }), false, "naming Grok locks that login");
   assert.equal(shouldAutoRouteSpawn({ routingEnabled: true, chat: "Kimi" }), false, "a named chat wins");
   assert.equal(shouldAutoRouteSpawn({ routingEnabled: true, customBotId: "bot_kimi" }), false, "a named custom bot wins");
   assert.equal(shouldAutoRouteSpawn({ routingEnabled: false }), false, "off: the worker takes its parent's bot");

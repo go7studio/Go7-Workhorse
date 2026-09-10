@@ -1,19 +1,21 @@
 import { primaryFolder } from "../lib/project";
 import { useEffect, useState } from "react";
 import { LINK_HOSTS, LINK_HOST_LABEL, linkHostConnectsByOneshot } from "../lib/workhorse-link";
-import { BOT_COLORS, customBotEnabled } from "../lib/custom-bots";
+import { BOT_COLORS, customBotEnabled, customBotModels, customModelRoutingOverride, routingProfileEdit, ROUTING_ROLE_PRESETS } from "../lib/custom-bots";
 import { isGrokBotUrl } from "../lib/custom-http-identity";
 import { formatWindow, modelsFor } from "../lib/models";
 import { PROVIDERS } from "../lib/providers";
 import { agentSystemsFromInboundSelect, inboundParentSelectValue, vendorEnabled, vendorLabel, vendorTint } from "../lib/settings";
+import { llmCardHint, llmDetailCopy } from "../lib/llm-copy";
 import { APP_VERSION } from "../lib/app-info";
 import { useStore } from "../lib/store";
 import { SETTINGS_THEME_CHOICES } from "../lib/theme";
-import type { AgentRuntimeId, DeskExportKind, LlmLink, PermissionMode, ProviderId, SandboxProfile, SettingsSection } from "../lib/types";
+import type { AgentRuntimeId, DeskExportKind, PermissionMode, ProviderId, SandboxProfile, SettingsSection } from "../lib/types";
 import type { AgentRuntimeStatus } from "../lib/external-catalog";
 import { BotForm } from "./BotForm";
 import { ContextMeter } from "./ContextMeter";
 import { SkillsPane } from "./SkillsPane";
+import { WorkshopBlock } from "./WorkshopBlock";
 import { UsagePane } from "./UsagePane";
 import { WatchPane } from "./WatchPane";
 import { RoutingPane } from "./RoutingPane";
@@ -28,6 +30,7 @@ const SECTIONS: { id: SettingsSection; label: string }[] = [
   { id: "profile", label: "Profile" },
   { id: "llms", label: "LLMs" },
   { id: "skills", label: "Skills" },
+  { id: "workshop", label: "Workshop" },
   { id: "routing", label: "Routing" },
   { id: "learning", label: "Learning" },
   { id: "usage", label: "Usage" },
@@ -35,45 +38,6 @@ const SECTIONS: { id: SettingsSection; label: string }[] = [
 ];
 
 const DESK_STOCK: Exclude<ProviderId, "custom">[] = ["grok", "codex", "claude", "cursor"];
-
-function llmCardHint(id: Exclude<ProviderId, "custom">, link: LlmLink): string {
-  if (!vendorEnabled(link)) return "Disabled";
-  // Installed but signed out is a different problem from missing, and the
-  // only one the person can fix from here.
-  if (link.needsAuth && !link.connected) return "Needs auth";
-  if (link.available === false) return "Not found";
-  if (id === "grok" || id === "codex" || id === "claude" || id === "cursor") return "Local login";
-  return "Marked";
-}
-
-function llmDetailCopy(id: Exclude<ProviderId, "custom">, link: LlmLink): string {
-  if (link.connected && link.enabled === false) {
-    return "Disabled for new chats.";
-  }
-  // A vendor that is signed in and cannot start reads as ready everywhere else
-  // on this row. The reason is one line the detector already wrote, so the meta
-  // line says that instead of promising a launch that will throw.
-  if (link.launchable === false && link.launchBlocker) return `${link.launchBlocker}. Install it, then Recheck.`;
-  const found = link.available ?? link.connected;
-  if (id === "grok") {
-    return found ? "Local Grok ready." : "Grok not found.";
-  }
-  if (id === "codex") {
-    return found
-      ? "Local Codex ready."
-      : "Codex not found.";
-  }
-  if (id === "claude") {
-    return found
-      ? "Local Claude ready."
-      : "Claude not found.";
-  }
-  if (id === "cursor") {
-    if (link.needsAuth && !link.connected) return "Sign in to Cursor Agent, then Recheck.";
-    return found || link.connected ? "Local Cursor Agent ready." : "Cursor ACP binary or login not found.";
-  }
-  return found ? "Marked for a future adapter" : "Not connected";
-}
 
 type LlmFocus = Exclude<ProviderId, "custom"> | `bot:${string}` | null;
 
@@ -368,6 +332,8 @@ export function Settings() {
 
       {section === "skills" && <SkillsPane />}
 
+      {section === "workshop" && <WorkshopBlock />}
+
       {section === "routing" && <RoutingPane />}
 
       {section === "learning" && <LearningPane />}
@@ -408,7 +374,7 @@ function StockBotDetail({
                   ? store.refreshCodexLogin()
                   : id === "cursor"
                     ? store.refreshCursorLogin()
-                    : store.refreshClaudeLogin()
+                    : store.refreshClaudeLogin({ recheck: true })
             }
           >
             Recheck
@@ -466,33 +432,59 @@ function StockBotDetail({
   );
 }
 
+/**
+ * Ticking a box is not rating a bot.
+ *
+ * Every handler here used to save `{ ...current, ...one change }`, and `current`
+ * is the resolved profile, not the stored one. So a person who only ticked
+ * Local or Docs had the family default written back as an override they never
+ * authored, on the 1-5 scale, where it stuck. Kimi K3 on this desk ended up
+ * rated 3, which doubles to 6 and can never clear the balanced bar of 8: Auto
+ * could not send it ordinary coding work, and this pane showed "Balanced".
+ *
+ * Now each control writes only its own field, over whatever is stored, and the
+ * readout says which numbers are the person's and what they score out of 10.
+ */
 function BotRoutingFields({ bot }: { bot: import("../lib/types").CustomBot }) {
   const store = useStore();
-  const current = routingProfileForModel("custom", bot.model, bot.routingProfile);
-  const setRole = (role: string) => {
-    const values = role === "deep"
-      ? { intelligence: 5, speed: 2, cost: 5 }
-      : role === "quick"
-        ? { intelligence: 3, speed: 5, cost: 1 }
-        : { intelligence: 4, speed: 4, cost: 3 };
-    store.updateCustomBot(bot.id, { routingProfile: { ...current, ...values } });
-  };
-  const role = current.intelligence >= 9 ? "deep" : current.speed >= 5 && current.cost <= 2 ? "quick" : "balanced";
-  const input = (key: keyof typeof current.inputs, value: boolean) =>
-    store.updateCustomBot(bot.id, {
-      routingProfile: { ...current, inputs: { ...current.inputs, [key]: value } },
-    });
+  const saved = bot.routingProfile;
+  const current = routingProfileForModel("custom", bot.model, saved);
+  const patch = (change: Parameters<typeof routingProfileEdit>[1]) =>
+    store.updateCustomBot(bot.id, { routingProfile: routingProfileEdit(saved, change) });
+  const setRole = (role: string) =>
+    patch(role === "family" ? "family" : ROUTING_ROLE_PRESETS[role as keyof typeof ROUTING_ROLE_PRESETS]);
+  const rated = saved?.intelligence !== undefined;
+  const role = !rated
+    ? "family"
+    : current.intelligence >= 9
+      ? "deep"
+      : current.speed >= 5 && current.cost <= 2
+        ? "quick"
+        : "balanced";
+  // One tick is one key. Spreading `current.inputs` here was the last control
+  // still laying its change over the resolved profile: the ratings were fixed
+  // and this one was not, so ticking Docs on an unrated bot went on authoring
+  // the family's answer for images, audio and video as three overrides nobody
+  // chose. Storage stopped inventing keys, but the pane was still supplying
+  // them. routingProfileEdit merges the bag, so an earlier tick survives.
+  const input = (key: keyof typeof current.inputs, value: boolean) => patch({ inputs: { [key]: value } });
   return (
     <div className="field">
       <span>Routing</span>
       <div className="actions">
         <select value={role} onChange={(event) => setRole(event.target.value)} aria-label="Routing role">
+          <option value="family">Family default</option>
           <option value="quick">Quick</option>
           <option value="balanced">Balanced</option>
           <option value="deep">Deep</option>
         </select>
-        <label><input type="checkbox" checked={current.local} onChange={(event) => store.updateCustomBot(bot.id, { routingProfile: { ...current, local: event.target.checked } })} /> Local</label>
+        <label><input type="checkbox" checked={current.local} onChange={(event) => patch({ local: event.target.checked })} /> Local</label>
       </div>
+      <p className="row-meta">
+        {rated
+          ? `Rated ${saved!.intelligence} of 5 · scores ${current.intelligence} of 10`
+          : `Family default · scores ${current.intelligence} of 10`}
+      </p>
       <div className="actions">
         <label><input type="checkbox" checked={current.inputs.images} onChange={(event) => input("images", event.target.checked)} /> Images</label>
         <label><input type="checkbox" checked={current.inputs.documents} onChange={(event) => input("documents", event.target.checked)} /> Docs</label>
@@ -617,6 +609,225 @@ function MassSend({
   );
 }
 
+type CustomCatalog = import("../../electron/custom-catalog").CustomCatalog;
+type CustomCatalogModel = import("../../electron/custom-catalog").CustomCatalogModel;
+type CustomModelTestResult = import("../../electron/custom-http").CustomModelTestResult;
+type StoredRoutingProfile = import("../lib/types").StoredRoutingProfile;
+
+/**
+ * Which of the editor's three roles a saved per-model override reads as. The
+ * presets are the ones the bot's own Routing controls write, so a row and the
+ * bot agree about what "Deep" means. An unrated model reads "family": the
+ * rating beside it comes from the family table and nothing is stored.
+ */
+function storedRole(stored?: StoredRoutingProfile): "family" | "quick" | "balanced" | "deep" {
+  if (!stored || stored.intelligence === undefined) return "family";
+  for (const [role, values] of Object.entries(ROUTING_ROLE_PRESETS)) {
+    if (stored.intelligence === values.intelligence && stored.speed === values.speed && stored.cost === values.cost) {
+      return role as "quick" | "balanced" | "deep";
+    }
+  }
+  return stored.intelligence >= 5 ? "deep" : (stored.speed ?? 0) >= 5 && (stored.cost ?? 5) <= 2 ? "quick" : "balanced";
+}
+
+function priceLabel(model: CustomCatalogModel | undefined): string {
+  if (!model) return "";
+  const money = (value: number) => (value >= 1 ? value.toFixed(2) : value.toFixed(3));
+  const parts: string[] = [];
+  if (model.pricePerMTokIn !== undefined) parts.push(`$${money(model.pricePerMTokIn)}/M in`);
+  if (model.pricePerMTokOut !== undefined) parts.push(`$${money(model.pricePerMTokOut)}/M out`);
+  return parts.join(" · ");
+}
+
+function testLabel(result: CustomModelTestResult): string {
+  if (!result.ok) return result.message;
+  const counts =
+    result.inputTokens !== undefined || result.outputTokens !== undefined
+      ? ` · ${result.inputTokens ?? 0} in / ${result.outputTokens ?? 0} out`
+      : "";
+  return `${result.reply ?? result.message} · ${result.latencyMs} ms${counts}`;
+}
+
+/**
+ * What the host serves, what this bot offers, and what Auto will think of each.
+ *
+ * A multi-model host sells dozens behind one key. Typing the ids by hand made
+ * every one of them a guess — the right spelling, the real window, the price —
+ * and a wrong guess is only found when a chat fails. So the list comes from the
+ * host, the windows and prices are the host's own numbers, and each row can be
+ * tested on its own before anyone routes work to it.
+ *
+ * Nothing is written on open. A catalog arriving does not approve a model, and
+ * the rating shown beside a row is the effective one from the family table
+ * until the person deliberately overrides it. Only a tick, a role change or a
+ * test button writes anything.
+ */
+function OfferedModels({ bot }: { bot: import("../lib/types").CustomBot }) {
+  const store = useStore();
+  const [catalog, setCatalog] = useState<CustomCatalog | null | undefined>(undefined);
+  const [tests, setTests] = useState<Record<string, CustomModelTestResult | "busy">>({});
+  const { id: botId, baseUrl } = bot;
+  // A bot that is off is off. Opening its editor must not reach its host or
+  // spend its key, so the section reads back what it already offers and asks
+  // nothing. Turning the bot on is what asks.
+  const live = customBotEnabled(bot);
+
+  useEffect(() => {
+    let alive = true;
+    setCatalog(undefined);
+    if (!live || !window.workhorse?.customBotCatalog) {
+      setCatalog(null);
+      return () => {
+        alive = false;
+      };
+    }
+    void window.workhorse
+      .customBotCatalog(botId)
+      .then((next) => {
+        if (!alive) return;
+        setCatalog(next);
+        // A window the host published beats the one saved on the bot, and the
+        // chat picker reads it from the desk catalog rather than from here.
+        if (next) store.refreshVendorModels();
+      })
+      .catch(() => {
+        if (alive) setCatalog(null);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [botId, baseUrl, live, store]);
+
+  const primary = bot.model.trim();
+  const approved = new Set(bot.models ?? []);
+  const listed = catalog?.models ?? [];
+  // With no catalog to draw from, an off bot still shows what it already
+  // offers, so the person can see what turning it back on would put in play.
+  const rows = live
+    ? [primary, ...listed.map((model) => model.id).filter((id) => id !== primary)].filter(Boolean)
+    : customBotModels(bot);
+  const byId = new Map(listed.map((model) => [model.id, model]));
+
+  const toggle = (id: string) => {
+    const next = new Set(approved);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    store.updateCustomBot(bot.id, { models: [...next].filter((item) => item !== primary) });
+  };
+
+  const setRole = (id: string, role: string) => {
+    const next = { ...(bot.routingProfiles ?? {}) };
+    const edited = routingProfileEdit(
+      bot.routingProfiles?.[id],
+      role === "family" ? "family" : ROUTING_ROLE_PRESETS[role as keyof typeof ROUTING_ROLE_PRESETS],
+    );
+    if (edited) next[id] = edited;
+    else delete next[id];
+    store.updateCustomBot(bot.id, { routingProfiles: next });
+  };
+
+  const runTest = (id: string) => {
+    if (!window.workhorse?.testCustomBotModel) return;
+    setTests((current) => ({ ...current, [id]: "busy" }));
+    void window.workhorse
+      .testCustomBotModel(bot.id, id)
+      .then((result) => setTests((current) => ({ ...current, [id]: result })))
+      .catch((error: unknown) =>
+        setTests((current) => ({
+          ...current,
+          [id]: {
+            ok: false,
+            model: id,
+            latencyMs: 0,
+            message: error instanceof Error ? error.message : "The test could not run.",
+          },
+        })),
+      );
+  };
+
+  return (
+    <div className="field wide bot-offered">
+      <span>Offered models</span>
+      {!live ? (
+        <p className="row-meta">
+          This bot is off, so its host is not asked and its models cannot be tested. Turn it on to pick and test what
+          it serves.
+        </p>
+      ) : catalog === undefined ? (
+        <p className="row-meta">Asking the host what it serves…</p>
+      ) : catalog === null ? (
+        <p className="row-meta">
+          This host does not publish a model list. Add the ids you want by hand under “Models on this key” above.
+        </p>
+      ) : (
+        <p className="row-meta">
+          {listed.length} model{listed.length === 1 ? "" : "s"} on this host. Tick the ones this bot may offer; every
+          ticked model becomes a routing candidate.
+        </p>
+      )}
+      {catalog || !live
+        ? rows.map((id) => {
+            const model = byId.get(id);
+            const isPrimary = id === primary;
+            const on = isPrimary || approved.has(id);
+            const effective = routingProfileForModel("custom", id, customModelRoutingOverride(bot, id));
+            const result = tests[id];
+            return (
+              <div className="bot-offered-row" key={id}>
+                <label className="bot-offered-pick">
+                  <input
+                    type="checkbox"
+                    checked={on}
+                    disabled={isPrimary || !live}
+                    title={isPrimary ? "The bot's own model is always offered" : id}
+                    onChange={() => toggle(id)}
+                  />
+                  <strong>{id}</strong>
+                </label>
+                <span className="row-meta">
+                  {model?.contextWindow ? `${formatWindow(model.contextWindow)} context` : "window unpublished"}
+                  {priceLabel(model) ? ` · ${priceLabel(model)}` : ""}
+                  {isPrimary ? " · default" : ""}
+                </span>
+                <div className="actions">
+                  <span className="row-meta">
+                    intelligence {effective.intelligence} of 10 · speed {effective.speed} · cost {effective.cost}
+                  </span>
+                  <select
+                    value={storedRole(bot.routingProfiles?.[id])}
+                    aria-label={`Routing role for ${id}`}
+                    disabled={!live}
+                    onChange={(event) => setRole(id, event.target.value)}
+                  >
+                    <option value="family">Family default</option>
+                    <option value="quick">Quick</option>
+                    <option value="balanced">Balanced</option>
+                    <option value="deep">Deep</option>
+                  </select>
+                  {live ? (
+                    <button
+                      className="tiny"
+                      type="button"
+                      disabled={result === "busy"}
+                      onClick={() => runTest(id)}
+                    >
+                      {result === "busy" ? "Testing…" : "Test"}
+                    </button>
+                  ) : null}
+                </div>
+                {result && result !== "busy" ? (
+                  <p className={result.ok ? "row-meta bot-offered-ok" : "row-meta bot-offered-failed"}>
+                    {testLabel(result)}
+                  </p>
+                ) : null}
+              </div>
+            );
+          })
+        : null}
+    </div>
+  );
+}
+
 function CustomBotDetail({ botId, onGone }: { botId: string; onGone: () => void }) {
   const store = useStore();
   const bot = store.settings.customBots.find((item) => item.id === botId);
@@ -676,7 +887,7 @@ function CustomBotDetail({ botId, onGone }: { botId: string; onGone: () => void 
         }}
       />
 
-      {isGrokBotUrl(bot.baseUrl) ? <GrokBotWakeSetup /> : null}
+      {isGrokBotUrl(bot.baseUrl) ? <GrokBotWakeSetup /> : <OfferedModels bot={bot} />}
 
       <BotRoutingFields bot={bot} />
 

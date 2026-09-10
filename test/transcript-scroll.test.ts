@@ -164,3 +164,16 @@ test("an open Changes dock sits above watch and goal notices", () => {
   );
   assert.doesNotMatch(css, /margin-bottom:\s*var\(--changes-dock/);
 });
+
+test("a user prompt wraps a long URL instead of running off the window", () => {
+  const css = readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8");
+  const stack = css.match(/(?:^|\n)\.turn\.user \.say-stack\s*\{[^}]*\}/);
+  const say = css.match(/(?:^|\n)\.turn\.user \.say\s*\{[^}]*\}/);
+  const para = css.match(/(?:^|\n)\.md p\s*\{[^}]*\}/);
+  assert.ok(stack && say && para, "user bubble and markdown paragraph rules");
+  assert.match(stack[0], /min-width:\s*0/);
+  assert.match(stack[0], /overflow-wrap:\s*anywhere/);
+  assert.match(say[0], /min-width:\s*0/);
+  assert.match(say[0], /overflow-wrap:\s*anywhere/);
+  assert.match(para[0], /overflow-wrap:\s*anywhere/);
+});

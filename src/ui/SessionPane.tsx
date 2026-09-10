@@ -9,6 +9,7 @@ import { talkingToSummary } from "../lib/tool-labels";
 import { LINEUP_FINISHED_NOTICE } from "../lib/lineup";
 import {
   createTranscriptGrouper,
+  crewNamesFromTitles,
   isDeskNotice,
   lastReplyIndex,
   recentTranscriptText,
@@ -24,7 +25,10 @@ import { useStoreSelector } from "../lib/store";
 import { sameSessionPaneDesk, selectSessionPaneDesk } from "../lib/store-select";
 import { Composer } from "./Composer";
 import { GoalBar } from "./GoalBar";
+import { MissionBoard } from "./MissionBoard";
 import { WatchBanners } from "./WatchNotices";
+import { VendorTasksStrip } from "./VendorTasksStrip";
+import { ChatSpend } from "./ChatSpend";
 import { ContextMeter } from "./ContextMeter";
 import { EditedList } from "./EditedList";
 import { FileOpenProvider } from "./FileOpen";
@@ -39,6 +43,7 @@ import { TurnActions } from "./TurnActions";
 import { UserTurn } from "./UserTurn";
 import { WorkPopout } from "./WorkPopout";
 import { TerminalPane } from "./TerminalPane";
+import { WorkshopPanel } from "./WorkshopPanel";
 import { pinNoticesDock } from "../lib/session-dock";
 import {
   countTurnsAboveViewport,
@@ -63,7 +68,13 @@ export function crewDoneKind(text: string): "ok" | "bad" | null {
   return null;
 }
 
-const SystemTurn = memo(function SystemTurn({ block }: { block: Extract<TranscriptBlock, { type: "system" }> }) {
+const SystemTurn = memo(function SystemTurn({
+  block,
+  crewNames,
+}: {
+  block: Extract<TranscriptBlock, { type: "system" }>;
+  crewNames?: string;
+}) {
   if (isDeskNotice(block.message)) return null;
   const crew = crewDoneKind(block.message.text);
   if (crew) {
@@ -75,6 +86,7 @@ const SystemTurn = memo(function SystemTurn({ block }: { block: Extract<Transcri
       >
         <div className="crew-done-card">
           <strong>{block.message.text}</strong>
+          {crewNames ? <span>{crewNames}</span> : null}
         </div>
       </article>
     );
@@ -155,6 +167,7 @@ export function SessionPane() {
   const [fileWidth, setFileWidth] = useState(() => FILE_PANE.fallback);
   const [extraEdits, setExtraEdits] = useState<ProjectEdit[]>([]);
   const [terminalOpen, setTerminalOpen] = useState(false);
+  const [workshopOpen, setWorkshopOpen] = useState(false);
   const [hiddenByChat, setHiddenByChat] = useState<Record<string, string[]>>({});
   const [stats, setStats] = useState<Record<string, { added: number; deleted: number }>>({});
   const fetchedStats = useRef<Record<string, string>>({});
@@ -233,6 +246,7 @@ export function SessionPane() {
     setFileOut(false);
     setExtraEdits([]);
     setTerminalOpen(false);
+    setWorkshopOpen(false);
     setHeldEdits([]);
     setEditsBarOpen(false);
     setStats({});
@@ -365,6 +379,7 @@ export function SessionPane() {
   }, [session?.id]);
 
   if (!session) return null;
+  const crewNames = crewNamesFromTitles((session.lineup?.rows ?? []).map((row) => row.title));
   const closeFilePane = () => {
     if (!open || fileOut) return;
     if (typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches) {
@@ -419,9 +434,12 @@ export function SessionPane() {
     >
       <div className="session-col">
       <header className="session-header slim">
-        <div className="session-status">
-          {session.status === "needs-input" && <span className="live-pill wait">Needs you</span>}
-          {talking ? <span className="peer-live">{talking}</span> : null}
+        <div className="session-header-left">
+          <ChatSpend />
+          <div className="session-status">
+            {session.status === "needs-input" && <span className="live-pill wait">Needs you</span>}
+            {talking ? <span className="peer-live">{talking}</span> : null}
+          </div>
         </div>
         <div className="session-header-tools">
           {project ? (
@@ -457,6 +475,13 @@ export function SessionPane() {
               </button>
             </>
           ) : null}
+          <button
+            className={`tiny${workshopOpen ? " active-kind" : ""}`}
+            type="button"
+            onClick={() => setWorkshopOpen((value) => !value)}
+          >
+            Workshop
+          </button>
           <ContextMeter />
         </div>
       </header>
@@ -514,7 +539,7 @@ export function SessionPane() {
           if (block.type === "user") {
             return <UserTurn key={block.message.id} message={block.message} />;
           }
-          if (block.type === "system") return <SystemTurn key={block.message.id} block={block} />;
+          if (block.type === "system") return <SystemTurn key={block.message.id} block={block} crewNames={crewNames} />;
           const live = working && index === liveIndex;
           return (
             <AssistantTurn
@@ -562,6 +587,8 @@ export function SessionPane() {
         </div>
       ) : null}
       <div className="session-notices">
+        <VendorTasksStrip tasks={session.vendorTasks} />
+        <MissionBoard />
         <GoalBar />
         <WatchBanners onSwitchModel={openSetup} setupOpen={setupOpen} />
       </div>
@@ -573,6 +600,7 @@ export function SessionPane() {
         onToggleSetup={toggleSetup}
       />
       {project && terminalOpen && cwd ? <TerminalPane sessionId={session.id} cwd={cwd} onClose={() => setTerminalOpen(false)} /> : null}
+      {workshopOpen ? <WorkshopPanel onClose={() => setWorkshopOpen(false)} /> : null}
       </div>
       {open ? (
         <aside

@@ -15,6 +15,7 @@ import type { ChatImage, Command } from "../src/lib/types";
 import { isCursorInnerTask } from "../src/lib/cursor-lane";
 export { applyCompactUsage } from "../src/lib/grok-events";
 import { parseSubagentFinished, subagentUsageDraft } from "../src/lib/grok-events";
+import { parseVendorBackgroundTask, type VendorBackgroundTask } from "../src/lib/vendor-tasks";
 
 export function cursorExtensionResult(method: string): { outcome: { outcome: string; reason?: string } } | null {
   if (method === "cursor/ask_question") return { outcome: { outcome: "skipped" } };
@@ -36,6 +37,8 @@ export type GrokUsageDraft = {
 export type GrokPermissionAsk = {
   requestId: string;
   tool: string;
+  /** The vendor's own name for the call, unprettified, for the classifiers. */
+  rawTool?: string;
   detail: string;
   path?: string;
 };
@@ -61,6 +64,8 @@ export type GrokAgentHandlers = {
   onUsage?: (usage: GrokUsageDraft) => void;
   onPermission?: (ask: GrokPermissionAsk) => void;
   onTool?: (tool: GrokToolEvent) => void;
+  /** Grok ACP background Task / Watcher, not a transcript tool chip. */
+  onBackgroundTask?: (task: VendorBackgroundTask) => void;
   onCompact?: (compact: GrokCompactEvent) => void;
   onTitle?: (title: string) => void;
   onCommands?: (commands: Command[]) => void;
@@ -188,11 +193,34 @@ export function isAcpSessionUpdateMethod(method: string | undefined): boolean {
   );
 }
 
+/** A JSON-RPC result/error for a request we sent. Not a notification or an incoming request. */
+export function isAcpRpcReply(message: { id?: number | string; method?: string }): boolean {
+  return message.id !== undefined && !message.method;
+}
+
+/**
+ * Session updates in the same stdout flush as `session/prompt`'s result must
+ * land before the promise resolves. Otherwise the desk idles, then more
+ * thinking arrives on a turn that already says it finished.
+ */
+export function partitionAcpBatch<T extends { id?: number | string; method?: string }>(
+  messages: T[],
+): { live: T[]; replies: T[] } {
+  const live: T[] = [];
+  const replies: T[] = [];
+  for (const message of messages) {
+    if (isAcpRpcReply(message)) replies.push(message);
+    else live.push(message);
+  }
+  return { live, replies };
+}
+
 export type ClassifiedAcpUpdate =
   | { kind: "message"; text: string }
   | { kind: "thought"; text: string }
   | { kind: "usage"; usage: GrokUsageDraft }
   | { kind: "tool"; tool: GrokToolEvent }
+  | { kind: "background-task"; task: VendorBackgroundTask }
   | { kind: "compact"; compact: GrokCompactEvent }
   | { kind: "title"; title: string }
   | { kind: "commands"; commands: Command[] }
@@ -214,6 +242,8 @@ export function isCodexThoughtUpdate(update: Record<string, unknown>): boolean {
 
 export function classifyAcpUpdate(update: Record<string, unknown>): ClassifiedAcpUpdate {
   const name = updateKind(update);
+  const background = parseVendorBackgroundTask(update);
+  if (background) return { kind: "background-task", task: background };
   const tool = extractToolEvent(update);
   if (tool) return { kind: "tool", tool };
   const compact = extractCompactEvent(update);
@@ -347,6 +377,7 @@ function firstPath(value: unknown): string {
     "description",
     "command",
     "query",
+    "prompt",
   ]) {
     if (typeof record[key] === "string" && record[key].trim()) return record[key].trim();
   }
@@ -570,6 +601,20 @@ function toolTitle(params: Record<string, unknown>): string {
   const title = rawToolTitle(params);
   if (!title) return "use a tool";
   return prettyToolTitle(title);
+}
+
+/**
+ * The vendor's own word for what the call does. Claude sends a shell call with
+ * the command itself as the title, which the desk's labeller renames to "Run a
+ * command" for the card — a name the permission classifiers did not know, so a
+ * plain grep was denied on a read-only seat. The ACP kind ("execute", "read",
+ * "search") rides alongside the title so the classifiers judge the raw name
+ * while the card still shows the pretty one.
+ */
+function rawToolName(params: Record<string, unknown>): string | undefined {
+  const toolCall = asRecord(params.toolCall);
+  const kind = typeof toolCall.kind === "string" ? toolCall.kind.trim() : "";
+  return kind || undefined;
 }
 
 function toolDetail(params: Record<string, unknown>): string {
@@ -1122,7 +1167,9 @@ export class GrokAgent {
       this.buffer += chunk;
       const { messages, rest } = consumeAcpMessages(this.buffer);
       this.buffer = rest;
-      for (const message of messages) this.onMessage(message);
+      const { live, replies } = partitionAcpBatch(messages);
+      for (const message of live) this.onMessage(message);
+      for (const message of replies) this.onMessage(message);
     } catch (error) {
       debugAcp({ stdoutError: error instanceof Error ? error.message : String(error) });
     }
@@ -1195,6 +1242,10 @@ export class GrokAgent {
       this.handlers.onTool?.(classified.tool);
       return;
     }
+    if (classified.kind === "background-task") {
+      this.handlers.onBackgroundTask?.(classified.task);
+      return;
+    }
     if (classified.kind === "compact") {
       this.handlers.onCompact?.(classified.compact);
       return;
@@ -1233,6 +1284,7 @@ export class GrokAgent {
     const ask: GrokPermissionAsk = {
       requestId,
       tool: toolTitle(params),
+      rawTool: rawToolName(params),
       detail: toolDetail(params),
       path: toolPath(params),
     };

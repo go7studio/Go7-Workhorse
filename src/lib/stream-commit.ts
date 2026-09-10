@@ -4,6 +4,7 @@ import { upsertThoughtMessage } from "./grok-events";
 import { mergeStreamedText } from "./markdown";
 import type { Session } from "./types";
 import type { FrameClock } from "./transcript-scroll";
+import { isDeskAssistantNotice } from "./vendor-bridge";
 
 export type { FrameClock };
 
@@ -81,7 +82,12 @@ export function applyStreamQueues(input: {
     if (chunk) {
       delete chunkQueue[session.id];
       messages = messages.map((message) =>
-        message.id === assistantId ? { ...message, text: mergeStreamedText(message.text, chunk) } : message,
+        message.id === assistantId
+          ? {
+              ...message,
+              text: isDeskAssistantNotice(message.text) ? chunk : mergeStreamedText(message.text, chunk),
+            }
+          : message,
       );
       touched = true;
     }

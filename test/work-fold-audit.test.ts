@@ -7,7 +7,7 @@ import { LINEUP_FINISHED_NOTICE } from "../src/lib/lineup";
 import { subagentTurns, workerTaskTitle } from "../src/lib/subagents";
 import { displayWorkSteps, groupTranscript } from "../src/lib/turns";
 import { crewDoneKind } from "../src/ui/SessionPane";
-import { workerFoldLabel } from "../src/ui/WorkPopout";
+import { workerFoldLabel, crewWorkerName } from "../src/ui/WorkPopout";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const read = (rel: string) => readFileSync(path.join(ROOT, rel), "utf8");
@@ -30,6 +30,11 @@ test("work-fold labels use the nested sidebar identity, not a slice fragment", (
     workerTaskTitle("Casper", "Menu open close blur"),
   );
   assert.equal(workerFoldLabel({ text: "Grok" }, null), "Grok");
+  assert.equal(
+    crewWorkerName({ fromTitle: "Certify Saga candidate", text: "Certify Saga candidate" }, { title: "Barnaby · Certify Saga candidate", workerName: "Barnaby" }),
+    "Barnaby",
+  );
+  assert.equal(crewWorkerName({ text: "Grok" }, null), "Grok");
   const popout = read("src/ui/WorkPopout.tsx");
   assert.match(popout, /workerFoldLabel\(marker, child\)/);
   assert.match(popout, /from \"\.\.\/lib\/subagents\"/);
@@ -50,6 +55,13 @@ test("failed tool and crew-done copy use danger, not tertiary gray", () => {
   assert.match(css, /\.tool-status\.failed\s*\{[^}]*var\(--danger\)/);
   assert.match(css, /\.tool-line\.failed\s*\{[^}]*var\(--danger\)/);
   assert.match(css, /\.crew-done\.failed \.crew-done-card strong\s*\{[^}]*var\(--danger\)/);
+  assert.match(cssBlock(css, ".crew-done-card strong"), /var\(--text\)/);
+  assert.match(cssBlock(css, ".work-pop[data-state=\"done\"] > summary"), /var\(--text\)/);
+  assert.match(cssBlock(css, ".work-pop[data-state=\"failed\"] > summary"), /var\(--danger\)/);
+  assert.match(cssBlock(css, ".work-pop > summary"), /transition:\s*color 180ms/);
+  assert.match(css, /prefers-reduced-motion: reduce[\s\S]*?\.work-pop > summary,\s*\n\s*\.work-pop > summary::before[\s\S]*?transition:\s*none/);
+  assert.match(pane, /crewNamesFromTitles/);
+  assert.match(pane, /crewNames \? <span>\{crewNames\}<\/span>/);
 });
 
 test("subagent names keep a real min-width and wrap instead of shrinking to an ellipsis", () => {

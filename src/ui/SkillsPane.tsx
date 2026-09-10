@@ -140,6 +140,20 @@ export function SkillsPane() {
     <>
       <McpServersPane />
       <div className="settings-section-divider" />
+      <div className="settings-group">
+        <SwitchRow
+          label="Suggest skills from wording"
+          copy="Match natural language to installed home skills. Slash commands still work when this is off."
+          on={store.settings.skills.suggestFromWording !== false}
+          onChange={(on) => store.updateSkillDiscovery({ suggestFromWording: on })}
+        />
+        <SwitchRow
+          label="Include plugin packs in auto-load"
+          copy="Off keeps Codex and Cursor plugin skills in this list and in slash, but out of radar and list_skills."
+          on={store.settings.skills.includePluginPacks === true}
+          onChange={(on) => store.updateSkillDiscovery({ includePluginPacks: on })}
+        />
+      </div>
       <div className="link-head skills-heading">
         <strong>Skills</strong>
         <span className="row-meta">Reusable instructions from your agent homes and projects.</span>
@@ -214,6 +228,37 @@ export function SkillsPane() {
         </button>
       ) : null}
     </>
+  );
+}
+
+function SwitchRow({
+  label,
+  copy,
+  on,
+  onChange,
+}: {
+  label: string;
+  copy: string;
+  on: boolean;
+  onChange: (on: boolean) => void;
+}) {
+  return (
+    <div className="settings-row">
+      <div className="settings-row-copy">
+        <strong>{label}</strong>
+        <span>{copy}</span>
+      </div>
+      <div className="settings-control">
+        <button
+          className={`switch${on ? " on" : ""}`}
+          type="button"
+          role="switch"
+          aria-checked={on}
+          aria-label={label}
+          onClick={() => onChange(!on)}
+        />
+      </div>
+    </div>
   );
 }
 

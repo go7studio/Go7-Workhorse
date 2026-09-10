@@ -15,6 +15,7 @@ type GrokPromptBridgeInput = {
   mcpServers?: import("./lib/types").McpServerConfig[];
   preface?: string;
   crewModes?: import("./lib/types").CrewMode[];
+  spawnNames?: string[];
 };
 
 type GrokBridgeEvent =
@@ -27,12 +28,15 @@ type GrokBridgeEvent =
       sessionId: string;
       requestId: string;
       tool: string;
+      /** The vendor's own name for the call. The classifiers judge this; the card shows `tool`. */
+      rawTool?: string;
       detail: string;
       path?: string;
       elevate?: { mode?: import("./lib/types").PermissionMode; sandbox?: import("./lib/types").SandboxProfile };
       vendor?: { provider: import("./lib/types").ProviderId; name: string; status?: string };
     }
   | { type: "tool"; sessionId: string; toolCallId: string; title: string; status: string; detail: string }
+  | { type: "background-task"; sessionId: string } & import("./lib/vendor-tasks").VendorBackgroundTask
   | {
       type: "compact";
       sessionId: string;
@@ -147,6 +151,8 @@ type WorkhorseBridge = {
   loadState: () => Promise<Record<string, unknown>>;
   liveRunIds: () => Promise<string[]>;
   saveState: (state: Record<string, unknown>) => Promise<void>;
+  /** One routing:decision line in main.log. Optional, like every other bridge method. */
+  recordRoutingDecision?: (detail: string) => Promise<void>;
   /** Optional, like every other bridge method: an older shell simply shows the prose. */
   loadTranscript?: (sessionId: string) => Promise<import("./lib/transcript-sidecar").TranscriptSidecar | null>;
   saveComposerDrafts?: (drafts: Record<string, { text?: string; images?: import("./lib/types").ChatImage[] }>) => Promise<void>;
@@ -170,7 +176,7 @@ type WorkhorseBridge = {
   detectCodexRuntime?: () => Promise<import("../electron/codex-app-server").CodexRuntimeInfo>;
   listCodexNativeThreads?: (limit?: number) => Promise<import("../electron/codex-app-server").CodexNativeThread[]>;
   codexCapabilities?: (projectRoot?: string) => Promise<ReturnType<typeof import("../electron/codex-capabilities").codexCapabilitySummary>>;
-  detectClaudeLogin: () => Promise<import("../electron/claude-login").ClaudeLoginDetectResult>;
+  detectClaudeLogin: (input?: { recheck?: boolean }) => Promise<import("../electron/claude-login").ClaudeLoginDetectResult>;
   claudeSetupToken: () => Promise<{ ok: boolean; message?: string }>;
   claudePrompt: (input: GrokPromptBridgeInput) => Promise<{
     text?: string;
@@ -192,6 +198,7 @@ type WorkhorseBridge = {
   cursorCancel?: (sessionId: string) => Promise<void>;
   onCursorEvent?: (handler: (event: GrokBridgeEvent) => void) => () => void;
   cursorPlanUsage?: () => Promise<import("./lib/types").GrokPlanUsage | null | undefined>;
+  cursorLedgerEvents?: (input?: { startDate?: number; endDate?: number }) => Promise<import("./lib/usage").CursorLedgerJoinRow[] | null | undefined>;
   detectCustomLogin: () => Promise<{
     connected: boolean;
     source: "openclaw" | "env" | "none";
@@ -206,6 +213,16 @@ type WorkhorseBridge = {
     model: string;
     api?: "anthropic-messages" | "openai-completions";
   }) => Promise<{ ok: boolean; message: string; contextWindow?: number; model?: string; api?: "anthropic-messages" | "openai-completions" }>;
+  /** What the bot's host publishes at /v1/models. Null when it publishes none. */
+  customBotCatalog?: (
+    botId: string,
+    refresh?: boolean,
+  ) => Promise<import("../electron/custom-catalog").CustomCatalog | null>;
+  /** One short completion through this bot at one model, for the editor's row test. */
+  testCustomBotModel?: (
+    botId: string,
+    model: string,
+  ) => Promise<import("../electron/custom-http").CustomModelTestResult>;
   customAnswerPermission: (requestId: string, answer: import("./lib/permissions").PermissionAnswer) => Promise<boolean>;
   customPrompt: (input: {
     sessionId: string;
@@ -227,6 +244,7 @@ type WorkhorseBridge = {
     hidden?: boolean;
     role?: import("./lib/workhorse-rules").DeskRole;
     crewModes?: import("./lib/types").CrewMode[];
+    spawnNames?: string[];
     customBotId?: string;
     config: {
       baseUrl: string;
@@ -314,6 +332,33 @@ type WorkhorseBridge = {
     request: import("./lib/external-task").RuntimeStartRequest,
   ) => Promise<import("./lib/types").ExternalTask | null>;
   cancelExternalRuntimeTask?: (taskId: string) => Promise<boolean>;
+  /** Installed packs with their sources, install provenance, and the user's grant state. Settings → Workshop. */
+  workshopList?: () => Promise<import("./lib/workshop-pack").PackListing[]>;
+  /** Packs that are On, with layout and the documents main has fetched. Main owns the timers; this returns its cache. */
+  workshopView?: () => Promise<import("./lib/workshop-pack").PackView[]>;
+  /** Download the highest semver tag of a public https GitHub repo, stage, validate, install. No git. */
+  workshopCatalog?: () => Promise<import("./lib/workshop-catalog").CatalogViewState>;
+  workshopInstallCatalog?: (input: { id: string }) => Promise<import("./lib/workshop-pack").InstallResult>;
+  workshopInstallRepo?: (input: { url: string }) => Promise<import("./lib/workshop-pack").InstallResult>;
+  /** Folder picker in main; the folder is copied, never referenced. */
+  workshopInstallFolder?: () => Promise<import("./lib/workshop-pack").InstallResult>;
+  workshopRemove?: (input: { id: string }) => Promise<{ ok: boolean; reason?: string }>;
+  workshopCheckUpdate?: (input: { id: string }) => Promise<{ ok: boolean; current: string; latest?: string; reason?: string }>;
+  /** Re-installs the latest tag. When sources changed (any pack in the archive) those packs turn off and `reconfirm`/`reconfirmIds` are set. */
+  workshopUpdate?: (input: { id: string }) => Promise<import("./lib/workshop-pack").InstallResult>;
+  /** Shows the pack's collector folder in the OS file manager. Never runs anything in it. */
+  workshopRevealCollector?: (input: { id: string }) => Promise<boolean>;
+  workshopOpenBreakout?: () => Promise<boolean>;
+  workshopCloseBreakout?: () => Promise<boolean>;
+  deskOpenLocalPath?: (path: string) => Promise<boolean>;
+  deskRevealLocalPath?: (path: string) => Promise<boolean>;
+  localMediaCreate?: (input: {
+    hostId: string;
+    capability: string;
+    templateId: string;
+    fields?: Record<string, string | number | boolean>;
+  }) => Promise<{ ok: true; jobId?: string; message: string } | { ok: false; reason: string }>;
+  onWorkshopChanged?: (handler: () => void) => () => void;
 };
 
 interface Window {

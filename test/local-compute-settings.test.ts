@@ -5,7 +5,9 @@ import path from "node:path";
 import test from "node:test";
 import {
   advertisedLocalComputeContinuations,
+  draftToLocalComputeHost,
   isAbsoluteTokenFile,
+  localComputeDraftIssue,
   localComputeHostCallable,
   normalizeLocalComputeSettings,
   staleLocalComputeContinuationGrants,
@@ -127,4 +129,41 @@ test("continuation families are distinct, deduplicated, and checked for stale ex
   const granted = toggleLocalComputeContinuationGrant([], advertised[0]!);
   assert.deepEqual(granted, [{ capability: "artifact.review", tool: "artifact.review_item" }]);
   assert.deepEqual(toggleLocalComputeContinuationGrant(granted, advertised[0]!), []);
+});
+
+test("a host draft names the one field that is still wrong", () => {
+  const good = { id: "render-host", label: "Render", baseUrl: "https://host.example/run", tokenFile: "/etc/host.key" };
+  assert.equal(localComputeDraftIssue(good), null);
+  const host = draftToLocalComputeHost(good);
+  assert.equal(host?.id, "render-host");
+  assert.equal(host?.baseUrl, "https://host.example/run");
+  // A new host authorizes nothing until it is granted.
+  assert.deepEqual(host?.allowedCallerRoles, []);
+  assert.deepEqual(host?.allowedCapabilities, []);
+  assert.equal(host?.enabled, true);
+
+  assert.equal(localComputeDraftIssue({ ...good, id: "" }), "id");
+  assert.equal(localComputeDraftIssue({ ...good, id: "-nope" }), "id");
+  // http is refused off loopback, and so is a query string or embedded sign-in.
+  assert.equal(localComputeDraftIssue({ ...good, baseUrl: "http://host.example" }), "baseUrl");
+  assert.equal(localComputeDraftIssue({ ...good, baseUrl: "https://host.example/run?key=1" }), "baseUrl");
+  assert.equal(localComputeDraftIssue({ ...good, baseUrl: "https://user:pw@host.example" }), "baseUrl");
+  assert.equal(localComputeDraftIssue({ ...good, baseUrl: "not a url" }), "baseUrl");
+  // Loopback http stays allowed, because a local gateway has no certificate.
+  assert.equal(localComputeDraftIssue({ ...good, baseUrl: "http://127.0.0.1:8080" }), null);
+
+  assert.equal(localComputeDraftIssue({ ...good, tokenFile: "" }), "tokenFile");
+  assert.equal(localComputeDraftIssue({ ...good, tokenFile: "relative/path.key" }), "tokenFile");
+  assert.equal(localComputeDraftIssue({ ...good, tokenFile: "~/host.key" }), "tokenFile");
+  // A Windows absolute path is as valid as a POSIX one.
+  assert.equal(localComputeDraftIssue({ ...good, tokenFile: "C:\\keys\\host.key" }), null);
+
+  // Every rejected draft is also refused by the normalizer, so the form and the store agree.
+  for (const bad of [
+    { ...good, id: "" },
+    { ...good, baseUrl: "http://host.example" },
+    { ...good, tokenFile: "relative/path.key" },
+  ]) {
+    assert.equal(draftToLocalComputeHost(bad), null);
+  }
 });

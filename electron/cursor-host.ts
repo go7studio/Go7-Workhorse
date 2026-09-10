@@ -125,6 +125,7 @@ export class CursorSessionHost {
       sandbox: input.sandbox,
       role: input.role ?? (input.parentId || input.hidden ? "worker" : "orchestrator"),
       crewMode: input.crewModes,
+      spawnNames: input.spawnNames,
     }, input.visibleText);
     try {
       const result = await slot.agent.prompt(text, this.handlersFor(input, emit), input.images ?? []);
@@ -160,16 +161,19 @@ export class CursorSessionHost {
           provider: "cursor",
           ...usage,
         }),
-      onPermission: (ask: { requestId: string; tool: string; detail: string; path?: string }) =>
+      onPermission: (ask: { requestId: string; tool: string; rawTool?: string; detail: string; path?: string }) =>
         emit({
           type: "permission" as const,
           sessionId: input.sessionId,
           requestId: ask.requestId,
           tool: ask.tool,
+          rawTool: ask.rawTool,
           detail: ask.detail,
           path: ask.path,
         }),
       onTool: (tool: GrokToolEvent) => emit({ type: "tool" as const, sessionId: input.sessionId, ...tool }),
+      onBackgroundTask: (task: import("../src/lib/vendor-tasks").VendorBackgroundTask) =>
+        emit({ type: "background-task" as const, sessionId: input.sessionId, ...task }),
       onTitle: (title: string) => emit({ type: "title" as const, sessionId: input.sessionId, title }),
       onCommands: (commands: import("../src/lib/types").Command[]) =>
         emit({ type: "commands" as const, sessionId: input.sessionId, commands }),

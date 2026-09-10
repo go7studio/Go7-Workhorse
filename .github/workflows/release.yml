@@ -42,7 +42,10 @@ jobs:
   # A version exists only after the release PR's package.json bump reaches main.
   # That keeps ordinary fixes/features from publishing anything.
   detect-release:
-    if: github.event_name == 'push'
+    # A manual run counts only from main: it may publish a version that has
+    # no release yet (a cut whose installer job failed after a workflow-only
+    # fix), never a branch's copy of that version.
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -66,6 +69,7 @@ jobs:
         id: detect
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          WORKHORSE_RELEASE_MANUAL: ${{ github.event_name == 'workflow_dispatch' && '1' || '0' }}
         run: node scripts/detect-release.mjs
 
   installers:
@@ -80,7 +84,12 @@ jobs:
           - os: windows-latest
             script: package:win
             installer: "*Workhorse-Setup-*.exe"
-          - os: macos-latest
+          # Pinned, not latest: the macos-26 image that rolled on 2026-08-28
+          # (runner image 20260828) breaks electron-builder's temporary
+          # signing keychain at set-key-partition-list ("SecKeychainUnlock:
+          # passphrase incorrect"). The 0.6.55 cut signed on the 20260728
+          # image with the same electron-builder. Revisit when either moves.
+          - os: macos-15
             script: package:mac
             # Both Apple silicon and Intel. The glob has to keep the arch
             # suffix in view or it collects one dmg and Intel Macs get nothing.

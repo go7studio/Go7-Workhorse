@@ -79,9 +79,9 @@ test("drop-to-chat and FileViewer stay; unused chrome and walks are gone", () =>
   assert.doesNotMatch(grok, /export async function startGrokAgent/);
   const commands = readFileSync(path.join(ROOT, "src", "lib", "commands.ts"), "utf8");
   assert.match(commands, /Back to this project/);
-  assert.match(commands, /Profile, connected LLMs, skills, routing, learning, usage, watch/i);
+  assert.match(commands, /Profile, connected LLMs, skills, workshop, routing, learning, usage, watch/i);
   const agents = readFileSync(path.join(ROOT, "AGENTS.md"), "utf8");
-  assert.match(agents, /Profile, connected LLMs, skills, routing, learning, usage, watch/i);
+  assert.match(agents, /Profile, connected LLMs, skills, workshop, routing, learning, usage, watch/i);
   assert.doesNotMatch(readFileSync(path.join(ROOT, "README.md"), "utf8"), /\| `\/new` \|/);
   assert.doesNotMatch(readFileSync(path.join(ROOT, "GOAL.md"), "utf8"), /Current shipped baseline/);
 });

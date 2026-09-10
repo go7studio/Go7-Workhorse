@@ -1,9 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   advertisedLocalComputeContinuations,
   LOCAL_COMPUTE_CALLER_ROLES,
   localComputeContinuationKey,
-  normalizeLocalComputeHost,
   staleLocalComputeContinuationGrants,
   toggleLocalComputeContinuationGrant,
   type LocalComputeContinuationGrant,
@@ -12,6 +11,7 @@ import {
   type LocalComputeCallerRole,
 } from "../lib/local-compute";
 import { useStore } from "../lib/store";
+import { LocalComputeAddHost } from "./LocalComputeAddHost";
 
 const ROLE_LABEL: Record<LocalComputeCallerRole, { name: string; detail: string }> = {
   desk: { name: "Workhorse", detail: "Calls made by this desk" },
@@ -19,10 +19,6 @@ const ROLE_LABEL: Record<LocalComputeCallerRole, { name: string; detail: string 
   worker: { name: "Workers", detail: "Workhorse builder workers" },
   auditor: { name: "Auditors", detail: "Workhorse verification workers" },
 };
-
-type HostDraft = { id: string; label: string; baseUrl: string; tokenFile: string };
-
-const EMPTY_DRAFT: HostDraft = { id: "", label: "", baseUrl: "", tokenFile: "" };
 
 function probeLabel(probe: LocalComputeHostProbe | undefined): string {
   if (!probe) return "Not checked";
@@ -35,7 +31,6 @@ function probeLabel(probe: LocalComputeHostProbe | undefined): string {
 export function LocalComputeBlock() {
   const store = useStore();
   const settings = store.settings.localCompute;
-  const [draft, setDraft] = useState<HostDraft>(EMPTY_DRAFT);
   const [adding, setAdding] = useState(false);
   const [checking, setChecking] = useState(false);
   const [note, setNote] = useState("");
@@ -59,18 +54,6 @@ export function LocalComputeBlock() {
     // Hosts are rechecked deliberately after edits so typing never starts network work.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  const candidate = useMemo(
-    () => normalizeLocalComputeHost({
-      ...draft,
-      enabled: true,
-      allowedCallerRoles: [],
-      allowedCapabilities: [],
-      allowedContinuations: [],
-    }),
-    [draft],
-  );
-  const duplicate = candidate ? settings.hosts.some((host) => host.id === candidate.id) : false;
 
   const saveHosts = (hosts: LocalComputeHostSettings[]) => {
     store.updateLocalCompute({ version: 1, hosts, legacyEnvironmentFallback: false });
@@ -117,50 +100,13 @@ export function LocalComputeBlock() {
       </div>
 
       {adding ? (
-        <div className="local-compute-add">
-          <label>
-            <span>Name</span>
-            <input value={draft.label} placeholder="Render host" onChange={(event) => setDraft({ ...draft, label: event.target.value })} />
-          </label>
-          <label>
-            <span>ID</span>
-            <input value={draft.id} placeholder="render-host" onChange={(event) => setDraft({ ...draft, id: event.target.value })} />
-          </label>
-          <label>
-            <span>Address</span>
-            <input value={draft.baseUrl} placeholder="https://host.example/run" onChange={(event) => setDraft({ ...draft, baseUrl: event.target.value })} />
-          </label>
-          <label className="local-compute-token">
-            <span>Token file</span>
-            <input value={draft.tokenFile} placeholder="Choose a private token file" onChange={(event) => setDraft({ ...draft, tokenFile: event.target.value })} />
-            <button
-              className="tiny"
-              type="button"
-              onClick={() => void window.workhorse?.pickLocalComputeTokenFile?.().then((file) => {
-                if (file) setDraft((current) => ({ ...current, tokenFile: file }));
-              })}
-            >
-              Choose…
-            </button>
-          </label>
-          <div className="local-compute-add-actions">
-            <span>{duplicate ? "That host ID is already in use." : candidate ? "Ready to add. Grants start off." : "Enter a valid HTTPS host and absolute token-file path."}</span>
-            <button
-              className="tiny"
-              type="button"
-              disabled={!candidate || duplicate}
-              onClick={() => {
-                if (!candidate || duplicate) return;
-                saveHosts([...settings.hosts, candidate]);
-                setDraft(EMPTY_DRAFT);
-                setAdding(false);
-                setNote("Host added. Recheck it, then allow the capabilities and callers you want.");
-              }}
-            >
-              Add
-            </button>
-          </div>
-        </div>
+        <LocalComputeAddHost
+          onCancel={() => setAdding(false)}
+          onAdded={() => {
+            setAdding(false);
+            setNote("Host added. Recheck it, then allow the capabilities and callers you want.");
+          }}
+        />
       ) : null}
 
       {settings.hosts.length === 0 && !adding ? (

@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { deskHelperEnv } from "./desk-path";
 
 export type ClaudeDesktopOauth = {
   accessToken: string;
@@ -92,6 +93,7 @@ $dec = [System.Security.Cryptography.ProtectedData]::Unprotect($enc, $null, 'Cur
   const out = execFileSync("powershell.exe", ["-NoProfile", "-Command", script], {
     encoding: "utf8",
     windowsHide: true,
+    env: deskHelperEnv(),
   }).trim();
   if (!out) throw new Error("DPAPI returned empty");
   return Buffer.from(out, "base64");

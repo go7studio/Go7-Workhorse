@@ -15,6 +15,20 @@ export type ModelInfo = {
   reasoningLevels?: ReasoningLevel[];
   /** Other vendor ids that are this same family (effort/fast spellings). */
   aliases?: string[];
+  /**
+   * The host itself published this row, window included. Only a custom host
+   * sets it, and only its own `/models` answer can: a seeded row is Workhorse
+   * guessing, and a guess must never outrank the window an owner saved.
+   */
+  hostListed?: boolean;
+  /**
+   * Which custom slot published it. Two bots may serve the same model id at
+   * different windows — a Synthetic key and a self-hosted box both answer
+   * `hf:moonshotai/Kimi-K3` — and neither may inherit the other's number.
+   * Context never pools across slots, so a window is only ever read back with
+   * the bot it came from.
+   */
+  customBotId?: string;
 };
 
 export type ModelChoice = {
@@ -82,6 +96,7 @@ export const MODEL_CATALOG: Record<ProviderId, ModelInfo[]> = {
   ],
   claude: [
     { id: "claude-fable-5", name: "Fable 5", effort: true, contextWindow: 1_000_000 },
+    { id: "claude-fable-5-1", name: "Fable 5.1", effort: true, contextWindow: 1_000_000 },
     { id: "claude-opus-5", name: "Opus 5", effort: true, contextWindow: 1_000_000 },
     { id: "claude-sonnet-5", name: "Sonnet 5", effort: true, contextWindow: 1_000_000 },
     { id: "claude-haiku-4-5", name: "Haiku 4.5", effort: true, contextWindow: 200_000 },
@@ -92,6 +107,7 @@ export const MODEL_CATALOG: Record<ProviderId, ModelInfo[]> = {
     { id: "gpt-5.6-sol", name: "GPT-5.6-Sol", effort: true, contextWindow: 1_050_000 },
     { id: "gpt-5.6-terra", name: "GPT-5.6-Terra", effort: true, contextWindow: 1_050_000 },
     { id: "gpt-5.6-luna", name: "GPT-5.6-Luna", effort: true, contextWindow: 1_050_000 },
+    { id: "gpt-6-astra", name: "GPT-6-Astra", effort: true, contextWindow: 872_000 },
     { id: "gpt-5.5", name: "GPT-5.5", effort: true, contextWindow: 1_050_000 },
     { id: "gpt-5.4", name: "GPT-5.4", effort: true, contextWindow: 1_050_000 },
     { id: "gpt-5.4-mini", name: "GPT-5.4-Mini", effort: true, contextWindow: 400_000 },
@@ -117,7 +133,30 @@ export const MODEL_CATALOG: Record<ProviderId, ModelInfo[]> = {
       contextWindow: 204_800,
       reasoningLevels: MINIMAX_EFFORTS,
     },
+    // Synthetic's published catalog (GET https://api.synthetic.new/v1/models,
+    // no key needed), with the context length each model reports. A bot saved
+    // before its model was listed here keeps the 128k default it was created
+    // with, and contextWindowFor takes the wider of the two, so a 524k Kimi is
+    // no longer treated as a 128k one and skipped on a long thread.
     { id: "hf:moonshotai/Kimi-K3", name: "Kimi K3", effort: false, contextWindow: 524_288 },
+    { id: "hf:zai-org/GLM-5.2", name: "GLM 5.2", effort: false, contextWindow: 524_288 },
+    { id: "hf:zai-org/GLM-5.3-Flash", name: "GLM 5.3 Flash", effort: false, contextWindow: 524_288 },
+    { id: "hf:zai-org/GLM-4.7-Flash", name: "GLM 4.7 Flash", effort: false, contextWindow: 196_608 },
+    { id: "hf:Qwen/Qwen3.8-27B", name: "Qwen3.8 27B", effort: false, contextWindow: 262_144 },
+    { id: "hf:openai/gpt-oss-120b", name: "GPT-OSS 120B", effort: false, contextWindow: 131_072 },
+    {
+      id: "hf:nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4",
+      name: "Nemotron 3 Super 120B",
+      effort: false,
+      contextWindow: 262_144,
+    },
+    // Aliases. Synthetic points these at whichever model it currently runs for
+    // that size and modality, so the window here is the one the alias reports,
+    // not a copy of a particular model's.
+    { id: "syn:large:text", name: "Synthetic Large", effort: false, contextWindow: 524_288 },
+    { id: "syn:large:vision", name: "Synthetic Large Vision", effort: false, contextWindow: 524_288 },
+    { id: "syn:small:text", name: "Synthetic Small", effort: false, contextWindow: 196_608 },
+    { id: "syn:small:vision", name: "Synthetic Small Vision", effort: false, contextWindow: 262_144 },
   ],
 };
 
@@ -184,6 +223,15 @@ export function modelsFor(provider: ProviderId): ModelInfo[] {
   const live = liveCatalog[provider];
   const rows = live?.length ? live : MODEL_CATALOG[provider];
   const filtered = rows.filter((model) => model.id !== "custom" && model.name !== "Custom");
+  if (provider === "custom") {
+    // The live custom list carries one row per slot per model, because a window
+    // belongs to the slot that published it. Everything that reads this as a
+    // catalog wants one row per id, so collapse it here and leave the per-slot
+    // rows where `contextWindowFor` can still find them.
+    const byId = new Map<string, ModelInfo>();
+    for (const model of filtered) if (!byId.has(model.id)) byId.set(model.id, model);
+    return [...byId.values()];
+  }
   if (provider !== "cursor") return filtered;
   return filtered.map((model) => {
     const name = cursorModelDisplayName(model.id, model.name);
@@ -196,7 +244,7 @@ export const DEFAULT_CHOICE: ModelChoice = {
   model: "grok-4.6",
   effort: "medium",
   sandbox: "off",
-  mode: "ask",
+  mode: "always-approve",
 };
 
 function rowMatches(item: ModelInfo, modelId: string, canonicalId: string): boolean {
@@ -357,6 +405,28 @@ export function parseEffort(value: string): EffortLevel | null {
   return null;
 }
 
+const ASSIGNED_EFFORTS = new Set<EffortLevel>(["high", "xhigh", "max", "ultra"]);
+
+/** High (and above) is an assignment. Medium is the desk default Auto may still replace. */
+export function isAssignedEffort(effort?: EffortLevel | null): boolean {
+  return Boolean(effort && ASSIGNED_EFFORTS.has(effort));
+}
+
+/**
+ * Thinking level named in prose. Requires "on high", "high effort", or
+ * "effort: high" — a lone "high" in "high-priority" is not an assignment.
+ */
+export function parseEffortFromText(text: string): EffortLevel | null {
+  const t = text.trim().toLowerCase();
+  if (!t) return null;
+  const match =
+    t.match(/\bon\s+(low|medium|high|xhigh|extra|max)\b/) ||
+    t.match(/\b(?:effort|brain|thinking)\s*[:=]\s*(low|medium|high|xhigh|extra|max)\b/) ||
+    t.match(/\b(low|medium|high|xhigh|extra|max)\s+effort\b/);
+  if (!match?.[1]) return null;
+  return parseEffort(match[1]);
+}
+
 /**
  * A model the desk has never heard of is still a choice when its id names a
  * vendor's family. A release should not be the gate on a model the vendor
@@ -379,15 +449,64 @@ export function unlistedChoice(query: string): ModelChoice | null {
   return { provider, model: id, effort: "medium", sandbox: "off", unlisted: true };
 }
 
+/**
+ * Names fold spaces and underscores to hyphens on both sides, so the way a
+ * harness writes a model ("GPT-6 Astra", "Fable 5.1") meets the way the
+ * catalog spells it ("GPT-6-Astra", "gpt-6-astra"). Dots stay: 5.6 is not 56.
+ */
+export function foldModelName(text: string): string {
+  return text.trim().toLowerCase().replace(/[\s_]+/g, "-");
+}
+
+/**
+ * Fold a typed name onto a vendor-agnostic key so "Fable 5.1", "claude-fable-5-1",
+ * and "Claude Fable 5.1" meet. Dots in versions become dashes; a leading
+ * "claude-" is dropped. Not a launch id.
+ */
+export function modelChoiceKey(text: string): string {
+  return foldModelName(text)
+    .replace(/^claude-/, "")
+    .replace(/(\d)\.(\d)/g, "$1-$2");
+}
+
+function catalogRowMatches(model: ModelInfo, q: string, provider: ProviderId): boolean {
+  const keys = [model.id, model.name, ...(model.aliases ?? [])];
+  if (keys.some((id) => foldModelName(id) === q || modelChoiceKey(id) === modelChoiceKey(q))) return true;
+  if (provider === "cursor") {
+    const family = cursorFamilyId(model.id);
+    if (foldModelName(family) === q || modelChoiceKey(family) === modelChoiceKey(q)) return true;
+  }
+  return false;
+}
+
+/** Resolve a typed model against one vendor's live overlay and seed, not the whole desk. */
+export function findChoiceOnProvider(provider: ProviderId, query: string): ModelChoice | null {
+  const q = foldModelName(query);
+  if (!q) return null;
+  const seen = new Set<string>();
+  for (const model of [...modelsFor(provider), ...MODEL_CATALOG[provider]]) {
+    if (seen.has(model.id)) continue;
+    seen.add(model.id);
+    if (!catalogRowMatches(model, q, provider)) continue;
+    return {
+      provider,
+      model: model.id,
+      effort: model.effort ? "medium" : null,
+      sandbox: "off",
+    };
+  }
+  return null;
+}
+
 export function findChoice(query: string): ModelChoice | null {
-  const q = query.trim().toLowerCase();
+  const q = foldModelName(query);
   if (!q) return null;
   for (const provider of Object.keys(MODEL_CATALOG) as ProviderId[]) {
     const seen = new Set<string>();
     for (const model of [...modelsFor(provider), ...MODEL_CATALOG[provider]]) {
       if (seen.has(model.id)) continue;
       seen.add(model.id);
-      if (model.id === q || model.name.toLowerCase() === q) {
+      if (foldModelName(model.id) === q || foldModelName(model.name) === q) {
         return {
           provider,
           model: model.id,
@@ -414,7 +533,9 @@ export function effortLabel(effort: EffortLevel | null): string {
 /** Official Claude API windows. Live caches overlay but cannot shrink below these. */
 const CLAUDE_MODEL_WINDOWS: Record<string, number> = {
   "claude-fable-5": 1_000_000,
+  "claude-fable-5-1": 1_000_000,
   "claude-mythos-5": 1_000_000,
+  "claude-mythos-5-1": 1_000_000,
   "claude-opus-5": 1_000_000,
   "claude-sonnet-5": 1_000_000,
   "claude-opus-4-8": 1_000_000,
@@ -441,6 +562,9 @@ export function advertisedClaudeWindow(modelId: string, reported?: number): numb
 
 /** Official model windows. Codex CLI caches a smaller session cap (272k); do not use that as Sol's size. */
 const CODEX_MODEL_WINDOWS: Record<string, number> = {
+  // GPT-6 Astra: the max_context_window Codex's own model cache reports (2026-09-07).
+  // No official figure is published yet; a larger live reading still wins.
+  "gpt-6-astra": 872_000,
   "gpt-5.6-sol": 1_050_000,
   "gpt-5.6-terra": 1_050_000,
   "gpt-5.6-luna": 1_050_000,
@@ -456,12 +580,63 @@ export function advertisedCodexWindow(modelId: string, reported?: number): numbe
   return Math.max(known, seen) || 272_000;
 }
 
+/**
+ * The window a live custom host published for this id.
+ *
+ * Only a row the host itself listed counts. `MODEL_CATALOG.custom` is a seed —
+ * Workhorse's guess about three ids — and the number an owner typed into the
+ * bot beats a guess. Neither beats the host saying what it actually serves, so
+ * that answer, and only that answer, is preferred here.
+ */
+/** The seeded figure for a custom id. Never a live row: those belong to one slot. */
+function seededCustomWindow(modelId: string): number {
+  const canonicalId = normalizeModelId("custom", modelId);
+  return MODEL_CATALOG.custom.find((item) => rowMatches(item, modelId, canonicalId))?.contextWindow ?? 0;
+}
+
+function liveCustomWindow(modelId: string, customBotId?: string): number | undefined {
+  const id = modelId.trim();
+  if (!id) return undefined;
+  const rows = (liveCatalog.custom ?? []).filter(
+    (item) => item.hostListed === true && item.contextWindow > 0 && (item.id === id || item.aliases?.includes(id)),
+  );
+  if (rows.length === 0) return undefined;
+  const bot = customBotId?.trim();
+  if (bot) return rows.find((item) => item.customBotId === bot)?.contextWindow;
+  // No slot named, so there is no way to tell whose window this is. One answer
+  // shared by every slot serving the id is still that id's window; two
+  // different answers are two different hosts, and picking either would hand
+  // one slot the other's context. Fall back to what the caller saved instead.
+  const windows = new Set(rows.map((item) => item.contextWindow));
+  return windows.size === 1 ? rows[0]!.contextWindow : undefined;
+}
+
 export function contextWindowFor(
   provider: ProviderId,
   modelId: string,
   customWindow?: number,
+  customBotId?: string,
 ): number {
-  if (provider === "custom" && customWindow && customWindow > 0) return customWindow;
+  if (provider === "custom") {
+    // What this slot's own host said, if it said anything. That answer outranks
+    // widest-wins below, and it is allowed to be narrower: a box on this machine
+    // serving a familiar id at 32k is not the hosted model of the same name, and
+    // widening it to the catalog's figure would send it threads it cannot hold.
+    const listed = liveCustomWindow(modelId, customBotId);
+    if (listed) return listed;
+    // Otherwise widest wins. The bot's own number is whatever it was created
+    // with, and a connection saved before its model was catalogued carries the
+    // 128k default. Taking it on its own read a 524k Kimi K3 as 128k, and
+    // routing then skipped it on any thread wider than that. The catalog is the
+    // vendor's published figure, the bot's is a default or a probe, and neither
+    // is allowed to shrink the other.
+    //
+    // The seed, never the live rows: those are per-slot, and reading one here
+    // would hand a slot that published nothing another slot's context.
+    const known = seededCustomWindow(modelId);
+    const reported = customWindow && customWindow > 0 ? customWindow : 0;
+    return Math.max(known, reported) || 128_000;
+  }
   if (provider === "claude") return advertisedClaudeWindow(modelId, findModel(provider, modelId)?.contextWindow);
   return findModel(provider, modelId)?.contextWindow ?? 128_000;
 }

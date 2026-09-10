@@ -1,3 +1,9 @@
+import {
+  missionBoardWorkersFromSessions,
+  sameMissionBoardLineup,
+  sameMissionBoardWorkers,
+  type MissionBoardWorker,
+} from "./mission-board";
 import type { Store } from "./store";
 import type { Session } from "./types";
 
@@ -28,6 +34,7 @@ export type ComposerDesk = {
   clearWatchRestore: Store["clearWatchRestore"];
   setComposerDraft: Store["setComposerDraft"];
   setCrewMode: Store["setCrewMode"];
+  setSpawnAllowlist: Store["setSpawnAllowlist"];
 };
 
 export function selectComposerDesk(store: Store): ComposerDesk {
@@ -43,6 +50,7 @@ export function selectComposerDesk(store: Store): ComposerDesk {
     clearWatchRestore: store.clearWatchRestore,
     setComposerDraft: store.setComposerDraft,
     setCrewMode: store.setCrewMode,
+    setSpawnAllowlist: store.setSpawnAllowlist,
   };
 }
 
@@ -60,10 +68,12 @@ export function sameComposerSession(left: Session | null, right: Session | null)
     left.mode === right.mode &&
     left.routingMode === right.routingMode &&
     (left.crewModes ?? []).join() === (right.crewModes ?? []).join() &&
+    (left.spawnAllowlist ?? []).join() === (right.spawnAllowlist ?? []).join() &&
     left.queue === right.queue &&
     left.grokCommands === right.grokCommands &&
     left.composerDraft === right.composerDraft &&
-    left.composerImages === right.composerImages
+    left.composerImages === right.composerImages &&
+    (left.spawnAllowlist ?? []).join() === (right.spawnAllowlist ?? []).join()
   );
 }
 
@@ -80,17 +90,19 @@ export function sameComposerDesk(left: ComposerDesk, right: ComposerDesk): boole
     left.steerQueued === right.steerQueued &&
     left.clearWatchRestore === right.clearWatchRestore &&
     left.setComposerDraft === right.setComposerDraft &&
-    left.setCrewMode === right.setCrewMode
+    left.setCrewMode === right.setCrewMode &&
+    left.setSpawnAllowlist === right.setSpawnAllowlist
   );
 }
 
 export type ContextDesk = {
   session: Session | null;
   settings: Store["settings"];
+  usage: Store["usage"];
 };
 
 export function selectContextDesk(store: Store): ContextDesk {
-  return { session: activeDeskSession(store), settings: store.settings };
+  return { session: activeDeskSession(store), settings: store.settings, usage: store.usage };
 }
 
 /**
@@ -115,7 +127,44 @@ export function sameContextSession(left: Session | null, right: Session | null):
 
 export function sameContextDesk(left: ContextDesk, right: ContextDesk): boolean {
   if (left === right) return true;
-  return sameContextSession(left.session, right.session) && left.settings === right.settings;
+  return sameContextSession(left.session, right.session) && left.settings === right.settings && left.usage === right.usage;
+}
+
+export type ChatSpendSession = Pick<Session, "id" | "title" | "parentId">;
+
+export type ChatSpendDesk = {
+  session: ChatSpendSession | null;
+  workers: ChatSpendSession[];
+  usage: Store["usage"];
+};
+
+function chatSpendSession(session: Session | null): ChatSpendSession | null {
+  if (!session) return null;
+  return { id: session.id, title: session.title, parentId: session.parentId };
+}
+
+export function selectChatSpendDesk(store: Store): ChatSpendDesk {
+  const session = activeDeskSession(store);
+  const workers = session
+    ? store.sessions
+        .filter((item) => item.parentId === session.id)
+        .map((item) => ({ id: item.id, title: item.title, parentId: item.parentId }))
+    : [];
+  return { session: chatSpendSession(session), workers, usage: store.usage };
+}
+
+function sameChatSpendSession(left: ChatSpendSession | null, right: ChatSpendSession | null): boolean {
+  if (left === right) return true;
+  if (!left || !right) return false;
+  return left.id === right.id && left.title === right.title && left.parentId === right.parentId;
+}
+
+export function sameChatSpendDesk(left: ChatSpendDesk, right: ChatSpendDesk): boolean {
+  if (left === right) return true;
+  if (left.usage !== right.usage) return false;
+  if (!sameChatSpendSession(left.session, right.session)) return false;
+  if (left.workers.length !== right.workers.length) return false;
+  return left.workers.every((worker, index) => sameChatSpendSession(worker, right.workers[index] ?? null));
 }
 
 export type WatchDesk = {
@@ -299,5 +348,34 @@ export function sameUsageDesk(left: UsageDesk, right: UsageDesk): boolean {
     left.vendorPlanKnown === right.vendorPlanKnown &&
     left.refreshCustomPlans === right.refreshCustomPlans &&
     left.settings === right.settings
+  );
+}
+
+/**
+ * Mission board above the composer. It reads lineup contract and worker run
+ * status — never the growing assistant message on this chat or its children.
+ */
+export type MissionBoardDesk = {
+  session: Session | null;
+  workers: MissionBoardWorker[];
+  selectSession: Store["selectSession"];
+};
+
+export function selectMissionBoardDesk(store: Store): MissionBoardDesk {
+  const session = activeDeskSession(store);
+  return {
+    session,
+    workers: session ? missionBoardWorkersFromSessions(session.id, store.sessions) : [],
+    selectSession: store.selectSession,
+  };
+}
+
+export function sameMissionBoardDesk(left: MissionBoardDesk, right: MissionBoardDesk): boolean {
+  if (left === right) return true;
+  return (
+    left.session?.id === right.session?.id &&
+    sameMissionBoardLineup(left.session?.lineup, right.session?.lineup) &&
+    sameMissionBoardWorkers(left.workers, right.workers) &&
+    left.selectSession === right.selectSession
   );
 }

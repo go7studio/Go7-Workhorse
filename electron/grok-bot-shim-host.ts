@@ -28,6 +28,24 @@ import {
   type GrokBotShimSecrets,
 } from "../src/lib/grok-bot-shim";
 import { grokBotShimKeepalivePaths, installGrokBotShimKeepalive } from "./grok-bot-shim-keepalive";
+import { deskHelperEnv } from "./desk-path";
+
+/**
+ * The shim is the desk's own program, started detached so it survives a
+ * restart. It needs two names to do its job and it names them: run this
+ * Electron binary as node, and read this install's state folder. The rest of
+ * the desk's environment — every other bridge name, every vendor login — stays
+ * behind, because a detached child holds what it inherits with nobody left
+ * watching.
+ */
+export function shimSpawnEnv(userData: string, base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  return deskHelperEnv(base, { ELECTRON_RUN_AS_NODE: "1", WORKHORSE_USER_DATA: userData });
+}
+
+/** `launchctl` and `schtasks` register the shim. They read nothing of ours. */
+export function shimKeepaliveEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  return deskHelperEnv(base);
+}
 import type { LinkDeskPlatform } from "../src/lib/workhorse-link";
 
 function sepFor(userData: string): "\\" | "/" {
@@ -339,7 +357,12 @@ export async function ensureGrokBotShim(input: {
       mkdirp: (dir) => fs.mkdirSync(dir, { recursive: true }),
       writeFile: (file, text) => fs.writeFileSync(file, text),
       exec: (file, args) => {
-        const result = spawnSync(file, args, { encoding: "utf8", timeout: 8_000, windowsHide: true });
+        const result = spawnSync(file, args, {
+          encoding: "utf8",
+          timeout: 8_000,
+          windowsHide: true,
+          env: shimKeepaliveEnv(),
+        });
         return { status: result.status ?? 1 };
       },
     },
@@ -357,7 +380,7 @@ export async function ensureGrokBotShim(input: {
     }
   }
   const child = spawn(input.command, [input.script], {
-    env: { ...process.env, ELECTRON_RUN_AS_NODE: "1", WORKHORSE_USER_DATA: input.userData },
+    env: shimSpawnEnv(input.userData),
     detached: true,
     stdio: "ignore",
     windowsHide: true,

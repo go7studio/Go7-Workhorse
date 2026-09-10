@@ -8,9 +8,11 @@ import {
   parseSkillFrontmatter,
   publicSkillCard,
   skillHomes,
+  skillsForAutoLoad,
   workhorseSkillsHome,
 } from "../src/lib/skills-catalog";
 import { chatExportFiles, defaultExportRoot, sessionToMarkdown, slugTitle, vendorExportDirName } from "../src/lib/desk-export";
+import { DEFAULT_SETTINGS } from "../src/lib/settings";
 import type {
   DeskExportKind,
   DeskExportResult,
@@ -18,6 +20,7 @@ import type {
   Project,
   ProviderId,
   Session,
+  SkillDiscoverySettings,
   SkillOrigin,
 } from "../src/lib/types";
 
@@ -59,8 +62,12 @@ export function listDeskSkills(projectFolders: string[] = [], homedir = os.homed
   return catalogSkills({ homedir, projectFolders });
 }
 
-export function publicDeskSkills(projectFolders: string[] = [], homedir = os.homedir()) {
-  return listDeskSkills(projectFolders, homedir).map(publicSkillCard);
+export function publicDeskSkills(
+  projectFolders: string[] = [],
+  homedir?: string,
+  policy: SkillDiscoverySettings = DEFAULT_SETTINGS.skills,
+) {
+  return skillsForAutoLoad(listDeskSkills(projectFolders, homedir ?? os.homedir()), policy).map(publicSkillCard);
 }
 
 export function readDeskSkill(

@@ -285,6 +285,184 @@ const CURSOR_USAGE_REQUESTS: { method: "GET" | "POST"; url: string; body?: strin
   { method: "GET", url: "https://api2.cursor.sh/auth/usage" },
 ];
 
+const CURSOR_LEDGER_URLS = [
+  "https://api2.cursor.sh/aiserver.v1.DashboardService/GetFilteredUsageEvents",
+  "https://api2.cursor.sh/aiserver.v1.DashboardService/GetAggregatedUsageEvents",
+] as const;
+
+export type CursorLedgerEvent = {
+  eventId: string;
+  at: number;
+  model?: string;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  costUsd?: number;
+  identifiers: Record<string, string>;
+};
+
+export type CursorLedgerJoinVerdict = "MATCH" | "OTHER_MATCH" | "NO_MATCH";
+
+function stringVal(value: unknown): string | undefined {
+  if (typeof value === "string" && value.trim()) return value.trim();
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  return undefined;
+}
+
+function isIdentifierKey(key: string): boolean {
+  return /id$/i.test(key) || /^(conversation|session|composer|agent|request)/i.test(key);
+}
+
+function collectIdentifiers(row: Record<string, unknown>, into: Record<string, string>, prefix = ""): void {
+  for (const [key, value] of Object.entries(row)) {
+    const name = prefix ? `${prefix}.${key}` : key;
+    const text = stringVal(value);
+    if (text && isIdentifierKey(key)) into[name] = text;
+    const nested = asRecord(value);
+    if (Object.keys(nested).length && !prefix) collectIdentifiers(nested, into, key);
+  }
+}
+
+function tokenBuckets(row: Record<string, unknown>): {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  costUsd?: number;
+} {
+  const usage = asRecord(row.tokenUsage ?? row.token_usage ?? row.usage);
+  const source = Object.keys(usage).length ? usage : row;
+  const inputTokens = numberVal(source.inputTokens ?? source.input_tokens) ?? 0;
+  const outputTokens = numberVal(source.outputTokens ?? source.output_tokens) ?? 0;
+  const cacheReadTokens = numberVal(source.cacheReadTokens ?? source.cache_read_tokens) ?? 0;
+  const cacheWriteTokens = numberVal(source.cacheWriteTokens ?? source.cache_write_tokens) ?? 0;
+  const cents = numberVal(source.totalCents ?? source.total_cents ?? source.chargedCents ?? row.chargedCents);
+  return {
+    inputTokens,
+    outputTokens,
+    cacheReadTokens,
+    cacheWriteTokens,
+    ...(cents !== undefined ? { costUsd: cents / 100 } : {}),
+  };
+}
+
+function eventRows(raw: unknown): unknown[] {
+  const root = asRecord(raw);
+  const nested = asRecord(root.data);
+  const source = Object.keys(nested).length ? { ...root, ...nested } : root;
+  for (const key of ["usageEvents", "usageEventsDisplay", "events", "usage_events"]) {
+    const list = source[key];
+    if (Array.isArray(list)) return list;
+  }
+  if (Array.isArray(source.aggregations)) return source.aggregations;
+  return [];
+}
+
+function parseOneLedgerEvent(value: unknown, idField = "conversationId"): CursorLedgerEvent | undefined {
+  const row = asRecord(value);
+  if (Object.keys(row).length === 0) return undefined;
+  const identifiers: Record<string, string> = {};
+  collectIdentifiers(row, identifiers);
+  const eventId =
+    (idField ? identifiers[idField] ?? stringVal(row[idField]) : undefined) ??
+    identifiers.conversationId ??
+    stringVal(row.conversationId) ??
+    stringVal(row.conversation_id) ??
+    Object.values(identifiers)[0];
+  if (!eventId) return undefined;
+  const buckets = tokenBuckets(row);
+  if (
+    buckets.inputTokens <= 0 &&
+    buckets.outputTokens <= 0 &&
+    buckets.cacheReadTokens <= 0 &&
+    buckets.cacheWriteTokens <= 0
+  ) {
+    return undefined;
+  }
+  let at = numberVal(row.timestamp ?? row.at ?? row.createdAt ?? row.created_at) ?? 0;
+  if (at <= 0) {
+    const parsed = Date.parse(stringVal(row.timestamp) ?? "");
+    if (Number.isFinite(parsed) && parsed > 0) at = parsed;
+  }
+  const when = at > 0 && at < 1e12 ? at * 1000 : at;
+  return {
+    eventId,
+    at: when > 0 ? when : 0,
+    model: stringVal(row.model ?? row.modelIntent ?? row.model_intent),
+    identifiers,
+    ...buckets,
+  };
+}
+
+/** Per-request Cursor dashboard rows. Aggregates with no conversation id are dropped. */
+export function parseCursorLedgerEvents(raw: unknown, idField = "conversationId"): CursorLedgerEvent[] {
+  const events: CursorLedgerEvent[] = [];
+  const seen = new Set<string>();
+  for (const row of eventRows(raw)) {
+    const parsed = parseOneLedgerEvent(row, idField);
+    if (!parsed) continue;
+    const key = `${parsed.eventId}:${parsed.at}:${parsed.inputTokens}:${parsed.outputTokens}:${parsed.cacheReadTokens}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    events.push(parsed);
+  }
+  return events;
+}
+
+function fieldCoversSessions(events: CursorLedgerEvent[], vendorSessionIds: string[], field: string): boolean {
+  const used = new Set<string>();
+  for (const vendorId of vendorSessionIds) {
+    const hit = events.find((event) => {
+      const value = event.identifiers[field];
+      if (value !== vendorId) return false;
+      const stamp = `${event.eventId}:${event.at}:${event.inputTokens}:${event.outputTokens}`;
+      if (used.has(stamp)) return false;
+      return true;
+    });
+    if (!hit) return false;
+    used.add(`${hit.eventId}:${hit.at}:${hit.inputTokens}:${hit.outputTokens}`);
+  }
+  return true;
+}
+
+export function judgeCursorLedgerJoin(input: {
+  events: CursorLedgerEvent[];
+  vendorSessionIds: string[];
+}): {
+  verdict: CursorLedgerJoinVerdict;
+  joinField: string | null;
+  identifierFields: string[];
+  matchedIds: string[];
+} {
+  const vendorSessionIds = [...new Set(input.vendorSessionIds.map((id) => id.trim()).filter(Boolean))];
+  const identifierFields = [...new Set(input.events.flatMap((event) => Object.keys(event.identifiers)))].sort();
+  if (vendorSessionIds.length === 0 || input.events.length === 0) {
+    return { verdict: "NO_MATCH", joinField: null, identifierFields, matchedIds: [] };
+  }
+  const preferred = ["conversationId", "conversation_id", ...identifierFields.filter((field) => field !== "conversationId" && field !== "conversation_id")];
+  const fields = [...new Set(preferred)];
+  for (const field of fields) {
+    if (!fieldCoversSessions(input.events, vendorSessionIds, field)) continue;
+    return {
+      verdict: field === "conversationId" || field === "conversation_id" ? "MATCH" : "OTHER_MATCH",
+      joinField: field,
+      identifierFields,
+      matchedIds: vendorSessionIds,
+    };
+  }
+  return { verdict: "NO_MATCH", joinField: null, identifierFields, matchedIds: [] };
+}
+
+function cursorAuthHeaders(token: string): Record<string, string> {
+  return {
+    Authorization: `Bearer ${token}`,
+    Accept: "application/json",
+    "Content-Type": "application/json",
+    "Connect-Protocol-Version": "1",
+  };
+}
+
 export async function readOfficialCursorUsage(
   input: {
     token?: string;
@@ -303,12 +481,7 @@ export async function readOfficialCursorUsage(
     try {
       const response = await fetchImpl(request.url, {
         method: request.method,
-        headers: {
-          Authorization: `Bearer ${token}`,
-          Accept: "application/json",
-          "Content-Type": "application/json",
-          "Connect-Protocol-Version": "1",
-        },
+        headers: cursorAuthHeaders(token),
         body: request.body,
       });
       if (!response.ok) continue;
@@ -346,4 +519,55 @@ export async function fetchCursorPlanUsage(input?: {
   } catch {
     return undefined;
   }
+}
+
+/** Per-request Cursor dashboard events. Missing auth stays unknown — never an empty bill. */
+export async function fetchCursorLedgerEvents(input?: {
+  token?: string;
+  fetchImpl?: typeof fetch;
+  startDate?: number;
+  endDate?: number;
+  env?: NodeJS.Dict<string>;
+  homedir?: string;
+  platform?: NodeJS.Platform;
+  idField?: string;
+}): Promise<CursorLedgerEvent[] | undefined> {
+  const token =
+    input && "token" in (input as object) && input.token !== undefined
+      ? input.token.trim()
+      : readCursorAuthToken({ env: input?.env, homedir: input?.homedir, platform: input?.platform });
+  if (!token) return undefined;
+  const fetchImpl = input?.fetchImpl ?? fetch;
+  const endDate = input?.endDate ?? Date.now();
+  const startDate = input?.startDate ?? endDate - 15 * 60 * 1000;
+  const bodies = [
+    JSON.stringify({ teamId: -1, startDate, endDate, page: 1, pageSize: 1000 }),
+    JSON.stringify({ teamId: 0, startDate: String(startDate), endDate: String(endDate), page: 1, pageSize: 1000 }),
+    JSON.stringify({ startDate, endDate }),
+    "{}",
+  ];
+  let sawEventList = false;
+  for (const url of CURSOR_LEDGER_URLS) {
+    for (const body of bodies) {
+      try {
+        const response = await fetchImpl(url, {
+          method: "POST",
+          headers: cursorAuthHeaders(token),
+          body,
+        });
+        if (!response.ok) continue;
+        const raw: unknown = await response.json();
+        const parsed = parseCursorLedgerEvents(raw, input?.idField);
+        const root = asRecord(raw);
+        const nested = asRecord(root.data);
+        const source = Object.keys(nested).length ? { ...root, ...nested } : root;
+        const listKeys = ["usageEvents", "usageEventsDisplay", "events", "usage_events"];
+        if (listKeys.some((key) => Array.isArray(source[key]))) sawEventList = true;
+        if (parsed.length > 0 || sawEventList) return parsed;
+      } catch {
+        /* try the next documented usage URL or body */
+      }
+    }
+  }
+  return [];
 }

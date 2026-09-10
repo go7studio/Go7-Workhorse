@@ -155,7 +155,8 @@ test("Settings Skills tab and Mass send are wired", () => {
   assert.match(settings, /<SkillsPane/);
   assert.match(settings, /customBotId=\{bot\.id\}/);
   assert.match(pane, /Workhorse/);
-  assert.match(pane, /Import/);
+  assert.match(pane, /Include plugin packs in auto-load/);
+  assert.match(pane, /Suggest skills from wording/);
   assert.doesNotMatch(pane, />\s*Pull\s*</);
   assert.match(pane, /Search/);
   assert.match(pane, /Delete/);

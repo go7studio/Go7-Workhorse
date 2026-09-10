@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { CURSOR_ACP_NOT_INSTALLED } from "../src/lib/cursor-lane";
-import { extraDeskDirs } from "./desk-path";
+import { deskToolEnv, extraDeskDirs } from "./desk-path";
 import { detectCursorAccessDefaults } from "./vendor-access";
 import type { BotAccessDefaults } from "../src/lib/types";
 
@@ -76,11 +76,21 @@ function lookOnPath(
   return null;
 }
 
+/**
+ * Both probes below start Cursor's own CLI, so they take the desk's PATH — the
+ * Windows package is node plus a script and will not resolve without it — and
+ * leave behind the desk's private names and any other vendor's login.
+ */
+export function cursorProbeEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  return deskToolEnv(base);
+}
+
 function probeCursorBinary(filePath: string, prefixArgs: string[] = []): boolean {
   const result = spawnSync(filePath, [...prefixArgs, "--help"], {
     encoding: "utf8",
     timeout: 3_000,
     windowsHide: true,
+    env: cursorProbeEnv(),
   });
   return /Cursor Agent/i.test(`${result.stdout ?? ""}\n${result.stderr ?? ""}`);
 }
@@ -96,6 +106,7 @@ function probeCursorAuth(filePath: string, prefixArgs: string[] = []): boolean |
     encoding: "utf8",
     timeout: 8_000,
     windowsHide: true,
+    env: cursorProbeEnv(),
   });
   if (result.error) return undefined;
   return cursorAboutLoggedIn(`${result.stdout ?? ""}\n${result.stderr ?? ""}`);

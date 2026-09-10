@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { withDeskToolEnv, withoutWorkhorsePrivateEnv } from "./desk-path";
 import { groupSpawnOptions, stopProcessGroup, trackProcessGroup } from "./process-registry";
 import { permissionPolicyAnswer, looksLikeWriteTool, autoAllowPermission, type PermissionAnswer } from "../src/lib/permissions";
 import {
@@ -156,6 +157,11 @@ const DESK_TOOLS: { name: string; description: string; input_schema: Record<stri
       properties: {
         prompt: { type: "string", description: "Full task for the subagent" },
         description: { type: "string", description: "Short 3–5 word label" },
+        worker: {
+          type: "string",
+          description:
+            "Name of a worker already on this chat (Wren, Wanda). Pass it to continue the same topic with what that worker learned. Leave empty to mint a new name for a new topic — a new worker starts with a clear head. Do not name an idle worker just to save a start. A busy worker still gets a colleague.",
+        },
         provider: { type: "string", description: "grok, codex, claude, or custom" },
         model: { type: "string", description: "Optional model id" },
         permission: { type: "string", description: "Seat this worker runs under: ask, accept-edits, or always-approve. Capped at the desk default in Settings › LLMs, not at your own seat. Omit and the worker inherits your seat." },
@@ -170,11 +176,11 @@ const DESK_TOOLS: { name: string; description: string; input_schema: Record<stri
         files: { type: "array", items: { type: "string" }, description: "Files to attach to the worker" },
         chat: { type: "string", description: "Optional existing chat or vendor name to copy" },
         effort: { type: "string", description: "Optional override. Omit to keep a reused worker's thinking level; otherwise derived from quick, balanced, or deep" },
-        timeoutSeconds: { type: "number", description: "Optional 30-3600 second runtime limit. The desk stops the worker when it passes this; the run ends timed-out." },
+        timeoutSeconds: { type: "number", description: "Ignored. The desk does not stop a worker on a runtime limit. The worker runs until it finishes or is cancelled." },
         tokenBudget: {
           type: "number",
           description:
-            "Optional ceiling on this slice’s new work (output plus input growth after the first meter). Not leftover, occupancy, or inherited context. Omit unless stopping a runaway.",
+            "Ignored. The desk does not stop a worker on a token ceiling. This chat's billed spend is on the meter.",
         },
         isolation: { type: "string", description: "worktree (default) or shared" },
         seed: {
@@ -357,7 +363,7 @@ const DESK_TOOLS: { name: string; description: string; input_schema: Record<stri
   },
   {
     name: "workhorse_list_skills",
-    description: "List desk skills from Grok, Codex, Claude, Cursor, and Workhorse. Call proactively when the request or Workhorse skill radar resembles an installed workflow, even if the user did not name it.",
+    description: "List desk skills from Grok, Codex, Claude, Cursor, and Workhorse. Call when the request is an installed workflow or Workhorse skill radar listed a genuine match. Do not list skills for generic chat.",
     input_schema: { type: "object", properties: { origin: { type: "string", description: "Optional filter: grok, codex, claude, cursor, or workhorse" } } },
   },
   {
@@ -688,6 +694,12 @@ export async function executeCustomTool(
         const child = spawn(command, {
           cwd: runCwd,
           shell: true,
+          // A custom bot writes this command, so the shell is the agent's. It
+          // gets the same environment a vendor child gets — the person's login
+          // and PATH, without the desk's bridge token, state paths or the
+          // vendor login in its vault. With no `env` at all it inherited the
+          // lot, and `printenv WORKHORSE_BRIDGE_TOKEN` was a valid command.
+          env: withDeskToolEnv(withoutWorkhorsePrivateEnv(process.env)),
           windowsHide: true,
           stdio: ["ignore", "pipe", "pipe"],
           ...groupSpawnOptions(),

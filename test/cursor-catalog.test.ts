@@ -153,8 +153,10 @@ test("family profiles fill Composer, Auto, Gemini, Kimi, GLM, GPT-5.x on the 1-1
   assert.deepEqual(triple("gemini-3.7-flash"), [5, 5, 2]);
   assert.deepEqual(triple("gemini-3.1-pro"), [8, 4, 3], "a pro Gemini is not a flash");
   assert.deepEqual(triple("composer-2.5"), [8, 4, 2]);
-  assert.deepEqual(triple("kimi-k3"), [7, 3, 2]);
-  assert.deepEqual(triple("glm-5.2"), [7, 3, 2]);
+  // One family table serves every vendor, so a Kimi on a Cursor seat is rated
+  // the same 8 as a Kimi on a custom bot.
+  assert.deepEqual(triple("kimi-k3"), [8, 3, 2]);
+  assert.deepEqual(triple("glm-5.2"), [8, 3, 2]);
   assert.deepEqual(triple("gpt-5.5"), [8, 4, 3]);
   assert.deepEqual(triple("gpt-5.4"), [8, 4, 3]);
   assert.deepEqual(triple("gpt-5.3-codex"), [7, 4, 3]);
@@ -359,4 +361,19 @@ test("an unread catalog still resolves the picker families to real slugs", () =>
     const slug = resolveCursorModel(family, "medium");
     assert.ok(listed.has(slug), `${family} resolved to ${slug}, which Cursor rejects`);
   }
+});
+
+test("Cursor ACP launches Fable 5.1 on the API lane when the live CLI lists it", () => {
+  const live = [
+    ...fixtureRows(),
+    { id: "claude-fable-5-1-high", name: "Claude Fable 5.1", effort: true, contextWindow: 200_000 },
+    { id: "claude-fable-5-1-medium", name: "Claude Fable 5.1", effort: true, contextWindow: 200_000 },
+  ];
+  const rows = reconcileCursorModels(live, MODEL_CATALOG.cursor);
+  applyVendorCatalog({ cursor: rows });
+  assert.ok(rows.some((row) => row.id === "claude-fable-5-1"));
+  assert.equal(cursorWatchLane("claude-fable-5-1"), "cursor:other-models");
+  const slug = resolveCursorModel("Fable 5.1", "high");
+  assert.equal(cursorFamilyId(slug), "claude-fable-5-1");
+  assert.match(slug, /claude-fable-5-1/);
 });

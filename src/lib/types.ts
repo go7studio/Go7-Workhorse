@@ -349,9 +349,9 @@ export type AgentRun = {
   startedAt: number;
   finishedAt?: number;
   timeoutMs?: number;
-  /** This pass’s ceiling. Unset means unbounded. */
+  /** Persisted from older desks. The live path never writes or enforces a ceiling. */
   tokenBudget?: number;
-  /** Mission-level ceiling when this pass is one of several. */
+  /** Persisted mission-level ceiling. No longer assigned. */
   missionTokenBudget?: number;
   /** Current assignment spend. Resets when a reused worker takes a new slice. */
   usedTokens?: number;
@@ -586,6 +586,11 @@ export type Session = {
   queue?: QueuedPrompt[];
   /** Persisted background runs. Electron main dispatches pending entries and recovers interrupted work. */
   scheduledRuns?: ScheduledRun[];
+  /**
+   * Live Grok ACP Tasks / Watchers (scripts the vendor started). Not Settings → Watch,
+   * and not Workhorse scheduledRuns. Dropped on load; ACP events refill the strip.
+   */
+  vendorTasks?: import("./vendor-tasks").VendorBackgroundTask[];
   /** Workhorse-owned context checkpoint used when a provider has no native compaction. */
   contextCheckpoint?: PortableCheckpoint;
   /** Unsent composer text. Kept when leaving this chat. */
@@ -634,6 +639,8 @@ export type Session = {
   routingDecision?: RoutingDecision;
   /** Composer + pins. Orchestrate and Mission can be on together. */
   crewModes?: CrewMode[];
+  /** This-chat Orchestrate bot list. Empty means all bots. */
+  spawnAllowlist?: string[];
 };
 
 export type PermissionRequest = {
@@ -667,9 +674,11 @@ export type Sheet = "project" | "reference" | null;
 
 export type Panel = "settings" | "add-bot" | null;
 
-export type SettingsSection = "profile" | "llms" | "skills" | "routing" | "learning" | "usage" | "watch";
+export type SettingsSection = "profile" | "llms" | "skills" | "workshop" | "routing" | "learning" | "usage" | "watch";
 
 export type SkillOrigin = "grok" | "codex" | "claude" | "cursor" | "workhorse";
+
+export type SkillSource = "home" | "plugin";
 
 export type DeskSkill = {
   name: string;
@@ -679,6 +688,8 @@ export type DeskSkill = {
   skillFile: string;
   /** True only for copies stored in Workhorse's own skills home. */
   managed?: boolean;
+  /** Plugin trees are listed in Settings; auto-load omits them unless the person opts in. */
+  source?: SkillSource;
 };
 
 export type DeskExportKind = "skills" | "chats";
@@ -703,6 +714,8 @@ export type LlmLink = {
   available?: boolean;
   /** Installed, but the login is missing or expired. */
   needsAuth?: boolean;
+  /** The vendor refused the desk's login with this reason. Sign in again clears it. */
+  authProblem?: string;
   /**
    * Whether the desk can start this vendor. Connected says a login artifact is
    * on disk; launchable says the binary the launch shells out to is somewhere
@@ -773,9 +786,27 @@ export type CustomBot = {
   createdAt: number;
   enabled?: boolean;
   /** Override for the bot's default `model` only. Other approved ids use the family table. */
-  routingProfile?: Partial<ModelRoutingProfile>;
+  routingProfile?: StoredRoutingProfile;
   /** Per-model overrides. Keyed by approved model id. */
-  routingProfiles?: Record<string, Partial<ModelRoutingProfile>>;
+  routingProfiles?: Record<string, StoredRoutingProfile>;
+  /**
+   * The write-back cleanup has run for this bot. Set once, never cleared.
+   *
+   * The cleanup recognises a rating by its shape, so leaving it armed would
+   * strip the same shape again if a person ever chose it deliberately. Marking
+   * the bot makes it what it was always meant to be: a one-time repair of what
+   * an old pane wrote, not a standing rule about which triples are allowed.
+   */
+  ratingsMigrated?: boolean;
+};
+
+/**
+ * A routing override as it is stored: every field optional, including each
+ * modality on its own. Absent means the family default, so ticking one box
+ * cannot author an answer for the others.
+ */
+export type StoredRoutingProfile = Partial<Omit<ModelRoutingProfile, "inputs">> & {
+  inputs?: Partial<ModelInputCapabilities>;
 };
 
 export type RoutingTaskTier = "quick" | "balanced" | "deep";
@@ -813,6 +844,14 @@ export type RoutingSettings = {
   reservePercent: number;
   /** Opt-in. Off never auto-picks OpenClaw or Hermes. */
   includeExternalAgents?: boolean;
+};
+
+/** How the desk auto-loads skills into a turn. Settings lists the full catalog either way. */
+export type SkillDiscoverySettings = {
+  /** Radar may suggest from wording. Off still keeps slash and Settings. */
+  suggestFromWording: boolean;
+  /** Plugin trees (`~/.codex/plugins`, `~/.cursor/plugins`, …) join radar and list_skills. Off by default. */
+  includePluginPacks: boolean;
 };
 
 export type AgentSystemsSettings = {
@@ -917,9 +956,11 @@ export type Settings = {
   usageBudgets: Partial<Record<ProviderId, number>>;
   watch: WatchSettings;
   routing: RoutingSettings;
+  skills: SkillDiscoverySettings;
   learning: import("./learning-types").LearningSettings;
   agentSystems?: AgentSystemsSettings;
   localCompute: LocalComputeSettings;
+  workshop: import("./workshop-pack").WorkshopSettings;
 };
 
 export type UsageRange = "today" | "week" | "month" | "all";

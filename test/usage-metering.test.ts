@@ -12,19 +12,27 @@ import {
   billedCompactUsage,
   byModel,
   cellDotBackground,
+  chatSpend,
+  crewSpendRows,
+  crewSpendTotal,
   deskUsageCards,
   heatCellBots,
   eventTotal,
   estimateFromSessionTurn,
   finalizeTurnUsage,
   formatIoLine,
+  heatmapPeak,
+  heatmapTotal,
   leftoverForCard,
   deskPulseLines,
+  inRange,
   normalizeUsage,
   occupancyFromUsage,
   repairSummedPromptTurn,
   settleTurnUsage,
+  stretchHeatmap,
   sumRequestBills,
+  usageTimestamp,
   visibleUsageEvents,
   usageFocusFacts,
 } from "../src/lib/usage";
@@ -884,9 +892,151 @@ test("disabled LLMs stay out of the usage view until they are turned back on", (
 
 test("Spend docs keep leftover, billed tokens, and retained context distinct", () => {
   const features = readFileSync(path.join(ROOT, "docs", "FEATURES.md"), "utf8");
-  assert.match(features, /four characters a token only when ACP sent no count/);
+  assert.match(features, /joined to this desk's ACP session id/);
+  assert.match(features, /four-characters-per-token estimate is used only until/);
   assert.match(features, /Composer and API stay[\s\S]*two separate pools/);
   assert.match(features, /Grok, Claude, and Codex stay unknown/);
   assert.match(features, /Leftover rings, billed tokens, and retained context stay distinct/);
   assert.match(features, /Retained context is this chat's window occupancy, never the[\s\S]*leftover ring/);
+  assert.match(features, /billed total sits in white on the left of the transcript/);
+  assert.match(features, /Orchestrated bots combine into one grey Crew total/);
+  assert.match(features, /This stretch shows billed in/);
+});
+
+test("chat spend is this session's billed in plus out", () => {
+  const events = [
+    {
+      id: "a",
+      at: 1,
+      provider: "grok" as const,
+      model: "grok-4.6",
+      sessionId: "chat-1",
+      inputTokens: 100,
+      outputTokens: 40,
+      cacheReadTokens: 800,
+      cacheWriteTokens: 0,
+    },
+    {
+      id: "b",
+      at: 2,
+      provider: "grok" as const,
+      model: "grok-4.6",
+      sessionId: "chat-1",
+      inputTokens: 20,
+      outputTokens: 10,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+    },
+    {
+      id: "c",
+      at: 3,
+      provider: "grok" as const,
+      model: "grok-4.6",
+      sessionId: "other",
+      inputTokens: 9_999,
+      outputTokens: 9_999,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+    },
+  ];
+  const spend = chatSpend(events, "chat-1");
+  assert.equal(spend.inputTokens, 120);
+  assert.equal(spend.outputTokens, 50);
+  assert.equal(spend.cacheReadTokens, 800);
+  assert.equal(spend.totalTokens, 170);
+  assert.equal(spend.events, 2);
+  assert.equal(chatSpend(events, "missing").events, 0);
+  assert.equal(chatSpend(events, undefined).events, 0);
+});
+
+test("crew spend keeps this chat apart from each orchestrated bot", () => {
+  const events = [
+    {
+      id: "parent",
+      at: 1,
+      provider: "grok" as const,
+      model: "grok-4.6",
+      sessionId: "chat-1",
+      inputTokens: 100,
+      outputTokens: 70,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+    },
+    {
+      id: "dexter",
+      at: 2,
+      provider: "cursor" as const,
+      model: "composer-2",
+      sessionId: "worker-dexter",
+      inputTokens: 40,
+      outputTokens: 40,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+    },
+    {
+      id: "marlow",
+      at: 3,
+      provider: "custom" as const,
+      model: "hf:moonshotai/Kimi-K3",
+      sessionId: "worker-marlow",
+      inputTokens: 20,
+      outputTokens: 10,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+    },
+  ];
+  const rows = crewSpendRows(events, "chat-1", [
+    { id: "worker-dexter", label: "Dexter" },
+    { id: "worker-marlow", label: "Marlow" },
+  ]);
+  assert.equal(rows[0]?.label, "This chat");
+  assert.equal(rows[0]?.totals.totalTokens, 170);
+  assert.equal(rows[1]?.label, "Dexter");
+  assert.equal(rows[1]?.totals.totalTokens, 80);
+  assert.equal(rows[2]?.label, "Marlow");
+  assert.equal(rows[2]?.totals.totalTokens, 30);
+  assert.equal(crewSpendTotal(rows).totalTokens, 280);
+  assert.equal(crewSpendRows(events, undefined, [{ id: "worker-dexter", label: "Dexter" }]).length, 0);
+});
+
+test("This stretch bills the range total, including events with no clock", () => {
+  // Local 8pm, not a fixed UTC instant — CI is UTC, where 20:00 EDT is midnight
+  // and a 3-hour-old event falls into yesterday.
+  const now = new Date(2026, 8, 5, 20, 0, 0).getTime();
+  const undated = {
+    id: "zero",
+    at: 0,
+    provider: "cursor" as const,
+    model: "grok-4.6",
+    sessionId: "chat-1",
+    inputTokens: 3_100_000,
+    outputTokens: 146_000,
+    cacheReadTokens: 25_700_000,
+    cacheWriteTokens: 0,
+  };
+  const earlier = {
+    ...undated,
+    id: "hour",
+    at: now - 3 * 60 * 60 * 1000,
+    inputTokens: 27_000,
+    outputTokens: 25_000,
+    cacheReadTokens: 0,
+  };
+  assert.equal(inRange(undated, "today", now), true);
+  assert.equal(inRange(undated, "month", now), true);
+  assert.equal(eventTotal(undated), 3_246_000);
+  assert.equal(usageTimestamp(Math.floor(now / 1000), now), now);
+
+  const today = stretchHeatmap([undated, earlier], "today", now);
+  const total = heatmapTotal(today);
+  const peak = heatmapPeak(today);
+  assert.equal(total, 3_246_000 + 52_000);
+  assert.equal(chatSpend([undated, earlier], "chat-1").totalTokens, total);
+  assert.ok(peak);
+  assert.equal(peak.tokens, 3_246_000);
+  assert.ok(total > peak.tokens);
+
+  const repaired = normalizeUsage([undated]);
+  assert.equal(repaired.length, 1);
+  assert.ok(repaired[0]!.at > 1e12);
 });

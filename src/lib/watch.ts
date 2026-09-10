@@ -690,7 +690,8 @@ export function leftoverByWatchKey(
   return Object.fromEntries(statuses.map((status) => [status.key, status.leftover]));
 }
 
-export type DeskCallStatus = "ok" | "disabled" | "not_connected" | "spent" | "day_bank";
+/** `cannot_start`: attached and on, but a missing binary or a refused login stops every launch. */
+export type DeskCallStatus = "ok" | "disabled" | "not_connected" | "cannot_start" | "spent" | "day_bank";
 
 export type DeskCallRow = {
   id: string;
@@ -719,6 +720,9 @@ function deskCallRow(input: {
   kind: "vendor" | "custom";
   connected: boolean;
   enabled: boolean;
+  /** From the vendor link: a vendor that cannot start is not callable, and the blocker says why. */
+  launchable?: boolean;
+  launchBlocker?: string;
   leftover?: number;
   usedPercent?: number;
   period?: GrokPlanUsage["period"];
@@ -741,6 +745,14 @@ function deskCallRow(input: {
     code = "disabled";
     canCall = false;
     reason = `${input.name} is turned off in Settings → LLMs.`;
+  } else if (input.launchable === false) {
+    // Attached and on, but the desk cannot start it: a missing binary or a
+    // login the vendor refused. Not callable, and the row says which. Its own
+    // code, so the roster still lists the vendor instead of hiding it as
+    // unattached.
+    code = "cannot_start";
+    canCall = false;
+    reason = input.launchBlocker?.trim() || `${input.name} cannot start on this desk.`;
   } else if (
     (input.blockSpent || input.holding) &&
     input.leftover != null &&
@@ -821,6 +833,8 @@ export function deskCallCatalog(input: {
           kind: "vendor",
           connected,
           enabled,
+          launchable: link?.launchable,
+          launchBlocker: link?.launchBlocker,
           leftover: composer?.leftover,
           usedPercent: composer?.usedPercent,
           period: composer?.period,
@@ -842,6 +856,8 @@ export function deskCallCatalog(input: {
           kind: "vendor",
           connected,
           enabled,
+          launchable: link?.launchable,
+          launchBlocker: link?.launchBlocker,
           leftover: api?.leftover,
           usedPercent: api?.usedPercent,
           period: api?.period,
@@ -866,6 +882,8 @@ export function deskCallCatalog(input: {
         kind: "vendor",
         connected: Boolean(link?.connected),
         enabled: Boolean(link?.connected && link?.enabled !== false),
+        launchable: link?.launchable,
+        launchBlocker: link?.launchBlocker,
         leftover: status?.leftover,
         usedPercent: status?.usedPercent,
         period: status?.period,
@@ -937,12 +955,20 @@ export function vendorCallBlocked(
 
 export function deskCallRowFor(
   rows: DeskCallRow[],
-  query: { provider?: ProviderId | string | null; customBotId?: string; name?: string },
+  query: { provider?: ProviderId | string | null; customBotId?: string; name?: string; model?: string },
 ): DeskCallRow | undefined {
   const provider = query.provider?.trim().toLowerCase();
   const name = query.name?.trim().toLowerCase();
+  const model = query.model?.trim();
+  if (query.customBotId) {
+    const bot = rows.find((item) => item.id === `bot:${query.customBotId}`);
+    if (bot) return bot;
+  }
+  if (provider === "cursor" && model) {
+    const lane = rows.find((item) => item.id === cursorWatchLane(model));
+    if (lane) return lane;
+  }
   return (
-    (query.customBotId ? rows.find((item) => item.id === `bot:${query.customBotId}`) : undefined) ??
     (provider && provider !== "custom" ? rows.find((item) => item.id === provider || item.provider === provider) : undefined) ??
     (name
       ? rows.find((item) => item.name.toLowerCase() === name || item.model?.toLowerCase() === name || item.id === name)
@@ -1052,7 +1078,7 @@ export function formatDeskRoster(rows: DeskCallRow[]): string {
   }
   if (callable.length > 0) {
     lines.push(
-      `Callable now: ${callable.map((row) => row.name).join(", ")}. For ordinary work, leave provider, model, and effort unset so the desk routes by task fit and capacity. Use a named row only for an explicit user assignment or requested full lineup.`,
+      `Callable now: ${callable.map((row) => row.name).join(", ")}. For ordinary work, leave provider, model, and effort unset so the desk routes by task fit and capacity. Grok 4.6 on Grok and Cursor is one family — leave the vendor unset and the desk picks by leftover. Use a named row only for an explicit user assignment or requested full lineup.`,
     );
   } else {
     lines.push("Nothing is callable right now.");
@@ -1075,6 +1101,211 @@ export function formatDeskRoster(rows: DeskCallRow[]): string {
 export const CAPACITY_SNAPSHOT_VERSION = 1 as const;
 /** Cached official-meter age past this is stale. Six hours. */
 export const CAPACITY_STALE_AFTER_MS = 6 * 60 * 60 * 1000;
+
+/**
+ * What a vendor's plan holds after a refresh comes back.
+ *
+ * An answer replaces an answer; anything else keeps what was already known.
+ * Every refresher used to write undefined on a rejection and on an answer of
+ * nothing, which was survivable while plans were fetched only at boot and in
+ * the Usage pane. Routing now asks whenever a reading is over fifteen minutes
+ * old, so one flaky call mid-spawn-wave would have turned a known meter into an
+ * unknown one and pulled that vendor's capacity term out of the ranking.
+ *
+ * A vendor that has never answered still reads unknown, because `previous` is
+ * undefined for it already. This only refuses to spend a reading the desk has.
+ */
+export function planAfterRefresh(
+  previous: GrokPlanUsage | undefined,
+  answer: GrokPlanUsage | null | undefined,
+): GrokPlanUsage | undefined {
+  return answer ?? previous;
+}
+
+/** A plan a spawn or an Auto turn is about to route on must be newer than this. */
+export const ROUTING_PLAN_STALE_AFTER_MS = 15 * 60_000;
+/** One fetch per burst. A wave of spawns must not become a wave of meter calls. */
+export const ROUTING_PLAN_REFRESH_DEBOUNCE_MS = 60_000;
+
+/**
+ * Whether routing should ask the vendors for their meters again before it picks.
+ *
+ * Nothing refreshed deskPlans except boot, the Usage pane and the setup sheet,
+ * so a desk left open all afternoon paced every spawn against a morning
+ * reading. This is the rule that fixes it, kept pure so it can be tested
+ * without a network.
+ *
+ * A plan the desk does not hold is not stale, it is unknown, and unknown stays
+ * unknown — refetching on its behalf would put a meter call on every send for a
+ * vendor that has never answered. Only plans the desk has are aged, and a plan
+ * with no observedAt is treated as old because nothing can say otherwise.
+ */
+export function shouldRefreshPlansForRouting(input: {
+  plans: WatchPlans;
+  now: number;
+  lastRefreshAt?: number;
+  staleAfterMs?: number;
+  debounceMs?: number;
+}): boolean {
+  const staleAfterMs = input.staleAfterMs ?? ROUTING_PLAN_STALE_AFTER_MS;
+  const debounceMs = input.debounceMs ?? ROUTING_PLAN_REFRESH_DEBOUNCE_MS;
+  if (input.lastRefreshAt !== undefined && input.now - input.lastRefreshAt < debounceMs) return false;
+  const held: Array<GrokPlanUsage | undefined> = [
+    input.plans.grok,
+    input.plans.codex,
+    input.plans.claude,
+    input.plans.cursor,
+    ...Object.values(input.plans.custom ?? {}),
+  ];
+  return held.some((plan) => {
+    if (!plan) return false;
+    const observed = plan.observedAt ? Date.parse(plan.observedAt) : NaN;
+    if (!Number.isFinite(observed)) return true;
+    return input.now - observed > staleAfterMs;
+  });
+}
+
+/** Doubling backoff for a meter that keeps not answering, capped at an hour. */
+export const CUSTOM_METER_BACKOFF_BASE_MS = 60_000;
+export const CUSTOM_METER_BACKOFF_MAX_MS = 60 * 60_000;
+
+/** What the desk remembers about a custom bot's meter between beats. */
+export type CustomMeterHealth = { misses: number; lastTriedAt: number };
+
+/**
+ * Which bots this beat may ask for a leftover reading.
+ *
+ * The refresh loop walked every saved bot on every beat. Two things were wrong
+ * with that. A bot the person switched off is off the desk — turning it off is
+ * how they stop it costing them anything, and a background timer is not consent
+ * to keep spending its key. And a host that rejects the key, or has no meter
+ * behind that path at all, answers nothing just as fast the two-hundredth time:
+ * the desk went on asking every beat forever and the ring never moved.
+ *
+ * So: only bots that are on and hold a key, and a bot whose meter has missed
+ * backs off — a minute, two, four, capped at an hour — until it answers once.
+ * Any answer clears the count, so a blip costs one delayed reading, not a
+ * permanently dark ring. A person switching the bot on, or saving a new key,
+ * clears it too, because that is somebody asking for it to be tried now.
+ *
+ * Kept pure and beside the other "should we ask again" rule so both can be
+ * tested without a network or a mounted store.
+ */
+export function customMeterBackoffMs(misses: number): number {
+  if (misses <= 0) return 0;
+  return Math.min(CUSTOM_METER_BACKOFF_BASE_MS * 2 ** (misses - 1), CUSTOM_METER_BACKOFF_MAX_MS);
+}
+
+export function customBotsToMeter<T extends Pick<CustomBot, "id" | "baseUrl" | "apiKey" | "credentialId" | "enabled">>(
+  bots: T[],
+  health: Record<string, CustomMeterHealth | undefined>,
+  now: number,
+): T[] {
+  return bots.filter((bot) => {
+    if (!customBotEnabled(bot)) return false;
+    if (!customBotAttached(bot)) return false;
+    const held = health[bot.id];
+    if (!held || held.misses <= 0) return true;
+    return now - held.lastTriedAt >= customMeterBackoffMs(held.misses);
+  });
+}
+
+/** Fold one meter round's answer into what the desk remembers about that bot. */
+export function customMeterHealthAfter(
+  held: CustomMeterHealth | undefined,
+  answered: boolean,
+  now: number,
+): CustomMeterHealth {
+  return answered ? { misses: 0, lastTriedAt: now } : { misses: (held?.misses ?? 0) + 1, lastTriedAt: now };
+}
+
+/** Drop everything keyed by a bot that is no longer on the desk. */
+export function prunedByBotId<T>(record: Record<string, T>, liveIds: Iterable<string>): Record<string, T> {
+  const keep = new Set(liveIds);
+  const next: Record<string, T> = {};
+  for (const [id, value] of Object.entries(record)) if (keep.has(id)) next[id] = value;
+  return next;
+}
+
+/** Drop one bot's entry, keeping the same object when there is nothing to drop. */
+export function dropBotEntry<T>(record: Record<string, T>, id: string): Record<string, T> {
+  if (!(id in record)) return record;
+  const next = { ...record };
+  delete next[id];
+  return next;
+}
+
+/**
+ * May a leftover answer that has just landed still be written to this slot?
+ *
+ * A meter call is a round trip. Somebody can delete the connection, or switch
+ * it off, while the request is in the air — and the answer, when it arrives,
+ * carries a bot id that no longer belongs to anything the person can see. The
+ * loop wrote it anyway: the reading went back into `customPlans`, the effect
+ * that mirrors those readings into `deskPlans` picked it up, and the next save
+ * put a deleted bot's figure back on disk. Delete has to survive a slow host.
+ *
+ * So the answer is written against the slot as it stands now, not as it stood
+ * when the question was asked.
+ */
+export function customSlotTakesAnswer(bots: { id: string; enabled?: boolean }[], id: string): boolean {
+  const bot = bots.find((item) => item.id === id);
+  return Boolean(bot && customBotEnabled(bot));
+}
+
+/** A new key or a new host is somebody asking for this bot to be tried now. */
+export function customEditRetriesMeter(patch: Partial<CustomBot>): boolean {
+  return patch.apiKey !== undefined || patch.baseUrl !== undefined || patch.credentialId !== undefined;
+}
+
+/** What one beat of the custom leftover loop needs from the desk. */
+export type CustomMeterBeat<T> = {
+  /** Every saved connection, as they stand when the beat starts. */
+  bots: T[];
+  /** What the desk remembers about each meter when the beat starts. */
+  health: Record<string, CustomMeterHealth | undefined>;
+  now: number;
+  /** Ask one host. Resolves to the reading, or to nothing for no answer. */
+  ask: (bot: T) => Promise<GrokPlanUsage | undefined>;
+  /** The connections as they stand when an answer lands. Read, never closed over. */
+  liveBots: () => { id: string; enabled?: boolean }[];
+  writePlan: (id: string, plan: GrokPlanUsage | undefined) => void;
+  markKnown: (id: string) => void;
+  writeHealth: (id: string, answered: boolean) => void;
+};
+
+/**
+ * One beat of the leftover loop, from picking who to ask to filing the answer.
+ *
+ * The store owns the four writes and nothing else, so both gates that decide
+ * whether a bot costs anything — who is asked, and whose answer is kept — live
+ * here where a test can drive them without a mounted store or a network.
+ */
+export async function runCustomMeterBeat<
+  T extends Pick<CustomBot, "id" | "baseUrl" | "apiKey" | "credentialId" | "enabled">,
+>(beat: CustomMeterBeat<T>): Promise<void> {
+  await Promise.all(
+    customBotsToMeter(beat.bots, beat.health, beat.now).map(async (bot) => {
+      let plan: GrokPlanUsage | undefined;
+      let answered = false;
+      let replied = false;
+      try {
+        plan = await beat.ask(bot);
+        answered = Boolean(plan);
+        replied = true;
+      } catch {
+        // A thrown call is a miss, same as a host that answered nothing.
+      }
+      if (!customSlotTakesAnswer(beat.liveBots(), bot.id)) return;
+      // Same rule as the stock meters: an answer replaces an answer, and a
+      // failure leaves whatever was last known in place. Writing here on a
+      // throw is what would turn a live bot's meter into unknown mid-wave.
+      if (replied) beat.writePlan(bot.id, plan);
+      beat.markKnown(bot.id);
+      beat.writeHealth(bot.id, answered);
+    }),
+  );
+}
 
 export type CapacityMeterStatus = "known" | "unknown" | "unmetered";
 export type CapacityFreshness = "fresh" | "stale" | "unknown";

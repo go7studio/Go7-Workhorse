@@ -729,6 +729,11 @@ test("desk roster assigns Cursor Auto to the API pool it actually uses", () => {
   assert.equal(composer?.models?.some((model) => model.id === "auto"), false);
   assert.equal(api?.models?.some((model) => model.id === "auto"), true);
   assert.equal(api?.model, "auto");
+  assert.equal(deskCallRowFor(rows, { provider: "cursor" })?.id, "cursor:cursor-models");
+  assert.equal(deskCallRowFor(rows, { provider: "cursor", model: "composer-2.5" })?.id, "cursor:cursor-models");
+  assert.equal(deskCallRowFor(rows, { provider: "cursor", model: "claude-fable-5-1" })?.id, "cursor:other-models");
+  assert.equal(deskCallRowFor(rows, { provider: "cursor", model: "Fable 5.1" })?.id, "cursor:other-models");
+  assert.match(readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8"), /model: spec.model/);
 });
 
 test("available LLMs include a keyed custom bot when stock vendors are a no-go", () => {
@@ -778,7 +783,10 @@ test("available LLMs include a keyed custom bot when stock vendors are a no-go",
   assert.doesNotMatch(roster, /No custom\/MiniMax bot is attached/);
   assert.doesNotMatch(roster, /no custom bot is attached to this desk/i);
   assert.doesNotMatch(roster, /Nothing is callable right now/);
-  assert.match(readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8"), /formatDeskRoster\(catalog\)/);
+  assert.match(
+    readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8"),
+    /formatDeskRoster\(filterCatalogBySpawnAllowlist\(catalog/,
+  );
   assert.match(readFileSync(path.join(ROOT, "electron", "workhorse-mcp.ts"), "utf8"), /action: "list"/);
 });
 

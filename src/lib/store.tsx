@@ -7,11 +7,12 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { claudeAuthFailure } from "./claude-auth-failure";
 import { StoreContext, StoreRuntimeContext, useStore } from "./store-context";
 export { useStore, useStoreReader, useStoreSelector } from "./store-context";
 import { commandContinuesToVendor, commandsForSession, matchCommand } from "./commands";
 import { isWorkhorseGoalControl, isWorkhorseGoalIntent, parseGoalInput, parseGrokGoalLine } from "./goal";
-import { nextGoalForSend, planHaltForward, prepareVendorSend, vendorTerminalAction } from "./vendor-send";
+import { nextGoalForSend, planHaltForward, prepareVendorSend, shouldIgnoreRedirectedCancel, vendorTerminalAction } from "./vendor-send";
 import { customChatHistory } from "./custom-history";
 import { uid } from "./id";
 import {
@@ -23,6 +24,8 @@ import {
   deleteWorkerChats,
   dropQueuedPrompt,
   enqueuePrompt,
+  canFlushQueuedHead,
+  shouldEnqueueInsteadOfLiveSend,
   forkChat,
   lastUserMessage,
   applyDeleteDeskChat,
@@ -49,8 +52,11 @@ import { autoTitleForSend, firstUserText, suggestedTitleForSession, titleAccepts
 import {
   applyPermissionAnswer,
   autoAllowPermission,
+  classifyPermissionTool,
   deskClampNote,
   describeElevation,
+  elevationStillNeeded,
+  standingGrant,
   elevationForBlock,
   enqueuePermission,
   grantedAccessLine,
@@ -90,6 +96,7 @@ import {
   EMPTY_CUSTOM_DRAFT,
   normalizeCustomModelList,
 } from "./custom-bots";
+import { customSlotDrops, deskAfterCustomBotDeleted, deskAfterCustomBotEnabled } from "./custom-slot";
 import {
   DEFAULT_CHOICE,
   applyVendorCatalog,
@@ -98,6 +105,7 @@ import {
   findChoice,
   normalizeModelId,
   parseEffort,
+  parseEffortFromText,
   withEffort,
 } from "./models";
 import { mergeStreamedText } from "./markdown";
@@ -111,6 +119,7 @@ import {
   applyDeleteProject,
   applyProjectChatFate,
   applyRenameDeskProject,
+  applyReorderProjects,
   renameTookOnDesk,
   visibleProjectNames,
   emptyProject,
@@ -123,9 +132,20 @@ import {
 } from "./project";
 import { isParentTakeoverTool, isWriteToolTitle, projectEdits, writePathFromToolEvent } from "./project-edits";
 import { isProviderId, providerById } from "./providers";
-import { sameDeskSkills } from "./skills-catalog";
+import { sameDeskSkills, skillsForAutoLoad } from "./skills-catalog";
 import { withSkillDiscoveryHint } from "./skill-suggestions";
 import { mcpServersForSession } from "./mcp-servers";
+import {
+  filterCandidatesBySpawnAllowlist,
+  filterCatalogBySpawnAllowlist,
+  normalizeSpawnAllowlist,
+  spawnAllowlistBlockedError,
+  spawnAllowlistForCaller,
+  spawnAllowlistIdForSpec,
+  spawnAllowlistNames,
+  spawnIdentityAllowed,
+  spawnSpecDisplayName,
+} from "./spawn-allowlist";
 import {
   applyUpdateStockBot,
   DEFAULT_SETTINGS,
@@ -135,6 +155,7 @@ import {
   normalizeSettings,
   normalizeAgentSystems,
   normalizeRouting,
+  normalizeSkillDiscovery,
   vendorAttachedForSession,
   vendorLaunchGate,
 } from "./settings";
@@ -157,13 +178,14 @@ import {
   outcomesFromLearningEvents,
   routingCandidatesForDesk,
   routingDecisionEvidence,
+  routingDecisionLogDetail,
   routingIdentityExcluded,
   routingProfileForModel,
   shouldRouteSessionTurn,
   shouldShadowRouteSessionTurn,
   spawnEffortFor,
 } from "./routing";
-import type { AgentRun, AgentSystemsSettings, ChatMessage, ExternalTask, FileLease } from "./types";
+import type { AgentSystemsSettings, ChatMessage, ExternalTask, FileLease } from "./types";
 import {
   approvePlanRun,
   assignPlanStep,
@@ -195,6 +217,7 @@ import {
   upsertToolMessage,
 } from "./grok-events";
 import { chatPreview, formatPeerPrompt, sameSessionCrew } from "./session-bridge";
+import { applyVendorBackgroundTask } from "./vendor-tasks";
 import {
   addLineupRow,
   applyChildIdleSync,
@@ -209,20 +232,21 @@ import {
   JOIN_MAX_ATTEMPTS,
   looksLikeJoinPrompt,
   handOverLineup,
+  maybeEnqueueLineupJoin,
   queueWakeDelayMs,
+  shouldJoinAfterChildSettle,
   reconcileIdleChildren,
   reconcilePersistedLineups,
   setLineupRowStatus,
   stampLineupUserText,
 } from "./lineup";
+import { applyDemoMission } from "./mission-board";
 import { applyPlanAuditorSpawn, joinAndAdmit } from "./plan-admission";
 import {
   applyCancelWorker,
   admitSpawn,
   assertAgentPathWrite,
   campaignGateError,
-  expiredWorkerIds,
-  WORKER_DEADLINE_SWEEP_MS,
   claimSharedFiles,
   collectChildAgentReports,
   deskRoleOf,
@@ -235,6 +259,7 @@ import {
   normalizeFileLeases,
   normalizePathAllowlist,
   overlappingAgentFiles,
+  parentCrewSnapshot,
   parentHasRunningChildren,
   maxRootWorkers,
   nextCampaignPhase,
@@ -243,6 +268,7 @@ import {
   resolveSpawnSpec,
   missionForDeskSpawn,
   findReusableWorker,
+  formatParentCrewLine,
   fileContentsFingerprint,
   leasePathForWrite,
   refreshSharedFileFingerprint,
@@ -254,16 +280,18 @@ import {
   releaseCancelledSessionLeases,
   releaseDeletedSessionLeases,
   releaseSessionLeases,
-  appendRunEvent,
   scopedChildAgentIds,
   type WorkerNameReservation,
   type WorkerRecord,
   shouldAutoRouteSpawn,
   routingDecisionMatchesSpawn,
   constrainRouteCandidatesForSpawn,
+  spawnContinuationHowToUse,
   spawnExclusions,
   spawnWaitsForReply,
   withSubagentStatus,
+  withFinishedTurnSubagentStatus,
+  resolveAgentStatus,
   workerStatusSnapshot,
   workerTaskTitle,
   continueWorkerRun,
@@ -280,6 +308,7 @@ import {
   parsePermissionMode,
   parseSandbox,
   vendorSessionForSend,
+  applyStandingGrant,
 } from "./session";
 import { sessionExecutionCwd } from "./session-environment";
 import { parseScheduleCommand } from "./schedule";
@@ -291,11 +320,14 @@ import { estimateMessageTokens } from "./context-stats";
 import { buildSessionPreface } from "./context-preface";
 import {
   applyCompactOutcome,
+  applyCursorLedger,
   applyUsageContext,
   backfillCursorUsage,
   estimateFromSessionTurn,
+  joinCursorLedgerEvents,
   normalizeUsage,
   occupancyFromUsage,
+  rangeStart,
   rehomeCustomUsage,
   settleTurnUsage,
   usageHasBilledTokens,
@@ -304,18 +336,18 @@ import {
 import {
   applyWorkerBudgetUsage,
   beginAssignmentBudget,
-  BUDGET_HANDOFF_PROMPT,
   missionUsedTokens,
-  needsBudgetHandoffTurn,
-  nestedHelperBudget,
-  nextBudgetRunState,
-  parentBudgetRemaining,
 } from "./worker-budget";
 import { clampPaneWidth, SIDEBAR_PANE, THREAD_PANE } from "./pane";
 import {
   assistantHasVisibleReply,
   isVendorRateLimitError,
+  isDeskAssistantNotice,
+  keepStreamedAssistantText,
+  shouldReviveIdleTurn,
   settleEmptyAssistantText,
+  TURN_IDLE_AFTER_DONE_MS,
+  TURN_IDLE_AFTER_TRAILING_MS,
   turnEndedWithoutProse,
   turnWorkedAfterAssistant,
   vendorFailedMessage,
@@ -341,15 +373,23 @@ import {
   normalizeWatch,
   normalizeWatchDayMarks,
   normalizeWatchPermits,
+  customEditRetriesMeter,
+  customMeterHealthAfter,
+  dropBotEntry,
+  planAfterRefresh,
   pruneWatchPermits,
+  runCustomMeterBeat,
+  shouldRefreshPlansForRouting,
   syncWatchDayMarks,
   watchVendorStatuses,
+  type CustomMeterHealth,
   type WatchHold,
   type WatchNotice,
 } from "./watch";
 import { applyWorkhorseToggle, isConcreteTheme, isTheme, nextTheme } from "./theme";
 import { effectiveLearningMode, learningCaptures, normalizeLearning } from "./learning-policy";
 import { normalizeLocalComputeSettings } from "./local-compute";
+import { normalizeWorkshopSettings, type WorkshopSettings } from "./workshop-pack";
 import { agentTurnEvidence, learningEvidenceId } from "./learning-agent-evidence";
 import { settleSessionGoals } from "./learning-goal";
 import { BACKFILL_SUMMARY_CHARS, backfillEventId } from "./learning-backfill";
@@ -383,6 +423,7 @@ import type {
   Theme,
   UsageDraft,
   UsageRange,
+  SkillDiscoverySettings,
   WatchSettings,
   RoutingSettings,
 } from "./types";
@@ -423,10 +464,12 @@ export type Store = AppState & {
   removeReference: (referenceId: string) => void;
   archiveProject: (id: string, archived?: boolean) => void;
   deleteProject: (id: string, chats: "keep" | "remove") => void;
+  reorderProjects: (fromId: string, toId: string, place: "before" | "after") => void;
   startSession: (projectId?: string | null, provider?: ProviderId) => void;
   setSessionModel: (provider: ProviderId, model: string, customBotId?: string) => void;
   setSessionRoutingMode: (mode: "auto" | "manual") => void;
   setCrewMode: (modes: CrewMode[] | undefined) => void;
+  setSpawnAllowlist: (ids: string[] | undefined) => void;
   /** Pick an interrupted worker back up. Returns why not, when it cannot. */
   resumeAgentRun: (sessionId: string) => { ok: boolean; message: string };
   createCustomBot: () => string | null;
@@ -436,6 +479,8 @@ export type Store = AppState & {
   setCustomBotEnabled: (id: string, enabled: boolean) => void;
   probeCustomDraft: () => Promise<{ ok: boolean; message: string }>;
   probeCustomBot: (id: string) => Promise<{ ok: boolean; message: string }>;
+  /** Re-read the desk catalog. A custom host's freshly read model list lands here. */
+  refreshVendorModels: () => void;
   setSessionEffort: (effort: EffortLevel) => void;
   setSessionEnvironment: (kind: "local" | "worktree") => Promise<{ ok: boolean; message: string }>;
   selectSession: (id: string) => void;
@@ -466,13 +511,14 @@ export type Store = AppState & {
   probeMcpServer: (serverName: string) => Promise<import("./types").McpProbeResult>;
   refreshGrokLogin: () => void;
   refreshCodexLogin: () => void;
-  refreshClaudeLogin: () => void;
+  refreshClaudeLogin: (options?: { recheck?: boolean }) => void;
   refreshCursorLogin: () => void;
   refreshCustomLogin: () => void;
   cycleTheme: () => void;
   toggleWorkhorseTheme: () => void;
   answerPermission: (id: string, answer: "once" | "session" | "deny") => void;
   demoPermission: () => void;
+  demoMission: () => void;
   recordUsage: (draft: UsageDraft) => void;
   openSettings: (section?: SettingsSection) => void;
   closeSettings: () => void;
@@ -516,8 +562,10 @@ export type Store = AppState & {
   setUsageBudget: (provider: ProviderId, tokens: number | null) => void;
   updateWatch: (patch: Partial<WatchSettings>) => void;
   updateRouting: (patch: Partial<RoutingSettings>) => void;
+  updateSkillDiscovery: (patch: Partial<SkillDiscoverySettings>) => void;
   updateAgentSystems: (patch: Partial<AgentSystemsSettings>) => void;
   updateLocalCompute: (settings: import("./types").LocalComputeSettings) => void;
+  updateWorkshop: (settings: WorkshopSettings) => Promise<void>;
   grantPlanExternalAgents: (sessionId: string, allow: boolean) => void;
   agentRuntimes: import("./external-catalog").AgentRuntimeStatus[];
   agentCatalog: import("./external-catalog").ExternalAgent[];
@@ -910,7 +958,7 @@ function normalizeChoice(raw: unknown): AppState["lastModel"] {
     model,
     effort: withEffort(provider, model, record.effort ?? DEFAULT_CHOICE.effort),
     sandbox: parseSandbox(String((record as { sandbox?: string }).sandbox ?? "")) ?? DEFAULT_CHOICE.sandbox ?? "off",
-    mode: parsePermissionMode(String((record as { mode?: string }).mode ?? "")) ?? DEFAULT_CHOICE.mode ?? "ask",
+    mode: parsePermissionMode(String((record as { mode?: string }).mode ?? "")) ?? DEFAULT_CHOICE.mode ?? "always-approve",
     customBotId:
       typeof (record as { customBotId?: string }).customBotId === "string"
         ? (record as { customBotId?: string }).customBotId
@@ -957,12 +1005,14 @@ function stopDeletedWorkerSessions(before: Session[], after: Session[]) {
 }
 
 function occupancyForSession(
-  session: { provider: ProviderId; model: string; messages?: Parameters<typeof estimateMessageTokens>[0] } | undefined,
+  session:
+    | { provider: ProviderId; model: string; customBotId?: string; messages?: Parameters<typeof estimateMessageTokens>[0] }
+    | undefined,
   draft: UsageDraft,
   seen?: number,
 ): number | undefined {
   if (typeof seen === "number" && seen > 0) return seen;
-  const window = session ? contextWindowFor(session.provider, session.model) : 0;
+  const window = session ? contextWindowFor(session.provider, session.model, undefined, session.customBotId) : 0;
   if (draft.source === "estimate") {
     const occupying = session?.messages ? estimateMessageTokens(session.messages).tokens : 0;
     return occupancyFromUsage(
@@ -1091,6 +1141,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [cursorPlan, setCursorPlan] = useState<GrokPlanUsage | undefined>();
   const [customPlans, setCustomPlans] = useState<Record<string, GrokPlanUsage | undefined>>({});
   const [customPlanKnown, setCustomPlanKnown] = useState<Record<string, boolean>>({});
+  // Runtime health, not settings: how many beats in a row this bot's meter has
+  // answered nothing, so a host that rejects the key is not asked every beat.
+  const [customMeterHealth, setCustomMeterHealth] = useState<Record<string, CustomMeterHealth | undefined>>({});
   const [vendorPlanKnown, setVendorPlanKnown] = useState<Record<string, boolean>>({});
   const [editMessageId, setEditMessageId] = useState<string | null>(null);
   const [watchHold, setWatchHold] = useState<WatchHold | null>(null);
@@ -1105,6 +1158,20 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const draftPersistTimer = useRef<number | null>(null);
   const composerDraftsRef = useRef<Record<string, ComposerDraftSnap>>({});
   const plansRef = useRef<import("./watch").WatchPlans>({});
+  // Read by the refresh loop, which is declared with no deps so it can be
+  // called from the routing paths. Mirrors customMeterHealth, like plansRef.
+  const meterHealthRef = useRef<Record<string, CustomMeterHealth | undefined>>({});
+  /**
+   * Meter freshness on the routing paths (MASTER-AUDIT Repair 16).
+   *
+   * Nothing refreshed deskPlans except boot, the Usage pane and the setup
+   * sheet, so a desk left open all day paced every spawn against a stale
+   * reading. `runPlanRefresh` is filled in below, once the per-vendor
+   * refreshers exist; `planRefreshAt` is the debounce, so a burst of spawns
+   * costs one round of meter calls, not one per spawn.
+   */
+  const runPlanRefresh = useRef<() => void>(() => undefined);
+  const planRefreshAt = useRef<number | undefined>(undefined);
   const pathLeasesRef = useRef<FileLease[]>([]);
   const pathPermissionPreflight = useRef(new Set<string>());
   const approvedPathWrites = useRef(new Map<string, Array<{ path: string; root: string }>>());
@@ -1114,10 +1181,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const workerNameReservations = useRef<WorkerNameReservation[]>([]);
   const deskSkillsRef = useRef<DeskSkill[]>([]);
   const grokAssistantId = useRef<Record<string, string>>({});
+  /** Live vendor turn started, React has not committed `running` yet. */
+  const liveTurnPending = useRef(new Set<string>());
   const grokChunkQueue = useRef<Record<string, string>>({});
   const grokThoughtQueue = useRef<Record<string, string>>({});
   const grokUsagePending = useRef<Record<string, UsageDraft[]>>({});
   const grokContextSeen = useRef<Record<string, number>>({});
+  const turnIdleTimer = useRef<Record<string, number>>({});
+  const turnIdleStopReason = useRef<Record<string, string | undefined>>({});
+  const pendingIdleClose = useRef<Record<string, () => void>>({});
+  const redirectedAssistant = useRef<Record<string, string>>({});
+  const ingestCursorLedgerRef = useRef<() => void>(() => undefined);
   const learningTurns = useRef<Record<string, LearningTurnLink>>({});
   const agentCatalogRef = useRef<import("./external-catalog").ExternalAgent[]>([]);
   const agentRuntimesRef = useRef<import("./external-catalog").AgentRuntimeStatus[]>([]);
@@ -1166,6 +1240,31 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   stateRef.current = state;
   pathLeasesRef.current = state.leases ?? [];
   plansRef.current = { grok: grokPlan, codex: codexPlan, claude: claudePlan, cursor: cursorPlan, custom: customPlans };
+  meterHealthRef.current = customMeterHealth;
+
+  /** Ask the meters again when a routing path is about to pace on an old reading. */
+  const refreshPlansForRouting = useCallback((plans: import("./watch").WatchPlans, now = Date.now()) => {
+    if (!shouldRefreshPlansForRouting({ plans, now, lastRefreshAt: planRefreshAt.current })) return;
+    planRefreshAt.current = now;
+    runPlanRefresh.current();
+  }, []);
+
+  /**
+   * The desk wrote down what it picked and nothing about what it refused, so
+   * "why has Auto never sent this bot real work" could only be answered by
+   * replaying the ranker outside the app. One line per decision answers it here.
+   */
+  const recordRoutingDecision = useCallback(
+    (input: Parameters<typeof routingDecisionLogDetail>[0]) => {
+      if (!window.workhorse?.recordRoutingDecision) return;
+      try {
+        void window.workhorse.recordRoutingDecision(routingDecisionLogDetail(input)).catch(() => {});
+      } catch {
+        // A desk that cannot log still has to route.
+      }
+    },
+    [],
+  );
   useEffect(() => {
     setState((current) => ({ ...current, deskPlans: plansRef.current }));
   }, [grokPlan, codexPlan, claudePlan, cursorPlan, customPlans]);
@@ -1514,6 +1613,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  const reorderProjects = useCallback((fromId: string, toId: string, place: "before" | "after") => {
+    setState((current) => {
+      const projects = applyReorderProjects(current.projects, fromId, toId, place);
+      if (!projects) return current;
+      return { ...current, projects };
+    });
+  }, []);
+
   const deleteProject = useCallback((id: string, chats: "keep" | "remove") => {
     setState((current) => {
       const projects = applyDeleteProject(current.projects, id);
@@ -1643,6 +1750,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       ...current,
       sessions: current.sessions.map((item) =>
         item.id === current.activeSessionId ? { ...item, crewModes: modes } : item,
+      ),
+    }));
+  }, []);
+
+  const setSpawnAllowlist = useCallback((ids: string[] | undefined) => {
+    const spawnAllowlist = normalizeSpawnAllowlist(ids);
+    setState((current) => ({
+      ...current,
+      sessions: current.sessions.map((item) =>
+        item.id === current.activeSessionId ? { ...item, spawnAllowlist } : item,
       ),
     }));
   }, []);
@@ -2015,10 +2132,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     })();
   }, [refreshVendorModels]);
 
-  const refreshClaudeLogin = useCallback(() => {
+  const refreshClaudeLogin = useCallback((options?: { recheck?: boolean }) => {
     void (async () => {
       const detected = window.workhorse?.detectClaudeLogin
-        ? await window.workhorse.detectClaudeLogin()
+        ? await window.workhorse.detectClaudeLogin(options?.recheck ? { recheck: true } : undefined)
         : { connected: false, accessDefaults: undefined };
       setState((current) => ({
         ...current,
@@ -2030,6 +2147,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               ...current.settings.llms.claude,
               available: Boolean(detected.connected),
               needsAuth: Boolean((detected as { needsAuth?: boolean }).needsAuth),
+              authProblem: (detected as { authProblem?: string }).authProblem,
               accessDefaults: keepVendorAccessDefaults(
                 current.settings.llms.claude.accessDefaults,
                 detected.accessDefaults,
@@ -2180,6 +2298,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  const demoMission = useCallback(() => {
+    setState((current) => {
+      const session = current.sessions.find((item) => item.id === current.activeSessionId);
+      if (!session || session.parentId) return current;
+      const next = applyDemoMission({ sessions: current.sessions, parent: session });
+      return { ...current, sessions: next.sessions, activeSessionId: next.parentId };
+    });
+  }, []);
+
   const send = useCallback((raw: string, options?: SendOptions) => {
     let text = raw.trim();
     const originalText = text;
@@ -2206,7 +2333,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     // Vendor slash commands must remain the first bytes of the prompt. The
     // radar is for natural language; explicit commands already chose a route.
     if (!originalText.startsWith("/")) {
-      vendorText = withSkillDiscoveryHint(vendorText, originalText, deskSkillsRef.current);
+      const policy = stateRef.current.settings.skills ?? DEFAULT_SETTINGS.skills;
+      const catalog = policy.suggestFromWording === false ? [] : skillsForAutoLoad(deskSkillsRef.current, policy);
+      vendorText = withSkillDiscoveryHint(vendorText, originalText, catalog);
     }
     const haltPlan = options?.afterGoalHalt
       ? "send-now"
@@ -2295,7 +2424,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       goalHaltedSessions.current.delete(liveSession.id);
     }
     const skipQueue = haltPlan === "defer-until-cancelled-done";
-    if (liveSession?.status === "running" && !skipQueue && !options?.afterGoalHalt && !options?.steer && !options?.replaceUserId) {
+    if (
+      liveSession &&
+      shouldEnqueueInsteadOfLiveSend({
+        status: liveSession.status,
+        liveTurnPending: liveTurnPending.current.has(liveSession.id),
+        skipQueue,
+        afterGoalHalt: options?.afterGoalHalt,
+        steer: options?.steer,
+        replaceUserId: options?.replaceUserId,
+      })
+    ) {
       setState((current) => {
         const sessions = enqueuePrompt(current.sessions, liveSession.id, {
           text: originalText,
@@ -2308,10 +2447,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       return;
     }
     if (liveSession?.status === "running" && options?.steer) {
-      if (liveSession.provider === "codex") void window.workhorse?.codexCancel?.(liveSession.id);
-      else if (liveSession.provider === "claude") void window.workhorse?.claudeCancel?.(liveSession.id);
-      else if (liveSession.provider === "custom") void window.workhorse?.customCancel?.(liveSession.id);
-      else void window.workhorse?.grokCancel(liveSession.id);
+      const currentAssistant = grokAssistantId.current[liveSession.id];
+      if (currentAssistant) redirectedAssistant.current[liveSession.id] = currentAssistant;
+      cancelVendorSession(liveSession);
     }
 
     if (!goalInput && originalText.startsWith("/")) {
@@ -2347,6 +2485,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       }
       if (match?.run === "demo-permission") {
         demoPermission();
+        return;
+      }
+      if (match?.run === "demo-mission") {
+        demoMission();
         return;
       }
       if (match?.run === "theme") {
@@ -2435,7 +2577,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               const outcome = applyCompactOutcome({
                 leftoverPercent: 0,
                 contextUsed: item.contextUsed,
-                windowSize: contextWindowFor(item.provider, item.model),
+                windowSize: contextWindowFor(item.provider, item.model, undefined, item.customBotId),
                 omittedMessages: checkpoint.omittedMessages,
                 keptMessages: Math.max(0, visible.length - checkpoint.omittedMessages),
                 summaryChars: checkpoint.summary.length,
@@ -2607,6 +2749,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     // switch decides how a new chat starts; it does not reach into a chat the
     // person has already set one way or the other.
     if (shouldRouteSessionTurn({ routingMode: session.routingMode, text: originalText, hideUser })) {
+      // The next turn gets the fresher meters; this one still routes now rather
+      // than waiting on a network round trip to pick a model.
+      refreshPlansForRouting(plansRef.current);
       const statuses = watchVendorStatuses({
         settings: current.settings,
         usage: current.usage,
@@ -2631,6 +2776,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         contextNeed: session.contextUsed || undefined,
       };
       const decision = chooseRoutingDecision(routeCandidates, routeRequest, current.settings.routing);
+      recordRoutingDecision({
+        source: "chat",
+        candidates: routeCandidates,
+        request: routeRequest,
+        settings: current.settings.routing,
+        ...(decision ? { selected: decision } : {}),
+      });
       if (decision) {
         // Auto picks the effort with the model: a quick task at low, a deep
         // one at high. Keeping the person's old effort here left Auto choosing
@@ -2776,11 +2928,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       working = next;
       keepBefore = next.filter((message) => message.role === "user").length - 2;
       if (session.status === "running") {
-        if (session.provider === "codex") void window.workhorse?.codexCancel?.(session.id);
-        else if (session.provider === "claude") void window.workhorse?.claudeCancel?.(session.id);
-        else if (session.provider === "cursor") void window.workhorse?.cursorCancel?.(session.id);
-        else if (session.provider === "custom") void window.workhorse?.customCancel?.(session.id);
-        else void window.workhorse?.grokCancel(session.id);
+        const currentAssistant = grokAssistantId.current[session.id];
+        if (currentAssistant) redirectedAssistant.current[session.id] = currentAssistant;
+        cancelVendorSession(session);
       }
       setEditMessageId(null);
     }
@@ -2788,7 +2938,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     if (live !== "preview") {
       const previousAssistantId = grokAssistantId.current[session.id];
       const assistantId = uid("msg");
+      if (previousAssistantId && (options?.steer || options?.replaceUserId)) {
+        redirectedAssistant.current[session.id] = previousAssistantId;
+      }
       grokAssistantId.current[session.id] = assistantId;
+      liveTurnPending.current.add(session.id);
+      const idleHandle = turnIdleTimer.current[session.id];
+      if (idleHandle) window.clearTimeout(idleHandle);
+      delete turnIdleTimer.current[session.id];
+      delete turnIdleStopReason.current[session.id];
+      delete pendingIdleClose.current[session.id];
       const leftover = grokUsagePending.current[session.id];
       if (leftover?.length) {
         const leftoverSettled = settleTurnUsage({
@@ -2912,6 +3071,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           hidden: session.hidden,
           role: deskRoleOf(session),
           crewModes: session.crewModes,
+          spawnNames: spawnAllowlistNames(session.spawnAllowlist, stateRef.current.settings),
           mcpServers: mcpServersForSession(stateRef.current.settings.mcpServers, session),
           preface: withPortableHistory(buildSessionPreface({
             sessionId: session.id,
@@ -2933,6 +3093,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 botName: customBotForSession(stateRef.current.settings.customBots, session)?.name,
               }),
               preview: chatPreview(working),
+              ...(session.parentId
+                ? {}
+                : {
+                    crew: formatParentCrewLine(parentCrewSnapshot(stateRef.current.sessions, session.id)),
+                  }),
             },
           }), session.provider === "custom" ? [] : messagesForPortableReplay(working, session.contextCheckpoint)),
         };
@@ -2974,6 +3139,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             hidden: session.hidden,
             role: deskRoleOf(session),
             crewModes: session.crewModes,
+            spawnNames: spawnAllowlistNames(session.spawnAllowlist, stateRef.current.settings),
             customBotId: session.customBotId ?? ("id" in custom ? custom.id : undefined),
             config: {
               baseUrl: custom.baseUrl,
@@ -2988,22 +3154,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             ...latest,
             sessions: latest.sessions.map((item) =>
               item.id === session.id
-                ? applyVendorTurnIdle({
+                ? {
                     ...item,
                     messages: item.messages.map((entry) =>
-                      entry.id === assistantId && !assistantHasVisibleReply(entry.text)
-                        ? {
-                            ...entry,
-                            text: settleEmptyAssistantText({
-                              provider: "custom",
-                              reply,
-                              existingText: entry.text,
-                              worked: turnWorkedAfterAssistant(item.messages, assistantId),
-                            }),
-                          }
+                      entry.id === assistantId
+                        ? { ...entry, text: keepStreamedAssistantText({ reply, existingText: entry.text }) }
                         : entry,
                     ),
-                  }, { assistantId })
+                  }
                 : item,
             ),
           }));
@@ -3014,7 +3172,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             throw new Error("Claude agent runs in the Workhorse desktop window.");
           }
           if (options?.replaceUserId) vendorSessionId = undefined;
-          const result = await window.workhorse.claudePrompt({ ...promptInput, vendorSessionId });
+          const result = await window.workhorse.claudePrompt({ ...promptInput, vendorSessionId }).catch((error: unknown) => {
+            // The card must not keep saying On while the vendor refuses the login.
+            if (claudeAuthFailure(error)) refreshClaudeLogin();
+            throw error;
+          });
           const reply = typeof result?.text === "string" ? result.text.trim() : "";
           vendorSessionId =
             typeof result?.vendorSessionId === "string" && result.vendorSessionId
@@ -3024,23 +3186,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             ...latest,
             sessions: latest.sessions.map((item) =>
               item.id === session.id
-                ? applyVendorTurnIdle({
+                ? {
                     ...item,
                     vendorSessionId,
                     messages: item.messages.map((entry) =>
-                      entry.id === assistantId && !assistantHasVisibleReply(entry.text)
-                        ? {
-                            ...entry,
-                            text: settleEmptyAssistantText({
-                              provider: "claude",
-                              reply,
-                              existingText: entry.text,
-                              worked: turnWorkedAfterAssistant(item.messages, assistantId),
-                            }),
-                          }
+                      entry.id === assistantId
+                        ? { ...entry, text: keepStreamedAssistantText({ reply, existingText: entry.text }) }
                         : entry,
                     ),
-                  }, { assistantId })
+                  }
                 : item,
             ),
           }));
@@ -3061,32 +3215,28 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             ...latest,
             sessions: latest.sessions.map((item) =>
               item.id === session.id
-                ? applyVendorTurnIdle({
+                ? {
                     ...item,
                     vendorSessionId,
                     messages: item.messages.map((entry) =>
-                      entry.id === assistantId && !assistantHasVisibleReply(entry.text)
-                        ? {
-                            ...entry,
-                            text: settleEmptyAssistantText({
-                              provider: "cursor",
-                              reply,
-                              existingText: entry.text,
-                              worked: turnWorkedAfterAssistant(item.messages, assistantId),
-                            }),
-                          }
+                      entry.id === assistantId
+                        ? { ...entry, text: keepStreamedAssistantText({ reply, existingText: entry.text }) }
                         : entry,
                     ),
-                  }, { assistantId })
+                  }
                 : item,
             ),
           }));
           void window.workhorse?.cursorPlanUsage?.()
+            // The same rule as the refreshers below. These two fire when a
+            // Cursor turn ends, which is exactly when the meter is busiest, and
+            // they were still blanking the reading on an answer of nothing.
             .then((plan) => {
-              setCursorPlan(plan ?? undefined);
+              setCursorPlan((previous) => planAfterRefresh(previous, plan));
               markVendorPlanKnown("cursor");
             })
             .catch(() => markVendorPlanKnown("cursor"));
+          ingestCursorLedgerRef.current();
           return;
         }
         if (live === "codex") {
@@ -3105,23 +3255,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             ...latest,
             sessions: latest.sessions.map((item) =>
               item.id === session.id
-                ? applyVendorTurnIdle({
+                ? {
                     ...item,
                     vendorSessionId,
                     messages: item.messages.map((entry) =>
-                      entry.id === assistantId && !assistantHasVisibleReply(entry.text)
-                        ? {
-                            ...entry,
-                            text: settleEmptyAssistantText({
-                              provider: "codex",
-                              reply,
-                              existingText: entry.text,
-                              worked: turnWorkedAfterAssistant(item.messages, assistantId),
-                            }),
-                          }
+                      entry.id === assistantId
+                        ? { ...entry, text: keepStreamedAssistantText({ reply, existingText: entry.text }) }
                         : entry,
                     ),
-                  }, { assistantId })
+                  }
                 : item,
             ),
           }));
@@ -3147,23 +3289,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           ...latest,
           sessions: latest.sessions.map((item) =>
             item.id === session.id
-              ? applyVendorTurnIdle({
+              ? {
                   ...item,
                   vendorSessionId,
                   messages: item.messages.map((entry) =>
-                    entry.id === assistantId && !assistantHasVisibleReply(entry.text)
-                      ? {
-                          ...entry,
-                          text: settleEmptyAssistantText({
-                            provider: "grok",
-                            reply,
-                            existingText: entry.text,
-                            worked: turnWorkedAfterAssistant(item.messages, assistantId),
-                          }),
-                        }
+                    entry.id === assistantId
+                      ? { ...entry, text: keepStreamedAssistantText({ reply, existingText: entry.text }) }
                       : entry,
                   ),
-                }, { assistantId })
+                }
               : item,
           ),
         }));
@@ -3255,7 +3389,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           ),
         }));
       });
-      return;
+      return true;
     }
     const where = project && project.folders.length > 0
       ? project.folders.map((folder) => folder.path).join("\n")
@@ -3297,7 +3431,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           : item,
       ),
     }));
-  }, [cycleTheme, demoPermission, linkFolder, setMode, setSandbox, setSessionEffort, setSessionModel]);
+  }, [cycleTheme, demoMission, demoPermission, linkFolder, setMode, setSandbox, setSessionEffort, setSessionModel]);
 
   /**
    * Pick up a worker the desk interrupted.
@@ -3373,17 +3507,28 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (watchHold) return;
     for (const session of state.sessions) {
-      if (session.status !== "idle" || !session.queue?.length || flushing.current.has(session.id)) continue;
-      if (session.goal?.status === "paused") continue;
+      if (session.status === "running" || session.status === "needs-input") {
+        flushing.current.delete(session.id);
+        liveTurnPending.current.delete(session.id);
+        continue;
+      }
+      if (session.status !== "idle" || session.goal?.status === "paused") continue;
+      if (!session.queue?.length) {
+        flushing.current.delete(session.id);
+        continue;
+      }
+      if (flushing.current.has(session.id) || !canFlushQueuedHead(session)) continue;
       const item = session.queue[0];
-      if (item.notBefore && Date.now() < item.notBefore) continue;
+      if (!item) continue;
       flushing.current.add(session.id);
+      // Hold the lock until send starts a live turn (or bails). Releasing it
+      // in this microtask before React commits `running` flushed every queued
+      // user turn when a worker-finish render saw the parent still idle.
       setState((current) => {
         const shifted = shiftQueuedPrompt(current.sessions, session.id);
         return shifted ? { ...current, sessions: shifted.sessions } : current;
       });
       queueMicrotask(() => {
-        flushing.current.delete(session.id);
         if (item.scheduledRunId) {
           setState((current) => ({
             ...current,
@@ -3399,13 +3544,18 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             ),
           }));
         }
-        sendRef.current(item.text, {
-          images: item.images,
-          sessionId: session.id,
-          joinAttempt: item.joinAttempt,
-          hideUser: item.hideUser === true,
-          scheduledRunId: item.scheduledRunId,
-        });
+        try {
+          const started = sendRef.current(item.text, {
+            images: item.images,
+            sessionId: session.id,
+            joinAttempt: item.joinAttempt,
+            hideUser: item.hideUser === true,
+            scheduledRunId: item.scheduledRunId,
+          });
+          if (started !== true) flushing.current.delete(session.id);
+        } catch {
+          flushing.current.delete(session.id);
+        }
       });
     }
     const wait = queueWakeDelayMs(state.sessions);
@@ -3741,6 +3891,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             hidden: session.hidden,
             role,
             crewModes: session.crewModes,
+            spawnNames: spawnAllowlistNames(session.spawnAllowlist, snapshot.settings),
             restartRuntime,
           };
           if (live === "preview") throw new Error(`${providerById(session.provider).name} is not connected yet`);
@@ -3776,6 +3927,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               hidden: session.hidden,
               role,
               crewModes: session.crewModes,
+              spawnNames: spawnAllowlistNames(session.spawnAllowlist, snapshot.settings),
               customBotId: session.customBotId ?? ("id" in custom ? custom.id : undefined),
               config: {
                 baseUrl: custom.baseUrl,
@@ -3793,7 +3945,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           }
           if (live === "claude") {
             if (!window.workhorse?.claudePrompt) throw new Error("Claude agent runs in the Workhorse desktop window.");
-            const result = await window.workhorse.claudePrompt(promptInput);
+            const result = await window.workhorse.claudePrompt(promptInput).catch((error: unknown) => {
+              if (claudeAuthFailure(error)) refreshClaudeLogin();
+              throw error;
+            });
             return typeof result?.text === "string" ? result.text.trim() : "";
           }
           if (live === "codex") {
@@ -3823,7 +3978,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 permits: latest.watchPermits,
                 dayMarks: latest.watchDayMarks,
               });
-              await replyAsk({ text: formatDeskRoster(catalog) });
+              const fromId = payload.fromSessionId?.trim() || "";
+              const allowlist = fromId ? spawnAllowlistForCaller(latest.sessions, fromId) : undefined;
+              await replyAsk({ text: formatDeskRoster(filterCatalogBySpawnAllowlist(catalog, allowlist)) });
               return;
             }
             if (action === "plan") {
@@ -4369,7 +4526,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                   await replyAsk({
                     text: JSON.stringify({
                       ok: false,
-                      reason: "Helpers are read-only by design; the parent owns writes.",
+                      reason: "This helper was asked to run read-only; the parent owns its writes.",
                     }),
                   });
                   return;
@@ -4402,6 +4559,55 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               // becomes a card. The person is not in that chat, and the seat it
               // wants moved belongs to a chat further up. Say which one.
               if (from.hidden) {
+                // Within the desk default the desk grants the seat itself: the
+                // worker was started by the system, and nothing is raised past
+                // what the person set. Past the ceiling, it is told the source.
+                if (!elevationStillNeeded({ mode: from.mode, sandbox: from.sandbox }, classified.need)) {
+                  // The seat already covers it; only the lineage record lagged.
+                  await replyAsk({
+                    text: JSON.stringify({
+                      ok: true,
+                      alreadyElevated: true,
+                      mode: from.mode,
+                      sandbox: from.sandbox,
+                      howToUse: "This chat already has that access. Continue the work.",
+                    }),
+                  });
+                  return;
+                }
+                const standing = standingGrant({ session: from, need: classified.need, deskAccess: latest.settings.access });
+                if (standing) {
+                  const raised = applyStandingGrant(from, standing);
+                  setState((current) => ({
+                    ...current,
+                    sessions: current.sessions.map((item) =>
+                      item.id === from.id
+                        ? {
+                            ...applyStandingGrant(item, standing),
+                            messages: [
+                              ...item.messages,
+                              {
+                                id: uid("msg"),
+                                role: "system" as const,
+                                text: `Granted from the desk default: ${describeElevation(item, standing)}.`,
+                                createdAt: Date.now(),
+                              },
+                            ],
+                          }
+                        : item,
+                    ),
+                  }));
+                  await replyAsk({
+                    text: JSON.stringify({
+                      ok: true,
+                      elevated: true,
+                      mode: raised.mode,
+                      sandbox: raised.sandbox,
+                      howToUse: "Granted from the desk default. Continue the work.",
+                    }),
+                  });
+                  return;
+                }
                 await replyAsk({
                   text: JSON.stringify({
                     ok: false,
@@ -4786,25 +4992,19 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             }
             if (action === "agent-status") {
               const id = (payload.name || payload.message || "").trim();
-              const worker = latest.sessions.find((session) => session.id === id && Boolean(session.parentId));
-              if (worker) {
-                const parentId = payload.fromSessionId?.trim() || "";
-                const allowed = !parentId || descendantSessionIds(latest.sessions, parentId).includes(worker.id);
-                if (!allowed) {
-                  await replyAsk({ error: "unknown" });
-                  return;
-                }
-                await replyAsk({
-                  text: JSON.stringify(workerStatusSnapshot(worker), null, 2),
-                });
-                return;
-              }
-              const task = normalizeTaskStore(latest.externalTasks).byId[id];
-              if (!task) {
+              const resolved = resolveAgentStatus({
+                id,
+                fromSessionId: payload.fromSessionId,
+                sessions: latest.sessions,
+                externalTask: normalizeTaskStore(latest.externalTasks).byId[id],
+              });
+              if (!resolved.ok) {
                 await replyAsk({ error: "unknown" });
                 return;
               }
-              await replyAsk({ text: JSON.stringify({ ...task, status: task.status }, null, 2) });
+              await replyAsk({
+                text: JSON.stringify(resolved.snapshot, null, 2),
+              });
               return;
             }
             if (action === "cancel-agent") {
@@ -5263,6 +5463,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               model: payload.model,
               chat: payload.chat,
             });
+            if (routeSpawn) refreshPlansForRouting(latest.deskPlans ?? plansRef.current);
             const routeStatuses = routeSpawn
               ? watchVendorStatuses({
                   settings: latest.settings,
@@ -5320,15 +5521,28 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               outcomes: outcomesFromLearningEvents(learningOutcomeEvents),
               exclude: effectiveExclusions,
             };
+            const spawnAllowlist = spawnAllowlistForCaller(latest.sessions, caller.id);
             const routeCandidates = routeSpawn
-              ? constrainRouteCandidatesForSpawn(
-                  routingCandidatesForDesk(latest.settings, routeStatuses, latest.deskPlans ?? plansRef.current),
-                  { provider: payload.provider },
+              ? filterCandidatesBySpawnAllowlist(
+                  constrainRouteCandidatesForSpawn(
+                    routingCandidatesForDesk(latest.settings, routeStatuses, latest.deskPlans ?? plansRef.current),
+                    { provider: payload.provider, model: payload.model },
+                  ),
+                  spawnAllowlist,
                 )
               : [];
             const routeDecision = routeSpawn
               ? chooseRoutingDecision(routeCandidates, routeRequest, latest.settings.routing)
               : null;
+            if (routeSpawn) {
+              recordRoutingDecision({
+                source: "spawn",
+                candidates: routeCandidates,
+                request: routeRequest,
+                settings: latest.settings.routing,
+                ...(routeDecision ? { selected: routeDecision } : {}),
+              });
+            }
             if (routeSpawn && !routeDecision) {
               await replyAsk({
                 error: `no capable route: ${describeRoutingMiss(routeCandidates, routeRequest, latest.settings.routing)}`,
@@ -5343,16 +5557,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               inferRoutingTier(payload.message, payload.attachments, {
                 role: routingRole,
               });
-            const requestedEffort = parseEffort(String(payload.effort ?? ""));
-            const spawnTimeoutSeconds = isNested
-              ? Math.min(120, Math.max(30, payload.timeoutSeconds ?? 120))
-              : payload.timeoutSeconds;
-            const spawnTokenBudget = isNested
-              ? nestedHelperBudget({
-                  requested: payload.tokenBudget,
-                  parentRemaining: parentBudgetRemaining(caller.agentRun),
-                })
-              : payload.tokenBudget;
+            const requestedEffort = parseEffort(String(payload.effort ?? ""))
+              ?? parseEffortFromText(lastUserMessage(caller)?.text ?? "")
+              ?? parseEffortFromText(String(payload.message ?? ""));
             const spawnIsolation = nestedPolicy.isolation ?? payload.isolation ?? "worktree";
             const admitted = admitSpawn({
               parent: caller,
@@ -5474,6 +5681,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               });
               return;
             }
+            if (!spawnIdentityAllowed(spawnAllowlist, spawnAllowlistIdForSpec(spec))) {
+              await replyAsk({
+                error: spawnAllowlistBlockedError(spawnSpecDisplayName(spec, latest.settings)),
+              });
+              return;
+            }
             if (vendorSendTarget(spec.provider) === "preview") {
               await replyAsk({ error: `${providerById(spec.provider).name} is not connected yet` });
               return;
@@ -5482,6 +5695,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               provider: spec.provider,
               customBotId: spec.customBotId,
               name: spec.title,
+              model: spec.model,
             });
             const vendorKey = spec.customBotId ? `bot:${spec.customBotId}` : spec.provider;
             const sameVendor =
@@ -5599,12 +5813,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               }
               assignedPlan = running.plan;
             }
-            const timeoutMs = typeof spawnTimeoutSeconds === "number"
-              ? Math.max(30, Math.min(3_600, spawnTimeoutSeconds)) * 1_000
-              : 10 * 60 * 1_000;
-            const tokenBudget = typeof spawnTokenBudget === "number" && spawnTokenBudget > 0
-              ? Math.floor(spawnTokenBudget)
-              : undefined;
             const project = boundProject;
             const root = admitted.cwd;
             let environment: SessionEnvironment = { kind: "local" };
@@ -5657,6 +5865,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 sessionId: childId,
                 isolation,
                 role: spawnRole,
+                // The seat this worker will actually run under decides the write,
+                // not the label on its role.
+                sandbox: nestedPolicy.readOnly && !helperReleased ? "read-only" : callAccess.granted.sandbox,
                 files,
               });
               if (!claim.ok) {
@@ -5720,29 +5931,20 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               workerName = reserved.name;
             }
             const assignmentBudget = beginAssignmentBudget(priorWorker?.agentRun, {
-              tokenBudget,
               mission: spawnMission
                 ? {
-                    tokenBudget: spawnMission.tokenBudget,
                     usedTokens: missionUsedTokens(latest.sessions, spawnMission.id),
                     iteration: spawnMission.iteration,
                     maxIterations: spawnMission.maxIterations,
                   }
                 : undefined,
             });
-            const childMission = spawnMission
-              ? {
-                  ...spawnMission,
-                  ...(assignmentBudget.missionTokenBudget
-                    ? { tokenBudget: assignmentBudget.missionTokenBudget }
-                    : {}),
-                }
-              : undefined;
+            const childMission = spawnMission;
             const child: Session = {
               // A reused worker keeps everything it already is — most of all
               // vendorSessionId, which IS its memory of the last slice. Only
-              // the run and the new message are fresh. Budget and usedTokens
-              // come from THIS assignment, never the previous slice.
+              // the run and the new message are fresh. Slice spend starts at
+              // zero on this assignment; billed usage for the chat stays on the meter.
               ...(priorWorker ?? {}),
               id: childId,
               workerName,
@@ -5774,7 +5976,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               agentRun: {
                 status: "running",
                 startedAt,
-                timeoutMs,
                 isolation,
                 executionOwner: "workhorse",
                 ...assignmentBudget,
@@ -5883,6 +6084,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               };
             });
             const waitForReply = spawnWaitsForReply(payload);
+            const spawnCrew = parentCrewSnapshot(
+              latest.sessions.some((item) => item.id === childId)
+                ? latest.sessions.map((item) => (item.id === childId ? child : item))
+                : [...latest.sessions, child],
+              parent.id,
+            );
             let terminalFailure: "timed-out" | "cancelled" | "budget-exceeded" | undefined;
             const markChildFailure = (error: unknown) => {
               const message = error instanceof Error ? error.message : String(error);
@@ -5934,46 +6141,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 const liveRun = stateRef.current.sessions.find((item) => item.id === childId)?.agentRun;
                 if (liveRun?.status === "budget-exceeded") {
                   terminalFailure = "budget-exceeded";
-                  throw error;
                 }
-                if (!needsBudgetHandoffTurn({ ...liveRun, status: liveRun?.status })) throw error;
-              }
-              const liveAfter = stateRef.current.sessions.find((item) => item.id === childId);
-              if (needsBudgetHandoffTurn(liveAfter?.agentRun) && liveAfter?.agentRun?.status === "running") {
-                const handoffAt = Date.now();
-                setState((current) => ({
-                  ...current,
-                  sessions: current.sessions.map((item) =>
-                    item.id === childId && item.agentRun
-                      ? {
-                          ...item,
-                          status: "running" as const,
-                          agentRun: appendRunEvent(
-                            {
-                              ...item.agentRun,
-                              budgetPhase: "handoff",
-                              budgetHandoffAt: handoffAt,
-                            },
-                            { at: handoffAt, type: "budget-handoff", detail: BUDGET_HANDOFF_PROMPT },
-                          ),
-                        }
-                      : item,
-                  ),
-                }));
-                try {
-                  reply = (await promptVendor(
-                    { ...liveAfter, status: "running" },
-                    BUDGET_HANDOFF_PROMPT,
-                    latest.settings.mcpServers,
-                  )) || reply;
-                } catch (error) {
-                  const liveRun = stateRef.current.sessions.find((item) => item.id === childId)?.agentRun;
-                  if (liveRun?.status === "budget-exceeded") {
-                    terminalFailure = "budget-exceeded";
-                    throw error;
-                  }
-                  throw error;
-                }
+                throw error;
               }
               const terminalStatus = stateRef.current.sessions.find((item) => item.id === childId)?.agentRun?.status;
               if (terminalStatus === "timed-out" || terminalStatus === "cancelled" || terminalStatus === "budget-exceeded") {
@@ -5986,7 +6155,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                     correlationId: childCorrelationId,
                   });
                   sessions = settlePlanAssignment(sessions, parent.id, childId, "failed", terminalStatus);
-                  const admitted = joinAdmit(sessions, parent.id, current, plansRef.current);
+                  const admitted = shouldJoinAfterChildSettle(rowStatus)
+                    ? joinAdmit(sessions, parent.id, current, plansRef.current)
+                    : { sessions };
                   queueMicrotask(() => {
                     if (admitted.auditor) sendRef.current(admitted.auditor.brief, { sessionId: admitted.auditor.id, hideUser: true });
                   });
@@ -6087,11 +6258,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                     ),
                     worker: workerName,
                     reused: Boolean(priorWorker),
+                    crew: spawnCrew,
                     access: accessReceipt,
                     routingMode: routedWorkerIsRouted ? "auto" : "manual",
                     ...(routedWorkerIsRouted && routeDecision ? { routingDecision: routeDecision } : {}),
-                    howToUse:
-                      `Worker is running in its own chat. ${priorWorker ? `${workerName} picked this up with what it already knew.` : `${workerName} is new to this work.`} For the next slice of the same kind pass worker="${workerName}" and it goes back to the same worker. Spawn the rest with wait=false, then stop. The desk joins reports later. Do not sit on workhorse_await_agents or ask the user to pick.`,
+                    howToUse: spawnContinuationHowToUse(workerName, Boolean(priorWorker)),
                   },
                   null,
                   2,
@@ -6131,6 +6302,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                   ...(finished?.routingDecision ?? routeDecision
                     ? { routingDecision: finished?.routingDecision ?? routeDecision }
                     : {}),
+                  crew: parentCrewSnapshot(stateRef.current.sessions, parent.id),
                   report: fallback,
                 },
                 null,
@@ -6173,6 +6345,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               provider: target.provider,
               customBotId: target.customBotId,
               name: target.title,
+              model: target.model,
             });
             if (row && vendorOverrideNeeded(row)) {
               const requestId = uid("perm");
@@ -6248,6 +6421,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                       toolStatus: "running",
                       text: target.title,
                       createdAt: startedAt,
+                      correlationId: peerCorrelationId,
                     },
                   ],
                 };
@@ -6316,6 +6490,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 ),
                 target.id,
                 "completed",
+                { correlationId: peerCorrelationId, toolCallId: payload.id },
               ),
             }));
             return fallback;
@@ -6353,7 +6528,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                         }
                       : item,
                   ),
-                  { parentId: from?.id, childId: target.id, targetTitle: target.title, error: message },
+                  {
+                    parentId: from?.id,
+                    childId: target.id,
+                    targetTitle: target.title,
+                    error: message,
+                    correlationId: peerCorrelationId,
+                    toolCallId: payload.id,
+                  },
                 ),
               }));
             });
@@ -6394,6 +6576,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 childId,
                 targetTitle: target?.title,
                 error: message,
+                correlationId: payload.traceId || payload.id,
+                toolCallId: payload.id,
               },
             );
             const parentId = payload.fromSessionId || target?.parentId;
@@ -6413,7 +6597,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
-  /** One terminal path, whether the caller cancelled or the desk's own deadline fired. */
+  /** Caller cancel still shares this path. The desk does not fire it for a runtime limit. */
   const stopWorker = useCallback((childSessionId: string, reason: "timed-out" | "cancelled") => {
     const child = stateRef.current.sessions.find((session) => session.id === childSessionId);
     if (child?.status === "running") cancelVendorSession(child);
@@ -6424,7 +6608,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       });
       const parentId = child?.parentId;
       if (parentId) sessions = settlePlanAssignment(sessions, parentId, childSessionId, "failed", reason);
-      const admitted = parentId ? joinAdmit(sessions, parentId, current, plansRef.current) : { sessions };
+      const admitted =
+        parentId && shouldJoinAfterChildSettle(rowStatus)
+          ? joinAdmit(sessions, parentId, current, plansRef.current)
+          : { sessions };
       queueMicrotask(() => {
         if (admitted.auditor) sendRef.current(admitted.auditor.brief, { sessionId: admitted.auditor.id, hideUser: true });
       });
@@ -6436,23 +6623,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     if (!window.workhorse?.onPeerCancel) return;
     return window.workhorse.onPeerCancel(({ childSessionId, reason }) => stopWorker(childSessionId, reason));
   }, [stopWorker]);
-
-  /**
-   * The desk enforces the runtime limit, because the caller's timer cannot: on Link a
-   * delegation is answered immediately with the worker id, and that reply clears it
-   * while the worker runs on. Measured before this: a 30s limit let a pass run 251s.
-   */
-  useEffect(() => {
-    if (!ready) return;
-    const sweep = () => {
-      for (const id of expiredWorkerIds(stateRef.current.sessions, Date.now())) {
-        stopWorker(id, "timed-out");
-      }
-    };
-    sweep();
-    const timer = window.setInterval(sweep, WORKER_DEADLINE_SWEEP_MS);
-    return () => window.clearInterval(timer);
-  }, [ready, stopWorker]);
 
   useEffect(() => {
     const flushStreams = () => {
@@ -6480,8 +6650,64 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       frame: (run) => requestAnimationFrame(run),
       cancelFrame: (handle) => cancelAnimationFrame(handle),
     });
+    const armTurnIdle = (sessionId: string, delayMs: number) => {
+      const handle = turnIdleTimer.current[sessionId];
+      if (handle) window.clearTimeout(handle);
+      turnIdleTimer.current[sessionId] = window.setTimeout(() => {
+        delete turnIdleTimer.current[sessionId];
+        pendingIdleClose.current[sessionId]?.();
+      }, delayMs);
+    };
+    const noteTrailingTurnActivity = (sessionId: string) => {
+      const session = stateRef.current.sessions.find((item) => item.id === sessionId);
+      const assistantId = grokAssistantId.current[sessionId];
+      const canRevive = Boolean(
+        session &&
+          shouldReviveIdleTurn({
+            status: session.status,
+            assistantId,
+            messages: session.messages,
+          }),
+      );
+      if (canRevive) {
+        setState((current) => ({
+          ...current,
+          sessions: current.sessions.map((item) => {
+            if (item.id !== sessionId) return item;
+            return {
+              ...item,
+              status: "running" as const,
+              messages: item.messages.map((message) =>
+                assistantId && message.id === assistantId && isDeskAssistantNotice(message.text)
+                  ? { ...message, text: "" }
+                  : message,
+              ),
+            };
+          }),
+        }));
+        if (turnIdleStopReason.current[sessionId] === undefined) {
+          turnIdleStopReason.current[sessionId] = "end_turn";
+        }
+      }
+      if (!pendingIdleClose.current[sessionId] && !canRevive) return;
+      armTurnIdle(sessionId, TURN_IDLE_AFTER_TRAILING_MS);
+    };
     const apply = (event: GrokBridgeEvent) => {
       try {
+      const redirectedId = redirectedAssistant.current[event.sessionId];
+      if (
+        shouldIgnoreRedirectedCancel({
+          eventType: event.type,
+          stopReason: event.type === "done" ? event.stopReason : undefined,
+          redirectedAssistantId: redirectedId,
+        })
+      ) {
+        delete redirectedAssistant.current[event.sessionId];
+        return;
+      }
+      if (event.type === "done" || event.type === "error") {
+        delete redirectedAssistant.current[event.sessionId];
+      }
       const goalHalted = goalHaltedSessions.current.has(event.sessionId);
       const terminal = vendorTerminalAction({
         halted: goalHalted,
@@ -6530,6 +6756,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           grokChunkQueue.current[event.sessionId] ?? "",
           event.text,
         );
+        noteTrailingTurnActivity(event.sessionId);
         streamCommits.request();
         return;
       }
@@ -6537,6 +6764,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         if (!event.text) return;
         grokThoughtQueue.current[event.sessionId] =
           (grokThoughtQueue.current[event.sessionId] ?? "") + event.text;
+        noteTrailingTurnActivity(event.sessionId);
         streamCommits.request();
         return;
       }
@@ -6571,13 +6799,31 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           ...current,
           sessions: current.sessions.map((session) =>
             session.id === event.sessionId
-              ? { ...session, vendorSessionId: event.vendorSessionId, vendorProvider: session.provider }
+              ? {
+                  ...session,
+                  vendorSessionId: event.vendorSessionId,
+                  vendorProvider: session.provider,
+                  ...(event.opened === "session/new" ? { vendorTasks: undefined } : {}),
+                }
+              : session,
+          ),
+        }));
+        return;
+      }
+      if (event.type === "background-task") {
+        const { sessionId: _sessionId, type: _type, ...task } = event;
+        setState((current) => ({
+          ...current,
+          sessions: current.sessions.map((session) =>
+            session.id === event.sessionId
+              ? { ...session, vendorTasks: applyVendorBackgroundTask(session.vendorTasks, task) }
               : session,
           ),
         }));
         return;
       }
       if (event.type === "tool") {
+        noteTrailingTurnActivity(event.sessionId);
         const owner = stateRef.current.sessions.find((item) => item.id === event.sessionId);
         const turn = learningTurns.current[event.sessionId];
         if (turn && event.toolCallId && !turn.toolIds.includes(event.toolCallId)) turn.toolIds.push(event.toolCallId);
@@ -6782,6 +7028,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 root,
                 currentFingerprint: fileContentsFingerprint(source?.text ?? ""),
                 role: owner.agentRun?.role,
+                sandbox: owner.sandbox,
               });
               if (!decision.ok) {
                 deny(decision.error);
@@ -6852,20 +7099,32 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             ? event.elevate
             : undefined;
         const ownerProject = owner ? stateRef.current.projects.find((item) => item.id === owner.projectId) : undefined;
+        // The card shows the title the desk's labeller made — "Run a command".
+        // The classifiers need the vendor's own name for the same call, which
+        // rides alongside it, because a title no classifier knew read as
+        // not-a-shell and denied a Claude worker's grep on a read-only seat.
+        const classifyTool = classifyPermissionTool(
+          event.tool,
+          "rawTool" in event && typeof event.rawTool === "string" ? event.rawTool : undefined,
+        );
         const security = owner
           ? securityPolicyAnswer({
               policy: owner.securityPolicy,
-              tool: event.tool,
+              tool: classifyTool,
               detail: event.detail,
               path: event.path,
               roots: ownerProject?.folders.map((folder) => folder.path) ?? [],
+              // Where this worker actually runs, so a `..` inside a command is
+              // measured from there. A worktree session is not its project
+              // folder, and resolving against the wrong one moves the boundary.
+              cwd: sessionExecutionCwd(owner.environment, primaryFolder(ownerProject, folderExists)?.path ?? ""),
             })
           : { answer: null };
         const forced = security.answer ?? (owner
           ? permissionPolicyAnswer({
               mode: owner.mode,
               sandbox: owner.sandbox,
-              tool: event.tool,
+              tool: classifyTool,
               detail: event.detail,
               path: event.path,
             })
@@ -6877,7 +7136,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               ? elevationForBlock({
                   mode: owner.mode,
                   sandbox: owner.sandbox,
-                  tool: event.tool,
+                  tool: classifyTool,
                   detail: event.detail,
                   path: event.path,
                 })
@@ -6892,6 +7151,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           sessions: stateRef.current.sessions,
           deskAccess: stateRef.current.settings.access,
         });
+        // The desk default is the standing permission for work the system
+        // started. A hidden worker blocked by a seat the desk default already
+        // covers is handed that seat here: allowed, raised, and told so in its
+        // transcript. No card, no denial note, no second call to fix.
+        // A security boundary is never granted past: an elevate event arrives
+        // with `blocked` set whatever the policy said, so the gate sits here.
+        const standing =
+          blocked && owner && !security.boundary && security.answer !== "deny"
+            ? standingGrant({ session: owner, need: blocked, deskAccess: stateRef.current.settings.access })
+            : null;
         // A subagent never asks the person. Its chat is hidden, the person is
         // not in it, and the setting it wants moved lives on some other chat
         // entirely — so the card was unanswerable where it appeared. The desk
@@ -6900,7 +7169,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         // A VISIBLE chat's own vendor session still gets its card: that is the
         // person asking to lift their own setting, in front of them.
         const deskClamp =
-          blocked && owner
+          blocked && owner && !standing
             ? owner.hidden
               ? sandboxSourceNote({
                   session: owner,
@@ -6911,7 +7180,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 ? deskClampNote(owner.agentRun)
                 : null
             : null;
-        const need = deskClamp ? null : blocked;
+        const need = deskClamp || standing ? null : blocked;
         if (need && owner) {
           setState((current) => ({
             ...current,
@@ -6940,7 +7209,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           ? grantedPolicyAnswer({
               granted: owner.agentRun?.grantedAccess?.mode,
               sandbox: owner.sandbox,
-              tool: event.tool,
+              tool: classifyTool,
               detail: event.detail,
               path: event.path,
             })
@@ -6951,10 +7220,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         // prompt below would put the desk's narrowing in front of the person
         // again, which is the whole thing this lane removes.
         const answered =
+          (standing ? ("once" as const) : null) ??
           forced ??
           granted ??
           autoAllowPermission({
-            tool: event.tool,
+            tool: classifyTool,
             detail: event.detail,
             path: event.path,
             grants: owner?.permissionGrants,
@@ -7004,6 +7274,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                       ),
                       agentRun: session.agentRun,
                     }),
+                    ...(standing ? applyStandingGrant(session, standing) : {}),
                     messages:
                       allowed === "deny"
                         ? [
@@ -7015,7 +7286,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                               createdAt: Date.now(),
                             },
                           ]
-                        : session.messages,
+                        : standing
+                          ? [
+                              ...session.messages,
+                              {
+                                id: uid("msg"),
+                                role: "system" as const,
+                                text: `Granted from the desk default: ${describeElevation(session, standing)}. ${event.tool} — ${event.detail}`,
+                                createdAt: Date.now(),
+                              },
+                            ]
+                          : session.messages,
                   }
                 : session,
             ),
@@ -7076,69 +7357,26 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         const liveSession = stateRef.current.sessions.find((item) => item.id === event.sessionId);
         if (liveSession?.agentRun?.status === "running") {
           const spend = applyWorkerBudgetUsage(liveSession.agentRun, event);
-          const now = Date.now();
-          const next = nextBudgetRunState(liveSession.agentRun, spend, now);
-          if (next.action === "handoff" || next.action === "terminate") cancelVendorSession(liveSession);
           setState((current) => ({
             ...current,
-            sessions: withSubagentStatus(
-              current.sessions.map((session) => {
-                if (session.id !== event.sessionId || !session.agentRun) return session;
-                let agentRun: AgentRun = {
+            sessions: current.sessions.map((session) => {
+              if (session.id !== event.sessionId || !session.agentRun) return session;
+              return {
+                ...session,
+                agentRun: {
                   ...session.agentRun,
-                  usedTokens: next.usedTokens,
-                  budgetBaseline: next.budgetBaseline,
-                  outputTokensTotal: next.outputTokensTotal,
-                  cacheTokensTotal: next.cacheTokensTotal,
-                  ...(next.budgetPhase ? { budgetPhase: next.budgetPhase } : {}),
-                  ...(next.budgetWarnedAt ? { budgetWarnedAt: next.budgetWarnedAt } : {}),
-                  ...(next.budgetHandoffAt ? { budgetHandoffAt: next.budgetHandoffAt } : {}),
-                  ...(next.status === "budget-exceeded"
-                    ? {
-                        status: "budget-exceeded" as const,
-                        finishedAt: next.finishedAt ?? now,
-                        error: next.error,
-                      }
-                    : {}),
-                };
-                if (next.action !== "none" && next.notice) {
-                  const type =
-                    next.action === "terminate"
-                      ? "budget-exceeded" as const
-                      : next.action === "handoff"
-                        ? "budget-verify" as const
-                        : "budget-warn" as const;
-                  agentRun = appendRunEvent(agentRun, { at: now, type, detail: next.notice });
-                }
-                const alreadyNoted =
-                  !next.notice ||
-                  session.messages.some((message) => message.role === "system" && message.text === next.notice);
-                return {
-                  ...session,
-                  status: next.action === "terminate" ? "idle" : session.status,
-                  agentRun,
-                  messages:
-                    next.notice && !alreadyNoted
-                      ? [
-                          ...session.messages,
-                          {
-                            id: uid("msg"),
-                            role: "system" as const,
-                            text: next.notice,
-                            createdAt: now,
-                          },
-                        ]
-                      : session.messages,
-                };
-              }),
-              event.sessionId,
-              next.action === "terminate" ? "failed" : "running",
-            ),
+                  usedTokens: spend.usedTokens,
+                  budgetBaseline: spend.budgetBaseline,
+                  outputTokensTotal: spend.outputTokensTotal,
+                  cacheTokensTotal: spend.cacheTokensTotal,
+                },
+              };
+            }),
           }));
         }
         const occupancy = occupancyFromUsage(
           incoming,
-          liveSession ? contextWindowFor(liveSession.provider, liveSession.model) : 0,
+          liveSession ? contextWindowFor(liveSession.provider, liveSession.model, undefined, liveSession.customBotId) : 0,
         );
         if (occupancy !== undefined) {
           grokContextSeen.current[event.sessionId] = occupancy;
@@ -7207,12 +7445,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         }
         if (session?.provider === "cursor") {
           void window.workhorse?.cursorPlanUsage?.()
+            // The same rule as the refreshers below. These two fire when a
+            // Cursor turn ends, which is exactly when the meter is busiest, and
+            // they were still blanking the reading on an answer of nothing.
             .then((plan) => {
-              setCursorPlan(plan ?? undefined);
+              setCursorPlan((previous) => planAfterRefresh(previous, plan));
               markVendorPlanKnown("cursor");
             })
             .catch(() => markVendorPlanKnown("cursor"));
+          ingestCursorLedgerRef.current();
         }
+        const closeTurn = () => {
         setState((current) => {
           const queued = grokChunkQueue.current[event.sessionId] ?? "";
           delete grokChunkQueue.current[event.sessionId];
@@ -7267,32 +7510,60 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           const finishedTurn = sessions.find((session) => session.id === event.sessionId);
           const reportedBlocked = Boolean(finishedTurn?.parentId) && workerReportedBlocked(childReportText(finishedTurn));
           const failed = safetyPaused || reportedBlocked;
-          sessions = withSubagentStatus(
+          sessions = withFinishedTurnSubagentStatus(
             sessions,
             event.sessionId,
             holdForHandoff ? "running" : failed ? "failed" : "completed",
+            assistantId,
           );
           const finished = sessions.find((session) => session.id === event.sessionId);
           if (finished?.parentId && !holdForHandoff) {
-            sessions = applyChildIdleSync(sessions, event.sessionId, failed ? "failed" : "completed", {
+            const childSettleStatus =
+              event.stopReason === "cancelled" ? ("cancelled" as const) : failed ? ("failed" as const) : ("completed" as const);
+            sessions = applyChildIdleSync(sessions, event.sessionId, childSettleStatus, {
               report: childReportText(finished),
               ...(safetyPaused
                 ? { error: "Agent paused before completing its goal." }
                 : reportedBlocked
                   ? { error: "Worker reported blocked." }
-                  : {}),
+                  : event.stopReason === "cancelled"
+                    ? { error: "Subagent was cancelled." }
+                    : {}),
             });
-            const admitted = joinAdmit(sessions, finished.parentId, current, plansRef.current);
+            const admitted = shouldJoinAfterChildSettle(childSettleStatus)
+              ? joinAdmit(sessions, finished.parentId, current, plansRef.current)
+              : { sessions };
             queueMicrotask(() => {
               if (admitted.auditor) sendRef.current(admitted.auditor.brief, { sessionId: admitted.auditor.id, hideUser: true });
             });
             sessions = admitted.sessions;
+          } else if (finished && !finished.parentId && finished.lineup) {
+            sessions = maybeEnqueueLineupJoin(sessions, finished.id);
           }
           return { ...current, sessions };
         });
+        };
+        const stopReason = event.stopReason;
+        if (stopReason === "cancelled" || stopReason === "safety_pause") {
+          const handle = turnIdleTimer.current[event.sessionId];
+          if (handle) window.clearTimeout(handle);
+          delete turnIdleTimer.current[event.sessionId];
+          delete turnIdleStopReason.current[event.sessionId];
+          delete pendingIdleClose.current[event.sessionId];
+          closeTurn();
+          return;
+        }
+        turnIdleStopReason.current[event.sessionId] = stopReason;
+        pendingIdleClose.current[event.sessionId] = closeTurn;
+        armTurnIdle(event.sessionId, TURN_IDLE_AFTER_DONE_MS);
         return;
       }
       if (event.type === "error") {
+        const idleHandle = turnIdleTimer.current[event.sessionId];
+        if (idleHandle) window.clearTimeout(idleHandle);
+        delete turnIdleTimer.current[event.sessionId];
+        delete turnIdleStopReason.current[event.sessionId];
+        delete pendingIdleClose.current[event.sessionId];
         const pending = grokUsagePending.current[event.sessionId];
         delete grokUsagePending.current[event.sessionId];
         const failedSession = stateRef.current.sessions.find((item) => item.id === event.sessionId);
@@ -7346,7 +7617,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           delete learningTurns.current[event.sessionId];
         }
         setState((current) => {
-          let sessions = withSubagentStatus(
+          let sessions = withFinishedTurnSubagentStatus(
             current.sessions.map((session) =>
               session.id === event.sessionId
                 ? applyVendorTurnIdle({
@@ -7373,6 +7644,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             ),
             event.sessionId,
             "failed",
+            assistantId,
           );
           const failed = sessions.find((session) => session.id === event.sessionId);
           if (failed?.parentId) {
@@ -7400,6 +7672,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const offCustom = window.workhorse?.onCustomEvent?.(apply);
     return () => {
       streamCommits.stop();
+      for (const handle of Object.values(turnIdleTimer.current)) window.clearTimeout(handle);
+      turnIdleTimer.current = {};
+      pendingIdleClose.current = {};
+      turnIdleStopReason.current = {};
       offGrok?.();
       offCodex?.();
       offClaude?.();
@@ -7709,22 +7985,37 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     return { ok: true, created: installed.created, bot: publicBotCard(installed.bot) };
   }, []);
 
-  const deleteCustomBot = useCallback((id: string) => {
-    setState((current) => ({
-      ...current,
-      settings: {
-        ...current.settings,
-        customBots: current.settings.customBots.filter((bot) => bot.id !== id),
-      },
-      lastModel:
-        current.lastModel.customBotId === id
-          ? { ...DEFAULT_CHOICE }
-          : current.lastModel,
-      sessions: current.sessions.map((session) =>
-        session.customBotId === id ? { ...session, customBotId: undefined } : session,
-      ),
-    }));
+  /**
+   * Everything the desk holds for one slot outside `settings.customBots`.
+   *
+   * Three records keyed by bot id, dropped together, so a slot that has gone or
+   * gone quiet cannot leave a reading in one of them. Delete and Off both come
+   * through here rather than each writing their own three setters.
+   */
+  const forgetCustomSlotRecords = useCallback((id: string, keepPlan = false) => {
+    const drops = customSlotDrops(id, keepPlan);
+    setCustomPlans(drops.plans);
+    setCustomPlanKnown(drops.known);
+    setCustomMeterHealth(drops.health);
   }, []);
+
+  /**
+   * Remove a connection, and every trace of the slot with it.
+   *
+   * The row leaving `settings.customBots` is what stops the leftover ping, the
+   * routing candidate, the catalog fetch and the model rows: all four walk that
+   * one list. What it did not stop was the reading — `customPlans` is keyed by
+   * bot id and was only ever written to, so a deleted bot's leftover figure sat
+   * in `deskPlans.custom` for the life of the desk and was saved to disk with
+   * it. A meter for a bot nobody can see is a number nobody can check.
+   */
+  const deleteCustomBot = useCallback(
+    (id: string) => {
+      setState((current) => deskAfterCustomBotDeleted(current, id));
+      forgetCustomSlotRecords(id);
+    },
+    [forgetCustomSlotRecords],
+  );
 
   const updateCustomBot = useCallback((id: string, patch: Partial<CustomBot>) => {
     setState((current) => {
@@ -7743,6 +8034,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         ),
       };
     });
+    // A new key or a new host is somebody asking for this bot to be tried now.
+    // Waiting out a backoff earned by the credentials they just replaced would
+    // leave the ring dark for up to an hour after the fix.
+    if (customEditRetriesMeter(patch)) setCustomMeterHealth((current) => dropBotEntry(current, id));
   }, []);
 
   const probeCustomBot = useCallback(async (id: string) => {
@@ -7779,15 +8074,23 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     };
   }, [updateCustomBot]);
 
-  const setCustomBotEnabled = useCallback((id: string, enabled: boolean) => {
-    setState((current) => ({
-      ...current,
-      settings: {
-        ...current.settings,
-        customBots: current.settings.customBots.map((bot) => (bot.id === id ? { ...bot, enabled } : bot)),
-      },
-    }));
-  }, []);
+  /**
+   * On and off are the same switch as far as the slot is concerned.
+   *
+   * Off must cost nothing: no meter call, no catalog fetch, no routing
+   * candidate, and no stale ring left behind reading a figure from before the
+   * switch. On is somebody asking for it to be tried now, so any backoff the
+   * meter had built up is cleared rather than waited out.
+   */
+  const setCustomBotEnabled = useCallback(
+    (id: string, enabled: boolean) => {
+      setState((current) => deskAfterCustomBotEnabled(current, id, enabled));
+      // Off drops all three. On keeps the reading the ring is showing and drops
+      // the backoff, which is what "try it now" means.
+      forgetCustomSlotRecords(id, enabled);
+    },
+    [forgetCustomSlotRecords],
+  );
 
   const refreshCustomLogin = useCallback(() => {
     void (async () => {
@@ -7847,16 +8150,31 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     setState((current) => ({ ...current, threadWidth: clampPaneWidth(width, THREAD_PANE) }));
   }, []);
 
+  /**
+   * A refresh that fails must not spend the reading the desk already has.
+   *
+   * Every refresher used to write undefined into its plan on a rejection, and
+   * on an answer of nothing. That was survivable while plans were only fetched
+   * at boot and in the Usage pane. Routing now asks whenever a plan is over
+   * fifteen minutes old, so one flaky call in the middle of a spawn wave would
+   * have turned a known meter into an unknown one and pulled a vendor's
+   * capacity term out from under the ranking.
+   *
+   * Unknown still means unknown. A vendor that has never answered holds
+   * undefined already, so leaving the previous value alone keeps a first
+   * failure reading unknown and keeps a later failure reading what it last
+   * knew. Only an answer replaces an answer.
+   */
   const refreshGrokPlan = useCallback(() => {
     if (!window.workhorse?.grokPlanUsage) return;
     void window.workhorse
       .grokPlanUsage()
       .then((plan) => {
-        setGrokPlan(plan);
+        setGrokPlan((previous) => planAfterRefresh(previous, plan));
         markVendorPlanKnown("grok");
       })
       .catch(() => {
-        setGrokPlan(undefined);
+        setGrokPlan((previous) => planAfterRefresh(previous, undefined));
         markVendorPlanKnown("grok");
       });
   }, [markVendorPlanKnown]);
@@ -7866,16 +8184,45 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     void window.workhorse
       .codexPlanUsage()
       .then((plan) => {
-        setCodexPlan(plan);
+        setCodexPlan((previous) => planAfterRefresh(previous, plan));
         markVendorPlanKnown("codex");
       })
       .catch(() => {
-        setCodexPlan(undefined);
+        setCodexPlan((previous) => planAfterRefresh(previous, undefined));
         markVendorPlanKnown("codex");
       });
   }, [markVendorPlanKnown]);
 
+  const ingestCursorLedger = useCallback(() => {
+    if (!window.workhorse?.cursorLedgerEvents) return;
+    void window.workhorse
+      .cursorLedgerEvents({ startDate: rangeStart("today"), endDate: Date.now() })
+      .then((events) => {
+        if (!events?.length) return;
+        setState((current) => {
+          const joined = joinCursorLedgerEvents({
+            events,
+            sessions: current.sessions
+              .filter((session) => session.provider === "cursor")
+              .map((session) => ({
+                id: session.id,
+                vendorSessionId: session.vendorSessionId,
+                model: session.model,
+                projectId: session.projectId,
+              })),
+          });
+          if (!joined.length) return current;
+          const usage = applyCursorLedger(current.usage, joined);
+          if (usage === current.usage) return current;
+          return { ...current, usage };
+        });
+      })
+      .catch(() => undefined);
+  }, []);
+  ingestCursorLedgerRef.current = ingestCursorLedger;
+
   const refreshCursorPlan = useCallback(() => {
+    // No bridge method at all is not a failed reading, it is no meter.
     if (!window.workhorse?.cursorPlanUsage) {
       setCursorPlan(undefined);
       return;
@@ -7883,21 +8230,22 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     void window.workhorse
       .cursorPlanUsage()
       .then((plan) => {
-        setCursorPlan(plan ?? undefined);
+        setCursorPlan((previous) => planAfterRefresh(previous, plan));
         markVendorPlanKnown("cursor");
       })
       .catch(() => {
-        setCursorPlan(undefined);
+        setCursorPlan((previous) => planAfterRefresh(previous, undefined));
         markVendorPlanKnown("cursor");
       });
-  }, [markVendorPlanKnown]);
+    ingestCursorLedger();
+  }, [ingestCursorLedger, markVendorPlanKnown]);
 
   const refreshClaudePlan = useCallback(() => {
     if (!window.workhorse?.claudePlanUsage) return;
     void window.workhorse
       .claudePlanUsage()
       .then((plan) => {
-        setClaudePlan(plan);
+        setClaudePlan((previous) => planAfterRefresh(previous, plan));
         markVendorPlanKnown("claude");
         if (plan) {
           if (claudePlanRetry.current) window.clearTimeout(claudePlanRetry.current);
@@ -7913,45 +8261,55 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         }, 90_000);
       })
       .catch(() => {
-        setClaudePlan(undefined);
+        setClaudePlan((previous) => planAfterRefresh(previous, undefined));
         markVendorPlanKnown("claude");
       });
   }, [markVendorPlanKnown]);
 
   const refreshCustomPlans = useCallback(() => {
-    if (!window.workhorse?.customPlanUsage) return;
-    for (const bot of stateRef.current.settings.customBots) {
-      void window.workhorse
-        .customPlanUsage({
+    const askHost = window.workhorse?.customPlanUsage;
+    if (!askHost) return;
+    const now = Date.now();
+    // Who is asked, and whose answer is kept, are both `runCustomMeterBeat`'s
+    // call: only bots that are on, hold a key, and are not backing off after a
+    // run of silent rounds, and only slots still on the desk when the answer
+    // lands. The store owns the four writes and the clock, nothing else.
+    void runCustomMeterBeat({
+      bots: stateRef.current.settings.customBots,
+      health: meterHealthRef.current,
+      now,
+      ask: (bot) =>
+        askHost({
           baseUrl: bot.baseUrl,
           apiKey: bot.apiKey,
           model: bot.model,
           credentialId: bot.credentialId || `custom-bot-${bot.id}`,
-        })
-        .then((plan) => {
-          setCustomPlans((current) => ({ ...current, [bot.id]: plan ?? undefined }));
-          setCustomPlanKnown((current) => ({ ...current, [bot.id]: true }));
-        })
-        .catch(() => {
-          setCustomPlans((current) => {
-            const next = { ...current };
-            delete next[bot.id];
-            return next;
-          });
-          setCustomPlanKnown((current) => ({ ...current, [bot.id]: true }));
-        });
-    }
+        }),
+      // Read at the moment the answer lands, not closed over at the moment the
+      // question was asked: a delete or a switch-off in the gap wins.
+      liveBots: () => stateRef.current.settings.customBots,
+      writePlan: (id, plan) =>
+        setCustomPlans((current) => ({ ...current, [id]: planAfterRefresh(current[id], plan) })),
+      markKnown: (id) => setCustomPlanKnown((current) => ({ ...current, [id]: true })),
+      writeHealth: (id, answered) =>
+        setCustomMeterHealth((current) => ({ ...current, [id]: customMeterHealthAfter(current[id], answered, now) })),
+    });
   }, []);
 
+  const refreshAllPlans = useCallback(() => {
+    refreshGrokPlan();
+    refreshCodexPlan();
+    refreshClaudePlan();
+    refreshCursorPlan();
+    refreshCustomPlans();
+  }, [refreshGrokPlan, refreshCodexPlan, refreshClaudePlan, refreshCursorPlan, refreshCustomPlans]);
+  // Declared far above, beside plansRef, because the routing paths run before
+  // any of these refreshers exist in this body.
+  runPlanRefresh.current = refreshAllPlans;
+
   useEffect(() => {
-    if (ready) {
-      refreshGrokPlan();
-      refreshCodexPlan();
-      refreshClaudePlan();
-      refreshCursorPlan();
-      refreshCustomPlans();
-    }
-  }, [ready, refreshGrokPlan, refreshCodexPlan, refreshClaudePlan, refreshCursorPlan, refreshCustomPlans]);
+    if (ready) refreshAllPlans();
+  }, [ready, refreshAllPlans]);
 
   const setUsageBudget = useCallback((provider: ProviderId, tokens: number | null) => {
     setState((current) => {
@@ -7982,6 +8340,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }));
   }, []);
 
+  const updateSkillDiscovery = useCallback((patch: Partial<SkillDiscoverySettings>) => {
+    setState((current) => ({
+      ...current,
+      settings: {
+        ...current.settings,
+        skills: normalizeSkillDiscovery({ ...current.settings.skills, ...patch }),
+      },
+    }));
+  }, []);
+
   const updateAgentSystems = useCallback((patch: Partial<AgentSystemsSettings>) => {
     setState((current) => ({
       ...current,
@@ -8003,6 +8371,33 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         localCompute: { ...normalizeLocalComputeSettings(settings), legacyEnvironmentFallback: false },
       },
     }));
+  }, []);
+
+  const updateWorkshop = useCallback(async (settings: WorkshopSettings) => {
+    const current = stateRef.current;
+    const next = {
+      ...current,
+      settings: {
+        ...current.settings,
+        workshop: normalizeWorkshopSettings(settings),
+      },
+    };
+    stateRef.current = next;
+    setState(next);
+    if (persistTimer.current) {
+      window.clearTimeout(persistTimer.current);
+      persistTimer.current = null;
+    }
+    if (!window.workhorse?.saveState) return;
+    const saved = listedChats(applyComposerDrafts(next.sessions, composerDraftsRef.current));
+    await window.workhorse.saveState({
+      ...next,
+      sessions: saved,
+      activeSessionId:
+        next.activeSessionId && saved.some((session) => session.id === next.activeSessionId)
+          ? next.activeSessionId
+          : null,
+    });
   }, []);
 
   const grantPlanExternalAgents = useCallback((sessionId: string, allow: boolean) => {
@@ -8279,10 +8674,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       removeReference,
       archiveProject,
       deleteProject,
+      reorderProjects,
       startSession,
       setSessionModel,
       setSessionRoutingMode,
       setCrewMode,
+      setSpawnAllowlist,
       resumeAgentRun,
       createCustomBot,
       installCustomBot,
@@ -8291,6 +8688,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       setCustomBotEnabled,
       probeCustomDraft,
       probeCustomBot,
+      refreshVendorModels,
       setSessionEffort,
       setSessionEnvironment,
       selectSession,
@@ -8326,6 +8724,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       toggleWorkhorseTheme,
       answerPermission,
       demoPermission,
+      demoMission,
       recordUsage,
       openSettings,
       closeSettings,
@@ -8356,8 +8755,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       setUsageBudget,
       updateWatch,
       updateRouting,
+      updateSkillDiscovery,
       updateAgentSystems,
       updateLocalCompute,
+      updateWorkshop,
       grantPlanExternalAgents,
       agentRuntimes,
       agentCatalog,
@@ -8413,10 +8814,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       removeReference,
       archiveProject,
       deleteProject,
+      reorderProjects,
       startSession,
       setSessionModel,
       setSessionRoutingMode,
       setCrewMode,
+      setSpawnAllowlist,
       resumeAgentRun,
       createCustomBot,
       installCustomBot,
@@ -8425,6 +8828,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       setCustomBotEnabled,
       probeCustomDraft,
       probeCustomBot,
+      refreshVendorModels,
       setSessionEffort,
       setSessionEnvironment,
       selectSession,
@@ -8460,6 +8864,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       toggleWorkhorseTheme,
       answerPermission,
       demoPermission,
+      demoMission,
       recordUsage,
       openSettings,
       closeSettings,
@@ -8488,8 +8893,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       setUsageBudget,
       updateWatch,
       updateRouting,
+      updateSkillDiscovery,
       updateAgentSystems,
       updateLocalCompute,
+      updateWorkshop,
       grantPlanExternalAgents,
       agentRuntimes,
       agentCatalog,

@@ -1,0 +1,160 @@
+{
+  "id": "spark-media",
+  "name": "Spark media",
+  "version": "1.0.0",
+  "contract": 1,
+  "description": "Comfy queue, gallery, and create templates from a Local Compute media feed. Create goes through Local Compute invoke \u2014 never a workshop POST.",
+  "homepage": "https://github.com/go7studio/workshop-pack-spark-media",
+  "collector": "collector",
+  "sources": [
+    {
+      "id": "feed",
+      "kind": "json",
+      "namespace": "media",
+      "path": "feed",
+      "pollMs": 2000,
+      "freshMs": 120000,
+      "asOf": "/asOf",
+      "schema": "go7-workshop-media/v0",
+      "maxBytes": 262144
+    }
+  ],
+  "strip": [
+    {
+      "w": "text",
+      "parts": [
+        {
+          "of": "feed:/queue/active",
+          "fmt": "int",
+          "prefix": "q "
+        },
+        {
+          "of": "feed:/queue/pending",
+          "fmt": "int",
+          "prefix": "+",
+          "suffix": " pend"
+        }
+      ]
+    },
+    {
+      "w": "switch",
+      "cases": [
+        {
+          "when": "feed:/outputs",
+          "has": true,
+          "paint": {
+            "w": "text",
+            "of": "feed:/outputs/0/label",
+            "fmt": "basename"
+          }
+        }
+      ],
+      "else": {
+        "w": "text",
+        "value": "no output"
+      }
+    }
+  ],
+  "cards": [
+    {
+      "title": "Queue",
+      "rows": [
+        {
+          "w": "hbox",
+          "children": [
+            {
+              "w": "kv",
+              "label": "Active",
+              "of": "feed:/queue/active",
+              "fmt": "int"
+            },
+            {
+              "w": "kv",
+              "label": "Pending",
+              "of": "feed:/queue/pending",
+              "fmt": "int"
+            },
+            {
+              "w": "kv",
+              "label": "Progress",
+              "of": "feed:/queue/progressPct",
+              "fmt": "fixed1",
+              "suffix": "%"
+            }
+          ]
+        },
+        {
+          "w": "kv",
+          "label": "Prompt",
+          "of": "feed:/queue/promptId"
+        },
+        {
+          "w": "kv",
+          "label": "ETA",
+          "of": "feed:/queue/etaSec",
+          "fmt": "int",
+          "suffix": "s"
+        }
+      ]
+    },
+    {
+      "title": "Gallery",
+      "rows": [
+        {
+          "w": "gallery",
+          "of": "feed:/outputs",
+          "limit": 24
+        }
+      ]
+    },
+    {
+      "title": "Create",
+      "rows": [
+        {
+          "w": "switch",
+          "cases": [
+            {
+              "when": "feed:/create/allowed",
+              "is": false,
+              "paint": {
+                "w": "kv",
+                "label": "Create",
+                "of": "feed:/create/refuseReason"
+              }
+            },
+            {
+              "when": "feed:/create/allowed",
+              "is": true,
+              "paint": {
+                "w": "chips",
+                "of": "feed:/create/templateLabels",
+                "tone": "mute"
+              }
+            }
+          ],
+          "else": {
+            "w": "text",
+            "value": "\u2014"
+          }
+        },
+        {
+          "w": "switch",
+          "cases": [
+            {
+              "when": "feed:/create/allowed",
+              "is": false,
+              "paint": {
+                "w": "note",
+                "value": "Queue is disabled while create is refused."
+              }
+            }
+          ],
+          "else": {
+            "w": "note",
+            "value": "Pick a template in the create form below, then Queue via Local Compute."
+          }
+        }
+      ]
+    }
+  ]
+}

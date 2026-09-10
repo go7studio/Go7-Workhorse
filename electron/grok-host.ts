@@ -42,6 +42,7 @@ export type GrokPromptInput = GrokSessionOpenInput & {
   visibleText?: string;
   images?: import("../src/lib/types").ChatImage[];
   crewModes?: CrewMode[];
+  spawnNames?: string[];
 };
 
 export type GrokCompactInput = GrokSessionOpenInput & {
@@ -58,12 +59,15 @@ export type GrokIpcEvent =
       sessionId: string;
       requestId: string;
       tool: string;
+      /** The vendor's own name for the call. The classifiers judge this; the card shows `tool`. */
+      rawTool?: string;
       detail: string;
       path?: string;
       elevate?: { mode?: import("../src/lib/types").PermissionMode; sandbox?: import("../src/lib/types").SandboxProfile };
       vendor?: { provider: import("../src/lib/types").ProviderId; name: string; status?: string };
     }
   | { type: "tool"; sessionId: string } & GrokToolEvent
+  | { type: "background-task"; sessionId: string } & import("../src/lib/vendor-tasks").VendorBackgroundTask
   | { type: "compact"; sessionId: string } & import("./grok-agent").GrokCompactEvent
   | {
       type: "usage";
@@ -194,6 +198,7 @@ export class GrokSessionHost {
       sandbox: input.sandbox,
       role: input.role ?? (input.parentId || input.hidden ? "worker" : "orchestrator"),
       crewMode: input.crewModes,
+      spawnNames: input.spawnNames,
     }, input.visibleText);
 
     try {
@@ -271,16 +276,19 @@ export class GrokSessionHost {
           provider: "grok",
           ...usage,
         }),
-      onPermission: (ask: { requestId: string; tool: string; detail: string; path?: string }) =>
+      onPermission: (ask: { requestId: string; tool: string; rawTool?: string; detail: string; path?: string }) =>
         emit({
           type: "permission" as const,
           sessionId: input.sessionId,
           requestId: ask.requestId,
           tool: ask.tool,
+          rawTool: ask.rawTool,
           detail: ask.detail,
           path: ask.path,
         }),
       onTool: (tool: GrokToolEvent) => emit({ type: "tool" as const, sessionId: input.sessionId, ...tool }),
+      onBackgroundTask: (task: import("../src/lib/vendor-tasks").VendorBackgroundTask) =>
+        emit({ type: "background-task" as const, sessionId: input.sessionId, ...task }),
       onCompact: (compact: import("./grok-agent").GrokCompactEvent) =>
         emit({ type: "compact" as const, sessionId: input.sessionId, ...compact }),
       onTitle: (title: string) => emit({ type: "title" as const, sessionId: input.sessionId, title }),

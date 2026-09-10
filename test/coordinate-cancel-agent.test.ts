@@ -46,6 +46,21 @@ test("cancel-agent dispatcher actually stops the vendor run", () => {
   );
 });
 
+test("cancel-agent dispatcher does not join or dump the cancelled worker into the parent", () => {
+  const block = extractCancelAgentBlock(STORE);
+  assert.match(block, /applyChildIdleSync\([\s\S]*?"cancelled"/);
+  assert.doesNotMatch(
+    block,
+    /joinAdmit/,
+    "cancel-agent must not enqueue a hideUser join with the cancelled worker's report",
+  );
+  assert.match(
+    STORE,
+    /shouldJoinAfterChildSettle\(rowStatus\)/,
+    "a cancelled vendor return must not admit a wave join",
+  );
+});
+
 test("cancel-agent dispatcher writes cancelled onto the lineup, not failed", () => {
   const block = extractCancelAgentBlock(STORE);
   assert.match(

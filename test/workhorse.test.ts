@@ -17,7 +17,9 @@ import {
   extractSessionTitle,
   extractToolEvent,
   extractUpdateText,
+  isAcpRpcReply,
   isAcpSessionUpdateMethod,
+  partitionAcpBatch,
   parseGrokUsage,
   parseRewindPoints,
   pickPermissionOptionId,
@@ -63,7 +65,6 @@ import { spawnDispatchStarted } from "../electron/custom-host";
 import {
   handleWorkhorseRpc,
   nestedTimeoutNote,
-  NESTED_HELPER_TIMEOUT_SECONDS,
   parseCreateProjectLive,
   parseRenameProjectLive,
   setWorkhorseDeskAsk,
@@ -73,8 +74,8 @@ import { startWorkhorseBridge } from "../electron/workhorse-bridge";
 import { mediaFileCandidates } from "../electron/media-src";
 import { estimateChatContext, parseSessionContext } from "../src/lib/context-stats";
 import { buildSessionPreface, buildVendorPreface, composeVendorPrompt, withVendorPreface } from "../src/lib/context-preface";
-import { CREW_STATUS_HINT, CURSOR_SESSION_RULES, CUSTOM_HTTP_SESSION_RULES, DESK_BOT_TURN_HINT, LOOSE_DELETE_HINT, MISSION_MODE_HINT, ORCHESTRATE_MODE_HINT, SPAWN_TURN_HINT, WORKER_SESSION_RULES, crewModeLabel, looksLikeCrewImpatience, looksLikeDeskBotRequest, looksLikeGoalCommand, looksLikeLooseDeleteRequest, looksLikePermissionQuestion, looksLikePreviewQuestion, looksLikeSpawnRequest, looksLikeWorkerBrief, orderedCrewModes, PERMISSION_TURN_HINT, PREVIEW_TURN_HINT, toggleCrewMode, withCrewModeHint, withCrewStatusHint, withDeskBotHint, withLooseDeleteHint, withPermissionHint, withSpawnHint, withCustomPeerHint, CUSTOM_HTTP_PEER_HINT, CUSTOM_HTTP_WORKER_RULES } from "../src/lib/workhorse-rules";
-import { applySessionElevation, applySessionModelChange, applySessionPolicyChange, brainCaption, brainStamp, formatChatSidebar, isSessionIntro, messageBrain, normalizeMessage, normalizeSession, stampUnstampedMessages, vendorSessionForSend } from "../src/lib/session";
+import { CREW_STATUS_HINT, CURSOR_SESSION_RULES, CUSTOM_HTTP_SESSION_RULES, DESK_BOT_TURN_HINT, LOOSE_DELETE_HINT, MISSION_MODE_HINT, ORCHESTRATE_MODE_HINT, SPAWN_TURN_HINT, WORKER_SESSION_RULES, crewModeLabel, looksLikeCrewImpatience, looksLikeDeskBotRequest, looksLikeGoalCommand, looksLikeLooseDeleteRequest, looksLikePermissionQuestion, looksLikePreviewQuestion, looksLikeSpawnRequest, looksLikeWorkerBrief, orderedCrewModes, sameCrewModes, PERMISSION_TURN_HINT, PREVIEW_TURN_HINT, toggleCrewMode, withCrewModeHint, withCrewStatusHint, withDeskBotHint, withLooseDeleteHint, withPermissionHint, withSpawnHint, withCustomPeerHint, CUSTOM_HTTP_PEER_HINT, CUSTOM_HTTP_WORKER_RULES } from "../src/lib/workhorse-rules";
+import { applySessionElevation, applySessionModelChange, applySessionPolicyChange, brainCaption, brainStamp, formatChatSidebar, isSessionIntro, messageBrain, normalizeMessage, normalizeSession, parsePermissionMode, stampUnstampedMessages, vendorSessionForSend } from "../src/lib/session";
 import { workerSidebarLabel } from "../src/ui/ChatRow";
 import { buildAcpPrompt, droppedFromPickerFile, groupAttachments, imageMime, normalizeImages, shouldSkipDropDir } from "../src/lib/images";
 import { catalogSessions, existingPeerReply, findSession, findSessionForLink, formatPeerPrompt, matchListedChat, peerPromptParts, sameSessionCrew, sessionTranscript } from "../src/lib/session-bridge";
@@ -132,7 +133,7 @@ import {
 } from "../src/lib/commands";
 import { applyGoalCommand, goalCommandForAction, goalDisplay, goalDisplayForSession, goalHaltsVendor, goalVendorPrompt, grokGoalAfterTurnIdle, parseGoalInput, parseGrokGoalLine } from "../src/lib/goal";
 import { nextGoalForSend, planHaltForward, prepareVendorSend, vendorTerminalAction } from "../src/lib/vendor-send";
-import { advertisedClaudeWindow, advertisedCodexWindow, applyVendorCatalog, contextWindowFor, defaultModel, effortStopAt, effortStopPos, effortsFor, MODEL_CATALOG, modelName, normalizeModelId, parseEffort, resetVendorCatalog, shortModelName, usageToneForModel } from "../src/lib/models";
+import { advertisedClaudeWindow, advertisedCodexWindow, applyVendorCatalog, contextWindowFor, DEFAULT_CHOICE, defaultModel, effortStopAt, effortStopPos, effortsFor, MODEL_CATALOG, modelName, normalizeModelId, parseEffort, resetVendorCatalog, shortModelName, usageToneForModel } from "../src/lib/models";
 import { safeExternalUrl } from "../src/lib/open-external";
 import { workhorseUserDataOverride, workhorseVolatileCredentials } from "../src/lib/user-data";
 import {
@@ -165,11 +166,11 @@ import {
   stripOutputFromThought,
   wrapMarkdown,
 } from "../src/lib/markdown";
-import { applyPermissionAnswer, autoAllowPermission, classifyElevation, deskClampNote, describeElevation, elevationForBlock, enqueuePermission, grantedPolicyAnswer, inboundAccess, lineageGrant, looksLikeDelegationTool, looksLikeSearchOnly, looksLikeWriteTool, parseElevationInput, pathOwnerMode, permissionGrantKey, permissionPolicyAnswer, permissionResumeStatus, promptOwner, workerAccess, workerGrant, workerTightening } from "../src/lib/permissions";
+import { applyPermissionAnswer, autoAllowPermission, classifyPermissionTool, classifyElevation, deskClampNote, describeElevation, elevationForBlock, enqueuePermission, grantedPolicyAnswer, inboundAccess, isQuietDeskTool, lineageGrant, looksLikeDelegationTool, looksLikeSearchOnly, looksLikeShellTool, looksLikeWriteTool, parseElevationInput, pathOwnerMode, permissionGrantKey, permissionPolicyAnswer, permissionResumeStatus, promptOwner, workerAccess, workerGrant, workerTightening } from "../src/lib/permissions";
 import { detectClaudeAccessDefaults, detectCursorAccessDefaults, detectGrokAccessDefaults } from "../electron/vendor-access";
 import { normalizePermissionGrants } from "../src/lib/permission-grants";
 import { appendUserMessage, applyComposerDrafts, applyDeleteDeskChat, applyDeleteLooseDeskChats, applyRenameDeskChat, archiveChat, autoRenameChat, canPlaceInProject, deleteChat, deleteChatGuard, deleteWorkerChats, dropDrafts, dropQueuedPrompt, enqueuePrompt, findListedChat, forkChat, omitQueuedUserMessages, forkTitle, formatLastTalked, hasComposerDraft, hiddenProjectChatCount, isDraftChat, isLooseDeleteScope, lastProjectChat, lastTalkedAt, lastUserMessage, listedChats, defaultInboundParentId, messagesThrough, moveChat, openDraft, activeProjectChat, pinnedCollapsedChat, PROJECT_CHAT_LIMIT, renameChat, resolveListedChat, rewindToUserMessage, shiftQueuedPrompt, visibleProjectChats, workersFoldOpen } from "../src/lib/chats";
-import { applyArchiveProject, applyCreateWorkhorseProject, applyDeleteProject, applyProjectChatFate, applyRenameDeskProject, emptyProject, findProjectByQuery, projectForSpawn, renameTookOnDesk, visibleProjectNames } from "../src/lib/project";
+import { applyArchiveProject, applyCreateWorkhorseProject, applyDeleteProject, applyProjectChatFate, applyRenameDeskProject, applyReorderProjects, emptyProject, findProjectByQuery, projectForSpawn, renameTookOnDesk, visibleProjectNames } from "../src/lib/project";
 import { agentSystemsFromInboundSelect, applyUpdateStockBot, DEFAULT_SETTINGS, deskInk, deskLabel, firstAttachedChoice, hasAttachedLlm, inboundParentSelectValue, keepVendorAccessDefaults, normalizeDeskAccess, normalizeSettings, vendorAttachedForSession, vendorEnabled, vendorLabel, vendorTint } from "../src/lib/settings";
 import { customBotEnabled } from "../src/lib/custom-bots";
 import { COUNT_MS, COUNT_SNAP, countAt, countMotion, countToward, shouldSnapCount } from "../src/lib/count";
@@ -194,6 +195,7 @@ import {
   selectedText,
 } from "../src/lib/edit-menu";
 import {
+  canonicalToolKey,
   chatLinksFromSessions,
   describePeerTool,
   formatPermissionDetail,
@@ -208,9 +210,13 @@ import {
   resetMediaPaint,
 } from "../src/lib/media-paint";
 import {
+  closedWorkSummary,
+  crewNamesFromTitles,
   displayWorkSteps,
   earlierWorkLabel,
   formatWorked,
+  namedCrewSummary,
+  namedWorkSummary,
   groupTranscript,
   groupWorkRows,
   isActiveWorkRow,
@@ -225,6 +231,7 @@ import {
   transcriptPaintStart,
   resolveWorkedMs,
   thoughtForReply,
+  workPopState,
   workStepKinds,
   type WorkStreamEvent,
 } from "../src/lib/turns";
@@ -272,6 +279,7 @@ import {
   cellDotBackground,
   stretchBuckets,
   stretchHeatmap,
+  heatmapTotal,
   weekDays,
 } from "../src/lib/usage";
 import { colorFromWheel, hexToHsv, hsvToHex, parseHex } from "../src/lib/color";
@@ -297,6 +305,20 @@ test("isolated user data accepts an env or explicit launch flag", () => {
   assert.equal(
     workhorseUserDataOverride(["electron", ".", "--workhorse-user-data=/tmp/flag-profile"], {}),
     "/tmp/flag-profile",
+  );
+  assert.equal(
+    workhorseUserDataOverride(
+      [
+        "electron",
+        ".",
+        "--workhorse-user-data=C:\\Users\\someone\\AppData\\Roaming\\Go7",
+        "Workhorse",
+        "Dev",
+        "--workhorse-volatile-credentials",
+      ],
+      {},
+    ),
+    "C:\\Users\\someone\\AppData\\Roaming\\Go7 Workhorse Dev",
   );
   assert.equal(workhorseUserDataOverride([], {}), undefined);
   assert.equal(workhorseVolatileCredentials(["electron", ".", "--workhorse-volatile-credentials"], {}), true);
@@ -422,6 +444,38 @@ test("applyPermissionAnswer updates the real pending queue and session", () => {
   assert.equal(autoAllowPermission({ tool: "workhorse_ask_chat" }), "once");
   assert.equal(autoAllowPermission({ tool: "workhorse_spawn_agent" }), "once");
   assert.equal(autoAllowPermission({ tool: "workhorse_ask_chat" }), "once");
+  assert.equal(autoAllowPermission({ tool: "Wait for agents" }), "once");
+  assert.equal(autoAllowPermission({ tool: "Wait for agents execute" }), "once");
+  assert.equal(autoAllowPermission({ tool: "List bots" }), "once");
+  assert.equal(autoAllowPermission({ tool: "Call agent" }), "once");
+  assert.equal(isQuietDeskTool("Wait for agents"), true);
+  assert.equal(isQuietDeskTool("Wait for agents execute"), true);
+  assert.equal(canonicalToolKey("Wait for agents"), "await_agents");
+  assert.equal(canonicalToolKey("Wait for agents execute"), "await_agents");
+  assert.equal(canonicalToolKey("Call agent"), "spawn_agent");
+  assert.equal(classifyPermissionTool("Wait for agents", "execute"), "Wait for agents");
+  assert.equal(classifyPermissionTool("Run a command", "execute"), "Run a command");
+  assert.equal(classifyPermissionTool("Run a command", "bash"), "Run a command bash");
+  assert.equal(looksLikeShellTool("Wait for agents execute", '{"workerIds":["w1"]}'), false);
+  assert.equal(looksLikeWriteTool("Wait for agents execute", "write the fruit system and create files", undefined), false);
+  assert.equal(
+    permissionPolicyAnswer({
+      mode: "always-approve",
+      sandbox: "read-only",
+      tool: "Wait for agents execute",
+      detail: '{"wait":true,"prompt":"write the fruit system"}',
+    }),
+    "session",
+  );
+  assert.equal(
+    permissionPolicyAnswer({
+      mode: "ask",
+      sandbox: "read-only",
+      tool: "Wait for agents",
+      detail: "wait for workers",
+    }),
+    "once",
+  );
   assert.equal(permissionResumeStatus({ hasOtherPending: true }), "needs-input");
   assert.equal(permissionResumeStatus({ hasOtherPending: false }), "running");
   assert.equal(
@@ -487,7 +541,7 @@ test("applyPermissionAnswer updates the real pending queue and session", () => {
   assert.deepEqual(lineageGrant({ deskAccess: { mode: "ask", sandbox: "workspace" } }), { mode: "ask", sandbox: "workspace" });
   assert.equal(promptOwner({ sandbox: "off" }, { mode: "always-approve", sandbox: "off" }), "desk");
   assert.equal(promptOwner({ sandbox: "off" }, { mode: "plan", sandbox: "read-only" }), "person");
-  assert.equal(deskClampNote({ role: "helper" }), "Helpers are read-only by design; hand this write to your parent.");
+  assert.equal(deskClampNote({ role: "helper" }), "This helper was asked to run read-only; hand this write to your parent, or spawn it with a sandbox that can write.");
   assert.equal(looksLikeSearchOnly("rg", "rg -n leftover src"), true);
   assert.equal(looksLikeSearchOnly("shell", "rg --files"), true);
   assert.equal(
@@ -507,6 +561,15 @@ test("applyPermissionAnswer updates the real pending queue and session", () => {
   assert.equal(permissionPolicyAnswer({ mode: "always-approve", sandbox: "off", tool: "shell", detail: "ls docs" }), "session");
   assert.equal(permissionPolicyAnswer({ mode: "always-approve", sandbox: "workspace", tool: "Write", detail: "src/app.ts", path: "src/app.ts" }), "session");
   assert.equal(permissionPolicyAnswer({ mode: "always-approve", sandbox: "read-only", tool: "Write", detail: "src/app.ts", path: "src/app.ts" }), "deny");
+  assert.equal(parsePermissionMode("always"), "always-approve");
+  assert.equal(parsePermissionMode("always-allow"), "always-approve");
+  assert.equal(parsePermissionMode("Always approve"), "always-approve");
+  assert.equal(DEFAULT_CHOICE.mode, "always-approve");
+  assert.equal(normalizeSession({ id: "sess_hydrate", provider: "grok", model: "grok-4.6" })?.mode, "always-approve");
+  assert.equal(
+    normalizeSession({ id: "sess_keep", provider: "grok", model: "grok-4.6", mode: "always-approve" })?.mode,
+    "always-approve",
+  );
   assert.equal(permissionGrantKey("shell", 'cd /tmp/worktree && ls docs && echo "copy"'), 'shell:cd /tmp/worktree && ls docs && echo "copy"');
   assert.equal(permissionGrantKey("Read", "src/app.ts", "src/app.ts"), "read:src/app.ts");
   // Inbound CLI/MCP takes the desk parent path. Always is the default, so an
@@ -609,6 +672,14 @@ test("applyPermissionAnswer updates the real pending queue and session", () => {
   assert.equal(keptVendor.mode, "ask");
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "PermissionBar.tsx"), "utf8"), /needs more access/);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "PermissionBar.tsx"), "utf8"), /Elevate/);
+  assert.match(
+    readFileSync(path.join(ROOT, "src", "ui", "PermissionBar.tsx"), "utf8"),
+    /modeLabel\(child\?\.mode \?\? "ask"\)/,
+  );
+  assert.doesNotMatch(
+    readFileSync(path.join(ROOT, "src", "ui", "PermissionBar.tsx"), "utf8"),
+    /\$\{label\} · Ask/,
+  );
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "WatchNotices.tsx"), "utf8"), /watch-hold-bar hold/);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "WatchNotices.tsx"), "utf8"), /Allow \$\{vendorAsk\.vendor\.name\} this chat/);
   assert.match(readFileSync(path.join(ROOT, "electron", "custom-host.ts"), "utf8"), /vendor: \{ provider: spawnTarget/);
@@ -1211,7 +1282,7 @@ test("adaptive missions continue one terminal pass at a time", () => {
   });
   const runningDecision = nextMissionIteration([running!], "parent", ["worker_running"]);
   assert.equal(runningDecision.ok, false);
-  if (!runningDecision.ok) assert.match(runningDecision.error, /interrupted|running/);
+  if (!runningDecision.ok) assert.match(runningDecision.error, /did not finish/);
 
   const newer = normalizeSession({
     ...worker,
@@ -1487,9 +1558,17 @@ test("vendor children get ripgrep on PATH and rg is not a write", () => {
   assert.equal(env.Path, env.PATH);
   assert.equal(env.RIPGREP, fakeRg);
   assert.equal(env.GIT, fakeGit);
+  // The desk's private names go, and so does another vendor's login: a child
+  // launched for Codex, Cursor or Grok has no business reading Claude's token.
   assert.deepEqual(
-    withoutWorkhorsePrivateEnv({ PATH: "desk", WORKHORSE_BRIDGE_TOKEN: "secret", WORKHORSE_STATE_PATH: "state", CLAUDE_CODE_OAUTH_TOKEN: "vendor-login" }),
-    { PATH: "desk", CLAUDE_CODE_OAUTH_TOKEN: "vendor-login" },
+    withoutWorkhorsePrivateEnv({
+      PATH: "desk",
+      WORKHORSE_BRIDGE_TOKEN: "secret",
+      WORKHORSE_STATE_PATH: "state",
+      CLAUDE_CODE_OAUTH_TOKEN: "vendor-login",
+      ANTHROPIC_API_KEY: "vendor-key",
+    }),
+    { PATH: "desk" },
   );
 
   // A Mac machine: the same lookups take the bare name and never mirror Path.
@@ -1655,6 +1734,21 @@ test("ACP text extractors walk nested content and update kinds", () => {
   assert.equal(isAcpSessionUpdateMethod("_x.ai/session/update"), true);
   assert.equal(isAcpSessionUpdateMethod("_x.ai/session_notification"), true);
   assert.equal(isAcpSessionUpdateMethod("_x.ai/queue/changed"), false);
+});
+
+test("ACP prompt replies wait until session updates in the same flush have landed", () => {
+  const thought = { jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_thought_chunk" } } };
+  const reply = { jsonrpc: "2.0", id: 7, result: { stopReason: "end_turn" } };
+  const later = { jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_thought_chunk" } } };
+  const { live, replies } = partitionAcpBatch([thought, reply, later]);
+  assert.equal(isAcpRpcReply(reply), true);
+  assert.equal(isAcpRpcReply(thought), false);
+  assert.deepEqual(live, [thought, later]);
+  assert.deepEqual(replies, [reply]);
+  const grokAgent = readFileSync(path.join(ROOT, "electron", "grok-agent.ts"), "utf8");
+  assert.match(grokAgent, /partitionAcpBatch\(messages\)/);
+  assert.match(grokAgent, /for \(const message of live\) this\.onMessage\(message\)/);
+  assert.match(grokAgent, /for \(const message of replies\) this\.onMessage\(message\)/);
 });
 
 test("consumeAcpMessages reads NDJSON and Content-Length frames", () => {
@@ -3597,6 +3691,66 @@ test("parseGrokPlanUsage reads weekly SuperGrok pool remaining", () => {
   assert.equal(plan?.period, "weekly");
   assert.equal(plan?.products[0]?.label, "Build");
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "UsagePane.tsx"), "utf8"), /% left/);
+
+  const spent = parseGrokPlanUsage({
+    config: {
+      currentPeriod: {
+        type: "USAGE_PERIOD_TYPE_WEEKLY",
+        start: "2026-08-23T13:53:32.726325+00:00",
+        end: "2026-08-30T13:53:32.726325+00:00",
+      },
+      creditUsagePercent: 100.0,
+      productUsage: [
+        { product: "GrokBuild", usagePercent: 100.0 },
+        { product: "GrokChat" },
+      ],
+      prepaidBalance: { val: 0 },
+    },
+  });
+  assert.equal(spent?.usedPercent, 100);
+  assert.equal(spent?.leftPercent, 0);
+  assert.equal(
+    planRingView({ focus: "grok", provider: "grok", key: "grok" }, { grok: spent })?.label,
+    "0%",
+  );
+
+  const spentBuildOnly = parseGrokPlanUsage({
+    config: {
+      currentPeriod: { type: "USAGE_PERIOD_TYPE_WEEKLY", start: "2026-08-23T00:00:00Z", end: "2026-08-30T00:00:00Z" },
+      productUsage: [{ product: "GrokBuild", usagePercent: 100 }],
+    },
+  });
+  assert.equal(spentBuildOnly?.usedPercent, 100);
+  assert.equal(spentBuildOnly?.leftPercent, 0);
+
+  // Live spent SuperGrok often reports leftover polarity (remaining 0) and
+  // omits creditUsagePercent. That is known zero, not a missing meter.
+  const spentRemaining = parseGrokPlanUsage({
+    config: {
+      remainingPercent: 0,
+      productUsage: [{ product: "GrokBuild", remainingPercent: 0 }],
+    },
+  });
+  assert.equal(spentRemaining?.usedPercent, 100);
+  assert.equal(spentRemaining?.leftPercent, 0);
+  assert.equal(
+    planRingView({ focus: "grok", provider: "grok", key: "grok" }, { grok: spentRemaining })?.label,
+    "0%",
+  );
+  const spentVal = parseGrokPlanUsage({ config: { creditRemainingPercent: { val: 0 } } });
+  assert.equal(spentVal?.leftPercent, 0);
+  const spentOnDemand = parseGrokPlanUsage({
+    config: { onDemandUsed: { val: 10 }, onDemandCap: { val: 10 } },
+  });
+  assert.equal(spentOnDemand?.usedPercent, 100);
+  assert.equal(spentOnDemand?.leftPercent, 0);
+  assert.equal(
+    parseGrokPlanUsage({ config: { onDemandUsed: { val: 0 }, onDemandCap: { val: 0 } } }),
+    undefined,
+    "a 0 on-demand cap is not a spent week",
+  );
+  assert.equal(parseGrokPlanUsage({}), undefined, "missing leftover stays unknown");
+  assert.equal(parseGrokPlanUsage({ config: {} }), undefined);
 });
 
 test("parseCodexPlanUsage reads weekly leftover the same way as SuperGrok", () => {
@@ -3766,6 +3920,23 @@ test("create-project binds the exact name and does not attach the folder to anot
   assert.equal(findListedChat([loose], "create me a project"), undefined);
   const moved = moveChat([loose], "sess_loose", named.id);
   assert.equal(moved?.find((item) => item.id === "sess_loose")?.projectId, named.id);
+});
+
+test("a project drag sits it before or after another, and never mixes live with archived", () => {
+  const a = { ...emptyProject("A"), id: "a" };
+  const archived = { ...emptyProject("X"), id: "x", archivedAt: 9 };
+  const b = { ...emptyProject("B"), id: "b" };
+  const c = { ...emptyProject("C"), id: "c" };
+  const list = [a, archived, b, c];
+  assert.deepEqual(applyReorderProjects(list, "c", "b", "before")?.map((item) => item.id), ["a", "x", "c", "b"]);
+  assert.deepEqual(applyReorderProjects(list, "c", "a", "before")?.map((item) => item.id), ["c", "a", "x", "b"]);
+  assert.deepEqual(applyReorderProjects(list, "a", "b", "after")?.map((item) => item.id), ["x", "b", "a", "c"]);
+  assert.equal(applyReorderProjects(list, "a", "a", "before"), null);
+  assert.equal(applyReorderProjects(list, "a", "x", "before"), null);
+  assert.equal(applyReorderProjects(list, "c", "b", "after"), null);
+  const sidebar = readFileSync(path.join(ROOT, "src", "ui", "Sidebar.tsx"), "utf8");
+  assert.match(sidebar, /text\/workhorse-project/);
+  assert.match(readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8"), /applyReorderProjects/);
 });
 
 test("delete-chat refuses the calling chat and fails closed on ambiguous titles", () => {
@@ -5116,6 +5287,8 @@ test("sidebar nests project chats in folders; top New chat stays loose", async (
   assert.match(sidebar, /index\.liveByProject\.get\(project\.id\)/);
   assert.match(sidebar, /startSession\(project\.id\)/);
   assert.match(sidebar, /startSession\(null\)/);
+  assert.match(sidebar, /text\/workhorse-project/);
+  assert.match(sidebar, /reorderProjects/);
   const settings = readFileSync(path.join(ROOT, "src", "ui", "Settings.tsx"), "utf8");
   const addBot = readFileSync(path.join(ROOT, "src", "ui", "AddBot.tsx"), "utf8");
   const storeSource = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
@@ -5490,6 +5663,7 @@ test("stretchBuckets follows today week month and all", () => {
     ["12 AM", "6 AM", "12 PM", "6 PM"],
   );
   assert.equal(todayDots.columns[12][0].tokens, 160);
+  assert.equal(heatmapTotal(todayDots), 160);
   assert.equal(todayDots.columns[12][0].inputTokens, 140);
   assert.equal(todayDots.columns[12][0].outputTokens, 20);
   assert.equal(todayDots.columns[12][0].bots.length, 2);
@@ -5628,6 +5802,9 @@ test("UsagePane ships the Figma fuel-ring overview, not the old token line", asy
   assert.equal(sameFuelTarget(undefined, 0.95), false);
   assert.match(css, /@keyframes fuel-in/);
   assert.match(pane, /This stretch/);
+  assert.match(pane, /heatmapTotal/);
+  assert.match(pane, /billed/);
+  assert.doesNotMatch(pane, /Peak \{peak\.label\} · \{formatTokens\(peak\.tokens\)\}/);
   assert.match(pane, /usage-dots/);
   assert.match(pane, /usage-tip/);
   assert.match(pane, /cellSummary/);
@@ -6235,6 +6412,97 @@ test("transcript groups tools and thoughts above the final reply", () => {
   assert.equal(resolveWorkedMs(1_000, undefined, [2_000, 20_000]), 19_000);
   assert.equal(resolveWorkedMs(1_000, undefined, [1_000]), undefined);
 
+  const readGoal: ChatMessage = {
+    id: "t1",
+    role: "system",
+    kind: "tool",
+    toolCallId: "1",
+    text: "Read · running — GOAL.md",
+    toolStatus: "running",
+    createdAt: 3,
+  };
+  const grepDone: ChatMessage = {
+    id: "t2",
+    role: "system",
+    kind: "tool",
+    toolCallId: "2",
+    text: "Grep · completed",
+    toolStatus: "completed",
+    createdAt: 4,
+  };
+  const readDone: ChatMessage = { ...readGoal, text: "Read · completed — GOAL.md", toolStatus: "completed" };
+  assert.equal(namedWorkSummary([readGoal], { live: true }), "Read GOAL.md");
+  assert.equal(namedWorkSummary([grepDone, readGoal], { live: true }), "Read GOAL.md");
+  assert.equal(namedWorkSummary([readDone, grepDone]), "Read · Grep");
+  assert.equal(namedWorkSummary([], { live: true }), "Thinking");
+  assert.equal(namedWorkSummary([], { live: true, allowThinking: false }), "");
+  assert.equal(
+    namedWorkSummary(
+      ["Read", "Grep", "Edit", "Write", "Glob"].map((title, index) => ({
+        id: `t${index}`,
+        role: "system" as const,
+        kind: "tool" as const,
+        toolCallId: String(index),
+        text: `${title} · completed`,
+        toolStatus: "completed",
+        createdAt: index,
+      })),
+    ),
+    "Read · Grep · Edit · 2 more",
+  );
+  const genericTool: ChatMessage = {
+    id: "tg",
+    role: "system",
+    kind: "tool",
+    toolCallId: "g",
+    text: "tool · completed",
+    toolStatus: "completed",
+    createdAt: 5,
+  };
+  const genericLive: ChatMessage = { ...genericTool, text: "tool · running", toolStatus: "running" };
+  assert.equal(namedWorkSummary([genericTool]), "");
+  assert.equal(namedWorkSummary([genericTool], { live: true }), "Thinking");
+  assert.equal(namedWorkSummary([genericLive], { live: true }), "Thinking");
+  assert.equal(namedWorkSummary([readDone, genericTool]), "Read");
+  assert.equal(namedCrewSummary([{ name: "Hazel" }]), "Hazel");
+  assert.equal(
+    namedCrewSummary([
+      { name: "Hazel" },
+      { name: "Piper" },
+      { name: "Dexter" },
+      { name: "Otis" },
+      { name: "Marlow" },
+    ]),
+    "Hazel · Piper · Dexter · 2 more",
+  );
+  assert.equal(
+    namedCrewSummary(
+      [
+        { name: "Hazel", live: false },
+        { name: "Piper", live: true },
+      ],
+      { live: true },
+    ),
+    "Piper · Hazel",
+  );
+  assert.equal(namedCrewSummary([]), "");
+  assert.equal(namedCrewSummary([{ name: " " }, { name: "tool" }]), "");
+  assert.equal(
+    closedWorkSummary({ label: "Worked 38s", tools: "Read · Grep", crew: "Hazel · Piper" }),
+    "Worked 38s · Hazel · Piper",
+  );
+  assert.equal(
+    closedWorkSummary({ label: "Worked 19s", talking: "Asking Test", tools: "Read" }),
+    "Worked 19s · Asking Test · Read",
+  );
+  assert.equal(workPopState({ live: true, failed: true }), "working");
+  assert.equal(workPopState({ live: false, failed: true }), "failed");
+  assert.equal(workPopState({ live: false, failed: false }), "done");
+  assert.equal(crewNamesFromTitles(["Hazel · Replace shop", "Piper · Pin labels"]), "Hazel · Piper");
+  assert.equal(crewNamesFromTitles(["Language pass player copy"]), "");
+  assert.equal(crewNamesFromTitles(["Milo · Language pass player copy"]), "Milo");
+  assert.equal(crewNamesFromTitles(["Language pass player copy", "Hazel · Replace shop"]), "Hazel");
+
   const messages: ChatMessage[] = [
     { id: "u", role: "user", text: "hi", createdAt: 1 },
     { id: "a", role: "assistant", text: "Done.", thought: "Checking the process tree.", createdAt: 2, workedMs: 14000 },
@@ -6302,11 +6570,23 @@ test("transcript groups tools and thoughts above the final reply", () => {
   assert.match(popout, /useStartOpen/);
   assert.match(popout, /fold\.current\.open = true/);
   assert.match(popout, /foldOpen/);
-  assert.match(popout, /<details className="work-pop" onToggle=\{onBodyToggle\}>/);
+  assert.match(popout, /<details className="work-pop" data-state=\{state\} onToggle=\{onBodyToggle\}>/);
   assert.doesNotMatch(popout, /<details className="work-pop" open=\{live\}>/);
   assert.match(popout, /bodyOpen && hasInner/);
   assert.match(popout, /earlierOpen \?/);
-  assert.match(popout, /1 \? "tool" : "tools"/);
+  assert.match(popout, /namedWorkSummary\(otherTools/);
+  assert.match(popout, /namedCrewSummary\(crewWorkers/);
+  assert.match(popout, /closedWorkSummary/);
+  assert.doesNotMatch(popout, /1 \? "subagent" : "subagents"/);
+  assert.doesNotMatch(popout, /1 \? "tool" : "tools"/);
+  assert.match(
+    readFileSync(path.join(ROOT, "docs", "FEATURES.md"), "utf8"),
+    /Working · 19s · Read GOAL\.md/,
+  );
+  assert.match(
+    readFileSync(path.join(ROOT, "docs", "FEATURES.md"), "utf8"),
+    /Worked 38s · Hazel · Piper/,
+  );
   assert.match(popout, /packWorkRows/);
   assert.match(popout, /earlierWorkLabel/);
   assert.match(popout, /data-kind="earlier"/);
@@ -6807,7 +7087,8 @@ test("Workhorse /goal and pulled skills join the Codex slash palette", () => {
   assert.match(storeSend, /commandContinuesToVendor\(match\.run\)/);
   assert.match(storeSend, /prepareVendorSend\(/);
   assert.match(storeSend, /if \(!originalText\.startsWith\("\/"\)\)/);
-  assert.match(storeSend, /withSkillDiscoveryHint\(vendorText, originalText, deskSkillsRef\.current\)/);
+  assert.match(storeSend, /withSkillDiscoveryHint\(vendorText, originalText, catalog\)/);
+  assert.match(storeSend, /skillsForAutoLoad\(deskSkillsRef\.current, policy\)/);
   assert.match(storeSend, /nextGoalForSend\(/);
   assert.doesNotMatch(storeSend, /vendorText = goalVendorPrompt/);
   assert.doesNotMatch(storeSend, /hideUser = true/);
@@ -6975,11 +7256,12 @@ test("Goal state set pause resume clear maps to display actions", () => {
   assert.match(haltStore, /prepareVendorSend\(/);
   assert.match(haltStore, /appendUserMessage\(/);
   const haltAt = haltStore.indexOf("planHaltForward(");
-  const queueAt = haltStore.indexOf("!skipQueue && !options?.afterGoalHalt && !options?.steer");
+  const queueAt = haltStore.indexOf("shouldEnqueueInsteadOfLiveSend({");
   assert.ok(haltAt >= 0 && queueAt >= 0 && haltAt < queueAt, "pause must halt before a live turn can queue it");
   assert.match(haltStore, /haltPlan === "defer-until-cancelled-done"/);
   assert.match(haltStore, /afterGoalHalt: true/);
-  assert.match(haltStore, /!options\?\.afterGoalHalt && !options\?\.steer/);
+  assert.match(haltStore, /afterGoalHalt: options\?\.afterGoalHalt/);
+  assert.match(haltStore, /steer: options\?\.steer/);
   assert.match(haltStore, /vendorTerminalAction\(/);
   assert.match(haltStore, /consume-halt-then-forward/);
   const consumeAt = haltStore.indexOf('terminal === "consume-halt-then-forward"');
@@ -8356,12 +8638,14 @@ test("vendor preface lists extra folders and references, not cwd", () => {
       projectName: "Walk Test",
       sidebar: "Grok 4.6 · Medium · Ask",
       preview: "Hey — I'm here and ready.",
+      crew: "Crew on this chat: Wanda · skies (idle)",
     },
   });
   assert.match(withDesk, /Title: Preview Query/);
   assert.match(withDesk, /Project: Walk Test/);
   assert.match(withDesk, /Sidebar subtitle/);
   assert.match(withDesk, /Preview \(last message snippet\): Hey — I'm here and ready\./);
+  assert.match(withDesk, /Crew on this chat: Wanda · skies \(idle\)/);
   assert.match(readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8"), /buildSessionPreface/);
   assert.match(readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8"), /visibleText: firstUserText\(\{ messages: working \}\) \|\| originalText \|\| images\[0\]\?\.name \|\| "Image"/);
   for (const host of ["grok-host.ts", "codex-host.ts", "claude-host.ts", "cursor-host.ts"]) {
@@ -8428,7 +8712,7 @@ test("switching This-chat vendor drops the previous vendor session", () => {
       messages: [],
       agentRun: { status: "completed", startedAt: 1, isolation: "worktree" },
     }),
-    "GPT-5.6-Terra · Medium",
+    "GPT-5.6-Terra · Medium · Done",
   );
   assert.equal(
     workerSidebarLabel({
@@ -8559,6 +8843,10 @@ test("composer + pins Orchestrate and Mission and those modes inject the bible",
   assert.deepEqual(toggleCrewMode(["orchestrate"], "mission"), ["orchestrate", "mission"]);
   assert.deepEqual(toggleCrewMode(["orchestrate", "mission"], "mission"), ["orchestrate"]);
   assert.deepEqual(orderedCrewModes(["mission", "orchestrate"]), ["orchestrate", "mission"]);
+  assert.equal(sameCrewModes(["orchestrate"], ["orchestrate"]), true);
+  assert.equal(sameCrewModes(["orchestrate"], ["orchestrate", "mission"]), false);
+  const held = ["orchestrate"] as const;
+  assert.equal(sameCrewModes(held, orderedCrewModes(["orchestrate"])), true);
 
   const review = "Review this folder and ship the report";
   assert.equal(withCrewModeHint(review), review);
@@ -8568,8 +8856,11 @@ test("composer + pins Orchestrate and Mission and those modes inject the bible",
   assert.match(orchestrated, /Review this folder and ship the report/);
   const missioned = withCrewModeHint(review, "mission");
   assert.ok(missioned.startsWith(MISSION_MODE_HINT));
+  assert.match(MISSION_MODE_HINT, /not a request to spawn or summon agents/);
   assert.match(missioned, /workhorse_continue_mission/);
-  assert.match(missioned, new RegExp(SPAWN_TURN_HINT.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.doesNotMatch(missioned, new RegExp(SPAWN_TURN_HINT.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.doesNotMatch(missioned, /The user asked you to spawn or summon agents/);
+  assert.doesNotMatch(missioned, /Call workhorse_list_bots now/);
   const both = withCrewModeHint(review, ["orchestrate", "mission"]);
   assert.ok(both.startsWith(ORCHESTRATE_MODE_HINT));
   assert.match(both, new RegExp(MISSION_MODE_HINT.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
@@ -8586,6 +8877,21 @@ test("composer + pins Orchestrate and Mission and those modes inject the bible",
   assert.match(composed, /canCall/);
   const composedMission = composeVendorPrompt(review, WORKHORSE_SESSION_RULES, "session/load", { crewMode: "mission" });
   assert.match(composedMission, /workhorse_continue_mission/);
+  assert.doesNotMatch(composedMission, /The user asked you to spawn or summon agents/);
+  assert.doesNotMatch(composedMission, /Call workhorse_list_bots now/);
+  const craft = "Brother you just put some weird wings on it, please make this unique different using the other crafts as references to create your perfect craft";
+  assert.equal(looksLikeSpawnRequest(craft), false);
+  const composedCraft = composeVendorPrompt(craft, WORKHORSE_SESSION_RULES, "session/load", { crewMode: "mission" });
+  assert.match(composedCraft, /The user selected Mission on this chat/);
+  assert.doesNotMatch(composedCraft, /The user asked you to spawn or summon agents/);
+  assert.doesNotMatch(composedCraft, /Call workhorse_list_bots now/);
+  const composedSpawnMission = composeVendorPrompt(
+    "please spawn subagents to review this",
+    WORKHORSE_SESSION_RULES,
+    "session/load",
+    { crewMode: "mission" },
+  );
+  assert.match(composedSpawnMission, /The user asked you to spawn or summon agents/);
   const composedBoth = composeVendorPrompt(review, WORKHORSE_SESSION_RULES, "session/load", {
     crewMode: ["orchestrate", "mission"],
   });
@@ -8628,6 +8934,9 @@ test("composer + pins Orchestrate and Mission and those modes inject the bible",
   assert.match(readFileSync(path.join(ROOT, "electron", "preload.ts"), "utf8"), /pickAttach/);
   assert.match(composer, /composer-crew-chip/);
   assert.match(composer, /setCrewMode\(toggleCrewMode/);
+  assert.match(composer, /composer-crew-gear/);
+  assert.match(composer, /onContextMenu/);
+  assert.match(composer, /All bots/);
   const css = readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8");
   assert.match(css, /\.composer-plus-menu/);
   assert.match(css, /\.plus-icon\.orchestrate/);
@@ -8648,12 +8957,14 @@ test("composer + pins Orchestrate and Mission and those modes inject the bible",
   const store = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
   assert.match(store, /crewModes: session\.crewModes/);
   assert.match(store, /setCrewMode/);
+  assert.match(store, /setSpawnAllowlist/);
   assert.match(readFileSync(path.join(ROOT, "electron", "grok-host.ts"), "utf8"), /crewMode: input\.crewModes/);
   assert.match(readFileSync(path.join(ROOT, "electron", "claude-host.ts"), "utf8"), /crewMode: input\.crewModes/);
   assert.match(readFileSync(path.join(ROOT, "electron", "codex-host.ts"), "utf8"), /crewMode: input\.crewModes/);
   assert.match(readFileSync(path.join(ROOT, "electron", "cursor-host.ts"), "utf8"), /crewMode: input\.crewModes/);
   assert.match(readFileSync(path.join(ROOT, "electron", "custom-host.ts"), "utf8"), /withCrewModeHint/);
   assert.match(readFileSync(path.join(ROOT, "docs", "FEATURES.md"), "utf8"), /Composer \+ menu/);
+  assert.match(readFileSync(path.join(ROOT, "docs", "FEATURES.md"), "utf8"), /not a spawn request/);
 });
 
 test("desk-enforced orchestrator vs worker lineup", async () => {
@@ -8878,6 +9189,8 @@ test("desk-enforced orchestrator vs worker lineup", async () => {
   assert.equal(shouldAutoRouteSpawn({ routingEnabled: true, provider: "claude" }), true, "a named vendor still ranks its models");
   assert.equal(shouldAutoRouteSpawn({ routingEnabled: true, provider: "custom" }), true, "a named vendor is not a named model");
   assert.equal(shouldAutoRouteSpawn({ routingEnabled: true, model: "MiniMax-M3" }), false);
+  assert.equal(shouldAutoRouteSpawn({ routingEnabled: true, model: "grok-4.6" }), true);
+  assert.equal(shouldAutoRouteSpawn({ routingEnabled: true, provider: "grok", model: "grok-4.6" }), false);
   assert.equal(shouldAutoRouteSpawn({ routingEnabled: true, chat: "Kimi" }), false);
   assert.equal(shouldAutoRouteSpawn({ routingEnabled: true, customBotId: "bot_kimi" }), false);
   assert.equal(shouldAutoRouteSpawn({ routingEnabled: false }), false);
@@ -9207,11 +9520,12 @@ test("desk-enforced orchestrator vs worker lineup", async () => {
   assert.match(WORKHORSE_SESSION_RULES, /One bounded assignment is one workhorse_spawn_agent/);
   assert.match(WORKHORSE_SESSION_RULES, /A second spawn only to independently check that worker's output/);
   assert.match(WORKHORSE_SESSION_RULES, /Leave model unset so Auto ranks the slice/);
-  assert.match(WORKHORSE_SESSION_RULES, /Grok 4.6 is ACP Grok, not Grok Bot/);
+  assert.match(WORKHORSE_SESSION_RULES, /Grok 4.6 is ACP Grok or Cursor Grok, never Grok Bot/);
   assert.match(WORKHORSE_SESSION_RULES, /Do not spawn grok-bot as a worker, builder, or auditor/);
   assert.match(WORKHORSE_SESSION_RULES, /Grok Bot may call, analyze, and dispatch only/);
-  assert.match(CUSTOM_HTTP_SESSION_RULES, /Grok 4.6 is ACP Grok, not Grok Bot/);
-  assert.match(SPAWN_TURN_HINT, /Grok 4.6 is ACP Grok, not Grok Bot/);
+  assert.match(WORKHORSE_SESSION_RULES, /Naming grok-4.6 with no vendor lets the desk pick by leftover/);
+  assert.match(CUSTOM_HTTP_SESSION_RULES, /Grok 4.6 is ACP Grok or Cursor Grok, never Grok Bot/);
+  assert.match(SPAWN_TURN_HINT, /Grok 4.6 is ACP Grok or Cursor Grok, never Grok Bot/);
   assert.match(readFileSync(path.join(ROOT, "skills", "desk", "SKILL.md"), "utf8"), /Do not spawn `grok-bot` as a worker/);
   assert.match(WORKHORSE_SESSION_RULES, /a named vendor without a model still Auto-ranks that vendor's models/);
   assert.match(WORKHORSE_SESSION_RULES, /Do not pick a model because it is first in the list/);
@@ -9556,6 +9870,8 @@ test("desk builds one named join prompt and syncs idle children", () => {
     "each lineup announces its own finish",
   );
   assert.match(formatAwaitAgentsSnapshot({ lineup: handedParent?.lineup, wait: true }), /Join them now/);
+  assert.match(formatAwaitAgentsSnapshot({ lineup: handedParent?.lineup, wait: true }), /Start with blockers/);
+  assert.doesNotMatch(formatAwaitAgentsSnapshot({ lineup: handedParent?.lineup, wait: true }), /worst first/);
   assert.doesNotMatch(formatAwaitAgentsSnapshot({ lineup: handedParent?.lineup, wait: true }), /desk will send the join/);
   const again = maybeEnqueueLineupJoin(joinedAfter, "orch", 13);
   assert.equal(again.find((item) => item.id === "orch")?.queue?.length, afterParent?.queue?.length);
@@ -9869,8 +10185,9 @@ test("the repo tracks no symlinks and states its working rules", () => {
   assert.match(tryDesk, /delete env\.CSC_LINK/);
   assert.match(tryDesk, /packWindowsDir/);
   assert.match(tryDesk, /installWinDevApp/);
-  assert.match(tryDesk, /--workhorse-user-data=/);
+  assert.match(tryDesk, /WORKHORSE_USER_DATA_PATH/);
   assert.match(tryDesk, /Start-Process/);
+  assert.doesNotMatch(tryDesk, /--workhorse-user-data=/);
   assert.doesNotMatch(tryDesk, /WORKHORSE_RELEASE_BUILD=1/);
   assert.doesNotMatch(tryDesk, /taskkill[\s\S]*Go7 Workhorse\.exe/);
   assert.equal(WORKHORSE_DEV_APP_ID, `${WORKHORSE_APP_ID}.dev`);
@@ -10169,48 +10486,26 @@ test("the desk reads each vendor app's own config and never asks the vendor for 
   );
 });
 
-test("a nested helper's clamped runtime is said out loud, not swallowed", () => {
+test("a nested helper is not given a runtime kill", () => {
   /*
-   * The tool schema offers 30-3600 seconds. The nested path silently cut every
-   * request down to two minutes, so a caller could ask for an hour, get two
-   * minutes, and read the early stop as a crash rather than as the limit it is.
-   * The clamp stays — a helper is a bounded check — but it now says so.
+   * Nested helpers used to be clamped to two minutes, then stopped. A helper
+   * that is still working is not a crash. timeoutSeconds on spawn is ignored
+   * the same way tokenBudget is.
    */
-  assert.equal(NESTED_HELPER_TIMEOUT_SECONDS, 120);
-  const note = nestedTimeoutNote(3600);
-  assert.match(note, /nested helpers run at most 120 s/);
-  assert.match(note, /3600 s asked for/, "the note says which number was overridden");
-
-  // Only a request that actually exceeded the ceiling earns a note. Anything at
-  // or under it was honoured, so saying so would be noise.
-  assert.equal(nestedTimeoutNote(120), "");
-  assert.equal(nestedTimeoutNote(30), "");
-  assert.equal(nestedTimeoutNote(undefined), "");
-  assert.equal(nestedTimeoutNote(Number.NaN), "");
-
-  // The note rides back with the spawn result and does not disturb the report.
-  const report = "Mission status: complete. Checked the two call sites.";
-  assert.equal(withSpawnNote(report, ""), report);
-  const carried = withSpawnNote(report, note);
-  assert.ok(carried.startsWith(report), "the worker's own report comes first, unaltered");
-  assert.match(carried, /nested helpers run at most 120 s/);
-  assert.equal(withSpawnNote(carried, note), carried, "a retried spawn does not stack the note twice");
-
-  // Both spawn return paths carry it: the first answer and the one after a
-  // vendor grant. A note on only one of them is a note that goes missing
-  // exactly when a vendor had to be asked twice.
   const mcp = readFileSync(path.join(ROOT, "electron", "workhorse-mcp.ts"), "utf8");
-  assert.match(mcp, /const clampNote = isNested \? nestedTimeoutNote\(input\.timeoutSeconds\) : "";/);
-  assert.match(mcp, /return withSpawnNote\(recordSpawnAccess\(first\), clampNote\);/, "the plain spawn result carries the note");
-  assert.match(
-    mcp,
-    /return withSpawnNote\(recordSpawnAccess\(await postBridge\("\/spawn"/,
-    "the granted retry carries it too",
-  );
-  assert.match(
+  assert.doesNotMatch(mcp, /const clampNote = isNested/);
+  assert.doesNotMatch(
     mcp,
     /timeoutSeconds: Math\.min\(NESTED_HELPER_TIMEOUT_SECONDS, Math\.max\(30, input\.timeoutSeconds \?\? NESTED_HELPER_TIMEOUT_SECONDS\)\)/,
-    "the clamp itself is kept, and reads from the one named ceiling",
+    "the nested path does not stamp a two-minute kill",
+  );
+  assert.match(mcp, /timeoutSeconds: undefined/);
+  assert.doesNotMatch(mcp, /nestedHelperBudgetNote\(input\.tokenBudget/);
+  assert.match(mcp, /return recordSpawnAccess\(first\)/, "the spawn result is not wrapped in a timeout clamp note");
+  assert.match(
+    mcp,
+    /return recordSpawnAccess\(await postBridge\("\/spawn"/,
+    "the granted retry is not wrapped either",
   );
 });
 

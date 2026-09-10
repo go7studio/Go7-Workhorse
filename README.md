@@ -188,7 +188,7 @@ macOS approval belongs to the signed app identity. One allow sticks across updat
 3. **Link folder** or **Add reference** when you want files, URLs, or notes on the project. Several folders are allowed.
 4. **New chat** starts with the last model. Change vendor, model, and brain level from the menu on the composer.
 5. **Talk** — Grok, Claude, Codex, and Cursor run live. Custom uses the HTTP bot you created.
-6. **Type `/`** — command palette. `/providers` goes back to this project’s home. `/settings` opens Profile, connected LLMs, skills, routing, learning, usage, and watch.
+6. **Type `/`** — command palette. `/providers` goes back to this project’s home. `/settings` opens Profile, connected LLMs, skills, workshop, routing, learning, usage, and watch.
 7. **`/demo-permission`** — shows Allow once / Allow for session / Deny.
 8. **Review / Terminal** — inspect the real Git working tree or open a shell scoped to this chat's local folder or worktree.
 
@@ -213,7 +213,7 @@ Each chat can execute in the linked local folder or a managed detached Git workt
 - The provider capability registry drives controls instead of implying that every vendor supports the same native operations.
 - Custom Anthropic Messages and OpenAI Chat Completions bots can use configured MCP servers through the same normalized approval and result path as built-in tools.
 - Electron main journals queues, one-shot and recurring schedules, and active goals. Dispatched work is recovered after an app-process restart.
-- Cross-provider subagents have explicit lifecycle records, runtime and token ceilings, cascading cancellation, changed-file review, shared-workspace conflict warnings, and managed-worktree isolation when the project supports it.
+- Cross-provider subagents have explicit lifecycle records, cascading cancellation, changed-file review, shared-workspace conflict warnings, and managed-worktree isolation when the project supports it. Billed spend for a chat is on the meter; the desk does not stop a worker on a token ceiling or a runtime limit.
 - The sidebar searches chat titles and message text across projects.
 - Settings can export a support-safe provider report. It excludes prompts, messages, file contents, environment variables, URLs, and credential values.
 

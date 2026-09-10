@@ -13,10 +13,13 @@ import {
   type ModelInfo,
   type ReasoningLevel,
 } from "../src/lib/models";
-import type { ProviderId } from "../src/lib/types";
+import type { CustomBot, ProviderId } from "../src/lib/types";
+import { customBotEnabled, customBotModels } from "../src/lib/custom-bots";
+import type { CustomCatalog } from "./custom-catalog";
 import { claudeAdvertisedRows, sameVendorModelCache, vendorModelCacheFrom, type VendorModelCache } from "../src/lib/advertised-models";
 import { parseCursorModelsOutput, reconcileCursorModels as collapseCursorLive } from "../src/lib/cursor-catalog";
 import { resolveCursorBinary, resolveCursorPrefixArgs, type CursorLoginDetectInput } from "./cursor-login";
+import { deskToolEnv } from "./desk-path";
 
 export { parseCursorModelsOutput };
 
@@ -28,6 +31,13 @@ export type VendorModelListInput = {
   cursorModelsOutput?: string | null;
   /** The desk's userData. Holds what each vendor advertised to a live session. */
   userData?: string;
+  /** Enabled custom bots and what their hosts last published, when known. */
+  customBots?: CustomBotCatalog[];
+};
+
+export type CustomBotCatalog = {
+  bot: Pick<CustomBot, "id" | "model" | "models" | "enabled">;
+  catalog?: CustomCatalog;
 };
 
 /** Where the desk keeps a vendor's advertised list: userData/vendor-models/<provider>.json */
@@ -101,13 +111,31 @@ export function cursorModelsCommand(
   return { command: binary, args: [...resolveCursorPrefixArgs(input), "models"] };
 }
 
+/**
+ * `cursor-agent models` is Cursor's own CLI, so it gets the desk's PATH and
+ * the person's shell settings — and not the Claude login the desk keeps in its
+ * vault, which is what a plain spread of `process.env` handed it.
+ *
+ * `env` is the detect environment, and in the live path it is `process.env`
+ * itself: `listVendorModels()` defaults to it and hands it down. So this
+ * overlays the environment onto itself, and it is `deskToolEnv` filtering the
+ * merge rather than only its base that keeps the desk's names out of the
+ * child. Anything passed here is treated as untrusted for that reason.
+ */
+export function cursorModelsEnv(
+  env: NodeJS.Dict<string> = {},
+  base: NodeJS.ProcessEnv = process.env,
+): NodeJS.ProcessEnv {
+  return deskToolEnv(base, env as NodeJS.ProcessEnv);
+}
+
 function readInstalledCursorModels(env: NodeJS.Dict<string>): string | null {
   const spawnAs = cursorModelsCommand({ env });
   if (!spawnAs) return null;
   try {
     return execFileSync(spawnAs.command, spawnAs.args, {
       encoding: "utf8",
-      env: { ...process.env, ...env },
+      env: cursorModelsEnv(env),
       timeout: 4_000,
       maxBuffer: 1_048_576,
       windowsHide: true,
@@ -249,6 +277,132 @@ export function parseGrokModelsCache(raw: string): ModelInfo[] {
   return models;
 }
 
+/**
+ * The desk's `custom` rows: every model an enabled bot offers, carrying the
+ * window its own host published.
+ *
+ * Offered, never merely served. A host sells dozens behind one key and the
+ * owner ticks the ones they want, so widening this to the whole catalog would
+ * put ids nobody approved in front of a chat. Only approved ids get a row, and
+ * a row is marked `hostListed` only when the host supplied its window — that
+ * mark is what lets `contextWindowFor` prefer it over the number saved on the
+ * bot without ever preferring a seed over it.
+ *
+ * The seed stays underneath. A desk with one Synthetic bot and one MiniMax bot
+ * that publishes no list must not lose MiniMax's rows because Synthetic
+ * answered.
+ */
+export function customVendorRows(rows: CustomBotCatalog[] = []): ModelInfo[] {
+  const models: ModelInfo[] = [];
+  // One row per slot per model. Two bots may serve the same id at different
+  // windows, and collapsing them here would hand whichever bot happened to be
+  // second the first one's context. `modelsFor` collapses by id for anything
+  // that wants a plain catalog; the window lookup reads these rows as they are.
+  const seen = new Set<string>();
+  for (const { bot, catalog } of rows) {
+    if (!customBotEnabled(bot)) continue;
+    const listed = new Map((catalog?.models ?? []).map((model) => [model.id, model]));
+    for (const id of customBotModels(bot)) {
+      const key = `${bot.id}\n${id}`;
+      if (seen.has(key)) continue;
+      const published = listed.get(id);
+      const seed = MODEL_CATALOG.custom.find((item) => item.id === id);
+      const contextWindow = published?.contextWindow ?? seed?.contextWindow ?? 0;
+      if (!contextWindow) continue;
+      seen.add(key);
+      models.push({
+        id,
+        name: seed?.name ?? id,
+        effort: seed?.effort ?? false,
+        contextWindow,
+        customBotId: bot.id,
+        ...(seed?.reasoningLevels ? { reasoningLevels: seed.reasoningLevels } : {}),
+        ...(published?.contextWindow ? { hostListed: true } : {}),
+      });
+    }
+  }
+  const offered = new Set(models.map((model) => model.id));
+  for (const seed of MODEL_CATALOG.custom) {
+    if (offered.has(seed.id)) continue;
+    offered.add(seed.id);
+    models.push(seed);
+  }
+  return models;
+}
+
+export type DeskCatalog = Pick<VendorModelLists, "grok" | "claude" | "codex" | "cursor">;
+const DESK_CATALOG_VENDORS = ["grok", "claude", "codex", "cursor"] as const;
+
+/** Where the desk keeps the stock lists it last served its picker: userData/vendor-models/desk.json */
+export function deskCatalogPath(userData: string): string {
+  return path.join(userData, "vendor-models", "desk.json");
+}
+
+/**
+ * The desk is the one reader of vendor homes. What it serves the picker it
+ * also saves, so a process with no renderer — the Link helper — lists the
+ * same rows without reading `~/.codex` or `~/.grok` on its own. Custom slots
+ * stay out: the desk alone knows them and their keys. Never throws.
+ */
+export function rememberDeskCatalog(userData: string, lists: VendorModelLists): boolean {
+  if (!userData) return false;
+  const next: DeskCatalog = { grok: lists.grok, claude: lists.claude, codex: lists.codex, cursor: lists.cursor };
+  const text = JSON.stringify(next, null, 2);
+  const file = deskCatalogPath(userData);
+  try {
+    if (fs.existsSync(file) && fs.readFileSync(file, "utf8") === text) return false;
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, text);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function deskCatalogRows(raw: unknown): ModelInfo[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const rows: ModelInfo[] = [];
+  for (const row of raw) {
+    if (!row || typeof row !== "object") continue;
+    const item = row as Partial<ModelInfo>;
+    if (typeof item.id !== "string" || !item.id.trim() || typeof item.name !== "string") continue;
+    if (typeof item.contextWindow !== "number" || !Number.isFinite(item.contextWindow) || item.contextWindow <= 0) continue;
+    rows.push({
+      id: item.id,
+      name: item.name,
+      effort: item.effort !== false,
+      contextWindow: item.contextWindow,
+      ...(Array.isArray(item.reasoningLevels) ? { reasoningLevels: parseReasoningLevels(item.reasoningLevels.map((level) => ({ effort: level?.id, description: level?.hint }))) ?? [] } : {}),
+      ...(Array.isArray(item.aliases) ? { aliases: item.aliases.filter((alias): alias is string => typeof alias === "string") } : {}),
+    });
+  }
+  return rows.length > 0 ? rows : undefined;
+}
+
+/** The stock lists the desk last served, or nothing when it has not served any. */
+export function readDeskCatalog(
+  userData: string,
+  existsSync: (filePath: string) => boolean = (filePath) => fs.existsSync(filePath),
+  readFile: (filePath: string) => string = (filePath) => fs.readFileSync(filePath, "utf8"),
+): Partial<DeskCatalog> | undefined {
+  if (!userData) return undefined;
+  const raw = readText(deskCatalogPath(userData), existsSync, readFile);
+  if (!raw) return undefined;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return undefined;
+  }
+  if (!parsed || typeof parsed !== "object") return undefined;
+  const lists: Partial<DeskCatalog> = {};
+  for (const vendor of DESK_CATALOG_VENDORS) {
+    const rows = deskCatalogRows((parsed as Record<string, unknown>)[vendor]);
+    if (rows) lists[vendor] = rows;
+  }
+  return Object.keys(lists).length > 0 ? lists : undefined;
+}
+
 export function listVendorModels(input: VendorModelListInput = {}): VendorModelLists {
   const env = input.env ?? process.env;
   const homedir = input.homedir ?? os.homedir();
@@ -279,6 +433,6 @@ export function listVendorModels(input: VendorModelListInput = {}): VendorModelL
     claude: claudeAdvertisedRows(claudeSeed, claudeDesk?.models.map((row) => row.slug) ?? []),
     codex: codexLive.length ? codexLive : MODEL_CATALOG.codex,
     cursor: reconcileCursorModels(cursorLive),
-    custom: MODEL_CATALOG.custom,
+    custom: customVendorRows(input.customBots),
   };
 }

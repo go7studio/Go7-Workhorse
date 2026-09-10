@@ -94,7 +94,7 @@ The validator checks:
 - the large-desk performance contract maps its scale fixtures, rendering and
   persistence boundaries, verification commands, rubric items, and default tests;
 - every provider usage profile covers direct and orchestrated calls, token and
-  leftover provenance, pool identity, and the Cursor-only estimate exception;
+  leftover provenance, pool identity, and the Cursor dashboard-join plus estimate fallback;
 - critical model, security, orchestration, usage, and release rubrics remain
   explicit release blockers;
 - the baseline is a full commit and the example version matches package.json;

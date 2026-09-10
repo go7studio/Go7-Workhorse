@@ -5,6 +5,11 @@ import electronMcp from "vite-plugin-electron";
 import path from "node:path";
 
 export default defineConfig({
+  server: {
+    watch: {
+      ignored: ["**/.worktrees/**"],
+    },
+  },
   build: {
     rollupOptions: {
       output: {

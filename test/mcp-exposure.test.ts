@@ -55,7 +55,7 @@ test("spawn paths describe scope evidence instead of containment", () => {
   assert.doesNotMatch(paths?.description ?? "", /files this worker may change/i);
 });
 
-test("a nested helper defaults to its parent worktree and remains local, shared, and read-only", async () => {
+test("a nested helper defaults to its parent worktree and stays local and shared, at the seat it inherited", async () => {
   const dir = mkdtempSync(path.join(tmpdir(), "wh-nested-cwd-"));
   const linked = path.join(dir, "linked");
   const workerTree = path.join(dir, "worker-tree");
@@ -98,7 +98,10 @@ test("a nested helper defaults to its parent worktree and remains local, shared,
     assert.equal(result.error, undefined, result.error?.message);
     assert.equal(seen?.folder, workerTree);
     assert.equal(seen?.isolation, "shared");
-    assert.equal(seen?.role, "helper");
+    // A plain nested spawn is no longer forced read-only, so it is not recorded
+    // as a helper either: the role and the clamp are the same fact. The desk
+    // default is the standing permission for work the system asked for.
+    assert.notEqual(seen?.role, "helper", "no clamp the call did not ask for");
     assert.equal(seen?.paths, undefined);
   } finally {
     setWorkhorseDeskAsk(null);
@@ -288,7 +291,7 @@ test("MCP initialize identifies Workhorse as an execution desk", async () => {
   assert.match(initialized.result?.instructions ?? "", /list_chats to choose an explicit parent/);
   assert.match(initialized.result?.instructions ?? "", /workhorse_delegate before doing the task directly/);
   assert.match(initialized.result?.instructions ?? "", /Leave initialBrain unset for full Auto/);
-  assert.match(initialized.result?.instructions ?? "", /Grok 4.6 is ACP Grok, not Grok Bot/);
+  assert.match(initialized.result?.instructions ?? "", /Grok 4.6 is ACP Grok or Cursor Grok, never Grok Bot/);
   assert.match(initialized.result?.instructions ?? "", /does not allocate grok-bot as an orchestration or builder worker/);
   assert.match(initialized.result?.instructions ?? "", /does not pin descendants/);
   assert.match(initialized.result?.instructions ?? "", /auto-routes from task fit and current capacity/);
@@ -811,8 +814,16 @@ test("adaptive mission continuation reconciles raw phase, inherits its folder an
         },
       },
     })) as { error?: { message?: string } };
-    assert.match(interrupted.error?.message ?? "", /resume the interrupted worker before continuing the mission/);
-    assert.equal(spawned, undefined, "an interrupted report cannot mint a continuation spawn");
+    // A worker that ended badly used to end the mission here, and the caller was
+    // told to resume it — something no Link tool can do. The pass now carries on
+    // and names what did not finish, so the work is picked up rather than stranded.
+    assert.equal(interrupted.error, undefined, interrupted.error?.message);
+    assert.ok(spawned, "an unfinished pass must not strand the mission");
+    assert.match(
+      String((spawned as { message?: unknown } | undefined)?.message ?? ""),
+      /DID NOT FINISH LAST PASS[\s\S]*worker_pass_1 ended interrupted/,
+      "and the next pass is told whose slice is still open",
+    );
   } finally {
     setWorkhorseDeskAsk(null);
     if (previous.profile === undefined) delete process.env.WORKHORSE_MCP_PROFILE;

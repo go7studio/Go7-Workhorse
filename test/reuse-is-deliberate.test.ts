@@ -4,7 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import { findReusableWorker } from "../src/lib/subagents";
-import { WORKHORSE_SESSION_RULES } from "../src/lib/workhorse-rules";
+import { CONTINUE_NAMED_WORKER_LAW, SPAWN_TURN_HINT, WORKHORSE_SESSION_RULES } from "../src/lib/workhorse-rules";
 import type { WorkerRecord } from "../src/lib/subagents";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -53,8 +53,26 @@ test("nothing still promises automatic reuse", () => {
     assert.doesNotMatch(text, /reuses an idle worker automatically/);
     assert.doesNotMatch(text, /Leave empty and the desk reuses an idle worker/);
   }
-  assert.match(WORKHORSE_SESSION_RULES, /pass worker with its name so it keeps what it learned/);
+  assert.match(WORKHORSE_SESSION_RULES, /pass worker with that idle name so it keeps what it learned/);
   assert.match(read("electron/workhorse-mcp.ts"), /a new worker starts with a clear head/);
+});
+
+test("orchestrator surfaces teach named continuation, not pooling", () => {
+  const skill = read("skills/desk/SKILL.md");
+  const store = read("src/lib/store.tsx");
+  const features = read("docs/FEATURES.md");
+  for (const text of [CONTINUE_NAMED_WORKER_LAW, SPAWN_TURN_HINT, WORKHORSE_SESSION_RULES, skill]) {
+    assert.match(text, /pass worker/);
+    assert.match(text, /same topic/);
+    assert.match(text, /clear head/);
+    assert.doesNotMatch(text, /reuses an idle worker automatically/);
+  }
+  assert.ok(SPAWN_TURN_HINT.includes(CONTINUE_NAMED_WORKER_LAW.trim()));
+  assert.match(store, /spawnContinuationHowToUse/);
+  assert.match(store, /parentCrewSnapshot/);
+  assert.match(store, /formatParentCrewLine/);
+  assert.match(features, /named continuation on this parent for the same topic/);
+  assert.match(features, /bare spawn still\s+starts clear-headed/);
 });
 
 test("continuity still works when it is asked for", () => {

@@ -1,0 +1,59 @@
+{
+  "schemaVersion": 1,
+  "forbidden": [
+    "figma-use",
+    "artifact-template-business-review",
+    "artifact-template-analytics-dashboard"
+  ],
+  "beats": [
+    {
+      "id": "idle-thanks",
+      "kind": "leak",
+      "prompt": "Thanks, that looks good.",
+      "expect": [],
+      "forbid": ["figma-use", "artifact-template-business-review", "artifact-template-analytics-dashboard"]
+    },
+    {
+      "id": "normal-coding",
+      "kind": "leak",
+      "prompt": "Fix the failing test save clobber.",
+      "expect": [],
+      "forbid": ["figma-use", "artifact-template-business-review", "artifact-template-analytics-dashboard"]
+    },
+    {
+      "id": "leak-present",
+      "kind": "leak",
+      "prompt": "Present your findings in a short writeup.",
+      "expect": [],
+      "forbid": ["figma-use", "artifact-template-business-review", "artifact-template-analytics-dashboard"]
+    },
+    {
+      "id": "leak-figma",
+      "kind": "leak",
+      "prompt": "The mock is in Figma; just implement the login form.",
+      "expect": [],
+      "forbid": ["figma-use", "artifact-template-business-review", "artifact-template-analytics-dashboard"]
+    },
+    {
+      "id": "hit-unity",
+      "kind": "hit",
+      "prompt": "Reconstruct this Unity HUD in Figma and preserve its layout.",
+      "expect": ["unity-ui-to-figma"],
+      "forbid": ["figma-use", "artifact-template-business-review", "artifact-template-analytics-dashboard"]
+    },
+    {
+      "id": "hit-taildrop",
+      "kind": "hit",
+      "prompt": "Send this APK to my Tailscale phone using Taildrop.",
+      "expect": ["send-taildrop"],
+      "forbid": ["figma-use", "artifact-template-business-review"]
+    },
+    {
+      "id": "hit-named",
+      "kind": "hit",
+      "prompt": "Use workhorse:desk to list the other chats.",
+      "expect": ["desk"],
+      "forbid": ["figma-use", "artifact-template-business-review"]
+    }
+  ]
+}

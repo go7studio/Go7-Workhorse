@@ -12,7 +12,7 @@ import {
   workerProgressCheckpoint,
   workerStatusSnapshot,
 } from "../src/lib/subagents";
-import { addLineupRow, applyChildIdleSync, emptyLineup, lineupJoinPrompt, normalizeLineup } from "../src/lib/lineup";
+import { addLineupRow, applyChildIdleSync, emptyLineup, formatAwaitAgentsSnapshot, lineupJoinPrompt, normalizeLineup } from "../src/lib/lineup";
 import { sessionTranscript } from "../src/lib/session-bridge";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -230,7 +230,8 @@ test("typed finding receipts survive terminal sync, restart normalization, statu
   assert.deepEqual(snapshot.findings, settledChild.agentRun?.findings, "agent_status exposes typed findings beside report");
   const join = lineupJoinPrompt(restoredLineup);
   assert.match(join, /findings: \[{"severity":"high"/);
-  assert.match(join, /Rank the structured findings by severity/);
+  assert.match(join, /Start with blockers, then the rest/);
+  assert.doesNotMatch(join, /worst first/);
 });
 
 test("a short finished report stays the existing report key with no silent clip", () => {
@@ -347,4 +348,64 @@ test("peer ask of a running worker continues the same run clock", () => {
   const store = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
   assert.match(store, /continueWorkerRun\(item\.agentRun/);
   assert.match(store, /vendorDisplayName\(spec\.provider\)/);
+});
+
+/**
+ * Catchy ranking slogans in the join prompt get copied into the transcript
+ * heading — `Crew review (worst first)` was one. Keep the instruction plain.
+ */
+test("join copy does not leak ranking slogans into the user-facing review", () => {
+  const leaks = [
+    /worst first/i,
+    /best first/i,
+    /ranking slogan/i,
+    /heading like/i,
+    /crew review/i,
+    /most urgent first/i,
+  ];
+  const running = addLineupRow(emptyLineup("/repo", 1), {
+    childId: "c1",
+    title: "Hazel · Shop",
+    slice: "Shop",
+    folder: "/repo",
+    vendor: "Codex",
+    status: "running",
+    startedAt: 1,
+  });
+  const done = addLineupRow(emptyLineup("/repo", 1), {
+    childId: "c1",
+    title: "Hazel · Shop",
+    slice: "Shop",
+    folder: "/repo",
+    vendor: "Codex",
+    status: "completed",
+    startedAt: 1,
+    report: "Shop buy grants fruit.",
+  });
+  const surfaces = [
+    lineupJoinPrompt(done),
+    lineupJoinPrompt(done, { continuePlan: true }),
+    lineupJoinPrompt(done, { parentTookOver: true }),
+    formatAwaitAgentsSnapshot({ lineup: done, wait: true }),
+    formatAwaitAgentsSnapshot({ lineup: running, wait: false }),
+    formatAwaitAgentsSnapshot({
+      wait: true,
+      reports: [
+        {
+          title: "Hazel · Shop",
+          status: "completed",
+          text: "done",
+          childSessionId: "c1",
+          executionOwner: "parent",
+        },
+      ],
+    }),
+  ];
+  for (const leak of leaks) {
+    for (const surface of surfaces) {
+      assert.doesNotMatch(surface, leak);
+    }
+  }
+  assert.match(lineupJoinPrompt(done), /Start with blockers, then the rest/);
+  assert.match(formatAwaitAgentsSnapshot({ lineup: done, wait: true }), /Start with blockers/);
 });

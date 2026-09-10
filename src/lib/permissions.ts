@@ -1,12 +1,12 @@
 import { modeLabel, sandboxLabel } from "./commands";
 import { uid } from "./id";
 import { applySessionElevation } from "./session";
-import { toolNameKey } from "./tool-labels";
+import { canonicalToolKey, isAcpToolKind, toolNameKey } from "./tool-labels";
 import type { BotAccessDefaults, DeskAccess, PermissionGrant, PermissionMode, PermissionRequest, SandboxProfile, Session } from "./types";
 
 export type PermissionAnswer = "once" | "session" | "deny";
 
-const DELEGATION_TOOLS = /^(?:spawn_agent|spawn_subagent|delegate)$/;
+const DELEGATION_TOOLS = /^(?:task|agent|launch_agent|spawn_agent|spawn_subagent|delegate)$/;
 
 /**
  * A sub-agent launch carries the whole assignment as its detail, so the words
@@ -16,7 +16,13 @@ const DELEGATION_TOOLS = /^(?:spawn_agent|spawn_subagent|delegate)$/;
  * judged at spawn admission; the write heuristic stays out of it.
  */
 export function looksLikeDelegationTool(tool: string, detail: string): boolean {
-  if (DELEGATION_TOOLS.test(toolNameKey(tool))) return true;
+  if (DELEGATION_TOOLS.test(canonicalToolKey(tool))) return true;
+  // Past this line the evidence is a field inside vendor-supplied text, and a
+  // shell must never be excused by its own envelope: a call named "Run a
+  // command" carrying {"variant":"Task","command":"rm -rf src"} is a command.
+  // The name is judged on its own, so a brief that merely mentions bash is
+  // still a brief.
+  if (shellByName(tool)) return false;
   const text = detail.trim();
   if (!text.startsWith("{")) return false;
   try {
@@ -80,21 +86,53 @@ function toolKeyIn(tool: string, names: ReadonlySet<string>): boolean {
 }
 
 const WRITE_WORDS =
-  /\b(write|write_file|edit|search_replace|str_replace|create|delete|unlink|rm |remove|move|rename|bash|shell|powershell|cmd\.exe|run command|run_command)\b/;
+  /\b(write|write_file|edit|search_replace|str_replace|create|delete|unlink|rm |remove|move|rename|bash|shell|powershell|cmd\.exe|run a command|run command|run_command)\b/;
 
 export function looksLikeWriteTool(tool: string, detail: string, filePath?: string): boolean {
+  if (isQuietDeskTool(tool)) return false;
   if (looksLikeDelegationTool(tool, detail)) return false;
   const shell = looksLikeShellTool(tool, detail);
-  // A tool that is not a shell is what its name says it is.
-  if (!shell && toolKeyIn(tool, READ_TOOL_KEYS)) return false;
+  // A tool that is not a shell is what its name says it is. The name is the
+  // vendor's, though, so it does not get to make `rm -rf src` a read: a
+  // read-named tool whose detail runs a program that writes is still a write.
+  if (!shell && toolKeyIn(tool, READ_TOOL_KEYS)) return detailRunsAWrite(detail, filePath);
   // A shell's name says nothing about what it runs, so it is judged by the
   // program it invokes. Everything else a shell does counts as a write.
   if (shell && looksLikeSearchOnly(tool, detail, filePath)) return false;
+  if (shell) return true;
   return WRITE_WORDS.test(`${tool} ${detail} ${filePath ?? ""}`.toLowerCase());
 }
 
+/**
+ * Shell names that never say "bash". The desk's own labeller turns a pasted
+ * command into the title "Run a command", and the ACP kind for that same call
+ * is "execute" — so a Claude worker's grep arrived named something no
+ * classifier knew, was judged not-a-shell, and fell through to a deny. These
+ * are matched on the NAME alone: a brief that merely says "execute the plan"
+ * is still a brief.
+ */
+const SHELL_TOOL_NAMES = /\b(run a command|execute|terminal|run_terminal_cmd|local_shell|shell_command)\b/i;
+const SHELL_WORDS = /\b(bash|shell|powershell|cmd\.exe|run command|run_command)\b/i;
+
+/** The NAME says shell, whatever the detail holds. */
+function shellByName(tool: string): boolean {
+  return SHELL_TOOL_NAMES.test(tool) || SHELL_WORDS.test(tool);
+}
+
 export function looksLikeShellTool(tool: string, detail: string): boolean {
-  return /\b(bash|shell|powershell|cmd\.exe|run command|run_command)\b/i.test(`${tool} ${detail}`);
+  if (isQuietDeskTool(tool)) return false;
+  if (shellByName(tool)) return true;
+  return SHELL_WORDS.test(`${tool} ${detail}`);
+}
+
+/**
+ * Name the classifiers judge. ACP `kind` (execute, other, …) is not a tool
+ * name: concatenating it onto "Wait for agents" made every MCP call a shell.
+ */
+export function classifyPermissionTool(tool: string, rawTool?: string): string {
+  const kind = rawTool?.trim() ?? "";
+  if (!kind || isAcpToolKind(kind)) return tool;
+  return `${tool} ${kind}`;
 }
 
 export function looksLikeNetworkTool(tool: string, detail: string): boolean {
@@ -124,6 +162,8 @@ export function securityPolicyAnswer(input: {
   detail: string;
   path?: string;
   roots?: string[];
+  /** Where the command runs, so a `..` inside it is measured from the right place. */
+  cwd?: string;
 }): { answer: PermissionAnswer | null; boundary?: "network" | "outside-workspace" } {
   const policy = input.policy ?? { network: "allowed", root: "allowed" };
   if (policy.network === "blocked" && looksLikeNetworkTool(input.tool, input.detail)) {
@@ -131,29 +171,585 @@ export function securityPolicyAnswer(input: {
   }
   const candidate = input.path?.trim();
   const roots = (input.roots ?? []).filter((root) => root.trim());
-  if (candidate && absolutePath(candidate) && roots.length > 0 && !roots.some((root) => inside(root, candidate))) {
+  const outside = (value: string) => absolutePath(value) && !roots.some((root) => inside(root, value));
+  if (candidate && roots.length > 0 && outside(candidate)) {
     if (policy.root === "blocked") return { answer: "deny", boundary: "outside-workspace" };
     if (policy.root === "ask") return { answer: null, boundary: "outside-workspace" };
   }
+  // A shell call carries no path of its own: the paths it touches are inside
+  // the command. `cat /etc/passwd` reached here with nothing to check, and now
+  // that a read runs on a clamped seat it would have run. The same root test
+  // is applied to every absolute path the command names. A sub-agent launch is
+  // exempt for the reason it always was: its detail is the brief, and a folder
+  // named in a brief is not this call's target.
+  if (
+    roots.length > 0 &&
+    looksLikeShellTool(input.tool, input.detail) &&
+    !looksLikeDelegationTool(input.tool, input.detail)
+  ) {
+    const command = shellCommandIn(input.detail) ?? input.detail;
+    const cwd = (input.cwd ?? "").trim() || (roots[0] ?? "");
+    const targets = commandTargets(command, cwd);
+    if (targets.unjudgeable || targets.paths.some(outside)) {
+      if (policy.root === "blocked") return { answer: "deny", boundary: "outside-workspace" };
+      if (policy.root === "ask") return { answer: null, boundary: "outside-workspace" };
+    }
+  }
   return { answer: null };
+}
+
+const WRITE_HINT_WORDS =
+  /\b(write|edit|replace|delete|unlink|rm\b|remove|move|rename|mkdir|out-file|set-content|new-item)\b/;
+
+/**
+ * Claude hands the desk a shell call as JSON — {"command":"grep …",
+ * "description":"…"} — and Codex sends `cmd`. Judging that envelope as if it
+ * were the command read the braces and the description instead of the program,
+ * so a plain grep counted as neither a search nor a write. The command string
+ * is what the shell runs; everything beside it is a label.
+ */
+export function shellCommandIn(detail: string): string | undefined {
+  const text = detail.trim();
+  if (!text.startsWith("{")) return undefined;
+  const fromRecord = (value: unknown): string | undefined => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+    const record = value as Record<string, unknown>;
+    for (const key of ["command", "cmd"]) {
+      const found = record[key];
+      if (typeof found === "string" && found.trim()) return found.trim();
+    }
+    return undefined;
+  };
+  try {
+    const parsed = JSON.parse(text) as Record<string, unknown>;
+    return fromRecord(parsed) ?? fromRecord(parsed.tool_input) ?? fromRecord(parsed.input);
+  } catch {
+    // A long call can reach the desk clipped. The command survives a cut that
+    // the closing brace does not, so it is read back out of the raw text.
+    const match = /"(?:command|cmd)"\s*:\s*("(?:[^"\\]|\\.)*")/.exec(text);
+    if (!match?.[1]) return undefined;
+    try {
+      const value = JSON.parse(match[1]) as unknown;
+      return typeof value === "string" && value.trim() ? value.trim() : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+}
+
+/**
+ * Programs that only ever read. Every stage of a pipeline has to start with one
+ * of these before the command counts as a search.
+ */
+const READ_ONLY_PROGRAMS: ReadonlySet<string> = new Set([
+  "grep",
+  "rg",
+  "ripgrep",
+  "egrep",
+  "fgrep",
+  "sed",
+  "awk",
+  "gawk",
+  "mawk",
+  "head",
+  "tail",
+  "cat",
+  "wc",
+  "sort",
+  "uniq",
+  "cut",
+  "tr",
+  "ls",
+  "find",
+  "echo",
+  "printf",
+  "git",
+  "which",
+  "type",
+  "file",
+  "stat",
+  "du",
+  "df",
+  "pwd",
+  "env",
+  "printenv",
+]);
+
+/** The read forms of git. Everything else it can do puts something on disk. */
+const GIT_READ_SUBCOMMANDS: ReadonlySet<string> = new Set([
+  "log",
+  "status",
+  "diff",
+  "show",
+  "blame",
+  "rev-parse",
+  "ls-files",
+  "branch",
+]);
+
+type CommandStage = { program: string; args: string[] };
+type CommandWalk = {
+  stages: CommandStage[];
+  /** Anything that stops the programs at the front speaking for the command. */
+  unsafe: boolean;
+  /** Text this side cannot see the value of: a substitution, or an open quote. */
+  hidden: boolean;
+};
+
+/** Characters a backslash is escaping. Anywhere else it is part of the word. */
+const SHELL_ESCAPABLE = /[ \t"'$`\\|&;<>\n]/;
+
+/**
+ * Split a command into pipeline stages, honouring quotes. Splitting the raw
+ * text tore `grep "a\|b" test | head -40` apart at the pipe inside the pattern
+ * and left a stage that started with nothing. Redirection and command
+ * substitution mark the walk unsafe: neither can be judged by the program at
+ * the front. The walk still finishes, because the paths a command names are
+ * read out of it whether or not it is allowed to run.
+ */
+function shellWalk(command: string): CommandWalk {
+  const stages: CommandStage[] = [];
+  let unsafe = false;
+  let hidden = false;
+  let tokens: string[] = [];
+  let token = "";
+  let quote: '"' | "'" | null = null;
+  const endToken = () => {
+    if (token) tokens.push(token);
+    token = "";
+  };
+  const endStage = () => {
+    endToken();
+    if (tokens.length > 0) stages.push({ program: tokens[0] ?? "", args: tokens.slice(1) });
+    tokens = [];
+  };
+  for (let index = 0; index < command.length; index += 1) {
+    const char = command[index] as string;
+    if (quote) {
+      if (char === "\\" && quote === '"' && index + 1 < command.length) {
+        token += char + (command[index + 1] as string);
+        index += 1;
+        continue;
+      }
+      // The closing quote is kept as well as the opening one, so a quoted
+      // token carries a matching pair. Keeping only the opening quote meant
+      // `cat "/etc/passwd"` never looked like a path and walked past the root
+      // check.
+      token += char;
+      if (char === quote) quote = null;
+      continue;
+    }
+    if (char === '"' || char === "'") {
+      quote = char;
+      token += char;
+      continue;
+    }
+    if (char === "\\") {
+      // A backslash escapes only what a shell escapes. Swallowing it wholesale
+      // turned `C:\repo\..\etc` into `C:repo..etc`, which is not an absolute
+      // path, so no Windows drive path was ever held to the root boundary.
+      const next = command[index + 1];
+      if (next !== undefined && SHELL_ESCAPABLE.test(next)) {
+        token += next;
+        index += 1;
+      } else {
+        token += char;
+      }
+      continue;
+    }
+    if (char === ">" || char === "<") {
+      unsafe = true;
+      endToken();
+      continue;
+    }
+    if (char === "`" || (char === "$" && command[index + 1] === "(")) {
+      unsafe = true;
+      hidden = true;
+      endToken();
+      continue;
+    }
+    if (char === "|" || char === ";" || char === "&" || char === "\n" || char === "\r") {
+      endStage();
+      continue;
+    }
+    if (char === " " || char === "\t") {
+      endToken();
+      continue;
+    }
+    token += char;
+  }
+  if (quote) {
+    unsafe = true;
+    hidden = true;
+  }
+  endStage();
+  return { stages, unsafe, hidden };
+}
+
+/** Inside double quotes a backslash escapes only these; elsewhere it is a character. */
+const DQ_ESCAPABLE = /["$`\\\n]/;
+
+/**
+ * The word the shell builds out of a token, with its quoting taken off. Only a
+ * pair wrapping the whole token used to come off, which meant a quote broken
+ * across the middle hid a path in plain sight: `"/etc/pass"wd` is one word and
+ * the shell reads it as /etc/passwd, but the leading quote survived and the
+ * absolute-path test never fired. So did `""/etc/passwd` and `/e"t"c/passwd`.
+ * Spans are joined the way the shell joins them, which closes the shape rather
+ * than the two examples of it, and leaves an ordinary `--include='*.dart'`
+ * alone.
+ */
+function dequote(raw: string): string {
+  let out = "";
+  let single = false;
+  let double = false;
+  for (let index = 0; index < raw.length; index += 1) {
+    const char = raw[index] as string;
+    if (char === "\\") {
+      const next = raw[index + 1];
+      if (!escapesNext(next, single, double)) {
+        out += char;
+        continue;
+      }
+      out += next as string;
+      index += 1;
+      continue;
+    }
+    if (char === "'" && !double) {
+      single = !single;
+      continue;
+    }
+    if (char === '"' && !single) {
+      double = !double;
+      continue;
+    }
+    out += char;
+  }
+  return out;
+}
+
+/**
+ * Whether a backslash is escaping what follows it. A backslash escapes nothing
+ * inside single quotes, a short list inside double quotes, and only the shell's
+ * own characters outside both. Swallowing it everywhere turned `C:\repo\..\etc`
+ * into `C:repo..etc`, which is not a path, so the boundary never saw it.
+ */
+function escapesNext(next: string | undefined, single: boolean, double: boolean): boolean {
+  if (next === undefined || single) return false;
+  return double ? DQ_ESCAPABLE.test(next) : SHELL_ESCAPABLE.test(next);
+}
+
+/** A token that walks out of its own folder. Nothing else can leave the cwd. */
+function climbsOut(value: string): boolean {
+  return /(?:^|[\\/])\.\.(?:[\\/]|$)/.test(value);
+}
+
+/**
+ * A token the shell rewrites before the program ever sees it. `$HOME/../etc`
+ * and `~/../etc` read here as folders named `$HOME` and `~` sitting under the
+ * working folder, so both resolved to somewhere inside the root and were
+ * allowed; the shell lands them on /etc. Where the token goes is unknowable
+ * from this side, so it is judged as outside rather than guessed at.
+ *
+ * The whole token is walked, not just its front. Testing the front alone let
+ * `cat "$HOME"/../etc/passwd` through: the quotes around the variable are not
+ * a matching pair wrapping the token, so nothing came off and the token simply
+ * did not begin with a `$`. Single quotes are the only thing that stops the
+ * shell expanding, so `'$HOME'` really is a name; double quotes do not.
+ *
+ * A `$` only expands when something can follow it as a name, so the trailing
+ * `$` anchoring a grep pattern stays a pattern.
+ */
+function expandsAtRuntime(raw: string): boolean {
+  let single = false;
+  let double = false;
+  for (let index = 0; index < raw.length; index += 1) {
+    const char = raw[index] as string;
+    if (char === "\\") {
+      if (escapesNext(raw[index + 1], single, double)) index += 1;
+      continue;
+    }
+    if (char === "'" && !double) {
+      single = !single;
+      continue;
+    }
+    if (char === '"' && !single) {
+      double = !double;
+      continue;
+    }
+    if (single) continue;
+    if (char === "`") return true;
+    if (char === "$") {
+      const next = raw[index + 1] ?? "";
+      // $'…' decodes its escapes and $"…" is translated, so both can become a
+      // path this side never saw: `cat $'\x2fetc/passwd'` is /etc/passwd. They
+      // only do that outside a quote, so a `$` sitting inside double quotes is
+      // not one of them.
+      if (!double && (next === "'" || next === '"')) return true;
+      // A `$` expands only when something can follow it as a name, so the
+      // trailing `$` anchoring a grep pattern stays a pattern.
+      if (/[A-Za-z_{(?#@*!$0-9-]/.test(next)) return true;
+      continue;
+    }
+    // Tilde expansion only happens at the front of a word, or straight after
+    // the `=` or `:` of an assignment. A trailing `backup~` is a file name.
+    if (char === "~" && (index === 0 || raw[index - 1] === "=" || raw[index - 1] === ":")) return true;
+  }
+  return false;
+}
+
+/**
+ * Resolve a path against the folder the command runs in and flatten every `..`
+ * in it, so the path is measured where it actually lands. `cat ../../etc/passwd`
+ * named no absolute path, so the root check had nothing to test; and
+ * `/repo/../etc/passwd` was absolute but unflattened, so a prefix test read it
+ * as sitting inside /repo. Both land on /etc/passwd.
+ */
+function resolveFrom(base: string, value: string): string {
+  const combined = absolutePath(value) ? value : `${base}/${value}`;
+  const parts = comparable(combined).split("/");
+  const out: string[] = [];
+  for (const part of parts) {
+    if (part === ".") continue;
+    if (part === "..") {
+      if (out.length > 1) out.pop();
+      continue;
+    }
+    out.push(part);
+  }
+  return out.join("/") || "/";
+}
+
+/**
+ * The paths a command names, so a root boundary can be applied to them. Every
+ * path carrying a `..` is flattened first, absolute or not, because a prefix
+ * test cannot see through one. A token the shell rewrites is reported as
+ * unjudgeable rather than guessed at.
+ *
+ * One thing this walk cannot see: a symlink inside the root pointing out of
+ * it. Following that needs realpath on the machine, which is not available
+ * here, so it stays a known gap rather than a silent claim.
+ */
+function commandTargets(command: string, cwd: string): { paths: string[]; unjudgeable: boolean } {
+  const paths: string[] = [];
+  const walk = shellWalk(command);
+  // A substitution or an unclosed quote hides the target outright. A plain
+  // redirect does not: its file is the next token along, and that is checked.
+  let unjudgeable = walk.hidden;
+  for (const stage of walk.stages) {
+    for (const token of [stage.program, ...stage.args]) {
+      // The whole token is tested for expansion, so both walks agree; only the
+      // path test looks past a flag's `=`.
+      if (expandsAtRuntime(token)) {
+        unjudgeable = true;
+        continue;
+      }
+      const word = dequote(token);
+      if (word.includes("://")) continue;
+      // A flag's value is a path as readily as a bare word is, and the word is
+      // judged too, so `--file=/etc/x` and `/etc/x` are both seen.
+      for (const value of word.includes("=") ? [word, word.slice(word.indexOf("=") + 1)] : [word]) {
+        if (!value) continue;
+        if (climbsOut(value)) {
+          if (absolutePath(value) || cwd) paths.push(resolveFrom(cwd, value));
+        } else if (absolutePath(value)) {
+          paths.push(value);
+        }
+      }
+    }
+  }
+  return { paths, unjudgeable };
+}
+
+/** A command holding a token only the shell can resolve is not a search. */
+function expandsSomewhere(command: string): boolean {
+  return shellWalk(command).stages.some((stage) =>
+    [stage.program, ...stage.args].some((token) => expandsAtRuntime(token)),
+  );
+}
+
+function programName(raw: string): string {
+  // Quoting is taken off the way the shell takes it off, so `r"m"` is rm.
+  return dequote(raw)
+    .replace(/^.*[\\/]/, "")
+    .replace(/\.exe$/i, "")
+    .toLowerCase();
+}
+
+function positionals(args: string[]): string[] {
+  return args.filter((arg) => !arg.startsWith("-"));
+}
+
+/**
+ * A sed substitution with no `w` and no `e` flag: `s/a/b/`, `1,20s|x|y|g`. The
+ * delimiter is whatever follows the `s`, so it is captured and matched back.
+ */
+const SED_SUBSTITUTION = /^\d*(?:,\d*)?s(.)(?:\\.|(?!\1)[^\\])*\1(?:\\.|(?!\1)[^\\])*\1[gpiImM0-9]*$/;
+/** An addressed print or delete: `p`, `1,20p`, `$d`, `/foo/p`. */
+const SED_PRINT = /^(?:\d+(?:,\d+)?|\$|\/(?:\\.|[^/\\])*\/)?[pdq=lnN]$/;
+
+/**
+ * sed and awk are the two programs on the read-only list that take a program
+ * of their own, and both can break out of it: awk through `system()`, a pipe
+ * to a command, or `print > "file"`; sed through the `e` command, a `w` write,
+ * and `-i` on either. `awk 'BEGIN{system("rm x")}'` and `sed 'e rm x'` were
+ * both read as searches and answered "once" on a read-only seat. Every other
+ * interpreter — perl, python, node, sh — is not on the list at all, so it
+ * never reaches here.
+ */
+function interpreterScriptReads(program: string, args: string[]): boolean {
+  if (args.some((arg) => /^-i/.test(arg) || arg === "--in-place")) return false;
+  const scripts = args.filter((arg) => !arg.startsWith("-"));
+  if (program === "sed") {
+    // -e and -f take the script as their own argument; -f names a file this
+    // side cannot read, so it is never a search.
+    if (args.some((arg) => /^(?:-f|--file)/.test(arg))) return false;
+    if (scripts.length === 0) return false;
+    const script = dequote(scripts[0] ?? "");
+    return script
+      .split(/[;\n]/)
+      .every((piece) => {
+        const text = piece.trim();
+        return text.length > 0 && (SED_SUBSTITUTION.test(text) || SED_PRINT.test(text));
+      });
+  }
+  if (args.some((arg) => /^(?:-f|--file|--source|-v)/.test(arg))) return false;
+  const program_text = scripts[0] ?? "";
+  return !/system|exec|ENVIRON|getline|close\s*\(|[|>]/.test(program_text);
+}
+
+/** Programs on the list that still hold a way to write, and the flag that does it. */
+function stageWrites(program: string, args: string[]): boolean {
+  if (program === "sed" || program === "awk" || program === "gawk" || program === "mawk") {
+    return !interpreterScriptReads(program === "sed" ? "sed" : "awk", args);
+  }
+  if (program === "find") {
+    return args.some((arg) => /^-(?:delete|exec|execdir|ok|okdir|fprint|fprintf|fls)$/.test(arg));
+  }
+  if (program === "sort") return args.some((arg) => arg === "-o" || arg.startsWith("--output"));
+  // `uniq in out` writes its second file.
+  if (program === "uniq") return positionals(args).length > 1;
+  // `env FOO=1 rm x` runs rm, so env only reads when it names no program.
+  if (program === "env") return positionals(args).length > 0;
+  if (program === "git") {
+    const sub = positionals(args)[0];
+    if (!sub || !GIT_READ_SUBCOMMANDS.has(sub.toLowerCase())) return true;
+    // `git branch` reads; `git branch <name>` and `git branch -d` do not.
+    if (sub.toLowerCase() === "branch") {
+      if (positionals(args).length > 1) return true;
+      return args.some((arg) => /^-(?:[dDmMcCf]|-delete|-move|-copy|-force|-set-upstream.*|-unset-upstream|-edit-description)$/.test(arg));
+    }
+    return false;
+  }
+  return false;
+}
+
+const POWERSHELL_WRAPPER = /^[^\n]*powershell(?:\.exe)?[^\n]*?(?:-command|-c)\s+/i;
+
+/** Programs that put something on disk, or run something that can. */
+const WRITE_PROGRAMS: ReadonlySet<string> = new Set([
+  "rm",
+  "rmdir",
+  "unlink",
+  "mv",
+  "cp",
+  "touch",
+  "mkdir",
+  "dd",
+  "chmod",
+  "chown",
+  "chgrp",
+  "ln",
+  "truncate",
+  "shred",
+  "install",
+  "tee",
+  "rsync",
+  "sh",
+  "bash",
+  "zsh",
+  "ksh",
+  "fish",
+  "powershell",
+  "pwsh",
+  "cmd",
+  "python",
+  "python3",
+  "node",
+  "perl",
+  "ruby",
+  "npm",
+  "npx",
+  "pnpm",
+  "yarn",
+  "pip",
+  "pip3",
+  "make",
+  "xargs",
+  "eval",
+  "sudo",
+]);
+
+/**
+ * The detail names a program that writes, or redirects into a file. Only the
+ * program at the front of each stage is read: a search whose query happens to
+ * contain the word "delete" is still a search, which is why the read exemption
+ * keys on the name in the first place.
+ */
+function detailRunsAWrite(detail: string, filePath?: string): boolean {
+  const command = shellCommandIn(detail) ?? `${detail} ${filePath ?? ""}`.trim();
+  if (!command) return false;
+  const { stages, unsafe } = shellWalk(command);
+  if (unsafe) return true;
+  return stages.some((stage) => {
+    if (stage.program.includes("://")) return false;
+    return WRITE_PROGRAMS.has(programName(stage.program));
+  });
+}
+
+/** Every stage starts with a program that only reads, and nothing redirects. */
+function readOnlyPipeline(command: string): boolean {
+  const { stages, unsafe } = shellWalk(command);
+  if (unsafe || stages.length === 0) return false;
+  // A token the shell rewrites could name anything, so the command cannot be
+  // called a search on the strength of the programs alone.
+  if (expandsSomewhere(command)) return false;
+  return stages.every((stage) => {
+    const program = programName(stage.program);
+    if (!READ_ONLY_PROGRAMS.has(program)) return false;
+    return !stageWrites(program, stage.args);
+  });
 }
 
 /** rg / grep as the invoked program — allow through Ask / Plan / Always. */
 export function looksLikeSearchOnly(tool: string, detail: string, filePath?: string): boolean {
   const command = `${detail} ${filePath ?? ""}`.trim();
-  const hay = `${tool} ${command}`.toLowerCase();
-  if (/\b(write|edit|replace|delete|unlink|rm\b|remove|move|rename|mkdir|out-file|set-content|new-item)\b/.test(hay)) {
-    return false;
-  }
   // A tool that is not a shell is judged by its name. "run a grep over the
   // tree" sitting inside a brief is the brief talking, not the program.
-  if (!looksLikeShellTool(tool, detail)) return toolKeyIn(tool, SEARCH_TOOL_KEYS);
-  const stripped = command
-    .replace(/^[^\n]*powershell(?:\.exe)?[^\n]*?(?:-command|-c)\s+/i, "")
-    .replace(/^try\s*\{[\s\S]*?\}\s*catch\s*\{\s*\}\s*/i, "")
-    .replace(/^["']|["']$/g, "")
-    .trim();
-  return /^(rg(?:\.exe)?|ripgrep|grep)\b/im.test(stripped) || /^(rg(?:\.exe)?|ripgrep|grep)\b/i.test(command);
+  if (!looksLikeShellTool(tool, detail)) {
+    if (WRITE_HINT_WORDS.test(`${tool} ${command}`.toLowerCase())) return false;
+    return toolKeyIn(tool, SEARCH_TOOL_KEYS);
+  }
+  // A shell is judged by the programs it invokes, never by the words in its
+  // text: a grep whose pattern held "remove" read as a write, and a search
+  // that piped into head read as neither.
+  const json = shellCommandIn(detail);
+  if (json !== undefined) return readOnlyPipeline(json);
+  // A PowerShell interpreter is not one of the programs below and its cmdlets
+  // are not those either, so its payload keeps the older, narrower rule: the
+  // search it was unwrapped for, and nothing else.
+  if (POWERSHELL_WRAPPER.test(command)) {
+    const inner = command
+      .replace(POWERSHELL_WRAPPER, "")
+      .replace(/^try\s*\{[\s\S]*?\}\s*catch\s*\{\s*\}\s*/i, "")
+      .trim();
+    return /^(rg(?:\.exe)?|ripgrep|grep)\b/im.test(inner);
+  }
+  // Only a quote pair that wraps the WHOLE command comes off. Stripping either
+  // end on its own took the closing quote off `sed -n '1,20p'` and left the
+  // walk inside a quote that never ended.
+  const wrapped = command.length > 1 && /^(["'])[\s\S]*\1$/.test(command);
+  return readOnlyPipeline(wrapped ? command.slice(1, -1).trim() : command);
 }
 
 const QUIET_DESK_TOOLS = new Set([
@@ -180,7 +776,7 @@ const QUIET_DESK_TOOLS = new Set([
 ]);
 
 export function isQuietDeskTool(tool: string): boolean {
-  return QUIET_DESK_TOOLS.has(toolNameKey(tool));
+  return QUIET_DESK_TOOLS.has(canonicalToolKey(tool));
 }
 
 function grantText(value: string | undefined): string {
@@ -188,7 +784,7 @@ function grantText(value: string | undefined): string {
 }
 
 export function permissionGrantKey(tool: string, detail?: string, filePath?: string): string {
-  const key = toolNameKey(tool);
+  const key = canonicalToolKey(tool);
   if (
     QUIET_DESK_TOOLS.has(key) ||
     /^(ask_chat|spawn_agent|await_agents|add_reference|delete_reference|setup_custom_bot|delete_bot|create_project|list_projects|move_chat|rename_chat|rename_project|delete_chat|delete_project)$/.test(
@@ -691,6 +1287,41 @@ export function promptOwner(need: ElevationNeed, lineage: DeskAccess): "person" 
 }
 
 /**
+ * The desk default is the standing permission for work the system starts.
+ *
+ * A hidden worker was seated by a call, not by a person: a subagent, a mission
+ * pass, a Link delegate, a CLI hand-off. When it hits a block that the desk
+ * default already covers, nothing is being raised past what the person set;
+ * the desk is only handing the worker the seat it could have been given at
+ * spawn. So the desk grants it silently: no card, no denial note, no second
+ * call to "fix". The answer is the part of the need still missing from the
+ * worker's own seat, or null when there is nothing the desk may hand over.
+ *
+ * Two cases stay as they were. A visible chat is the person's own seat, so a
+ * raise there is theirs to answer and still gets its card. A need that climbs
+ * past the desk default is past the ceiling; the desk cannot grant it and the
+ * caller reads why in its transcript.
+ */
+export function standingGrant(input: {
+  session: {
+    hidden?: boolean;
+    mode: PermissionMode;
+    sandbox: SandboxProfile;
+    agentRun?: { grantedAccess?: { source?: AccessSource } };
+  };
+  need: ElevationNeed;
+  deskAccess?: DeskAccess;
+}): ElevationNeed | null {
+  if (!input.session.hidden) return null;
+  // A seat the call asked for is the caller's own clamp: a coordinator that
+  // said read-only meant it. The desk hands over only what nobody chose.
+  if (input.session.agentRun?.grantedAccess?.source === "call") return null;
+  const desk = input.deskAccess ?? DESK_ACCESS_FALLBACK;
+  if (elevationStillNeeded(desk, input.need)) return null;
+  return elevationStillNeeded({ mode: input.session.mode, sandbox: input.session.sandbox }, input.need);
+}
+
+/**
  * A subagent never asks the person. It is not in front of them, its chat is
  * hidden, and the card it raised named a setting on some other chat entirely —
  * the live complaint was a Claude helper asking to drop "Sandbox Read-only"
@@ -753,13 +1384,24 @@ function accessOrigin(input: { session?: LineageChat; sessions?: readonly Lineag
  * make deskClampNote tell the person "helpers are read-only" about a chat that
  * is writing files. The access and the role move together or neither moves.
  */
+/**
+ * Whether a nested helper runs at the seat it inherited rather than read-only.
+ *
+ * It used to take an explicit sandbox on the call to release one, so a plain
+ * nested spawn under a desk whose default was always-approve / off was seated
+ * read-only anyway, blocked on its first write, and asked the person to
+ * elevate — for work another part of the system had asked for. The desk
+ * default is the person's standing decision. The desk must not add a clamp the
+ * call did not ask for: a helper is read-only only when the call says so.
+ */
 export function releasedHelper(input: { role?: string; requestedSandbox?: SandboxProfile }): boolean {
-  return input.role === "helper" && input.requestedSandbox !== undefined;
+  if (input.role !== "helper") return false;
+  return input.requestedSandbox !== "read-only" && input.requestedSandbox !== "strict";
 }
 
 /** The clamp, named, so a denial says what actually stopped the work. */
 export function deskClampNote(run: { role?: string; paths?: string[] } | undefined): string {
-  if (run?.role === "helper") return "Helpers are read-only by design; hand this write to your parent.";
+  if (run?.role === "helper") return "This helper was asked to run read-only; hand this write to your parent, or spawn it with a sandbox that can write.";
   if ((run?.paths?.length ?? 0) > 0) {
     return "This launch is path-owned; the desk answers its in-path writes from the access you granted.";
   }
@@ -797,12 +1439,18 @@ export function permissionPolicyAnswer(input: {
   detail: string;
   path?: string;
 }): PermissionAnswer | null {
+  if (isQuietDeskTool(input.tool)) return input.mode === "always-approve" ? "session" : "once";
+  const searchOnly = looksLikeSearchOnly(input.tool, input.detail, input.path);
+  // A read-only seat blocks writes, never reads. A search-only command is a
+  // read whatever the seat is, so it is answered above the sandbox clamp and
+  // above the plan clamp rather than leaning on the write check to spare it.
+  // Security boundaries still win: securityPolicyAnswer runs before this.
+  if (searchOnly) return input.mode === "always-approve" ? "session" : "once";
   const write = looksLikeWriteTool(input.tool, input.detail, input.path);
   const planFile = /plan\.md/i.test(`${input.path ?? ""} ${input.detail}`);
   if ((input.sandbox === "read-only" || input.sandbox === "strict") && write) return "deny";
   if (input.mode === "plan" && write && !planFile) return "deny";
   if (input.mode === "always-approve") return "session";
-  if (looksLikeSearchOnly(input.tool, input.detail, input.path)) return "once";
   if (input.mode === "accept-edits" && write && !looksLikeShellTool(input.tool, input.detail)) return "once";
   return null;
 }

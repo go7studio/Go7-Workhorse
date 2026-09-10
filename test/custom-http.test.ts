@@ -2009,8 +2009,15 @@ test("custom HTTP request includes tools and parses tool_use then gates by sandb
     { mode: "always-approve", sandbox: "off" },
   );
   assert.equal(allow, "session");
-  const blockedStrict = customToolPolicy(
+  // A tight sandbox blocks writes, never reads. `git status` reads, so the
+  // seat lets it through; the command that writes is what the seat stops.
+  const readAtStrict = customToolPolicy(
     { id: "t2", name: "run_command", input: { command: "git status" } },
+    { mode: "always-approve", sandbox: "strict" },
+  );
+  assert.equal(readAtStrict, "session");
+  const blockedStrict = customToolPolicy(
+    { id: "t2b", name: "run_command", input: { command: "rm -rf build" } },
     { mode: "always-approve", sandbox: "strict" },
   );
   assert.equal(blockedStrict, "deny");
@@ -2320,6 +2327,15 @@ test("explicit stock model identity cannot be hijacked by an overlapping custom 
     /Model grok-4\.6 belongs to grok, not codex/,
   );
 
+  const cursorFable = resolveSpawnSpec(
+    { fromSessionId: "parent", prompt: "draw the HUD", provider: "cursor", model: "Fable 5.1" },
+    [],
+    customParent,
+    grokBot,
+  );
+  assert.equal(cursorFable.provider, "cursor");
+  assert.equal(cursorFable.model, "claude-fable-5-1");
+
   const assignedCustom = resolveSpawnSpec(
     {
       fromSessionId: "parent",
@@ -2446,14 +2462,23 @@ test("routing evidence is kept only for the worker identity that ran", () => {
  * and comparing normalized strings let it through: a symlink sitting inside
  * the workspace passed `startsWith` while pointing anywhere.
  */
-test("the sandbox contains the real path, not the spelling of it", () => {
+test("the sandbox contains the real path, not the spelling of it", (t) => {
   const tmp = mkdtempSync(path.join(os.tmpdir(), "wh-contain-"));
   const workspace = path.join(tmp, "workspace");
   const secrets = path.join(tmp, "secrets");
   mkdirSync(workspace);
   mkdirSync(secrets);
   writeFileSync(path.join(secrets, "key.txt"), "not for the agent");
-  symlinkSync(secrets, path.join(workspace, "escape"));
+  try {
+    symlinkSync(secrets, path.join(workspace, "escape"));
+  } catch (err) {
+    const code = err && typeof err === "object" && "code" in err ? String((err as NodeJS.ErrnoException).code) : "";
+    if (code === "EPERM" || code === "EACCES") {
+      t.skip("Windows without symlink privilege");
+      return;
+    }
+    throw err;
+  }
 
   // A file inside the workspace is still fine.
   writeFileSync(path.join(workspace, "notes.md"), "ok");

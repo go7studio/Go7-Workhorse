@@ -46,6 +46,7 @@ export type CustomPromptInput = {
   hidden?: boolean;
   role?: import("../src/lib/workhorse-rules").DeskRole;
   crewModes?: CrewMode[];
+  spawnNames?: string[];
   customBotId?: string;
   config: CustomHttpConfig;
 };
@@ -374,6 +375,7 @@ export class CustomSessionHost {
           ),
           input.crewModes,
           role,
+          input.spawnNames,
         ),
         ...(input.images?.length ? { images: hydrateChatImages(input.images) } : {}),
       },
@@ -737,6 +739,7 @@ export class CustomSessionHost {
               sessionId: input.sessionId,
               requestId,
               tool: use.name,
+              rawTool: use.name,
               detail: detail.detail,
               path: detail.path,
               elevate: blocked,
@@ -756,6 +759,7 @@ export class CustomSessionHost {
               sessionId: input.sessionId,
               requestId,
               tool: use.name,
+              rawTool: use.name,
               detail: detail.detail,
               path: detail.path,
             });

@@ -15,6 +15,7 @@
     { "id": "plan", "name": "/plan", "aliases": [], "owner": "translated", "providers": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"], "rubric": ["CMD-05", "SEC-04"] },
     { "id": "sandbox", "name": "/sandbox", "aliases": [], "owner": "translated", "providers": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"], "rubric": ["SEC-02", "CMD-02"] },
     { "id": "demo", "name": "/demo-permission", "aliases": [], "owner": "workhorse", "providers": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"], "rubric": ["SEC-01"] },
+    { "id": "demo-mission", "name": "/demo-mission", "aliases": [], "owner": "workhorse", "providers": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"], "rubric": ["ORC-17"] },
     { "id": "theme", "name": "/theme", "aliases": ["/t"], "owner": "workhorse", "providers": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"], "rubric": ["SET-06"] },
     { "id": "settings", "name": "/settings", "aliases": ["/config", "/preferences", "/prefs"], "owner": "workhorse", "providers": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"], "rubric": ["SET-05"] },
     { "id": "rename", "name": "/rename", "aliases": ["/title"], "owner": "workhorse", "providers": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"], "rubric": ["PRJ-04", "MOD-06"] },

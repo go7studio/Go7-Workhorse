@@ -2,10 +2,12 @@ import { customBotEnabled, customBotServes, EMPTY_CUSTOM_DRAFT, normalizeCustomB
 import { normalizeAllowedExternalAgents } from "./agent-runtime";
 import { DEFAULT_LEARNING, normalizeLearning } from "./learning-policy";
 import { DEFAULT_LOCAL_COMPUTE_SETTINGS, normalizeLocalComputeSettings } from "./local-compute";
+import { DEFAULT_WORKSHOP_SETTINGS, normalizeWorkshopSettings } from "./workshop-pack";
 import { defaultModel, withEffort, type ModelChoice } from "./models";
 import { inboundAccess } from "./permissions";
 import { providerById } from "./providers";
-import type { AgentSystemsSettings, BotAccessDefaults, CustomBot, CustomLlm, DeskAccess, LlmLink, ProviderId, McpServerConfig, Profile, RoutingSettings, Session, Settings, SettingsSection } from "./types";
+import type { AgentSystemsSettings, BotAccessDefaults, CustomBot, CustomLlm, DeskAccess, LlmLink, ProviderId, McpServerConfig, Profile, RoutingSettings, Session, Settings, SettingsSection, SkillDiscoverySettings } from "./types";
+import { migrateCustomBotRatings } from "./routing";
 import { normalizeWatch } from "./watch";
 import { DEFAULT_WATCH } from "./watch-defaults";
 
@@ -34,8 +36,13 @@ export const DEFAULT_SETTINGS: Settings = {
     reservePercent: 15,
     includeExternalAgents: false,
   },
+  skills: {
+    suggestFromWording: true,
+    includePluginPacks: false,
+  },
   learning: { ...DEFAULT_LEARNING },
   localCompute: structuredClone(DEFAULT_LOCAL_COMPUTE_SETTINGS),
+  workshop: structuredClone(DEFAULT_WORKSHOP_SETTINGS),
 };
 
 export function normalizeRouting(raw: unknown): RoutingSettings {
@@ -49,6 +56,15 @@ export function normalizeRouting(raw: unknown): RoutingSettings {
     allowLocal: record.allowLocal !== false,
     reservePercent: Number.isFinite(reserve) ? Math.min(50, Math.max(0, Math.round(reserve))) : 15,
     includeExternalAgents: record.includeExternalAgents === true,
+  };
+}
+
+export function normalizeSkillDiscovery(raw: unknown): SkillDiscoverySettings {
+  if (!raw || typeof raw !== "object") return { ...DEFAULT_SETTINGS.skills };
+  const record = raw as Partial<SkillDiscoverySettings>;
+  return {
+    suggestFromWording: record.suggestFromWording !== false,
+    includePluginPacks: record.includePluginPacks === true,
   };
 }
 
@@ -148,7 +164,17 @@ export function keepVendorAccessDefaults(
  * A detect that says launchable clears any stored reason with it.
  */
 export function vendorLaunchGate(detected: unknown): Pick<LlmLink, "launchable" | "launchBlocker"> {
-  const record = (detected ?? {}) as { launchable?: unknown; launchBlocker?: unknown };
+  const record = (detected ?? {}) as { launchable?: unknown; launchBlocker?: unknown; needsAuth?: unknown; authProblem?: unknown };
+  // A vendor with no usable login cannot start either, whatever is on disk:
+  // routing must not pick it and a Link caller must not be told it can call.
+  // The reason names the refusal when there was one.
+  if (record.needsAuth === true) {
+    const problem = typeof record.authProblem === "string" ? record.authProblem.trim() : "";
+    return {
+      launchable: false,
+      launchBlocker: problem ? `The desk's login was refused: ${problem}. Sign in again` : "Not signed in. Sign in, then Recheck",
+    };
+  }
   if (typeof record.launchable !== "boolean") return {};
   // A vendor that can start has no reason it cannot. Carrying one anyway left
   // the row naming a binary the person had just installed.
@@ -167,11 +193,13 @@ function link(raw: unknown): LlmLink {
   // fields here left routing's launch gate reading an undefined it could never
   // be given, so a connected-but-unlaunchable vendor kept taking work.
   const blocker = typeof record.launchBlocker === "string" ? record.launchBlocker.trim() : "";
+  const authProblem = typeof record.authProblem === "string" ? record.authProblem.trim() : "";
   return {
     connected: Boolean(record.connected),
     enabled: record.enabled !== false,
     ...(typeof record.available === "boolean" ? { available: record.available } : {}),
     ...(typeof record.needsAuth === "boolean" ? { needsAuth: record.needsAuth } : {}),
+    ...(authProblem ? { authProblem } : {}),
     ...(typeof record.launchable === "boolean" ? { launchable: record.launchable } : {}),
     ...(blocker ? { launchBlocker: blocker } : {}),
     ...(name ? { name } : {}),
@@ -397,15 +425,20 @@ export function normalizeSettings(raw: unknown): Settings {
       cursor: link(record.llms?.cursor),
       custom: custom(record.llms?.custom),
     },
-    customBots: normalizeCustomBots(record.customBots, custom(record.llms?.custom)),
+    // The migration runs here, at the one seam every load passes through, and
+    // not inside normalizeCustomBots, because only the routing table knows what
+    // a family default would have been written back as.
+    customBots: migrateCustomBotRatings(normalizeCustomBots(record.customBots, custom(record.llms?.custom))),
     mcpServers: normalizeMcpServers(record.mcpServers),
     access: normalizeDeskAccess((record as { access?: unknown }).access),
     usageBudgets: normalizeUsageBudgets(record.usageBudgets),
     watch: normalizeWatch(record.watch),
     routing: normalizeRouting(record.routing),
+    skills: normalizeSkillDiscovery((record as { skills?: unknown }).skills),
     learning: normalizeLearning((record as { learning?: unknown }).learning),
     agentSystems: normalizeAgentSystems((record as { agentSystems?: unknown }).agentSystems),
     localCompute: normalizeLocalComputeSettings((record as { localCompute?: unknown }).localCompute),
+    workshop: normalizeWorkshopSettings((record as { workshop?: unknown }).workshop),
   };
 }
 
@@ -421,5 +454,5 @@ function normalizeUsageBudgets(raw: unknown): Settings["usageBudgets"] {
 }
 
 export function isSettingsSection(value: unknown): value is SettingsSection {
-  return value === "profile" || value === "llms" || value === "skills" || value === "routing" || value === "learning" || value === "usage" || value === "watch";
+  return value === "profile" || value === "llms" || value === "skills" || value === "workshop" || value === "routing" || value === "learning" || value === "usage" || value === "watch";
 }

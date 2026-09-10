@@ -18,10 +18,11 @@ import {
 import { wrapMarkdown } from "../lib/markdown";
 import { deskInk } from "../lib/settings";
 import { formatChatSidebar } from "../lib/session";
+import { spawnPickerRows, toggleSpawnAllowlistId, orchestrateChipLabel, spawnAllowlistActive } from "../lib/spawn-allowlist";
 import { useStoreSelector } from "../lib/store";
 import { sameComposerDesk, selectComposerDesk } from "../lib/store-select";
 import type { ChatImage, CrewMode } from "../lib/types";
-import { crewModeLabel, hasCrewMode, orderedCrewModes, toggleCrewMode } from "../lib/workhorse-rules";
+import { crewModeLabel, hasCrewMode, orderedCrewModes, sameCrewModes, toggleCrewMode } from "../lib/workhorse-rules";
 
 export function isEditableKeyTarget(el: EventTarget | null): boolean {
   if (!(el instanceof Element)) return false;
@@ -114,6 +115,7 @@ export const Composer = memo(function Composer({
     settings,
     setComposerDraft,
     setCrewMode,
+    setSpawnAllowlist,
     deskSkills,
   } = useStoreSelector(selectComposerDesk, sameComposerDesk);
   const ink = session ? deskInk(session, settings) : undefined;
@@ -124,6 +126,7 @@ export const Composer = memo(function Composer({
   const [over, setOver] = useState(false);
   const [active, setActive] = useState(0);
   const [plusOpen, setPlusOpen] = useState(false);
+  const [spawnOpen, setSpawnOpen] = useState(false);
   const [crewOpen, setCrewOpen] = useState(false);
   const [crewWidth, setCrewWidth] = useState(0);
   const [shownCrew, setShownCrew] = useState<CrewMode[]>([]);
@@ -138,7 +141,10 @@ export const Composer = memo(function Composer({
   imagesRef.current = images;
 
   const extras = useMemo(() => commandsForSession(session, deskSkills), [deskSkills, session]);
-  const crewModes = orderedCrewModes(session?.crewModes);
+  const crewModes = useMemo(() => orderedCrewModes(session?.crewModes), [session?.crewModes]);
+  const spawnRows = useMemo(() => spawnPickerRows(settings), [settings]);
+  const spawnIds = useMemo(() => spawnRows.map((row) => row.id), [spawnRows]);
+  const spawnFiltered = spawnAllowlistActive(session?.spawnAllowlist);
 
   useEffect(() => {
     setCrewOpen(false);
@@ -151,15 +157,18 @@ export const Composer = memo(function Composer({
   }, [crewModes.length]);
 
   useEffect(() => {
-    if (crewModes.length > 0) setShownCrew(crewModes);
+    if (crewModes.length === 0) return;
+    setShownCrew((current) => (sameCrewModes(current, crewModes) ? current : crewModes));
   }, [crewModes]);
 
   useEffect(() => {
     const el = crewInner.current;
     const next = crewModes.length === 0 ? 0 : el ? Math.ceil(el.scrollWidth) : 0;
-    const frame = window.requestAnimationFrame(() => setCrewWidth(next));
+    const frame = window.requestAnimationFrame(() => {
+      setCrewWidth((current) => (current === next ? current : next));
+    });
     return () => window.cancelAnimationFrame(frame);
-  }, [crewModes, crewOpen, shownCrew]);
+  }, [crewModes, crewOpen, shownCrew, spawnFiltered, session?.spawnAllowlist]);
   const displayCrew = crewModes.length > 0 ? crewModes : shownCrew;
   const crewStacked = displayCrew.length >= 2 && !crewOpen;
   const crewLeaving = crewModes.length === 0 && displayCrew.length > 0;
@@ -274,7 +283,13 @@ export const Composer = memo(function Composer({
 
   useEffect(() => {
     setPlusOpen(false);
+    setSpawnOpen(false);
   }, [sessionId]);
+
+  const openSpawnPicker = () => {
+    setPlusOpen(false);
+    setSpawnOpen(true);
+  };
 
   useEffect(() => {
     if (!plusOpen) return;
@@ -292,6 +307,23 @@ export const Composer = memo(function Composer({
     document.addEventListener("pointerdown", onDown);
     return () => document.removeEventListener("pointerdown", onDown);
   }, [plusOpen]);
+
+  useEffect(() => {
+    if (!spawnOpen) return;
+    const onDown = (event: PointerEvent) => {
+      const dock = wrap.current;
+      if (!(event.target instanceof Node) || !dock) {
+        setSpawnOpen(false);
+        return;
+      }
+      const menu = dock.querySelector(".composer-spawn-menu");
+      const gear = dock.querySelector(".composer-crew-gear");
+      if (menu?.contains(event.target) || gear?.contains(event.target)) return;
+      setSpawnOpen(false);
+    };
+    document.addEventListener("pointerdown", onDown);
+    return () => document.removeEventListener("pointerdown", onDown);
+  }, [spawnOpen]);
 
   useEffect(() => {
     const root = dropRoot?.current ?? wrap.current;
@@ -612,6 +644,44 @@ export const Composer = memo(function Composer({
             </button>
           </div>
         )}
+        {spawnOpen && (
+          <div className="composer-plus-menu composer-spawn-menu" role="menu">
+            <button
+              type="button"
+              className="plus-row"
+              role="menuitemcheckbox"
+              aria-checked={!spawnFiltered}
+              onClick={() => setSpawnAllowlist(undefined)}
+            >
+              <span className="plus-copy">
+                <strong>All bots</strong>
+                <em>Default for a new chat</em>
+              </span>
+            </button>
+            <hr />
+            {spawnRows.length === 0 ? (
+              <p className="composer-spawn-empty">Connect a vendor in Settings → LLMs.</p>
+            ) : (
+              spawnRows.map((row) => {
+                const checked = !spawnFiltered || Boolean(session?.spawnAllowlist?.includes(row.id));
+                return (
+                  <button
+                    key={row.id}
+                    type="button"
+                    className="plus-row"
+                    role="menuitemcheckbox"
+                    aria-checked={checked}
+                    onClick={() => setSpawnAllowlist(toggleSpawnAllowlistId(session?.spawnAllowlist, row.id, spawnIds))}
+                  >
+                    <span className="plus-copy">
+                      <strong>{row.name}</strong>
+                    </span>
+                  </button>
+                );
+              })
+            )}
+          </div>
+        )}
         <div className="composer-tools">
         <button
           className={`composer-attach${plusOpen ? " on" : ""}`}
@@ -620,7 +690,10 @@ export const Composer = memo(function Composer({
           aria-haspopup="menu"
           aria-expanded={plusOpen}
           title="Attach or choose a mode"
-          onClick={() => setPlusOpen((open) => !open)}
+          onClick={() => {
+            setSpawnOpen(false);
+            setPlusOpen((open) => !open);
+          }}
         >
           +
         </button>
@@ -644,6 +717,11 @@ export const Composer = memo(function Composer({
                   aria-label={`Show ${displayCrew.length} modes`}
                   title={displayCrew.map(crewModeLabel).join(", ")}
                   onClick={() => setCrewOpen(true)}
+                  onContextMenu={(event) => {
+                    if (!displayCrew.includes("orchestrate")) return;
+                    event.preventDefault();
+                    openSpawnPicker();
+                  }}
                 >
                   <span className="crew-more-stack" aria-hidden="true">
                     {displayCrew.map((mode) => (
@@ -656,19 +734,49 @@ export const Composer = memo(function Composer({
                 </button>
               ) : (
                 displayCrew.map((mode) => (
-                  <button
-                    key={mode}
-                    type="button"
-                    className="composer-crew-chip"
-                    title={`Clear ${crewModeLabel(mode)}`}
-                    onClick={() => setCrewMode(toggleCrewMode(session?.crewModes, mode))}
-                  >
-                    <span className={`plus-icon ${mode}`} aria-hidden="true">
-                      <CrewModeIcon mode={mode} />
-                    </span>
-                    {crewModeLabel(mode)}
-                    <span aria-hidden="true">×</span>
-                  </button>
+                  <div key={mode} className="composer-crew-chip-group">
+                    <button
+                      type="button"
+                      className="composer-crew-chip"
+                      title={`Clear ${crewModeLabel(mode)}`}
+                      onClick={() => setCrewMode(toggleCrewMode(session?.crewModes, mode))}
+                      onContextMenu={(event) => {
+                        if (mode !== "orchestrate") return;
+                        event.preventDefault();
+                        openSpawnPicker();
+                      }}
+                    >
+                      <span className={`plus-icon ${mode}`} aria-hidden="true">
+                        <CrewModeIcon mode={mode} />
+                      </span>
+                      {mode === "orchestrate" ? orchestrateChipLabel(session?.spawnAllowlist) : crewModeLabel(mode)}
+                      <span aria-hidden="true">×</span>
+                    </button>
+                    {mode === "orchestrate" ? (
+                      <button
+                        type="button"
+                        className="composer-crew-gear"
+                        aria-label="Choose bots for this chat"
+                        title="Choose bots for this chat"
+                        aria-haspopup="menu"
+                        aria-expanded={spawnOpen}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          openSpawnPicker();
+                        }}
+                      >
+                        <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                          <path
+                            d="M6.4 1.6h3.2l.4 1.7a4.8 4.8 0 0 1 1.3.8l1.7-.5 1.6 2.8-1.3 1.2c.1.5.1.9 0 1.4l1.3 1.2-1.6 2.8-1.7-.5a4.8 4.8 0 0 1-1.3.8l-.4 1.7H6.4l-.4-1.7a4.8 4.8 0 0 1-1.3-.8l-1.7.5L1.4 9.9l1.3-1.2a4.8 4.8 0 0 1 0-1.4L1.4 6.1l1.6-2.8 1.7.5a4.8 4.8 0 0 1 1.3-.8l.4-1.4z"
+                            stroke="currentColor"
+                            strokeWidth="1.3"
+                            strokeLinejoin="round"
+                          />
+                          <circle cx="8" cy="8" r="1.8" stroke="currentColor" strokeWidth="1.3" />
+                        </svg>
+                      </button>
+                    ) : null}
+                  </div>
                 ))
               )}
             </div>

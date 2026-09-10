@@ -3,10 +3,26 @@ import { collapseToolText, splitToolLine, toolIsFinished } from "../lib/grok-eve
 import { unsquashSentences } from "../lib/markdown";
 import { deskInk } from "../lib/settings";
 import { brainCaption, brainStamp } from "../lib/session";
-import { useStore } from "../lib/store";
-import { subagentTurns, workerTaskTitle } from "../lib/subagents";
+import { useStore, useStoreSelector, type Store } from "../lib/store";
+import { subagentTurns, workerNameFromTitle, workerTaskTitle } from "../lib/subagents";
 import { describePeerTool, prettyToolStatus, prettyToolTitle, talkingToSummary, toolNameKey } from "../lib/tool-labels";
-import { displayWorkSteps, formatWorked, groupWorkRows, isActiveWorkRow, packWorkRows, earlierWorkLabel, resolveWorkedMs, type DisplayWorkStep, type GroupedWorkRow, type TranscriptBlock } from "../lib/turns";
+import {
+  closedWorkSummary,
+  displayWorkSteps,
+  formatWorked,
+  groupWorkRows,
+  isActiveWorkRow,
+  namedCrewSummary,
+  namedWorkSummary,
+  packWorkRows,
+  earlierWorkLabel,
+  resolveWorkedMs,
+  workPopState,
+  type CrewSummaryWorker,
+  type DisplayWorkStep,
+  type GroupedWorkRow,
+  type TranscriptBlock,
+} from "../lib/turns";
 import type { ChatMessage } from "../lib/types";
 import { MessageBody } from "./MessageBody";
 import { TimeStamp } from "./TimeStamp";
@@ -26,6 +42,61 @@ export function workerFoldLabel(
   const name = child?.workerName?.trim();
   if (name && slice && slice !== name) return workerTaskTitle(name, slice);
   return slice || name || "Subagent";
+}
+
+/** First name on the closed work line: Hazel, not the slice. */
+export function crewWorkerName(
+  marker: { fromTitle?: string; text?: string },
+  child?: { title?: string; workerName?: string } | null,
+): string {
+  const named =
+    child?.workerName?.trim() ||
+    workerNameFromTitle(child?.title ?? "") ||
+    workerNameFromTitle(marker.fromTitle || marker.text || "");
+  if (named) return named;
+  const label = workerFoldLabel(marker, child);
+  return label.split("·", 1)[0]?.trim() || "Subagent";
+}
+
+function crewWorkerLive(
+  marker: ChatMessage,
+  child?: { status?: string } | null,
+): boolean {
+  return child?.status === "running" || child?.status === "needs-input" || marker.toolStatus === "running";
+}
+
+function crewWorkerFailed(
+  marker: ChatMessage,
+  child?: { agentRun?: { status?: string; executionOwner?: string } } | null,
+  live = false,
+): boolean {
+  return (
+    !live &&
+    child?.agentRun?.executionOwner !== "parent" &&
+    child?.agentRun?.status !== "interrupted" &&
+    (marker.toolStatus === "failed" || child?.agentRun?.status === "failed")
+  );
+}
+
+function crewWorkersFromStore(store: Store, threads: ChatMessage[]): CrewSummaryWorker[] {
+  return threads.map((marker) => {
+    const child = store.sessions.find((item) => item.id === marker.subagentSessionId);
+    const live = crewWorkerLive(marker, child);
+    return {
+      name: crewWorkerName(marker, child),
+      live,
+      failed: crewWorkerFailed(marker, child, live),
+    };
+  });
+}
+
+function sameCrewWorkers(left: CrewSummaryWorker[], right: CrewSummaryWorker[]): boolean {
+  if (left === right) return true;
+  if (left.length !== right.length) return false;
+  return left.every((item, index) => {
+    const other = right[index];
+    return item.name === other?.name && Boolean(item.live) === Boolean(other?.live) && Boolean(item.failed) === Boolean(other?.failed);
+  });
 }
 
 function ToolLine({ tool, peer }: { tool: ChatMessage; peer?: boolean }) {
@@ -107,14 +178,9 @@ function SubagentRow({
   const store = useStore();
   const [open, setOpen] = useState(false);
   const child = store.sessions.find((item) => item.id === marker.subagentSessionId);
-  const childLive =
-    child?.status === "running" || child?.status === "needs-input" || marker.toolStatus === "running";
+  const childLive = crewWorkerLive(marker, child);
   const title = workerFoldLabel(marker, child);
-  const failed =
-    !childLive &&
-    child?.agentRun?.executionOwner !== "parent" &&
-    child?.agentRun?.status !== "interrupted" &&
-    (marker.toolStatus === "failed" || child?.agentRun?.status === "failed");
+  const failed = crewWorkerFailed(marker, child, childLive);
   const ink = child ? deskInk(child, store.settings) : undefined;
   const brain = child
     ? brainCaption(brainStamp(child), store.settings.customBots, store.settings.llms)
@@ -360,7 +426,8 @@ export const WorkPopout = memo(function WorkPopout({
   const { open: earlierOpen, onToggle: onEarlierToggle } = useFoldOpen(false);
   const threads = block.subagents;
   const tools = block.tools;
-  const anyChildLive = threads.some((marker) => marker.toolStatus === "running");
+  const crewWorkers = useStoreSelector((store) => crewWorkersFromStore(store, threads), sameCrewWorkers);
+  const anyChildLive = crewWorkers.some((worker) => worker.live) || threads.some((marker) => marker.toolStatus === "running");
   useEffect(() => {
     if (!live && !anyChildLive) return;
     const timer = window.setInterval(() => setNow(Date.now()), 250);
@@ -392,24 +459,19 @@ export const WorkPopout = memo(function WorkPopout({
   const peerTools = workTools.filter((tool) => isPeerTool(tool));
   const otherTools = workTools.filter((tool) => !peerTools.some((item) => item.id === tool.id));
   const talking = talkingToSummary(peerTools);
-  const summary = [
-    label,
-    talking,
-    otherTools.length > 0
-      ? `${otherTools.length} ${talking ? "other " : ""}${otherTools.length === 1 ? "tool" : "tools"}`
-      : !talking && workTools.length > 0
-        ? `${workTools.length} ${workTools.length === 1 ? "tool" : "tools"}`
-        : "",
-    threads.length > 0 ? `${threads.length} ${threads.length === 1 ? "subagent" : "subagents"}` : "",
-  ]
-    .filter(Boolean)
-    .join(" · ");
+  const named = namedWorkSummary(otherTools, {
+    live,
+    allowThinking: !talking && threads.length === 0,
+  });
+  const crew = namedCrewSummary(crewWorkers, { live: live || anyChildLive });
+  const summary = closedWorkSummary({ label, talking, tools: named, crew });
+  const state = workPopState({ live: live || anyChildLive, failed: crewWorkers.some((worker) => worker.failed) });
 
   const rows = groupWorkRows(visible);
   const packed = packWorkRows(rows);
 
   return (
-    <details className="work-pop" onToggle={onBodyToggle}>
+    <details className="work-pop" data-state={state} onToggle={onBodyToggle}>
       <summary>
         {summary}
         {stamp}

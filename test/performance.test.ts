@@ -10,11 +10,13 @@ import {
   sameUsageDesk,
   sameWatchDesk,
   sameWatchSession,
+  sameMissionBoardDesk,
   type ComposerDesk,
   type ContextDesk,
   type SessionPaneDesk,
   type UsageDesk,
   type WatchDesk,
+  type MissionBoardDesk,
 } from "../src/lib/store-select";
 import { createPinScheduler } from "../src/lib/transcript-scroll";
 import { applyStreamQueues, createStreamCommitScheduler } from "../src/lib/stream-commit";
@@ -310,6 +312,7 @@ const composerDesk = (chat: Session | null, overrides: Record<string, unknown> =
     clearWatchRestore: noop,
     setComposerDraft: noop,
     setCrewMode: noop,
+    setSpawnAllowlist: noop,
     ...overrides,
   }) as unknown as ComposerDesk;
 
@@ -345,6 +348,7 @@ test("the composer ignores streamed prose but sees the chip, the queue, and the 
   assert.equal(sameComposerSession(talking, { ...talking, queue: [] }), false);
   assert.equal(sameComposerSession(talking, { ...talking, composerDraft: "half a line" }), false);
   assert.equal(sameComposerSession(talking, { ...talking, crewModes: ["orchestrate"] }), false);
+  assert.equal(sameComposerSession(talking, { ...talking, spawnAllowlist: ["claude"] }), false);
   assert.equal(sameComposerSession(null, null), true);
   assert.equal(sameComposerSession(talking, null), false);
 });
@@ -370,9 +374,10 @@ test("the context meter settles on turn boundaries instead of ticking per token"
     sameContextSession(talking, { ...talking, messages: [...talking.messages, message("u2", "user", "again", 3)] }),
     false,
   );
-  const desk = { session: talking, settings } as unknown as ContextDesk;
-  assert.equal(sameContextDesk(desk, { session: streamed(talking, "one two"), settings } as unknown as ContextDesk), true);
-  assert.equal(sameContextDesk(desk, { session: talking, settings: { ...settings } } as unknown as ContextDesk), false);
+  const desk = { session: talking, settings, usage: [] } as unknown as ContextDesk;
+  assert.equal(sameContextDesk(desk, { session: streamed(talking, "one two"), settings, usage: desk.usage } as unknown as ContextDesk), true);
+  assert.equal(sameContextDesk(desk, { session: talking, settings: { ...settings }, usage: desk.usage } as unknown as ContextDesk), false);
+  assert.equal(sameContextDesk(desk, { session: talking, settings, usage: [] } as unknown as ContextDesk), false);
 });
 
 test("a streamed chat cannot repaint the watch bar, but a usage write can", () => {
@@ -385,6 +390,25 @@ test("a streamed chat cannot repaint the watch bar, but a usage write can", () =
   assert.equal(sameWatchDesk(held, watchDesk(talking, { watchNotices: [] })), false);
   assert.equal(sameWatchDesk(held, watchDesk(talking, { pending: [] })), false);
   assert.equal(sameWatchDesk(held, watchDesk(talking, { grokPlan: { leftPercent: 40 } })), false);
+});
+
+test("a streamed token does not commit the mission board, but a worker status can", () => {
+  const workers: MissionBoardDesk["workers"] = [
+    { id: "w1", parentId: "chat", title: "Scout", status: "running", provider: "codex", runStatus: "running", missionId: "m1", iteration: 1, phase: "scout" },
+  ];
+  const board = (chat: Session | null, extras: Partial<MissionBoardDesk> = {}): MissionBoardDesk => ({
+    session: chat,
+    workers,
+    selectSession: noop,
+    ...extras,
+  });
+  const held = board(talking);
+  assert.equal(sameMissionBoardDesk(held, board(streamed(talking, "one two"))), true);
+  assert.equal(
+    sameMissionBoardDesk(held, board(talking, { workers: [{ ...workers[0]!, runStatus: "completed", status: "idle" }] })),
+    false,
+  );
+  assert.equal(sameMissionBoardDesk(held, board(talking, { selectSession: () => undefined })), false);
 });
 
 test("the session pane paints its own chat and sleeps through every other one", () => {

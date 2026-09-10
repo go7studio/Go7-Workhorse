@@ -182,6 +182,30 @@ export function lineupIsTerminal(lineup: DeskLineup | undefined): boolean {
   return lineup.rows.every((row) => row.status !== "queued" && row.status !== "running");
 }
 
+/** Parent is still on a turn — a join would steal the composer and dump reports. */
+export function lineupJoinParentIsLive(status?: string | null): boolean {
+  return status === "running" || status === "needs-input";
+}
+
+/**
+ * A wave that only stopped (cancel / interrupt) is not a join. The parent
+ * already chose that stop; injecting the cancelled transcript is a dump.
+ */
+export function lineupJoinHasActionableRow(lineup: DeskLineup | undefined): boolean {
+  return Boolean(
+    lineup?.rows.some(
+      (row) => row.status === "completed" || row.status === "failed" || row.status === "timed-out",
+    ),
+  );
+}
+
+/** Cancelling one worker must not synthesize the wave or wake the parent. */
+export function shouldJoinAfterChildSettle(
+  status: Exclude<DeskLineupRowStatus, "queued" | "running">,
+): boolean {
+  return status !== "cancelled";
+}
+
 export function lineupSnapshot(lineup: DeskLineup | undefined): {
   id?: string;
   folder?: string;
@@ -249,7 +273,8 @@ export function lineupJoinPrompt(
   } else {
     lines.push(
       "Answer the user in your own words as this chat’s bot. Write one combined review of what the crew found.",
-      "Rank the structured findings by severity before using the prose reports for context.",
+      "Start with blockers, then the rest. Name which worker found each item.",
+      "Use the structured findings, then the prose reports for context.",
       "Do not paste worker notes, file checklists, “let me check” narration, or raw slice dumps into this chat.",
       "Cite which slice a fact came from. Failed or empty slices: one line on what is missing. Do not ask 1/2/3.",
     );
@@ -306,7 +331,7 @@ export function formatAwaitAgentsSnapshot(input: {
         running.length === 0
           ? input.reports?.some((row) => row.executionOwner === "parent")
             ? "Workers finished, but the parent took over. Do not claim a fully Workhorse-owned completion. Join the reports and say who did the finishing work."
-            : "All workers finished and their reports are above. Join them now, in your own words: one list, worst first, naming which worker found each item. The desk will not send a separate join. Do not ask the user to pick 1/2/3."
+            : "All workers finished and their reports are above. Join them now for the user. Start with blockers, then the rest, and name which worker found each item. The desk will not send a separate join. Do not ask the user to pick 1/2/3."
           : "Workers are still running. Keep talking to the user. Do not ask them to pick. Do not sit on this tool.",
     },
     null,
@@ -613,6 +638,7 @@ export function applyJoinRateLimitRetry(
 export function maybeEnqueueLineupJoin(sessions: Session[], parentId: string, now = Date.now()): Session[] {
   const parent = sessions.find((session) => session.id === parentId);
   if (!parent?.lineup || parent.lineup.notifiedAt || !lineupIsTerminal(parent.lineup)) return sessions;
+  if (lineupJoinParentIsLive(parent.status) || !lineupJoinHasActionableRow(parent.lineup)) return sessions;
   if (parent.lineup.joinOwner === "external-runtime") {
     return handOverLineup(sessions, parentId, now);
   }
@@ -754,7 +780,7 @@ export type MissionState = {
   tone?: "danger" | "quiet";
 };
 
-function missionRowStatus(
+export function missionRowStatus(
   row: DeskLineupRow,
   child: Pick<Session, "id" | "status" | "agentRun"> | undefined,
 ): DeskLineupRowStatus {

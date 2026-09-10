@@ -1,0 +1,16 @@
+{
+  "id": "box-b",
+  "name": "Box B",
+  "version": "1.0.0",
+  "contract": 1,
+  "description": "Dedupe fixture: 5s poll of the same v0 feed as box-a.",
+  "sources": [
+    { "id": "feed", "kind": "json", "path": "feed", "namespace": "v0", "pollMs": 5000, "freshMs": 120000, "asOf": "/asOf", "schema": "sample-feed/v1", "maxBytes": 65536 }
+  ],
+  "strip": [
+    { "w": "text", "of": "feed:/watts", "fmt": "watts" }
+  ],
+  "cards": [
+    { "title": "B", "rows": [ { "w": "kv", "label": "Watts", "of": "feed:/watts", "fmt": "watts" } ] }
+  ]
+}

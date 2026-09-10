@@ -3,8 +3,18 @@ import fs from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
 import { buildFileDiff, countLines, type FileDiff } from "../src/lib/file-diff";
+import { deskGitEnv } from "./desk-path";
 
 const execFileAsync = promisify(execFile);
+
+/**
+ * Every `git` this module runs reads the person's repository, so it keeps
+ * their SSH and credential settings and loses the desk's private names. The
+ * panes call it per file, so it is the cheap filter, not the PATH build.
+ */
+export function projectGitEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  return deskGitEnv(base);
+}
 import { sameEditPath, stripPathSizeSuffix } from "../src/lib/project-edits";
 import {
   countCreatedReview,
@@ -119,6 +129,7 @@ export function readGitHead(cwd: string): string {
       windowsHide: true,
       timeout: 2_000,
       stdio: ["ignore", "pipe", "ignore"],
+      env: projectGitEnv(),
     }).trim();
   } catch {
     return "";
@@ -134,6 +145,7 @@ export function listGitChanges(cwd: string, baseRef?: string): GitChange[] {
       windowsHide: true,
       timeout: 2_000,
       stdio: ["ignore", "pipe", "ignore"],
+      env: projectGitEnv(),
     }).trim();
     const reference = typeof baseRef === "string" && baseRef.trim() ? baseRef.trim() : "";
     const raw = execFileSync(
@@ -146,6 +158,7 @@ export function listGitChanges(cwd: string, baseRef?: string): GitChange[] {
       windowsHide: true,
       timeout: 3_000,
       stdio: ["ignore", "pipe", "ignore"],
+      env: projectGitEnv(),
       },
     );
     const fields = raw.split("\0").filter(Boolean);
@@ -165,6 +178,7 @@ export function listGitChanges(cwd: string, baseRef?: string): GitChange[] {
         windowsHide: true,
         timeout: 3_000,
         stdio: ["ignore", "pipe", "ignore"],
+        env: projectGitEnv(),
       }).split("\0").filter(Boolean);
       for (const relative of untracked) {
         changes.push({ path: relative.replaceAll("\\", "/"), status: "?" });
@@ -390,6 +404,7 @@ function defaultGitShow(repo: string, rel: string): string | null {
         timeout: 800,
         killSignal: "SIGKILL",
         stdio: ["ignore", "pipe", "ignore"],
+        env: projectGitEnv(),
       });
     } catch {
       /* try the index, then give up */
@@ -490,19 +505,20 @@ function parseNumstat(raw: string, repo: string): Record<string, { added: number
 const NUMSTAT_ARGS = (repo: string, files: string[]) =>
   ["-C", repo, "--no-optional-locks", "diff", "--numstat", "HEAD", "--", ...files] as const;
 
-const NUMSTAT_OPTS = {
+const NUMSTAT_OPTS = () => ({
   encoding: "utf8" as const,
   windowsHide: true,
   timeout: 1_500,
   killSignal: "SIGKILL" as NodeJS.Signals,
   stdio: ["ignore", "pipe", "ignore"] as ["ignore", "pipe", "ignore"],
-};
+  env: projectGitEnv(),
+});
 
 function defaultGitNumstat(repo: string, rels: string[]): Record<string, { added: number; deleted: number }> {
   const files = rels.map((item) => item.replaceAll("\\", "/")).filter(Boolean);
   if (files.length === 0) return {};
   try {
-    return parseNumstat(execFileSync("git", [...NUMSTAT_ARGS(repo, files)], NUMSTAT_OPTS), repo);
+    return parseNumstat(execFileSync("git", [...NUMSTAT_ARGS(repo, files)], NUMSTAT_OPTS()), repo);
   } catch {
     return {};
   }
@@ -515,7 +531,7 @@ async function defaultGitNumstatAsync(
   const files = rels.map((item) => item.replaceAll("\\", "/")).filter(Boolean);
   if (files.length === 0) return {};
   try {
-    const { stdout } = await execFileAsync("git", [...NUMSTAT_ARGS(repo, files)], NUMSTAT_OPTS);
+    const { stdout } = await execFileAsync("git", [...NUMSTAT_ARGS(repo, files)], NUMSTAT_OPTS());
     return parseNumstat(String(stdout), repo);
   } catch {
     return {};

@@ -176,6 +176,32 @@ export function normalizeLocalComputeHost(value: unknown): LocalComputeHostSetti
   };
 }
 
+/** The four fields an Add host form collects. Grants always start empty. */
+export type LocalComputeHostDraft = { id: string; label: string; baseUrl: string; tokenFile: string };
+
+/**
+ * A draft as a host with no grants — null while any field is still wrong. Every form that adds a
+ * host goes through here, so the fail-closed rules live in one place rather than in each surface.
+ */
+export function draftToLocalComputeHost(draft: LocalComputeHostDraft): LocalComputeHostSettings | null {
+  return normalizeLocalComputeHost({
+    ...draft,
+    enabled: true,
+    allowedCallerRoles: [],
+    allowedCapabilities: [],
+    allowedContinuations: [],
+  });
+}
+
+/** Which field still needs work, so a form names one thing instead of one catch-all sentence. */
+export function localComputeDraftIssue(draft: LocalComputeHostDraft): "id" | "baseUrl" | "tokenFile" | null {
+  if (!HOST_ID.test(typeof draft.id === "string" ? draft.id.trim() : "")) return "id";
+  if (!normalizeLocalComputeBaseUrl(draft.baseUrl)) return "baseUrl";
+  const file = typeof draft.tokenFile === "string" ? draft.tokenFile.trim() : "";
+  if (!file || file.length > 4_096 || /[\0\r\n]/.test(file) || !isAbsoluteTokenFile(file)) return "tokenFile";
+  return null;
+}
+
 /** Collapse identical continuation families advertised by several source capabilities. */
 export function advertisedLocalComputeContinuations(
   capabilities: readonly LocalComputeCapability[],

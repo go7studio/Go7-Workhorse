@@ -7,8 +7,9 @@ import {
   type GrokLaunchSpec,
 } from "./grok-launch";
 import { sessionRulesFor, type DeskRole } from "../src/lib/workhorse-rules";
+import { cursorUsageLane } from "../src/lib/cursor-lane";
 import { cursorSlugForEffort } from "../src/lib/cursor-catalog";
-import { normalizeModelId } from "../src/lib/models";
+import { findChoice, findChoiceOnProvider, normalizeModelId } from "../src/lib/models";
 import {
   detectCursorLogin,
   isCursorAppCommand,
@@ -36,9 +37,17 @@ export function resolveCursorModel(
   model: string | null | undefined,
   effort?: EffortLevel | string | null,
 ): string {
-  const trimmed = model?.trim();
-  const normalized = normalizeModelId("cursor", trimmed || DEFAULT_MODEL);
-  return cursorSlugForEffort(normalized, effort ?? null);
+  const trimmed = model?.trim() || DEFAULT_MODEL;
+  const normalized = normalizeModelId("cursor", trimmed);
+  const onCursor = findChoiceOnProvider("cursor", normalized) ?? findChoiceOnProvider("cursor", trimmed);
+  const global = onCursor ? null : findChoice(trimmed);
+  const hosted =
+    global &&
+    global.provider !== "custom" &&
+    global.provider !== "grok" &&
+    (global.provider === "cursor" || cursorUsageLane(global.model) === "other-models");
+  const id = onCursor?.model ?? (hosted ? global!.model : null) ?? normalized;
+  return cursorSlugForEffort(id, effort ?? null);
 }
 
 export function resolveCursorEffort(effort: EffortLevel | string | null | undefined): string {

@@ -16,15 +16,17 @@ import { detectCodexLogin } from "./codex-login";
 import { archiveWorkhorseWorkerThreads, detectCodexRuntime, listCodexNativeThreads } from "./codex-app-server";
 import { codexCapabilitySummary } from "./codex-capabilities";
 import { detectClaudeLogin, resolveClaudeCliBinary } from "./claude-login";
+import { forgetClaudeRefusalWithoutToken, markClaudeTokenRejected, setStoredClaudeTokenReader } from "./claude-stored-token";
 import { detectCursorLogin } from "./cursor-login";
 import { runClaudeSetupToken } from "./claude-auth";
 import { detectCustomLogin, fillEmptyCustomBotKeys, hydrateDetectedCustomCredentials, openClawKeyForBaseUrl } from "./custom-login";
-import { probeCustomHttp } from "./custom-http";
-import { listVendorModels, rememberVendorModels } from "./vendor-models";
+import { probeCustomHttp, testCustomModel } from "./custom-http";
+import { cachedCustomCatalog, forgetCustomCatalogsExcept, readCustomCatalog } from "./custom-catalog";
+import { listVendorModels, rememberDeskCatalog, rememberVendorModels, type CustomBotCatalog } from "./vendor-models";
 import { fetchGrokPlanUsage } from "./grok-plan";
 import { fetchCodexPlanUsage } from "./codex-plan";
 import { fetchClaudePlanUsage } from "./claude-plan";
-import { fetchCursorPlanUsage } from "./cursor-plan";
+import { fetchCursorPlanUsage, fetchCursorLedgerEvents } from "./cursor-plan";
 import { fetchCustomPlanUsage, grokBotLeftoverPath } from "./custom-plan";
 import { fetchCustomModels } from "./custom-models";
 import type { PermissionAnswer } from "../src/lib/permissions";
@@ -51,7 +53,7 @@ import {
 } from "./desk-export-host";
 import { showDesktopNotice } from "./notify";
 import { applyAppUpdate, checkAppUpdate } from "./app-update";
-import { ensureDeskRipgrep } from "./desk-path";
+import { deskToolEnv, ensureDeskRipgrep } from "./desk-path";
 import { ensureManagedWorktree, pruneOrphanWorktrees, type EnsureWorktreeInput } from "./worktree-host";
 import { offloadStateAttachments } from "./attachment-store";
 import {
@@ -94,7 +96,8 @@ import {
   rememberFolderBookmark,
 } from "./folder-access";
 import { normalizeSettings } from "../src/lib/settings";
-import { customBotModels } from "../src/lib/custom-bots";
+import { claudeAuthFailure } from "../src/lib/claude-auth-failure";
+import { customBotEnabled, customBotModels } from "../src/lib/custom-bots";
 import { routingProfileForModel } from "../src/lib/routing";
 import type { AdaptiveCandidate } from "../src/lib/learning-policy";
 import { LearningService } from "./learning-service";
@@ -102,8 +105,15 @@ import { SqliteMemoryStore } from "./learning-sqlite";
 import { attachLearningIpc } from "./learning-ipc";
 import { runLearningSmoke } from "./learning-smoke";
 import { probeLocalComputeHosts } from "./local-compute-registry";
+import { createWorkshopHost, listInstalledPacks } from "./workshop-host";
+import { invokeMediaCreate } from "./local-media-create";
+import { checkPackUpdate, installCatalogEntry, installFromFolder, installFromRepo, removePack, updatePack } from "./workshop-install";
+import { createCatalogService } from "./workshop-catalog";
+import { catalogYankMatches } from "../src/lib/workshop-catalog";
+import { createWorkshopBreakoutWindow } from "./workshop-window";
+import { disablePacksForReconfirm, normalizeWorkshopSettings } from "../src/lib/workshop-pack";
 import { ephemeralCustomAuxiliary, providerAllowsEphemeralAuxiliary, resolveCompilerBotConfig } from "./learning-aux";
-import type { Settings } from "../src/lib/types";
+import type { CustomBot, Settings } from "../src/lib/types";
 import {
   WORKHORSE_APP_ID,
   WORKHORSE_BUILD_MARKER,
@@ -149,6 +159,9 @@ function runExternalRuntimeProcess(taskId: string, file: string, args: string[])
     timeoutMs: 120_000,
     maxOutputBytes: 16 * 1024 * 1024,
     sessionId: taskId,
+    // A harness CLI is a vendor process. It gets the desk's PATH and none of
+    // the desk's private names, the same as every other vendor child.
+    env: deskToolEnv(),
   });
   externalRuntimeProcesses.set(taskId, child);
   return done.then((result) => {
@@ -414,19 +427,14 @@ function credentialStore(): CredentialStore {
 }
 
 /**
- * Put Workhorse's own Claude token on the environment the vendor child
- * inherits. Detection counts it as a login and the launch spec prefers it, so
- * the desk stops depending on the shared Claude Code login entirely.
+ * Teach the Claude modules where Workhorse's own token lives. It stays in the
+ * vault: detection reads it there and the Claude launch spec puts it on its own
+ * env. It never goes on `process.env`, which every vendor child inherits — that
+ * is how a Codex, Cursor or Grok chat came to be able to print the user's
+ * Claude login, along with every MCP server and shell those agents started.
  */
-function applyStoredClaudeToken(): boolean {
-  try {
-    const token = credentialStore().get(CLAUDE_TOKEN_ID);
-    if (!token) return false;
-    process.env.CLAUDE_CODE_OAUTH_TOKEN = token;
-    return true;
-  } catch {
-    return false;
-  }
+function useStoredClaudeToken(): void {
+  setStoredClaudeTokenReader(() => credentialStore().get(CLAUDE_TOKEN_ID) ?? null);
 }
 
 function folderAccessIo() {
@@ -914,7 +922,7 @@ app.whenReady().then(async () => {
   if (process.platform === "win32") {
     app.setAppUserModelId(windowsAppUserModelId);
   }
-  applyStoredClaudeToken();
+  useStoredClaudeToken();
   debugStartup("credentials ready");
   try {
     ensureDeskRipgrep();
@@ -941,6 +949,7 @@ app.whenReady().then(async () => {
   }
 
   let liveSettings: Settings = normalizeSettings({});
+  let liveTheme: import("../src/lib/types").Theme = "system";
   const inboundFile = learningInboundPath(app.getPath("userData"));
   const inboundIo = {
     mkdirSync: (dir: string, opts: { recursive: true }) => {
@@ -1009,6 +1018,65 @@ app.whenReady().then(async () => {
   attachLearningIpc(ipcMain, learningService, (settings) => {
     liveSettings = settings;
   });
+  const broadcastWorkshopChanged = () => {
+    for (const window of BrowserWindow.getAllWindows()) {
+      if (!window.webContents.isDestroyed()) window.webContents.send("workshop:changed");
+    }
+  };
+
+  // Packs live in userData, never in the installer. Created lazily; nothing else writes here.
+  const workshopPacksRoot = (): string => {
+    const dir = path.join(app.getPath("userData"), "workshop", "packs");
+    fs.mkdirSync(dir, { recursive: true });
+    return dir;
+  };
+  const workshopCatalogSeedPath = (): string => {
+    const packaged = path.join(process.resourcesPath, "workshop", "catalog-seed.json");
+    if (app.isPackaged && fs.existsSync(packaged)) return packaged;
+    return path.join(app.getAppPath(), "workshop", "catalog-seed.json");
+  };
+  const workshopCatalog = createCatalogService({
+    seedPath: workshopCatalogSeedPath,
+    cacheDir: () => {
+      const dir = path.join(app.getPath("userData"), "workshop");
+      fs.mkdirSync(dir, { recursive: true });
+      return dir;
+    },
+  });
+  void workshopCatalog.refresh();
+  const workshopHost = createWorkshopHost({
+    packsRoot: workshopPacksRoot,
+    getSettings: () => normalizeWorkshopSettings(liveSettings.workshop),
+    getHosts: () => liveSettings.localCompute?.hosts ?? [],
+    onUpdate: () => broadcastWorkshopChanged(),
+    readToken: (file) => {
+      try {
+        const stat = fs.statSync(file);
+        if (!stat.isFile()) return null;
+        if (process.platform !== "win32" && (stat.mode & 0o077) !== 0) return null;
+        const token = fs.readFileSync(file, "utf8").trim();
+        if (!token || token.length > 16_384 || /[\r\n]/.test(token)) return null;
+        return token;
+      } catch {
+        return null;
+      }
+    },
+    createBreakout: () => {
+      const dark =
+        liveTheme === "light"
+          ? false
+          : liveTheme === "dark" || liveTheme === "workhorse"
+            ? true
+            : nativeTheme.shouldUseDarkColors;
+      return createWorkshopBreakoutWindow({
+        preload: path.join(__dirname, "preload.mjs"),
+        deskUrl: process.env.VITE_DEV_SERVER_URL ?? null,
+        deskFile: path.join(__dirname, "../dist/index.html"),
+        icon: appIconPath(),
+        dark,
+      });
+    },
+  });
   setInboundLearningSink((draft) => {
     learningService.record(draft);
   });
@@ -1048,9 +1116,7 @@ app.whenReady().then(async () => {
       return await new Promise<PeerAskResult>((resolve) => {
         const timer = setTimeout(() => {
           peerWaiters.delete(id);
-          if (spawn && childSessionId && !win.webContents.isDestroyed()) {
-            win.webContents.send("grok:peer-cancel", { childSessionId, reason: "timed-out" });
-          }
+          // A wait bound answers the caller. It does not stop the worker.
           resolve({
             error: peerAskTimeoutMs(ask).timeoutError,
           });
@@ -1133,7 +1199,12 @@ app.whenReady().then(async () => {
       {
         existsSync: (file) => fs.existsSync(file),
         execFile: (file, args) => {
-          const result = spawnSync(file, args, { encoding: "utf8", timeout: 8_000, windowsHide: true });
+          const result = spawnSync(file, args, {
+            encoding: "utf8",
+            timeout: 8_000,
+            windowsHide: true,
+            env: deskToolEnv(),
+          });
           return { status: result.status ?? 1, stdout: result.stdout ?? "", stderr: result.stderr ?? "" };
         },
       },
@@ -1216,7 +1287,12 @@ app.whenReady().then(async () => {
           fs.mkdirSync(dir, { recursive: true });
         },
         exec: (file, args) => {
-          const result = spawnSync(file, args, { encoding: "utf8", timeout: 15_000, windowsHide: true });
+          const result = spawnSync(file, args, {
+            encoding: "utf8",
+            timeout: 15_000,
+            windowsHide: true,
+            env: deskToolEnv(),
+          });
           // A missing binary is status null + ENOENT, not a failed run. Say
           // which, so "not installed" is not reported as "exit 1".
           const missing = result.error && (result.error as NodeJS.ErrnoException).code === "ENOENT";
@@ -1558,6 +1634,26 @@ app.whenReady().then(async () => {
 
   ipcMain.handle("state:save", (_event, state: Persistable) => {
     if (!state || typeof state !== "object") return;
+    if ("settings" in state) {
+      const nextSettings = normalizeSettings((state as { settings?: unknown }).settings);
+      const workshopChanged = JSON.stringify(liveSettings.workshop) !== JSON.stringify(nextSettings.workshop);
+      // Packs read through a Local Compute host, so editing that list changes the plan too. Without
+      // this a freshly added host is only picked up when something else happens to touch workshop
+      // settings, and a group that backed off after repeated refusals keeps its backoff.
+      const hostsChanged =
+        JSON.stringify(liveSettings.localCompute?.hosts ?? []) !== JSON.stringify(nextSettings.localCompute?.hosts ?? []);
+      liveSettings = nextSettings;
+      // A deleted connection leaves nothing behind in this process either.
+      forgetCustomCatalogsExcept(nextSettings.customBots.map((bot) => bot.id));
+      if (workshopChanged || hostsChanged) {
+        workshopHost.refresh();
+        broadcastWorkshopChanged();
+      }
+    }
+    if ("theme" in state && typeof (state as { theme?: unknown }).theme === "string") {
+      const theme = (state as { theme: string }).theme;
+      if (theme === "system" || theme === "light" || theme === "dark" || theme === "workhorse") liveTheme = theme;
+    }
     // The catch keeps the chain alive: writeState guards its own body, but a
     // future edit that throws before its try would otherwise poison the chain
     // and silently end every save after it.
@@ -1568,11 +1664,216 @@ app.whenReady().then(async () => {
     if (!drafts || typeof drafts !== "object" || Array.isArray(drafts)) return;
     writeComposerDraftFile(statePath(), drafts);
   });
+  // The event name is fixed here, not passed in: the renderer supplies the
+  // detail and nothing else, so no caller can invent a log event. The detail is
+  // capped for the same reason the log has a byte ceiling.
+  ipcMain.handle("routing:record-decision", (_event, detail: unknown) => {
+    if (typeof detail !== "string" || !detail.trim()) return;
+    mainLog.record("routing:decision", detail.slice(0, 2000));
+  });
   ipcMain.handle("localCompute:probe", (_event, hosts: unknown) =>
     probeLocalComputeHosts(
       Array.isArray(hosts) ? hosts as import("../src/lib/types").LocalComputeHostSettings[] : [],
     ),
   );
+
+  // Pack on/off is renderer updateWorkshop → state:save only. Install, update, and remove change
+  // the folder on disk; the timers re-plan and every window is told to re-read.
+  const workshopInstalledChanged = () => {
+    workshopHost.refresh();
+    broadcastWorkshopChanged();
+  };
+  /**
+   * Turn affected On packs off in liveSettings before refresh so the poller cannot
+   * fetch new pack.json URLs under old grants. Renderer also clears when it sees reconfirmIds.
+   */
+  const workshopDisableForReconfirm = (candidateIds: string[]): string[] => {
+    if (!candidateIds.length) return [];
+    const { settings, reconfirmIds } = disablePacksForReconfirm(
+      normalizeWorkshopSettings(liveSettings.workshop),
+      candidateIds,
+    );
+    if (!reconfirmIds.length) return [];
+    liveSettings = { ...liveSettings, workshop: settings };
+    return reconfirmIds;
+  };
+  const workshopId = (input: unknown): string =>
+    input && typeof input === "object" && typeof (input as { id?: unknown }).id === "string" ? (input as { id: string }).id : "";
+  ipcMain.handle("workshop:list", () => workshopHost.list());
+  ipcMain.handle("workshop:view", () => workshopHost.view());
+  ipcMain.handle("workshop:catalog", async () => {
+    const view = await workshopCatalog.refresh();
+    const doc = workshopCatalog.document();
+    const forced: string[] = [];
+    if (doc) {
+      for (const item of listInstalledPacks(workshopPacksRoot())) {
+        if (!item.ok) continue;
+        if (catalogYankMatches(doc, item.pack.id, item.pack.version)) forced.push(item.pack.id);
+      }
+    }
+    if (forced.length) {
+      // Tombstone bites at refresh: force Off so yanked packs stop painting under old grants.
+      workshopDisableForReconfirm(forced);
+      return workshopCatalog.withYankForceOff(forced);
+    }
+    return view;
+  });
+  ipcMain.handle("workshop:install-catalog", async (_event, input: unknown) => {
+    const id =
+      input && typeof input === "object" && typeof (input as { id?: unknown }).id === "string"
+        ? (input as { id: string }).id
+        : "";
+    // Bind from pin-verified catalog only — renderer cannot supply source/digest/summary.
+    const entry = workshopCatalog.entryForInstall(id);
+    if (!entry.ok) {
+      const fixed =
+        entry.reason === "Yanked from catalog" ||
+        entry.reason === "Catalog stale" ||
+        entry.reason === "Catalog expired" ||
+        entry.reason === "Catalog unreachable" ||
+        entry.reason === "catalog pin mismatch" ||
+        entry.reason === "Pack not in catalog"
+          ? entry.reason
+          : "Pack refused";
+      return { ok: false, reason: fixed };
+    }
+    let reconfirmIds: string[] = [];
+    const result = await installCatalogEntry(
+      { id: entry.ref.id, version: entry.ref.version, source: entry.ref.source, digest: entry.ref.digest },
+      workshopPacksRoot(),
+      fetch,
+      {
+        beforeReplace: ({ replacedIds }) => {
+          reconfirmIds = workshopDisableForReconfirm(replacedIds);
+        },
+      },
+    );
+    if (!result.ok) return result;
+    workshopInstalledChanged();
+    return {
+      ok: true,
+      ids: result.ids,
+      ...(result.sourcesChangedIds?.length ? { sourcesChangedIds: result.sourcesChangedIds } : {}),
+      ...(result.versionChangedIds?.length ? { versionChangedIds: result.versionChangedIds } : {}),
+      ...(reconfirmIds.length ? { reconfirm: true, reconfirmIds } : {}),
+    };
+  });
+  ipcMain.handle("workshop:install-repo", async (_event, input: unknown) => {
+    const url = input && typeof input === "object" && typeof (input as { url?: unknown }).url === "string" ? (input as { url: string }).url : "";
+    let reconfirmIds: string[] = [];
+    const result = await installFromRepo(url, workshopPacksRoot(), fetch, {
+      // Add/replace: any On pack being overwritten must reconfirm (old grants must not survive the swap).
+      beforeReplace: ({ replacedIds }) => {
+        reconfirmIds = workshopDisableForReconfirm(replacedIds);
+      },
+    });
+    if (!result.ok) return result;
+    workshopInstalledChanged();
+    return {
+      ok: true,
+      ids: result.ids,
+      ...(result.sourcesChangedIds?.length ? { sourcesChangedIds: result.sourcesChangedIds } : {}),
+      ...(reconfirmIds.length ? { reconfirm: true, reconfirmIds } : {}),
+    };
+  });
+  ipcMain.handle("workshop:install-folder", async () => {
+    const picked = await dialog.showOpenDialog({
+      title: "Add a Workshop pack folder",
+      buttonLabel: "Add pack",
+      properties: ["openDirectory"],
+    });
+    if (picked.canceled || !picked.filePaths[0]) return { ok: false, reason: "canceled" };
+    let reconfirmIds: string[] = [];
+    const result = await installFromFolder(picked.filePaths[0], workshopPacksRoot(), {
+      beforeReplace: ({ replacedIds }) => {
+        reconfirmIds = workshopDisableForReconfirm(replacedIds);
+      },
+    });
+    if (!result.ok) return result;
+    workshopInstalledChanged();
+    return {
+      ok: true,
+      ids: result.ids,
+      ...(result.sourcesChangedIds?.length ? { sourcesChangedIds: result.sourcesChangedIds } : {}),
+      ...(reconfirmIds.length ? { reconfirm: true, reconfirmIds } : {}),
+    };
+  });
+  ipcMain.handle("workshop:remove", (_event, input: unknown) => {
+    const result = removePack(workshopId(input), workshopPacksRoot());
+    if (result.ok) workshopInstalledChanged();
+    return result;
+  });
+  ipcMain.handle("workshop:check-update", (_event, input: unknown) => checkPackUpdate(workshopId(input), workshopPacksRoot()));
+  ipcMain.handle("workshop:update", async (_event, input: unknown) => {
+    let reconfirmIds: string[] = [];
+    const result = await updatePack(workshopId(input), workshopPacksRoot(), fetch, {
+      // Version change or sources change ⇒ Off + fresh Turn-on (no grant carry). Includes siblings.
+      beforeReplace: ({ sourcesChangedIds, versionChangedIds }) => {
+        const ids = Array.from(new Set([...sourcesChangedIds, ...versionChangedIds]));
+        reconfirmIds = workshopDisableForReconfirm(ids);
+      },
+    });
+    if (!result.ok) return result;
+    workshopInstalledChanged();
+    return {
+      ok: true,
+      ids: result.ids,
+      ...(result.sourcesChangedIds?.length ? { sourcesChangedIds: result.sourcesChangedIds } : {}),
+      ...(result.versionChangedIds?.length ? { versionChangedIds: result.versionChangedIds } : {}),
+      ...(reconfirmIds.length ? { reconfirm: true, reconfirmIds } : {}),
+    };
+  });
+  ipcMain.handle("workshop:reveal-collector", (_event, input: unknown) => {
+    const target = workshopHost.collectorPath(workshopId(input));
+    if (!target) return false;
+    shell.showItemInFolder(target);
+    return true;
+  });
+  ipcMain.handle("workshop:open-breakout", () => {
+    const ok = workshopHost.openBreakout();
+    broadcastWorkshopChanged();
+    return ok;
+  });
+  ipcMain.handle("workshop:close-breakout", () => {
+    workshopHost.closeBreakout();
+    return true;
+  });
+
+  const safeLocalPath = (input: unknown): string | null => {
+    if (typeof input !== "string" || !input || input.length > 4096 || input.includes("\0")) return null;
+    if (!path.isAbsolute(input)) return null;
+    const resolved = path.resolve(input);
+    try {
+      const stat = fs.statSync(resolved);
+      if (!stat.isFile() && !stat.isDirectory()) return null;
+      return resolved;
+    } catch {
+      return null;
+    }
+  };
+  ipcMain.handle("desk:open-local-path", async (_event, input: unknown) => {
+    const target = safeLocalPath(input);
+    if (!target) return false;
+    const err = await shell.openPath(target);
+    return !err;
+  });
+  ipcMain.handle("desk:reveal-local-path", (_event, input: unknown) => {
+    const target = safeLocalPath(input);
+    if (!target) return false;
+    shell.showItemInFolder(target);
+    return true;
+  });
+  ipcMain.handle("localMedia:create", async (_event, input: unknown) => {
+    const stateDir = path.join(app.getPath("userData"), "local-media-create");
+    fs.mkdirSync(stateDir, { recursive: true });
+    return invokeMediaCreate(
+      {
+        hosts: liveSettings.localCompute?.hosts ?? [],
+        stateDir,
+      },
+      input,
+    );
+  });
   ipcMain.handle("jobs:sync", (_event, sessions: unknown) => jobEngine?.sync(sessions) ?? []);
 
   ipcMain.handle("app:quit", () => app.quit());
@@ -1623,7 +1924,12 @@ app.whenReady().then(async () => {
   ipcMain.handle("codex:capabilities", (_event, projectRoot: unknown) =>
     codexCapabilitySummary(typeof projectRoot === "string" ? projectRoot : undefined),
   );
-  ipcMain.handle("claude:detect-login", () => detectClaudeLogin());
+  ipcMain.handle("claude:detect-login", (_event, input?: { recheck?: unknown }) => {
+    // Only the person's Recheck clears a refusal of the CLI login; the desk's
+    // own re-detect after a refused call must not.
+    if (input && typeof input === "object" && input.recheck === true) forgetClaudeRefusalWithoutToken();
+    return detectClaudeLogin();
+  });
   ipcMain.handle("claude:setup-token", async (event) => {
     const cli = resolveClaudeCliBinary();
     if (!cli) return { ok: false, message: "Claude Code CLI not found." };
@@ -1641,7 +1947,8 @@ app.whenReady().then(async () => {
     } catch (error) {
       return { ok: false, message: error instanceof Error ? error.message : "Could not store the token." };
     }
-    applyStoredClaudeToken();
+    // Nothing to apply: the reader registered at startup reads the vault live,
+    // so the next detect and the next Claude launch both see this token.
     return { ok: true };
   });
   ipcMain.handle("custom:detect", () => detectCustomLogin());
@@ -1651,6 +1958,71 @@ app.whenReady().then(async () => {
   ipcMain.handle("custom:probe", async (_event, config: { baseUrl: string; apiKey: string; model: string; api?: "anthropic-messages" | "openai-completions" }) => {
     return probeCustomHttp(config);
   });
+
+  /**
+   * A bot's live URL and key, resolved here and never handed back.
+   *
+   * The renderer asks by bot id alone, so the two handlers below take nothing
+   * secret in and return nothing secret out. Vault first, then the shell key an
+   * OpenClaw install already holds for that host.
+   */
+  const customBotCredential = (raw: unknown): { bot: CustomBot; apiKey: string } | undefined => {
+    const botId = typeof raw === "string" ? raw.trim() : "";
+    const bot = botId ? liveSettings.customBots.find((item) => item.id === botId) : undefined;
+    if (!bot) return undefined;
+    let apiKey = bot.apiKey?.trim() ?? "";
+    if (!apiKey && bot.credentialId) {
+      try {
+        apiKey = credentialStore().get(bot.credentialId);
+      } catch {
+        apiKey = "";
+      }
+    }
+    if (!apiKey && bot.baseUrl) {
+      try {
+        apiKey = openClawKeyForBaseUrl(bot.baseUrl);
+      } catch {
+        apiKey = "";
+      }
+    }
+    return { bot, apiKey };
+  };
+
+  /*
+   * Both handlers below reach a third-party host with a real credential, so
+   * both refuse a disabled slot. Turning a bot off is how a person stops it
+   * costing them anything, and opening Settings is not consent to spend on it
+   * again.
+   */
+  ipcMain.handle("customBot:catalog", async (_event, payload: { botId?: unknown; refresh?: unknown }) => {
+    const found = customBotCredential(payload?.botId);
+    if (!found?.apiKey.trim()) return null;
+    return (
+      (await readCustomCatalog({
+        botId: found.bot.id,
+        baseUrl: found.bot.baseUrl,
+        apiKey: found.apiKey,
+        enabled: customBotEnabled(found.bot),
+        refresh: payload?.refresh === true,
+      })) ?? null
+    );
+  });
+
+  ipcMain.handle("customBot:test-model", async (_event, payload: { botId?: unknown; model?: unknown }) => {
+    const model = typeof payload?.model === "string" ? payload.model.trim() : "";
+    const found = customBotCredential(payload?.botId);
+    if (!found) return { ok: false, model, message: "That bot is gone.", latencyMs: 0 };
+    if (!customBotEnabled(found.bot)) {
+      return { ok: false, model, message: "This bot is off. Turn it on to test its models.", latencyMs: 0 };
+    }
+    if (!model) return { ok: false, model, message: "Name a model to test.", latencyMs: 0 };
+    return testCustomModel({
+      baseUrl: found.bot.baseUrl,
+      apiKey: found.apiKey,
+      model,
+      api: found.bot.api,
+    });
+  });
   ipcMain.handle("mcp:probe", async (_event, serverName: unknown) => {
     const name = typeof serverName === "string" ? serverName.trim() : "";
     if (!name) return { ok: false, message: "Choose a saved MCP server.", tools: [] };
@@ -1658,7 +2030,36 @@ app.whenReady().then(async () => {
     if (!saved) return { ok: false, message: "Save this MCP server before testing it.", tools: [] };
     return probeMcpServer(saved);
   });
-  ipcMain.handle("models:list", () => listVendorModels({ userData: app.getPath("userData") }));
+  /**
+   * The custom half of the desk catalog, from what each enabled bot's host has
+   * already published. This reads the cache and never waits on a host: a model
+   * list must not be able to stall a boot.
+   *
+   * It does ask, in the background, for any bot whose answer has gone stale.
+   * The fifteen-minute cache is the bound — at most one GET per host per
+   * quarter hour, and only for a bot that is on and has a key — so the first
+   * read after a launch shows the window saved on the bot and the host's own
+   * number is there by the next refresh.
+   */
+  const customBotCatalogs = (): CustomBotCatalog[] => {
+    const rows: CustomBotCatalog[] = [];
+    for (const bot of liveSettings.customBots) {
+      if (bot.enabled === false) continue;
+      rows.push({ bot, catalog: cachedCustomCatalog(bot.id, bot.baseUrl) });
+      const found = customBotCredential(bot.id);
+      if (!found?.apiKey.trim()) continue;
+      void readCustomCatalog({ botId: bot.id, baseUrl: bot.baseUrl, apiKey: found.apiKey }).catch(() => undefined);
+    }
+    return rows;
+  };
+  ipcMain.handle("models:list", () => {
+    const lists = listVendorModels({ userData: app.getPath("userData"), customBots: customBotCatalogs() });
+    // What the picker is served, Link lists too: the helper reads this file
+    // instead of the vendor homes, so a model Codex or Claude added shows up
+    // for a harness the same day it shows up here.
+    rememberDeskCatalog(app.getPath("userData"), lists);
+    return lists;
+  });
   /** Seed rows plus what Claude last advertised. Anything else was typed. */
   const claudeModelListed = (model: string): boolean => {
     const raw = model.trim().toLowerCase();
@@ -1705,6 +2106,19 @@ app.whenReady().then(async () => {
   ipcMain.handle("cursor:plan-usage", async () => {
     try {
       return (await fetchCursorPlanUsage()) ?? null;
+    } catch {
+      return null;
+    }
+  });
+  ipcMain.removeHandler("cursor:ledger-events");
+  ipcMain.handle("cursor:ledger-events", async (_event, raw?: { startDate?: number; endDate?: number }) => {
+    try {
+      return (
+        (await fetchCursorLedgerEvents({
+          startDate: typeof raw?.startDate === "number" ? raw.startDate : undefined,
+          endDate: typeof raw?.endDate === "number" ? raw.endDate : undefined,
+        })) ?? null
+      );
     } catch {
       return null;
     }
@@ -1773,15 +2187,23 @@ app.whenReady().then(async () => {
       cwd: requireSessionCwd(raw.cwd),
       unlistedModel: !claudeModelListed(raw.model),
     };
-    const result = await claudeHost.prompt(input, (payload) => {
-      if (payload.type === "vendor-models") rememberVendorModels(app.getPath("userData"), payload.provider, payload.models);
-      try {
-        sendToDesk(event.sender, "claude:event", payload);
-      } catch (error) {
-        console.error("workhorse claude event send failed", error);
-      }
-    });
-    return result;
+    try {
+      return await claudeHost.prompt(input, (payload) => {
+        if (payload.type === "vendor-models") rememberVendorModels(app.getPath("userData"), payload.provider, payload.models);
+        try {
+          sendToDesk(event.sender, "claude:event", payload);
+        } catch (error) {
+          console.error("workhorse claude event send failed", error);
+        }
+      });
+    } catch (error) {
+      // A refused login is a Settings problem, not a chat problem. Remember it
+      // so the Claude card reads Sign in again and shows the button, instead
+      // of On with the button hidden while every call fails.
+      const problem = claudeAuthFailure(error);
+      if (problem) markClaudeTokenRejected(problem);
+      throw error;
+    }
   });
   ipcMain.handle("claude:answer-permission", (_event, payload: { requestId: string; answer: PermissionAnswer }) => {
     return claudeHost.answerPermission(payload.requestId, payload.answer);

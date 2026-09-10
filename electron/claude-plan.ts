@@ -5,7 +5,18 @@ import os from "node:os";
 import path from "node:path";
 import type { GrokPlanProduct, GrokPlanUsage } from "../src/lib/types";
 import { readClaudeDesktopOauth } from "./claude-desktop-auth";
+import { storedClaudeToken } from "./claude-stored-token";
 import { oauthNotExpired, resolveClaudeCliBinary } from "./claude-login";
+import { deskHelperEnv } from "./desk-path";
+
+/**
+ * `security` is the desk asking macOS for one keychain item. It is not a
+ * vendor process and it must never be handed a vendor login: the token this
+ * reads is exactly the one the law keeps off every other child's environment.
+ */
+export function keychainToolEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  return deskHelperEnv(base);
+}
 
 export type ClaudePlanUsage = GrokPlanUsage;
 
@@ -27,6 +38,8 @@ export type ClaudePlanTokenInput = {
   writeKeychain?: (contents: string) => void;
   refreshOauth?: (refreshToken: string) => Promise<{ accessToken: string; refreshToken?: string; expiresAt?: number } | undefined>;
   readDesktop?: () => { accessToken?: string } | null;
+  /** Workhorse's own Claude token. Injectable so tests never read the vault. */
+  storedToken?: () => string | null;
 };
 
 function numberVal(value: unknown): number {
@@ -87,6 +100,7 @@ function defaultMacClaudeKeychain(): string | null {
       encoding: "utf8",
       timeout: 3000,
       stdio: ["ignore", "pipe", "ignore"],
+      env: keychainToolEnv(),
     });
   } catch {
     return null;
@@ -98,7 +112,7 @@ function persistMacClaudeKeychain(contents: string): void {
   execFileSync(
     "security",
     ["add-generic-password", "-U", "-s", "Claude Code-credentials", "-a", os.userInfo().username, "-w", contents],
-    { encoding: "utf8", timeout: 5000, stdio: ["ignore", "ignore", "ignore"] },
+    { encoding: "utf8", timeout: 5000, stdio: ["ignore", "ignore", "ignore"], env: keychainToolEnv() },
   );
 }
 
@@ -178,9 +192,13 @@ function parseKeychainDump(dump: string | null): unknown {
   }
 }
 
-/** Claude Code login on this machine: env, macOS keychain, ~/.claude, then Desktop (Windows). */
+/** Claude Code login on this machine: vault, env, macOS keychain, ~/.claude, then Desktop (Windows). */
 export async function resolveClaudePlanToken(input: ClaudePlanTokenInput = {}): Promise<string> {
   const env = input.env ?? process.env;
+  // Workhorse's own token first, straight from the vault. It used to arrive
+  // through the environment, which handed it to every other vendor's child.
+  const fromVault = (input.storedToken ?? storedClaudeToken)();
+  if (fromVault) return fromVault;
   const fromEnv = env.CLAUDE_CODE_OAUTH_TOKEN?.trim();
   if (fromEnv) return fromEnv;
   const platform = input.platform ?? process.platform;

@@ -6,14 +6,19 @@ import { fileURLToPath } from "node:url";
 import {
   WORKER_BOUND_ELSEWHERE_ERROR,
   WORKER_NAMES,
+  PARENT_CREW_CAP,
   findReusableWorker,
+  formatParentCrewLine,
   nextWorkerName,
+  parentCrewSnapshot,
   reserveWorkerName,
   resolveNamedWorker,
+  spawnContinuationHowToUse,
   workerTaskTitle,
   workerIsFree,
   workerEndedWell,
   workerNameFromTitle,
+  workerSliceFromTitle,
   type WorkerRecord,
 } from "../src/lib/subagents";
 
@@ -26,7 +31,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
  * holding the tree and the task. Same again for two Sol mediums.
  */
 
-const worker = (over: Partial<WorkerRecord> = {}): WorkerRecord => ({
+const worker = (over: Partial<WorkerRecord> & { title?: string } = {}): WorkerRecord & { title?: string } => ({
   id: "w1",
   workerName: "Wren",
   provider: "grok",
@@ -247,6 +252,82 @@ test("spawn refuses a named worker bound elsewhere instead of suffixing the name
   const store = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
   assert.match(store, /resolveNamedWorker/);
   assert.match(store, /namedResolution && !namedResolution\.ok/);
+});
+
+test("workerSliceFromTitle reads the label after the name", () => {
+  assert.equal(workerSliceFromTitle("Wanda · Skies on Cursor Grok", "Wanda"), "Skies on Cursor Grok");
+  assert.equal(workerSliceFromTitle("Wren 2 · Audit"), "Audit");
+  assert.equal(workerSliceFromTitle("Wanda", "Wanda"), "");
+});
+
+test("parentCrewSnapshot is this parent only, with slice and free/busy", () => {
+  const crew = parentCrewSnapshot(
+    [
+      worker({
+        id: "w-wanda",
+        workerName: "Wanda",
+        title: "Wanda · Skies on Cursor Grok",
+        status: "idle",
+      }),
+      worker({
+        id: "w-juno",
+        workerName: "Juno",
+        title: "Juno · terrace pan",
+        status: "running",
+      }),
+      worker({
+        id: "w-other",
+        workerName: "Wanda",
+        parentId: "other-boss",
+        title: "Wanda · some other chat",
+      }),
+      worker({
+        id: "w-archived",
+        workerName: "Casper",
+        title: "Casper · chips",
+        archivedAt: 9,
+      }),
+      worker({
+        id: "w-visible",
+        workerName: "Greta",
+        title: "Greta · fork",
+        hidden: false,
+      }),
+    ],
+    "boss",
+  );
+  assert.deepEqual(
+    crew.map((row) => ({ worker: row.worker, slice: row.slice, free: row.free })),
+    [
+      { worker: "Wanda", slice: "Skies on Cursor Grok", free: true },
+      { worker: "Juno", slice: "terrace pan", free: false },
+    ],
+  );
+  assert.equal(
+    formatParentCrewLine(crew),
+    "Crew on this chat: Wanda · Skies on Cursor Grok (idle); Juno · terrace pan (busy)",
+  );
+});
+
+test("parentCrewSnapshot keeps the latest workers when the crew is long", () => {
+  const many = Array.from({ length: PARENT_CREW_CAP + 3 }, (_, index) =>
+    worker({
+      id: `w${index}`,
+      workerName: `Wren ${index + 2}`,
+      title: `Wren ${index + 2} · slice ${index}`,
+    }),
+  );
+  const crew = parentCrewSnapshot(many, "boss");
+  assert.equal(crew.length, PARENT_CREW_CAP);
+  assert.equal(crew[0]?.worker, `Wren 5`);
+  assert.equal(crew.at(-1)?.worker, `Wren ${PARENT_CREW_CAP + 4}`);
+});
+
+test("spawn howToUse tells the orchestrator to pass worker for the same topic", () => {
+  assert.match(spawnContinuationHowToUse("Wanda", false), /Wanda is new to this work/);
+  assert.match(spawnContinuationHowToUse("Wanda", true), /Wanda picked this up/);
+  assert.match(spawnContinuationHowToUse("Wanda", false), /same topic pass worker="Wanda"/);
+  assert.match(spawnContinuationHowToUse("Wanda", false), /mint a new name for a new topic/);
 });
 
 test("a reused worker’s new run starts a new budget window", () => {

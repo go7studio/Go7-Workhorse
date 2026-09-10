@@ -24,6 +24,8 @@ export type DeskContext = {
   projectName?: string;
   sidebar: string;
   preview: string;
+  /** This parent's named workers only. Omitted on a worker chat. */
+  crew?: string;
 };
 
 export type PrefaceInput = {
@@ -114,9 +116,9 @@ export function buildPolicyContext(
           : "Ask — changing tools wait for the user.";
   const box =
     sandbox === "read-only"
-      ? "Read-only — writes, edits, creates, deletes, and shell commands are blocked."
+      ? "Read-only — writes, edits, creates, and deletes are blocked. A command that only reads still runs."
       : sandbox === "strict"
-        ? "Strict — tightest box. Writes and shell commands are blocked."
+        ? "Strict — tightest box. Writes are blocked. A command that only reads still runs."
         : sandbox === "workspace"
           ? "Workspace — writes stay in the project folder."
           : "Off — full machine access, subject to Permission.";
@@ -146,6 +148,7 @@ export function buildDeskContext(desk: DeskContext): string {
   if (desk.projectName?.trim()) lines.push(`- Project: ${desk.projectName.trim()}`);
   lines.push(`- Sidebar subtitle (under the title): ${desk.sidebar.trim() || "(none)"}`);
   lines.push(`- Preview (last message snippet): ${preview}`);
+  if (desk.crew?.trim()) lines.push(`- ${desk.crew.trim()}`);
   lines.push("If the user asks what the preview says, quote Preview. The sidebar subtitle is not the preview.");
   return lines.join("\n");
 }
@@ -189,7 +192,13 @@ export function composeVendorPrompt(
   text: string,
   preface: string | undefined,
   opened: "session/new" | "session/load",
-  limits?: { mode?: PermissionMode; sandbox?: SandboxProfile; role?: DeskRole; crewMode?: CrewMode | CrewMode[] },
+  limits?: {
+    mode?: PermissionMode;
+    sandbox?: SandboxProfile;
+    role?: DeskRole;
+    crewMode?: CrewMode | CrewMode[];
+    spawnNames?: string[];
+  },
   visibleText?: string,
 ): string {
   const roleHinted =
@@ -199,6 +208,7 @@ export function composeVendorPrompt(
           withSpawnHint(withPermissionHint(withPreviewHint(withDeskBotHint(text)), limits?.role), limits?.role),
           limits?.crewMode,
           limits?.role,
+          limits?.spawnNames,
         ),
         limits?.role,
       ),

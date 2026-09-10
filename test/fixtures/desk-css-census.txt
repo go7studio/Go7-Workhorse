@@ -1,0 +1,1547 @@
+# Every rule the desk stylesheet held on 2026-09-10, the last day app.css was one file.
+# One line per rule: a hash of its declarations, then the at-rule it sits under and its selector.
+#
+# A rule may be added without touching this file. Changing or removing one shows up
+# here, which is the point: after the split, a bad merge drops rules with no other trace.
+# Refresh with: DESK_CSS_CENSUS=write npx tsx test/the-split-drops-no-rule.test.ts
+4cfd2ac72a3a  *
+5c893638e2e3  ::-webkit-scrollbar
+6f4bcf4e21dd  ::-webkit-scrollbar-track
+a73f9b791ba5  ::-webkit-scrollbar-corner
+2456ce5d4172  ::-webkit-scrollbar-thumb
+c6d6990d5ee5  ::-webkit-scrollbar-thumb:hover
+ed5ff31942d2  html, body, #root
+4fefcd3733a9  html::-webkit-scrollbar, body::-webkit-scrollbar, #root::-webkit-scrollbar
+0eb1d8e77258  body
+ea811598928a  button, input, textarea
+1441c8ff6bc5  button
+21672cf9ce5f  .crash
+dc7f1d2f7e8c  .crash h1
+2f95885a2c71  .crash p
+df5d5d074695  .crash button
+4e09e4e8b038  .app
+e36c94155fb0  .titlebar
+fe8aa9612419  .titlebar span
+3ba412cfb3ab  .workspace
+7aa23dde11cf  .sidebar
+70ac4986d58d  .split-handle
+aa1aa2cc9498  .split-handle.invert
+469183153e7b  .split-handle::after
+aa1aa2cc9498  .split-handle.invert::after
+fefa76a13e0a  .split-handle:hover::after, .split-handle.dragging::after
+1fb301054e97  .split-handle:focus, .split-handle:focus-visible
+17b5584fa1f7  html.pane-dragging, html.pane-dragging *
+0dabfa3c13c0  .open-project
+193944e6a256  .global-find
+331939903b2a  .global-find input
+877cdb6bbf97  .global-results
+d34876b39dc1  .global-results > button
+2d787250282c  .global-results > button:hover
+a6eeeb7ef47b  .global-results strong
+ecdd7639eedb  .global-results span, .global-results em
+3a35c2c32cf0  .agent-thread-review
+7d08d6385cc1  .agent-thread-review strong
+2564c4b8b13c  .agent-thread-review span
+488204f0bdfb  .agent-thread-review em
+2d8a492b0205  .brand
+63409cb91129  .brand-mark-btn
+ddf5e82e6326  .brand-mark-btn:hover
+f6a17d9dced4  .brand-mark-btn:active
+1fb301054e97  .brand-mark-btn:focus, .brand-mark-btn:focus-visible
+ba1fb4613722  .brand-mark
+f3727f28f901  .brand-copy
+497eb6eb80fe  .brand-title
+8e4fbdf96987  .brand h1
+50c98c2a0ef5  .brand-ver
+350fd0c5875f  .brand p
+c550358c44c1  .nav-btn, .primary, .ghost, .tiny
+f55012c2b124  .nav-btn, .row
+2d787250282c  .nav-btn:hover, .row:hover
+a34b3fb3f3d9  .row.active
+1361348254c9  .nav-btn:active, .row:active, .primary:active, .ghost:active
+cd1101b601a2  .primary, .ghost
+7219c6ed28fd  .sidebar .ghost
+cf0754a1d7a7  .primary
+78785f287ecf  .primary:hover
+2d787250282c  .ghost
+9e0346b4fc7f  .tiny
+9abd39d67819  .tiny:hover
+fc7b8bd8cf59  .tiny.danger
+f7494f7de419  .section-label
+1b3ac0e1e435  .sidebar .section-label
+97db9024a43f  .scroll
+15328f8ac49e  .sidebar-dock
+d529e1f5d1cf  .sidebar-settings
+85c4038e45f3  .sidebar-update
+2d787250282c  .sidebar-update:hover
+f6a17d9dced4  .sidebar-update:active
+8de77ed0af45  .sidebar-update:disabled
+d235c6d451f2  .sidebar-update-copy
+23b7ce3acf5d  .sidebar-update:hover .sidebar-update-copy, .sidebar-update:focus-visible .sidebar-update-copy
+bfb85862280e  .sidebar-update-copy .row-title
+dab946c77fd5  .sidebar-update-icon
+3e8636da5aba  .sidebar-update-icon svg
+727eef61ed17  .sidebar-update-icon path
+a130236a131f  .sidebar-update.busy .sidebar-update-icon
+73750255c6d0  .sidebar-update.error, .sidebar-update.error .row-title
+e7a3e2116cd4  .sidebar-update.error .sidebar-update-icon
+6077535441ad  @keyframes sidebar-update-pulse
+bd6d0af196b9  .settings-pulse
+28c812cdf26d  @keyframes settings-pulse
+4257425ac30e  .row-title
+481050e53590  .chat-row .row-talked
+09d4a0a2777b  .row-meta
+4ea6d59d92a8  .row-caller
+2564c4b8b13c  .row-state
+73750255c6d0  .row-state.bad
+f0a6191ed969  .main
+9bafd03f7114  [data-theme="workhorse"] .main
+808425a8756f  .session, .welcome, .picker
+e63f99580b67  .session.has-thread, .session.has-file
+ffddd1544776  .session-col
+3560a4894a0a  .session-notices
+5f5a110d41d1  .agent-thread
+adada952f98d  .agent-thread-head
+8e5c7cd941ac  .agent-thread-tools
+72d09d2ac239  .agent-thread-who
+2fb67ed1eee8  .agent-thread-name
+7f97ed5b4361  .agent-thread-who strong
+9f4480255d7a  .agent-thread-who em
+d8892c6311cd  .agent-thread-tabs
+13e797319e65  .agent-thread-tabs button
+872c7ec78524  .agent-thread-tabs button.on
+abc7772e26d5  .agent-thread-scroll
+7270980ce91d  .agent-thread-wait
+c2337c67e8f9  .agent-thread-warn
+b0840e7ad39f  .agent-thread-warn strong
+0075067d1b10  .agent-thread-warn span
+dd6ac6888d68  .agent-bubble
+f08f579b6aee  .agent-bubble.from
+3f7001a7959f  .agent-bubble.to
+3af92eb594e0  .agent-bubble-who
+37dd0c2a6468  .agent-bubble.from .agent-bubble-who
+84df3444135a  .agent-bubble .say, .agent-bubble .md
+a97576ba3e55  .agent-bubble.from .say, .agent-bubble.from .md
+e28761565429  .agent-bubble.to .say, .agent-bubble.to .md
+68082fc30a9c  .agent-thread.compact-thread .agent-thread-head
+789ec5b9cec3  .agent-thread.compact-thread .agent-thread-scroll
+50faa1174072  .agent-thread.compact-thread .turn
+6e3a4714ba19  .agent-thread.compact-thread .turn-who
+fe7647f98363  .agent-thread.compact-thread .say, .agent-thread.compact-thread .md
+6e3a4714ba19  .agent-thread.compact-thread .work-pop > summary
+6e3a4714ba19  .agent-thread.compact-thread .tool-line
+9cd190374248  .agent-thread.compact-thread .turn.user .say
+90804d2377b7  .agent-thread.compact-thread.overlay
+05358c2e5872  .context-meter-wrap.compact .context-ring
+d9ab26dc2deb  .context-meter-wrap.compact .context-copy
+6e3a4714ba19  .context-meter-wrap.compact .context-copy strong
+6e3a4714ba19  .context-meter-wrap.compact .context-copy em
+3ddb32290d81  .peer-open
+7822ede8434c  .peer-open:hover
+83fecae83cb0  .welcome, .picker
+83939dfbb95a  .welcome-mark
+c0c873e2c666  .profile-horse-wrap
+2ce4323ec038  .profile-horse
+d4c6b8c186f5  .profile-horse-blob
+1f8a86fc0673  @keyframes horse-drift
+9c341bdd7351  .profile-horse-tip
+d2bce80bf8f2  .profile-horse-wrap:hover .profile-horse-tip, .profile-horse-wrap:focus-within .profile-horse-tip
+9c3c129cf321  .profile-horse-tip strong
+1dc0aa6e117f  .profile-horse-tip > span
+e5f480dabade  .profile-horse-tip ul
+b627e348f4d7  .profile-horse-tip li
+a369aa7d8b48  .profile-horse-tip li span
+5b428644116f  .profile-horse-tip .dot
+055c9d308d91  .profile-horse-tip em
+767ec2be857c  .profile-horse-tip small
+5638308b0bd0  .welcome-ver
+84b8b6eb6b35  .eyebrow
+acf0e9da81f4  .welcome h2, .picker h2
+088e9b69d499  .welcome p, .picker p
+a9c77021d675  .actions
+16016e4e9a98  .welcome-steps
+70c381622b8d  .welcome-harnesses
+624651b7cc04  .welcome-harness-head, .welcome-harnesses li
+720f38ffb90c  .welcome-harnesses ul
+ecce344ddd06  .welcome-harnesses li
+5346b891d862  .welcome-harnesses li em
+984e056ff853  .welcome-steps button
+cc5981bd10d7  .provider-grid
+3d19041e43f2  .card
+4f3ac3903780  .card:hover
+7957690b0c3f  .card .rail
+d640f0dd9638  .card .rail.grok
+b972529ced4d  .card .rail.claude
+48e1b722ae4b  .card .rail.codex
+33d04944face  .card .rail.custom
+d4e9f5180075  .card-copy
+378e76576ae0  .card-title
+9bd5483262a3  .card strong
+7313404b49a1  .card-copy > span
+a5ff3018ffae  .chip-preview
+dfcb1960e57c  .session-header-left
+34c2be68a98a  .session-status
+7d6897b595b6  .live-pill
+6c3c87c924b4  .live-pill i
+456f0e0d5e23  .live-pill.wait
+6a3b68113307  .thinking
+67525f1e34cd  .dots
+97fece833f70  .dots i
+0de83ba8f3ee  .dots i:nth-child(2)
+b747d298b276  .dots i:nth-child(3)
+4ea6d59d92a8  .turn.live .turn-meta
+e16c8184ecb3  .dot.pulse
+9abd39d67819  .send.stop
+e7a717d57938  .send:disabled
+bfc05dd5f76f  @keyframes pulse
+161840af7d6b  @keyframes bounce
+d76c99a3b41e  .session-header
+72045e730e4d  .session-header.slim
+0c09c5ad1d32  .session-header.slim .context-meter-wrap, .session-header.slim .context-meter
+378e76576ae0  .session-who
+9bdcf483780e  .session-who strong
+fe153de89b2e  .mode-seg
+470a5c4046e8  .mode-pill
+59e9ea048d4f  .mode-pill.on
+031f4ecd02d4  .session-edits-slot
+42dc8d550d64  .session-edits-slot.open
+a73317ef977e  .session-edits-slot.open.away
+426c09a8d022  .session-edits-slot.open.away, .session-edits-slot.open.away .edited-block
+d7facf2b4170  .session-edits
+9630b1072160  .session-edits .edited-block
+23b7ce3acf5d  .session-edits-slot.open .edited-block
+cf662af3fcc5  .session-edits .edited-block.compact
+9f923026f709  .session-edits .edited-block.compact:not(.open):not(.closing)
+e498c5e9e124  .session-edits .edited-block.compact:not(.open):not(.closing) .edited-files-slot, .session-edits .edited-block.compact:not(.open):not(.closing) .edited-files-slot > .file-list
+4dfe4bb73998  .session-edits .edited-bar
+2372bcc9e62b  .session-edits .edited-block.compact.open, .session-edits .edited-block.compact.closing
+84e25bcfd5e7  .session-edits .edited-toggle
+65f53d9d7ee5  .session-edits .edited-block.compact .edited-toggle
+82b5ab339517  .session-edits .edited-block.compact:not(.open):not(.closing) .edited-toggle
+426c09a8d022  @media (prefers-reduced-motion: reduce) { .session-edits-slot, .session-edits-slot.open, .session-edits .edited-block, .session-edits-slot.open .edited-block
+f8bb03126948  .session-edits .file-row
+01123aa55206  .session-edits .file-row strong
+6122a13e6754  .session-edits .edited-toggle .row-meta
+6e22c58a7a6a  @container changes (max-width: 300px) { .file-when, .file-row .row-meta
+88fb08178ce7  @container changes (max-width: 300px) { .file-meta
+3c7e2f4c2416  @container changes (max-width: 300px) { .file-row
+6e22c58a7a6a  @container changes (max-width: 220px) { .edited-toggle .row-meta .file-diff-stat
+62e4cac77b86  @container session (max-width: 360px) { .session-edits .edited-block.compact
+10501347fd5e  @container session (max-width: 360px) { .session-edits .edited-block.compact.open, .session-edits .edited-block.compact.closing
+04668bc8f2de  .edited-bar
+396e68aca83e  .edited-bar .edited-toggle
+04668bc8f2de  .file-item
+396e68aca83e  .file-item .file-row
+811c6564d7a4  .file-item .file-close-x
+60fc1cdb6b05  .file-kind
+1bf1148ff702  .edited-toggle
+2d787250282c  .edited-toggle:hover
+d1d9861c2d38  .edited-block.compact .edited-files-slot
+6f167dae8b9b  .edited-block.compact.open .edited-files-slot
+bbe464ff900b  .edited-block.compact:not(.open) .edited-files-slot
+8ef365476ddb  .edited-block.compact .edited-files-slot > .file-list
+3da20f5eac51  .edited-block.compact.open .edited-files-slot > .file-list
+47ff02e23755  .edited-block.compact .file-list
+b9131d1cceef  .edited-block.compact.open .file-list
+426c09a8d022  @media (prefers-reduced-motion: reduce) { .edited-block.compact .edited-files-slot, .edited-block.compact.open .edited-files-slot
+b53f88406d7f  .transcript
+b899fd97e4ec  .transcript.has-changes
+d84741c5bc68  .transcript.follow-latest
+076b3a4fe054  .transcript-stack
+530e607766ca  .turn
+aac2a48830c9  .turn.live
+6ef5d525eb08  .turn.cluster
+8a64324d756d  .turn.user
+3bb31f468b40  .turn-meta
+02b73dc4c547  .turn-who
+75fac0955dc5  .turn-who:has(.dot.grok)
+4a9e8bd8f650  .turn-who:has(.dot.claude)
+2182be31b312  .turn-who:has(.dot.codex)
+64ffa98174bd  .turn-who:has(.dot.cursor)
+8dd5ef61ccfd  .turn-who:has(.dot.custom)
+c44e5d3e866b  .turn-who .dot
+3611bde2da7a  .turn-stamp
+0c09c5ad1d32  .turn-who .turn-stamp
+af9d89b200e4  .work-pop > summary .turn-stamp
+229713c33b51  .work-stamp, .work-pop + .turn-stamp, .turn.assistant > .turn-stamp
+d529e1f5d1cf  .say
+4fa00029d5b1  .turn.user
+fcdcdedaf43d  .turn.user .say-stack
+e1c0c9018e75  .turn.user .say
+7db25ceaf429  .turn.user .turn-stamp
+793ac342d5b0  .turn.user.peer .say
+701506a7c252  .turn.user .command-line
+e5f513cae5c8  .turn.user .chat-command
+514b8cd0c576  .turn.user.peer .peer-from
+4cf9f7954dde  .turn.user .prompt-edit
+93b2b68269cf  .turn.user .prompt-edit textarea
+ca0a4a6eaa9b  .turn.user .prompt-edit textarea:focus
+db0a7dcdeaa7  .prompt-edit-actions
+b618af0123d2  .prompt-edit-actions button
+cf0754a1d7a7  .prompt-edit-actions .resend
+af716a9bad5f  .turn-actions
+b23959bf2895  .turn.user .turn-actions
+e0f6e463b00c  .turn.user .turn-actions, .turn.user:hover .turn-actions, .turn.user:focus-within .turn-actions, .turn.reply:hover .turn-actions, .turn.reply:focus-within .turn-actions, .turn.reply .say.final .turn-actions
+5819f442a7de  .turn-actions button
+d0b96f036808  .turn-actions button.icon
+aa75644121bb  .turn-actions button.icon svg
+57b09bc52bb6  .turn-actions button:hover
+f0a245b4cd7e  .turn.system
+afa846fd9a50  .turn.system .md
+421a14f01c07  .turn.crew-done
+6f21c55b45c9  .turn.crew-done::before, .turn.crew-done::after
+a9f56b14def1  .crew-done-card
+45e6e33c1c1d  .crew-done-card strong
+6f042b566bbc  .crew-done-card span
+73750255c6d0  .crew-done.failed .crew-done-card strong
+3e967279bfee  .turn.reply .say.final
+a9fd68747ac5  .turn.reply .say.streaming
+b3ae9340bed0  .thought-live
+44fe461096b3  .thought-live-label
+61245e079f11  .work-pop
+b8c8f1c6b5ae  .work-pop > summary
+a9fd68747ac5  .work-pop[data-state="done"] > summary
+73750255c6d0  .work-pop[data-state="failed"] > summary
+6e22c58a7a6a  .work-pop > summary::-webkit-details-marker
+c341ff4261e1  .work-pop > summary::before
+71d924e2d065  .work-pop[open] > summary::before
+10e743865424  .work-draft
+dd54efae43e6  .work-draft-label
+bd4c95de08aa  .work-draft-text
+6c122ac5e82a  .work-body
+5d5dd8e3a10a  .work-body .thought
+c9ba435a4b08  .work-step[data-kind="thought"] .thought-live
+87c688c10487  .work-fold
+ea05e29c931e  .work-fold-body
+a5f08cada1a2  .work-fold[open] > .work-fold-body
+15fa423599f1  .work-fold > summary
+c62bf4051620  .work-fold > summary.thought-live-label
+1850dddb6fb1  .work-fold > summary::before
+6e22c58a7a6a  .work-fold.subagent > summary::before
+a9fd68747ac5  .tool-line.live .tool-name
+97a5962035e6  .tool-line.peer .tool-name, .tool-line.peer .tool-status
+18d6de736171  .peer-work
+7359c513853c  .peer-work-label, .peer-live
+913937d9fb54  .peer-live
+61c654152918  .chat-row.peer-link
+97a5962035e6  .chat-row.peer-link .row-meta.peer
+61c654152918  .project-folder.live .project-head
+ff4088b37ee0  .project-head .row > span
+97a5962035e6  .project-head .row-meta.peer
+378e76576ae0  .work-fold.subagent > summary
+87c688c10487  .tool-line.subagent-preview, .subagent-preview.work-step
+378e76576ae0  .subagent-head
+04cc5899b07b  .subagent-thread-slot
+2e63aa84884e  .subagent-preview.open .subagent-thread-slot
+8ef365476ddb  .subagent-thread-slot > .subagent-thread
+426c09a8d022  @media (prefers-reduced-motion: reduce) { .subagent-thread-slot
+7a5b0142ca3d  .subagent-open
+73b77554b7fa  .subagent-open .tool-name
+275b3a23835a  .subagent-model
+905e33a9123e  .subagent-scope
+1f094129eaab  .subagent-task
+0c09c5ad1d32  .subagent-open .tool-status
+be6a6b68bbdd  .subagent-thread
+29ffa39e6b43  .subagent-preview.open .subagent-thread
+968de6ea48ef  .subagent-turn.turn
+029f3da70e91  .subagent-turn.turn.user
+b1b8dcfd2ed0  .subagent-turn.turn.user .say
+217b10226bd8  .subagent-turn.turn.assistant .say
+34fb0b23b7f8  .tool-line.done
+15b04b5c6994  .tool-line.failed
+73750255c6d0  .tool-line.failed .tool-name, .tool-line.failed .tool-status
+5ea5daf0d9f1  .turn.tool .say
+cc6844e70730  .turn.compact .say
+991a2bd21499  .tool-line
+216dc0dd3eb7  .tool-name
+02f97e49c4f8  .tool-status
+73750255c6d0  .tool-status.failed
+ae0f8ac3a236  .tool-loc
+e58d4b054283  .thought
+a3604cc9115b  .thought .md
+a9fd68747ac5  .turn.live .thought
+0964e8afbfb7  .md
+2df98f92dad7  .md p, .md pre, .md ul, .md ol
+77ad7242660e  .md p
+3d9df89ef84d  .md strong
+a8f4a90dad2f  .md em
+7626ab05638c  .md a
+dbe752fa7f4f  .md a:hover
+90fb7accf826  .md code, .md-file
+b6c1690bab68  .md-file
+dbe752fa7f4f  .md-file:hover
+4fa00029d5b1  .md-pre
+2b751ab212a9  .md-pre-copy
+a9fd68747ac5  .md-pre-copy:hover
+fbe7daf3e59f  .md pre
+d386498d9bbe  .md ul, .md ol
+4fe0a6bdbfab  .md-h
+81185965a467  .md-h3
+9bd5483262a3  .md-h4
+f56812a6794a  .md-table-wrap
+d29cdb646f37  .md-table
+b91eaa9b0b3f  .md-table th, .md-table td
+ba5931f11739  .md-table th
+695fe733b349  .md-table tr:last-child td
+c98a9f1869e2  .md li + li
+31e864f74b62  .facts
+3fd70c2278d9  .fact
+58443532dee5  .fact dt
+2d5842721bcc  .fact dd
+d10550e0061d  .turn.tool .turn-meta, .turn.compact .turn-meta
+fe7647f98363  .turn.tool .md, .turn.compact .md
+2ff81217b23e  .composer-wrap
+f3cb806a424f  .composer-wrap.drop-over .composer, .session.drop-over .composer
+2fd218fb5504  .session.drop-over::after
+0f875fd26afa  .composer-thumbs
+9dd81f907c2e  .composer-thumb
+471635294e6f  .composer-thumb img
+eb8eab548617  .composer-thumb.file
+53d11a2d05f9  .composer-file, .say-file
+b925fa921e0e  .composer-file em, .say-file em
+89cc2f4018ed  .composer-thumb.folder
+79fa73944294  .say-file
+9477b3cea92b  .composer-thumb button
+aa75644121bb  .composer-thumb button svg
+736a4b760642  .say-images
+a7954a22905c  .say-images img
+d253a07044dd  .md-figure
+fc273b8f2d3b  .md-image, .say-image
+4e5f689f00a8  .say-images .say-image
+acc75e6b44dd  .say-image-pending, .md-image-pending
+4139d86b3c8e  .say-images .say-image-pending
+688fd974c2df  .md-image-pending
+5fadd926877c  .image-zoom-open
+3fbae026d8e9  .image-zoom-open > img
+c8734bdb2c69  .image-zoom-open:hover, .image-zoom-open:focus, .image-zoom-open:focus-visible
+44a178f5fc99  .image-zoom
+bb2b4eb3f4b5  .image-zoom img
+962c6e94d709  .image-zoom img.zoomed
+ec6d84ab858e  .image-zoom-close
+bd56815882fc  .md-figure figcaption, .md-image-fallback
+bac9f2690c7f  .session-header.slim .context-meter
+447150e75b52  .prompt-queue
+40809ad4e539  .prompt-queue-item
+49416461b759  .prompt-queue-when
+8335e7107ee9  .prompt-queue-text
+6c31f64ac6c5  .prompt-queue-steer
+6a36a08b1dac  .prompt-queue-item > button:last-child
+3ec64cab794e  .send-steer
+0d9cec9cbba9  .composer-dock
+036678978c09  .composer
+bb6afdb574bd  .composer textarea
+ad1457a05bb2  .composer-tools
+476623ea15e2  .composer-tools-spacer
+6ba5c29da8a9  .composer textarea:placeholder-shown
+cdf82b1a082e  .format-bar
+79720eb5f465  .format-bar button
+9abd39d67819  .format-bar button:hover
+7099b1af10ec  .palette
+4f7a12c14c8e  .palette button
+2d787250282c  .palette button:hover, .palette button.active
+ebc45a45a1c5  .palette code
+a2a9e431f7de  .palette em
+bd89dcb7fc6f  .palette-overlay
+61371f04e096  .permission-overlay.elevate-overlay
+1c625cf4ff96  .permission-card.elevate-card
+317c43341890  .permission-card
+2189cf45b074  .permission-card .session-who
+875eae7b21fc  .permission-card .session-who .eyebrow
+ff978a005f35  .permission-card strong
+64739b730aa1  .permission-card > span, .permission-detail
+86fbd138ca57  .permission-card .actions
+beb986dc00f9  .send
+73750255c6d0  .deny
+3342d09fb7fa  .dot
+b0f973dee158  .dot.grok
+99d085499cec  .dot.claude
+76bb65798538  .dot.codex
+77f0e3f2555c  .dot.cursor
+d31f44aa0264  .dot.custom
+79c32fd15781  .dot.auto
+0eeaf5da393c  .path
+d634082842dd  .project-home
+4555334f9590  .project-home h2, .project-home > p, .project-home .eyebrow
+9d2212a60553  .project-home h2
+808425a8756f  .project-home-shell
+e63f99580b67  .project-home-shell.has-file
+f7370d74a0b7  .project-home-shell > .project-home
+d2c5c8aa4cbb  .project-home-shell.has-file > .project-home
+f7fce829981f  .project-overview
+40e47d081098  .project-overview::-webkit-scrollbar-track
+533cf3531e23  .project-overview .edited-block.compact, .project-overview .edited-block.compact.fill
+37ab52c9d67a  .project-overview .edited-block.compact.fill.open, .project-overview .edited-block.compact.fill.closing
+b78024906732  .project-overview .edited-block.compact .file-list, .project-overview .edited-block.compact.open .edited-files-slot > .file-list
+baf2fda59eac  .project-hero
+de65b7d914fa  .project-hero .eyebrow
+c59b463569bc  .project-hero h2
+5ba904045e84  .project-hero .lede
+6e7202d3fced  .edited-block .link-head
+c79932349553  .file-list
+1ac229247cec  .file-row
+f3727f28f901  .file-row > span:first-child
+2d787250282c  .file-row:hover
+a071db79e937  .file-diff-stat
+abaf087ce041  .diff-add
+73750255c6d0  .diff-del
+1acb9ad95718  .file-review
+240794316912  .file-review.overlay
+89a911999e56  .file-viewer .file-review-body
+211642213ead  .file-viewer .file-review-tabs
+b307a5464f51  .file-viewer .file-review-meta
+6122a13e6754  .file-viewer .file-review-meta strong, .file-viewer .file-review-meta .path
+05525316b0a2  .session-file
+b605b1f52028  .session-file.out
+e14025700078  @keyframes file-pane-in
+f69cea891f99  @keyframes file-pane-out
+d50ca3ac0cb0  @media (prefers-reduced-motion: reduce) { .session-file, .session-file.out
+a50b43d10f13  .session-file .file-review
+cc58ec8ecdcd  .session-file .file-review-tabs
+fe7647f98363  .session-file .file-review-meta strong
+1d7d890ccc79  .session-file .file-review-code
+bddb189a864b  .file-review-tabs
+d6e66a85c867  .file-review-tab-row
+283de35728a4  .file-review-tab
+61cac7c98088  .file-review-tab.on
+9c71accd02cb  .file-review-tab-x
+e0f6e463b00c  .file-review-tab-x:hover
+3633e433a162  .file-review-modes
+edc48cbd8f6c  .file-review-close
+31c40707c735  .file-close-x
+aa05df96bb35  .file-close-x::before, .file-close-x::after
+2b3b0c51c615  .file-close-x::before
+196905898f7e  .file-close-x::after
+9abd39d67819  .file-close-x:hover
+93941b498355  .file-review-body
+e16f8d23e856  .file-review-main
+b373ad92f020  .file-review-meta
+ea1ff12e30d9  .file-review-meta strong
+96e25a8add30  .file-review-meta .path
+69271fc98e5f  .file-review-meta .file-diff-stat
+765fceb152d9  .file-review-code
+a48370c266df  .diff-line
+75e7b8d755d9  .diff-line i, .diff-line em
+b088c44dc881  .diff-line i
+0307a47c2acb  .diff-line em
+b86d8bca888b  .diff-line.add
+abaf087ce041  .diff-line.add em
+2592627f9b1d  .diff-line.del
+73750255c6d0  .diff-line.del em
+caa53dd11f40  .file-review-rail
+9a95fb29d2ef  .file-review-filter
+011da2638db4  .file-review-list
+dcfbd7fc1843  .file-review-list button
+2d787250282c  .file-review-list button:hover, .file-review-list button.on
+679fa90ccef3  .file-review-list strong
+abc76c3a394f  @media (max-width: 720px) { .file-review-body
+6f1abf56be99  @media (max-width: 720px) { .file-review-rail
+8da89a75a781  .session-header-tools
+d74ef39736cd  .terminal-pane
+72f0dd861235  .terminal-pane > header
+2901653827c9  .terminal-pane > header > div:first-child
+a6eeeb7ef47b  .terminal-pane > header strong
+80213036de66  .terminal-pane > header span, .terminal-pane > p
+01123aa55206  .terminal-pane > header span
+25d6dccde774  .terminal-pane > p
+1e5b0da66c97  .terminal-pane pre
+d70791b907a9  .terminal-pane > form
+96736c281d98  .terminal-pane input
+b45e3454b77b  .setup-security
+48e4816b71e1  .setup-security > div
+c1ab30702374  .setup-security strong
+2b75cfe7f0bd  .session-schedules
+6122a13e6754  .session-schedules > span:not(.section-label)
+33acba460e3a  .vendor-tasks
+226dda2d0881  .vendor-tasks-group
+f68a6d8c4d1e  .vendor-tasks-label
+3e0b69cad703  .vendor-task
+a9fd68747ac5  .vendor-task.live
+ee7b2a8457b0  .vendor-task-kind
+4ea6d59d92a8  .vendor-task.live .vendor-task-kind
+6122a13e6754  .vendor-task-name
+9873427d19b4  .vendor-task-meta
+2564c4b8b13c  .vendor-task.killed .vendor-task-name, .vendor-task.failed .vendor-task-name
+30b4db9fc8cc  .codex-native-status
+2225523fae44  .codex-capability-grid
+4355a2952084  .codex-capability-grid > span
+466880431a43  .codex-capability-grid strong
+da559dacf0b3  .codex-thread-list
+a3fcec121c67  .codex-thread-list li
+01123aa55206  .codex-thread-list strong, .codex-thread-list span
+a6eeeb7ef47b  .codex-thread-list strong
+80213036de66  .codex-thread-list span
+ca24c525558f  .file-row strong
+fe3a2c54ad53  .file-meta
+b21c942135de  .file-when
+e334f7896960  .file-meta .dot
+d1710c9ba819  .link-block
+04a92689f983  .link-head
+1e7cf80c5f54  .chip-list
+624651b7cc04  .chip
+ca24c525558f  .chip strong
+a0fdae5f0116  .sheet-backdrop
+3649330087ef  .sheet
+40f0a45a34fb  .sheet h3
+f7ec6d640158  .sheet p
+6f654682c50f  .sheet input
+72dd1610aa7f  .sheet input:focus
+76cf3e92e29b  .sheet.project-sheet
+4b4f1f58ff0c  .sheet-field
+26e3078f470e  .sheet-label
+f53303baa3da  .sheet-name
+72dd1610aa7f  .sheet-name:focus-within
+9482c1e25630  .sheet-name input
+c43b5bdb7385  .sheet-folder-icon, .source-drop-icon
+cda3cd4bb185  .source-drop-icon
+5179f6226cca  .source-folder-list
+ea5dbb69b386  .source-folder-list li
+a0a216931639  .source-folder-list span
+566952eb2f83  .source-folder-list strong
+b8b04d2c77ff  .source-folder-list em
+69664cc5ce2c  .source-drop
+250c52ddf6a9  .source-drop:hover, .source-drop.over
+02900325a479  .source-drop strong
+9acb9eda35b6  .source-drop span
+d5fbe82993a1  .sheet .actions
+36f733f0b739  .active-kind
+95ceb63accdf  .tiny:disabled, .primary:disabled
+c4e9a86645de  .chat-row
+4027c5da2374  .chat-row.nested-worker
+bf016b0e9d14  .crew-slot
+6f167dae8b9b  .crew-slot.open
+bbe464ff900b  .crew-slot:not(.open)
+d3dc6a5f2257  .crew-slot-inner
+edd26fd3b99d  .crew-slot-inner > .chat-row
+23b7ce3acf5d  .crew-slot.open .crew-slot-inner > .chat-row
+457fc5d825f9  .crew-slot.open .crew-slot-inner > .chat-row:nth-child(1)
+8e3b9e6c5c08  .crew-slot.open .crew-slot-inner > .chat-row:nth-child(2)
+247932c98aa3  .crew-slot.open .crew-slot-inner > .chat-row:nth-child(3)
+c08664c540dd  .crew-slot.open .crew-slot-inner > .chat-row:nth-child(4)
+0e6cdf651d34  .crew-slot.open .crew-slot-inner > .chat-row:nth-child(5)
+701eb16296ca  .crew-slot.open .crew-slot-inner > .chat-row:nth-child(6)
+123e63d88988  @media (prefers-reduced-motion: reduce) { .crew-slot, .crew-slot.open, .crew-slot-inner > .chat-row, .crew-slot.open .crew-slot-inner > .chat-row, .crew-twist, .crew-twist.open
+ad2badcc91e2  .crew-twist
+bdfa11ed4624  .crew-twist.open
+4fa00029d5b1  .crew-menu
+31fd63ebd4de  .crew-pop
+cd035d7a5b55  .crew-pop button
+2d787250282c  .crew-pop button:hover, .crew-pop button.on
+cf07c5cea9fd  .crew-pop em
+2d787250282c  .chat-row:hover
+a34b3fb3f3d9  .chat-row.active, .chat-row.active:hover
+48cc9d63368a  .chat-row .chat-open
+ff4088b37ee0  .chat-row .chat-open > span:nth-child(2)
+5fe9130b8b3a  .chat-row .chat-open:hover, .chat-row .chat-open:active, .chat-row .chat-open:focus, .chat-row .chat-open:focus-visible
+1684c7971324  .chat-more
+e0f6e463b00c  .chat-row:hover .chat-more, .chat-row:focus-within .chat-more, .chat-row.menu-open .chat-more
+d2f8497af057  .chat-menu
+f481e8d4c7c2  .chat-menu.floating
+65e8fd6ae481  .chat-menu button
+2d787250282c  .chat-menu button:hover
+73750255c6d0  .chat-menu .danger
+ab7a8c03f6d1  .chat-move
+a46c84a38e66  .chat-move-toggle
+d529e1f5d1cf  .chat-move-toggle span
+7d8ce0532a39  .chat-move .twist
+82c2d152da53  .chat-move.open .twist::before
+4a577499a4d0  .chat-move-panel
+5a5464ede4b0  .chat-move-panel.left
+fce3f6d0e98b  .chat-move-panel em
+01cc63d79297  @keyframes chat-move-in
+399d4a4db51b  @keyframes chat-move-in-left
+d50ca3ac0cb0  @media (prefers-reduced-motion: reduce) { .chat-move-panel, .chat-move-panel.left
+275211ff082c  .rename-form
+b29cc0933135  .rename-form input
+322158367fe7  .row.drop-over, .project-folder.drop-over .project-head
+7d6260d28524  .project-folder.drop-before
+5b0cc632139f  .project-folder.drop-after
+16e57b14ef92  .project-folder.dragging-project
+6f84c523b577  .project-folder.dragging-project .project-head .row
+2a896412858c  .project-folder
+e1af2abdccbb  .project-head
+2d787250282c  .project-head:hover, .project-head:focus-within
+a34b3fb3f3d9  .project-head:has(.row.active), .project-head:has(.row.active):hover, .project-folder.selected .project-head, .project-folder.selected .project-head:hover
+a17185b4c0ae  .project-head .row
+5fe9130b8b3a  .project-head .row, .project-head .row:hover, .project-head .row.active, .project-head .row:active, .project-head .row:focus, .project-head .row:focus-visible
+409389d690e3  .project-new, .project-info
+e0f6e463b00c  .project-head:hover .project-new, .project-head:hover .project-info, .project-head:focus-within .project-new, .project-head:focus-within .project-info, .project-head:has(.row.active) .project-new, .project-head:has(.row.active) .project-info, .project-folder.selected .project-new, .project-folder.selected .project-info
+81185965a467  .project-new
+9e3635ee1f4d  .project-info
+a9fd68747ac5  .project-new:hover, .project-info:hover, .project-info.active
+20ae16361338  .loose-chats
+85e921b2c7d0  .place-project
+81b61243d2e1  .place-project button
+a2d4f9b4fc7e  .place-menu
+b401263588fa  .place-menu button
+2d787250282c  .place-menu button:hover
+95f2c9564176  .twist
+23e9432112f9  .twist:hover, .twist:focus, .twist:focus-visible, .twist:active
+ed30efd4a04d  .twist::before
+82c2d152da53  .project-folder.open .twist::before
+fee009bbbe2e  .project-head .twist::before
+75b77d9a8017  .project-head .twist-folder
+fee009bbbe2e  .project-head .twist-folder-open
+fee009bbbe2e  .project-folder.open .project-head .twist-folder-closed
+e0f6e463b00c  .project-folder.open .project-head .twist-folder-open
+fee009bbbe2e  .project-head:hover .twist-folder, .project-head .twist:focus-visible .twist-folder, .project-folder.open .project-head:hover .twist-folder
+e0f6e463b00c  .project-head:hover .twist::before, .project-head .twist:focus-visible::before
+455f99cc3a7e  .project-chats-slot
+2e63aa84884e  .project-folder.open .project-chats-slot, .project-folder.has-pin .project-chats-slot
+bbe464ff900b  .project-folder:not(.open):not(.has-pin) .project-chats-slot
+b6fe999e39f0  .project-chats-slot > .project-chats
+91ab9cc7d0bd  .project-chats
+3ab39da593cd  .project-folder .project-chat-block
+b6fe999e39f0  .project-folder .project-chat-inner
+d7222f1f8dcf  .project-folder.open .project-chat-block, .project-folder.has-pin .project-chat-block.pinned-open
+bbe464ff900b  .project-folder:not(.open) .project-chat-block:not(.pinned-open)
+94b91148a865  .project-chats > .nest-empty, .project-chats > .archive-toggle
+4e71d14e59ae  .project-folder.open .project-chats > .nest-empty, .project-folder.open .project-chats > .archive-toggle
+9c471c2230bf  .project-folder.open .project-chats > :nth-child(1)
+03ed0499faa9  .project-folder.open .project-chats > :nth-child(2)
+25f98c01f8dc  .project-folder.open .project-chats > :nth-child(3)
+187ba6a743f9  .project-folder.open .project-chats > :nth-child(4)
+0e6cdf651d34  .project-folder.open .project-chats > :nth-child(5)
+cd1268fcf66d  .project-folder.open .project-chats > :nth-child(6)
+9c471c2230bf  .project-folder.open .project-chats > .project-chat-block.pinned-open, .project-folder.has-pin .project-chats > .project-chat-block.pinned-open
+426c09a8d022  @media (prefers-reduced-motion: reduce) { .project-chats-slot, .project-folder.open .project-chats-slot, .project-folder.has-pin .project-chats-slot, .project-folder .project-chat-block, .project-folder.open .project-chat-block, .project-folder.has-pin .project-chat-block.pinned-open, .project-chats > .nest-empty, .project-chats > .archive-toggle, .project-folder.open .project-chats > .nest-empty, .project-folder.open .project-chats > .archive-toggle
+0da306239351  .project-chats .chat-row, .project-chats .row
+d8f8d54abca0  .nest-empty
+234f9b1947ec  .nest-new
+f6cd3aeb4a2b  .archive-toggle
+0ec615f1847d  .usage-head
+570ceb0d86ed  .usage-head h2
+08bc4b8d99e8  .usage-facts
+19360afa0bd3  .usage-traffic-note
+b2aa600887c3  .usage-fact
+5f61ff02c2d0  .usage-fact span
+b4a713f19d1a  .usage-fact strong
+07124ce05ace  .usage-brains
+9e4f2b48adc1  .usage-overview
+76bf2266ecb2  .usage-overview .usage-ranges, .usage-embed > .usage-ranges, .usage-page > .usage-ranges
+c85f2749e1c5  .usage-overview .usage-brains
+314b7cbb7736  .usage-overview .usage-brain
+511b1a1868b5  .usage-brain
+2d787250282c  .usage-brain:hover
+34546d517648  .usage-overview .usage-brain span
+1a0ae59a1f05  .usage-brain em
+a34b3fb3f3d9  .usage-brain.on
+2721fadeeb64  .llm-mark
+1fa0377044e3  .llm-mark.grok.on
+f8713f173831  .llm-mark.claude.on
+cb79507b2e6f  .llm-mark.codex.on
+f8764abb73bc  .llm-mark.cursor.on
+2789b996b92b  .llm-mark.plus
+25a98a3a6a48  .llm-detail
+31cc15eda300  .llm-detail.bot-edit
+045abc82483a  .llm-detail.bot-edit .add-bot-preview, .llm-detail.bot-edit .add-bot-form
+02419cffd4a2  .llm-detail.bot-edit .row-meta, .llm-detail.bot-edit .add-bot-actions
+7433e7a9ac1a  .grok-bot-wake
+716bfc05a2bf  .grok-bot-wake-head, .grok-bot-wake-done, .grok-bot-wake-connect
+d529e1f5d1cf  .grok-bot-wake-head > div
+2eecd35887df  .grok-bot-wake-head .tiny
+aa75644121bb  .grok-bot-wake-head strong, .grok-bot-wake-head span
+cf328d715e7e  .grok-bot-wake-head strong
+e871c515b9b3  .grok-bot-wake-head > div > span
+1dfe74e8db2f  .grok-bot-wake-state
+70bf3570a6ff  .grok-bot-wake-state i
+ba098188599e  .grok-bot-wake.ready .grok-bot-wake-state i
+6d4ac5e5f886  .grok-bot-wake-help
+581a111d50b7  .grok-bot-wake-help summary
+ed525770e3b8  .grok-bot-wake-help p, .grok-bot-wake-done p
+e6cb05afac61  .grok-bot-wake-help p strong
+e3844d5a12a2  .grok-bot-wake-guide
+dbe752fa7f4f  .grok-bot-wake-guide:hover
+f22eee8afcd1  .grok-bot-wake-help .grok-bot-wake-stale
+a8e4d0b5036f  .grok-bot-wake-fields
+02419cffd4a2  .grok-bot-wake .grok-bot-wake-fields .field
+b7cf792545b0  .grok-bot-wake-connect
+c66e838ca165  .grok-bot-wake-connect .row-meta
+97149dfc3af6  .grok-bot-wake-done
+02419cffd4a2  .grok-bot-wake-done p
+abc76c3a394f  @media (max-width: 900px) { .grok-bot-wake-fields
+0f6f0c6e8241  .mass-send
+fa5e04d3b703  .mass-send .section-label
+72349efdc0e4  .mcp-settings
+1a43194970d9  .mcp-settings .link-head p, .mcp-settings > .row-meta, .skills-heading .row-meta
+1e7cf80c5f54  .mcp-server-list
+75a5142fab49  .mcp-server-row
+aa75644121bb  .mcp-server-row strong, .mcp-server-row .row-meta
+273c6fc681ac  .mcp-server-row .row-meta
+d178d7b06500  .mcp-form-grid
+e2891ac7f755  .mcp-form-grid label, .mcp-scope
+375aa0793a0f  .mcp-form-grid label > span, .mcp-scope legend
+5aa76bfdc834  .mcp-form-grid input, .mcp-form-grid textarea
+ce2a0497b4a1  .mcp-wide-field
+140d59a86dda  .mcp-scope
+5b0ef8b28c75  .mcp-check-grid
+2f2f554cc1a1  .mcp-settings .check-row
+3e0ed9c06921  .mcp-settings .check-row span
+eecf113c2d09  .settings-section-divider
+c804002a4185  .skills-heading
+1e7cf80c5f54  .skills-list, .pack-list
+c3ba27633281  .skill-row, .pack-row
+b3a75e19c773  .skill-open
+88c42195c5ad  .skill-open:hover strong
+cd4c3f75e191  .skill-row-side, .pack-row-side
+665145b9acb7  .skill-detail
+990342b3d51d  .skill-detail-head
+0c5a415e08b6  .skill-detail-head strong
+2828e5e9f4d6  .skill-detail-lead
+162db284dd0e  .skill-detail-body
+5ae58ecb7910  .skill-row strong, .pack-row strong
+baccb0368f7a  .skill-row em, .pack-row em
+4d6a57bf00e5  .skill-row .row-meta, .pack-row .row-meta
+1c3a49312ac4  .skill-origin
+60b30c56bc94  .skill-origin.grok
+964660a669b0  .skill-origin.codex
+8002bbc988cf  .skill-origin.claude
+23d7b4aef323  .skill-origin.cursor
+ed86a2a94c78  .skill-origin.workhorse
+f368e3596f65  .skill-push
+8fb73980a127  .llm-brains .usage-brain.off
+a29d3426fc93  .add-bot
+b18739b944e5  .add-bot .project-hero
+37ab52c9d67a  .add-bot .project-hero .link-head
+688c77646024  .add-bot .project-hero .lede
+11332e2a8d55  .add-bot > :not(.project-hero)
+d178d7b06500  .add-bot-catalog
+219b0b68c5aa  .add-bot-choice
+2d787250282c  .add-bot-choice:hover
+1f07fd6e0fdc  .add-bot-choice .llm-mark
+7106a396ced6  .add-bot-choice .llm-mark.plus
+8bf7c3725e5d  .add-bot-choice strong
+5fe71b0881f0  .add-bot-choice span:last-child
+02419cffd4a2  .add-bot-hint
+074535ea5ce2  .add-bot-preview
+8337d6e5f0bf  .add-bot-preview .llm-mark
+8b51dbe568c7  .add-bot-preview strong
+64bc91d1f9c0  .add-bot-preview em
+48ae9c8314c8  .add-bot-form
+ce2a0497b4a1  .add-bot-form .field.wide, .add-bot-form .field:nth-child(n + 4)
+b9b11d36723e  .bot-swatches
+a4091c94c667  .bot-swatch
+88b00574bacd  .bot-swatch.on
+59e2a146c5eb  .bot-swatch.wheel-toggle
+a8405f9c7b55  .bot-swatch.wheel-toggle i
+ce2a0497b4a1  .bot-wheel-field
+40becdae5d49  .color-wheel
+cd34e7be61cf  .color-wheel-disk
+50acb0d51922  .color-wheel-disk::after
+d31381d527ef  .color-wheel-thumb
+1ad04a9eaee0  .color-wheel-side
+400d6f5e6acd  .color-wheel-side input[type="range"]
+c98a9f1869e2  .add-bot-actions
+c66e838ca165  .add-bot .row-meta
+924e51230dde  .add-bot .vendor-setup-help
+abc76c3a394f  @media (max-width: 720px) { .add-bot-catalog, .add-bot-form, .grok-bot-wake-fields
+41236f4ec014  @media (max-width: 720px) { .grok-bot-wake-done, .grok-bot-wake-connect
+55b88796c71c  @media (max-width: 720px) { .add-bot-form .field:nth-child(n + 3)
+adf1187d0218  @keyframes fuel-in
+65399979c22f  .fuel-ring
+d50ca3ac0cb0  @media (prefers-reduced-motion: reduce) { .fuel-ring
+b7f0d05af8c8  .fuel-ring svg
+6d9f3807cda2  .fuel-ring .fuel-track, .fuel-ring .fuel-fill
+1e1a5f4c4ce9  .fuel-ring .fuel-track
+cd8e646124d4  .fuel-ring .fuel-fill
+4f1d04ae2375  .fuel-ring .fuel-over
+4e90faebcf5a  .fuel-ring.claude
+00314f5b15ff  .fuel-ring.codex
+24e6ae74758a  .fuel-ring.cursor
+673dfb276a36  .fuel-ring.custom
+e076e733a87c  .fuel-ring strong
+14ff7f70f5d9  .fuel-ring[style*="104px"] strong, .fuel-ring[style*="120px"] strong, .fuel-ring[style*="148px"] strong
+8e7e369c5e36  .usage-plan
+55f14b30c637  .usage-plan-copy
+04c63ef37945  .usage-plan-copy p
+8c11f95f2648  .usage-limits
+f6921123e0c1  .usage-limits-head
+3f1c275a44b9  .usage-limits-head .context-meter-wrap
+98781402ac5c  .usage-limits-head .context-meter.quiet
+82e1a16702e9  .usage-limits-windows, .usage-limits-foot
+6cb1cc20e960  .usage-limit.unlimited .usage-split-track i
+e6dccb92051d  .usage-limit-note
+e6ed32d937bd  .bot-context-row
+2fda5fcfbfde  .bot-context-row .row-meta
+5313025c2edb  .usage-plan-copy .context-meter-wrap
+f70690fa6f43  .usage-limit
+2d787250282c  .usage-limit:hover
+a34b3fb3f3d9  .usage-limit.on
+ce85d9076b98  .usage-limit-top
+9bdcf483780e  .usage-limit-top strong
+a2a9e431f7de  .usage-limit-top em, .usage-limit > span
+f496f19b29c4  .usage-detail
+addb93fcdb13  .usage-detail-copy
+04c63ef37945  .usage-detail-copy p
+841ce22a52a8  .usage-budget
+045472c9ee32  .usage-budget > span
+0c1a7e49a031  .usage-split
+ee89db45b2d5  .usage-split span
+a8c19ac48676  .usage-split em
+c5de97a41529  .usage-split-track
+9a33d435fa86  .usage-split-track i
+b972529ced4d  .usage-split-track i.claude
+48e1b722ae4b  .usage-split-track i.codex
+ea14d789232c  .usage-split-track i.cursor
+33d04944face  .usage-split-track i.custom
+97ad4ac867b7  .usage-stretch
+fab8f8e3563a  .usage-dots, .usage-dot-labels, .usage-stretch-peak
+154aa8886752  .usage-stretch.swap-out .usage-dots, .usage-stretch.swap-out .usage-dot-labels, .usage-stretch.swap-out .usage-stretch-peak
+da819cb9229b  .usage-stretch.swap-in .usage-dot-col
+d110db884d6d  @keyframes stretch-cell-in
+19210866c7d1  ::view-transition-old(usage-stretch), ::view-transition-new(usage-stretch)
+9f3907526548  ::view-transition-old(usage-stretch)
+725bf2e9d1ae  ::view-transition-new(usage-stretch)
+29ee20ffa7fc  @keyframes stretch-view-out
+818faa4b11a0  @keyframes stretch-view-in
+426c09a8d022  @media (prefers-reduced-motion: reduce) { .usage-dots, .usage-dot-labels, .usage-stretch-peak
+d50ca3ac0cb0  @media (prefers-reduced-motion: reduce) { .usage-stretch.swap-in .usage-dot-col
+d50ca3ac0cb0  @media (prefers-reduced-motion: reduce) { ::view-transition-old(usage-stretch), ::view-transition-new(usage-stretch)
+98029f719af0  .usage-stretch-head
+60fc1cdb6b05  .usage-stretch-peak
+f22741e982f6  .usage-dots
+9bed860e32d2  .usage-dots:not(.flat)
+5148849790f2  .usage-dot-col
+1453607e883c  .usage-dots:not(.flat) .usage-dot-col
+7ea33bc53e32  .usage-dots.dense
+6b5186fe735b  .usage-dots.dense .usage-dot
+ae481499bdaa  .usage-dot
+c71e00e838e1  .usage-dots:not(.flat) .usage-dot, .usage-dots.flat .usage-dot
+c5828dfc1d01  .usage-dots.week .usage-dot
+8de77ed0af45  .usage-dot:disabled
+71a935a60252  .usage-dots.flat .usage-dot-col
+7157236b8511  .usage-dot.l1
+34b191b84a58  .usage-dot.l2
+7e8fbf4dc2cc  .usage-dot.l3
+5747500da11a  .usage-dot.l4
+39761ed878a1  .usage-dot.ink.l1, .usage-dot.ink.l2, .usage-dot.ink.l3, .usage-dot.ink.l4
+46459a5fe720  .usage-dot.ink
+2b1bebb6ab7b  .usage-dot.pie
+a73f9b791ba5  .usage-dot.ink.pie
+8963ed2bd103  .usage-dot-fill
+6cb1cc20e960  .usage-dot.pad
+a731cb21b87d  .usage-dot-labels
+7ea33bc53e32  .usage-dots.dense + .usage-dot-labels
+8bdb2c8d2181  .usage-dot-labels span
+1625af3b5fc2  .usage-dots.dense + .usage-dot-labels span
+d71bc98e7591  .usage-dots.week + .usage-dot-labels span
+df21280e6bf9  .usage-tip
+ef17750c555c  .usage-tip.above
+a450e710ba47  .usage-tip strong
+3824cfbf6ec7  .usage-tip > span
+e5f480dabade  .usage-tip ul
+b627e348f4d7  .usage-tip li
+a369aa7d8b48  .usage-tip li span
+0524ca218a0f  .usage-tip .usage-swatch
+c4fcf2f547e4  .usage-tip em
+767ec2be857c  .usage-tip small
+12064aa29edc  .usage-models
+cb2984e21f84  .usage-model
+624651b7cc04  .usage-model-top
+9bebeeb93096  .usage-model span
+cefe19a6f4fc  .usage-swatch
+d640f0dd9638  .usage-swatch.grok
+b972529ced4d  .usage-swatch.claude
+48e1b722ae4b  .usage-swatch.codex
+ea14d789232c  .usage-swatch.cursor
+33d04944face  .usage-swatch.custom
+38c9e778127f  .usage-model .usage-swatch, .usage-tip .usage-swatch
+886049ebee8c  .usage-model em
+37ab52c9d67a  .usage-split-track.wide
+c1e582abc9b1  .caret
+e24139bcebf2  .chat-spend-wrap
+d39e8b571453  .chat-spend
+2d787250282c  .chat-spend:hover
+ad44db273dc1  .chat-spend strong
+d81698d61fea  .chat-spend em
+7df02c3c15ef  .chat-spend-pop
+e24139bcebf2  .context-meter-wrap
+e656e2714126  .context-meter
+2d787250282c  .context-meter:hover
+8de77ed0af45  .context-meter.quiet
+c51ec35a4e6a  .context-meter.quiet:hover
+a4a0398f605b  .context-ring
+48d782e3c2b2  .context-ring svg
+975357851464  .context-ring-track, .context-ring-fill
+1e1a5f4c4ce9  .context-ring-track
+37f25eaa8774  .context-ring-fill
+21b45cccb7ab  .context-meter.grok .context-ring-fill
+4963c247ad76  .context-meter.claude .context-ring-fill
+dec89380f0c1  .context-meter.codex .context-ring-fill
+fcd4277d3fe9  .context-meter.cursor .context-ring-fill
+2f99d74bf0b2  .context-meter.custom .context-ring-fill
+a4dc2fa285dc  .context-copy
+02c54eb96afc  .context-copy strong
+886049ebee8c  .context-copy em
+455c166b8148  .context-pop
+0a0478d04117  .context-pop header
+c4c3df752141  .context-pop header strong
+a8f8d3249536  .context-pop header span, .context-pop footer, .context-aside, .context-empty
+9ccd7e84e940  .context-stack
+68382b3fe99c  .context-stack .seg
+8ac8ac62e68c  .context-stack .seg.system
+fefa76a13e0a  .context-stack .seg.messages, .context-stack .seg.used
+cf862347f29f  .context-meter-wrap.grok .seg.messages, .context-meter-wrap.grok .seg.used
+98e62fdb0511  .context-meter-wrap.claude .seg.messages, .context-meter-wrap.claude .seg.used
+721d5179e111  .context-meter-wrap.codex .seg.messages, .context-meter-wrap.codex .seg.used
+ad9391538429  .context-meter-wrap.cursor .seg.messages, .context-meter-wrap.cursor .seg.used
+98f13e6eca95  .context-meter-wrap.custom .seg.messages, .context-meter-wrap.custom .seg.used
+ed2b42d71051  .context-stack .seg.overhead, .context-stack .seg.other
+a73f9b791ba5  .context-stack .seg.free
+4ec6408a1f87  .context-rows
+bd434002beb0  .context-rows li
+931f680acba3  .context-rows li span
+886049ebee8c  .context-rows li em
+b241b2231835  .context-rows li strong
+4ea6d59d92a8  .context-rows li.info span, .context-rows li.info strong
+63f357c5ffbb  .context-aside
+544e0d5674d1  .context-empty
+c85215630021  .context-pop footer
+b8367b2520f1  .effort-scale
+126244f1351e  .effort-scale .tiny
+5a857ec1bbc5  .settings .field, .add-bot .field
+a0ec5c94547e  .settings .field > span, .add-bot .field > span
+28513d463ca8  .settings .field input, .settings .field select, .add-bot .field input, .add-bot .field select
+cb3de3f2df20  .add-bot .field select, .settings .field select
+72dd1610aa7f  .settings .field input:focus, .settings .field select:focus, .add-bot .field input:focus, .add-bot .field select:focus
+14f7c6bfac9c  .llm-row strong
+523153b98a07  .settings.settings-full
+fe45d93837ea  .settings.settings-full.usage-section
+0b7fc67a8957  .settings.settings-full > p, .settings.settings-full .field, .settings.settings-full .link-block, .settings.settings-full .actions
+55ce05ccf4c6  .settings.settings-full .llm-detail-actions
+86a58d4ef68f  .settings-bar
+0155e38565bb  .settings-bar .actions
+cc29a0440060  .settings-group
+04420d673e98  .settings-row
+acad3dbfbdfe  .settings-row + .settings-row
+16e57b14ef92  .settings-row.off
+396e68aca83e  .settings-row-copy
+9faddd24ccb3  .settings-row-copy strong
+396225316351  .settings-row-copy span
+67d7fdb87de9  .settings-control
+5d7fc352878a  .settings-control > input, .settings-control > select
+b2c6553a4d72  .settings-control > input
+012004be0bd8  .settings-control > input[type="number"]
+350db1f2cd27  .settings-control > select
+72dd1610aa7f  .settings-control > input:focus, .settings-control > select:focus
+2564c4b8b13c  .settings-control > input:disabled
+70ce2b58d993  .settings-control .unit
+5d121e7bd644  .settings-control .actions
+5f46f639edc5  .settings-picks
+a3c62f8ab1a3  .settings-picks-head
+02419cffd4a2  .settings-picks-head .section-label
+a8f8d3249536  .settings-picks-head > span
+02419cffd4a2  .settings-picks .usage-brains
+a1a892829b38  .settings-picks .usage-brain
+a9fd68747ac5  .settings-picks .llm-mark.on
+d90d3c6f41ab  .settings-note
+e3bb78ea1040  .settings-group-head
+46355369e66e  .settings-control.link-connect
+97dc0f2ce5df  .settings-group-head .settings-control
+a4fd20d8196f  .settings-row-note
+b60d2328ee22  .settings-learn
+dbe752fa7f4f  .settings-learn:hover
+6620bae73fa1  .local-compute-add
+200f399afe95  .local-compute-add label
+672120780964  .local-compute-add input
+72dd1610aa7f  .local-compute-add input:focus
+90eb226a69d5  .local-compute-token
+ce2a0497b4a1  .local-compute-token > span
+93e2091049bb  .local-compute-add-actions
+b237d39857b5  .local-compute-host
+7f223aff45cd  .local-compute-host.off
+990342b3d51d  .local-compute-host-head
+d529e1f5d1cf  .local-compute-host-head > div:first-child
+aa75644121bb  .local-compute-host-head strong, .local-compute-host-head span
+6635680bdebf  .local-compute-host-head > div:first-child > span
+e504ba5cd6b5  .local-compute-grants
+53d987d84e78  .local-compute-grants b, .local-compute-grants > div > span:not(.agent-chips)
+d3d5f1e004b3  .local-capability
+c983e7d242bf  .local-capability.on
+4c05a6c5af18  .local-capability.stale
+16a7f4f92d7d  .local-capability strong
+a8f8d3249536  .local-capability span
+14df728ccf93  .local-capability-family
+abc76c3a394f  @media (max-width: 720px) { .local-compute-add, .local-compute-grants
+0b029bdda7c6  .runtime-row
+b73cb9ecadf1  .runtime-tile
+13ecb97e43ae  .runtime-tile.on
+c00ef618fee4  .runtime-row .settings-row-copy strong small
+8ecf8fef82ad  .agent-chips
+eddc86b72941  .agent-chip
+ce4e8a9a5571  .agent-chip.on
+7523c5beb7d5  .status-chips
+d8d894dfc8ff  .status-chip
+50b68e34f4b7  .status-chip::before
+7ff3a1f1aa62  .status-chip.on
+0090064d4136  .status-chip.on::before
+ee670991278f  .settings-search
+72dd1610aa7f  .settings-search:focus
+f3f10ca6e9d7  .llm-brains
+d4411a78b315  .llm-brains .usage-brain
+0346bfab2971  .llm-brain-open
+2d787250282c  .llm-brains .llm-mark:hover
+1a0c3f60b0c0  .llm-off-bots
+ecfa509baa67  .llm-off-bots h3
+b3a2297a12f5  .llm-off-bots .settings-group
+e19889cf1b54  .llm-off-row
+2fdd9825f499  .llm-off-state
+62f2ed619019  .llm-off-open
+3359c37c5bf8  .llm-off-open strong
+375176136a58  .llm-off-open span
+4e100405699e  .usage-page, .usage-embed
+7bf688e1c31e  .usage-embed
+db32b0408627  .usage-page .usage-stretch, .usage-embed .usage-stretch
+09e36207f37a  .usage-page .usage-stretch:has(.usage-dots.flat), .usage-embed .usage-stretch:has(.usage-dots.flat)
+09e36207f37a  .usage-page .usage-dots:not(.flat), .usage-embed .usage-dots:not(.flat)
+b1604664bbb5  .visually-hidden
+0256a800f5ed  .edit-menu
+fe408f405741  .edit-menu button
+2d787250282c  .edit-menu button:hover:not(:disabled), .edit-menu button.active:not(:disabled)
+e7a717d57938  .edit-menu button:disabled
+f95d45641146  .edit-menu kbd
+ad9235b5bfcf  @keyframes rise
+b9a41401110e  @keyframes work-open
+d50ca3ac0cb0  @media (prefers-reduced-motion: reduce) { .work-body, .work-fold-body, .thought
+426c09a8d022  @media (prefers-reduced-motion: reduce) { .work-pop > summary, .work-pop > summary::before
+9bf0accac987  .session-setup
+4aa43d7e841d  .session-setup > *:not(.setup-tide)
+b107f7d52332  .setup-tide
+b150f78e585a  .setup-tide-water
+42b8af58b686  .setup-tide-wave
+bc65a7662a28  .setup-tide-wave.two
+37942db8d4c7  .setup-tide-glint
+00045f7f6718  @keyframes setup-swell
+27454af26a10  @keyframes setup-glint
+d50ca3ac0cb0  @media (prefers-reduced-motion: reduce) { .setup-tide-wave, .setup-tide-glint
+d74203d0c03e  .setup-intro strong
+5b0e83d058f4  .setup-intro p
+00484d6eada5  .setup-block .section-label
+f9a5b05edab4  .setup-note
+bb39fda3e308  .session-setup.tide-ink-dark
+8ab8c05a240c  .session-setup.tide-ink-dark .setup-effort button.grok
+ea43ef8f1860  .setup-effort
+38fe81352776  .setup-effort button
+42dd58d764a7  .setup-effort button.grok
+4b497d73602a  .setup-effort button.codex
+ab30de1979b2  .setup-effort button.claude
+9b15fcce0873  .setup-effort button.custom
+7b752212d3ee  .setup-effort button.on
+01c48e72a9af  .setup-slider
+37190da9c019  .setup-slider-line
+d2275fc38877  .setup-slider-line::before
+23b3d6fc9c93  .setup-slider-fill
+9bd0bb84a5eb  .setup-slider-thumb
+426c09a8d022  .setup-slider.dragging .setup-slider-fill, .setup-slider.dragging .setup-slider-thumb
+5b79a8dd00ec  .setup-slider input[type="range"]
+8fdf9c7d0f82  .setup-slider-marks
+56a4572b2424  .setup-slider-marks button
+59f2866594f2  .setup-slider-marks button:first-child
+0d09709e6591  .setup-slider-marks button:last-child
+5b7d3496d118  .setup-slider-marks button.on
+09dc124a910d  .setup-split
+abc76c3a394f  .setup-split:has(.setup-block:only-child)
+a44e027fcc91  .setup-grid
+5bb5286d918a  .setup-grid button
+632029ad4051  .setup-grid button.on
+965d3440ee3c  .setup-grid button strong
+c4d4621f4ee4  .setup-grid button span
+20ba889551e9  .session-setup
+8f838ef8a425  .session-setup .setup-tide
+c308c0890ebb  .session-setup .setup-tide-water
+6e22c58a7a6a  .session-setup .setup-tide-wave, .session-setup .setup-tide-glint
+c2234f930696  .session-setup .setup-intro
+9c0219674eaf  .setup-kicker
+6faf7678b979  .session-setup .setup-intro strong
+2bc62b0b0591  .session-setup .setup-intro p
+dd5cac286925  .setup-close
+36f733f0b739  .setup-close:hover
+60bf12949478  .setup-card
+050ec61e6544  .setup-top-grid
+02419cffd4a2  .setup-top-grid .setup-card
+0964e8afbfb7  .setup-compact-stack
+147ef4dafc32  .setup-top-grid .setup-models
+abc76c3a394f  .setup-top-grid .setup-environments
+0fd4623bd7bf  .setup-top-grid .setup-environments button
+fe92127798bb  .setup-top-grid .setup-environment-icon
+aac3aa91efa5  .setup-heading
+b95ff9a432ca  .setup-lede
+a222347bfd2a  .setup-heading.compact
+f1bc0c968db0  .setup-heading > div > strong, .setup-choice-title > strong
+91bdaf070f04  .setup-heading > div > span, .setup-choice-title > span
+965e8fbf19bc  .setup-current
+3b6fad0b298d  .setup-subgroup + .setup-subgroup
+0648164e4b74  .setup-subgroup .section-label
+9f3fc412521a  .session-setup .setup-note
+0d1381dfdb69  .session-setup .setup-effort
+6c06aa2d122d  .session-setup .setup-effort button
+9bb664fec1fd  .setup-vendors button
+fcb3e1902965  .setup-provider-dot
+1bbf33ae8307  .session-setup .setup-effort button.on
+147ef4dafc32  .session-setup .setup-models
+f13de893c64b  .setup-models button
+51cd18e85a20  .setup-models button strong
+a2296702220e  .setup-models button > span
+e4638dd958a7  .setup-environments
+2527fbe2e75d  .setup-environments button
+2312c0dd81a6  .setup-environments button.on
+e4a857587730  .setup-environment-icon
+d529e1f5d1cf  .setup-environments button > span:last-child
+aa75644121bb  .setup-environments strong, .setup-environments em
+5f866127ca30  .setup-environments strong
+589181d34810  .setup-environments em
+3bf7fa82d7e2  .setup-reasoning-card .setup-slider
+0e8d6167b275  .setup-reasoning-card .setup-slider-line
+010ea7d31751  .setup-reasoning-card .setup-slider-line::before, .setup-reasoning-card .setup-slider-fill
+077508afbf7a  .setup-reasoning-card .setup-slider-thumb
+e7a29b03311f  .setup-reasoning-card .setup-slider-marks
+6e3a4714ba19  .setup-reasoning-card .setup-slider-marks button
+58cf3fe563b8  .session-setup .setup-split
+6e3a4714ba19  .setup-choice-title > span
+047cabb72a27  .session-setup .setup-grid
+356c8abe3313  .session-setup .setup-grid button
+2bd713151971  .session-setup .setup-grid button.on
+ee58559ea5d0  .session-setup .setup-grid button .setup-choice-icon
+3b74447a702f  .session-setup .setup-grid button .setup-choice-copy
+aa75644121bb  .setup-choice-copy strong, .setup-choice-copy em
+ee94f7b33aa7  .setup-choice-copy strong
+dd599080d1d3  .setup-choice-copy em
+9fc4e21e9357  .setup-access-note
+8b3eb28a7d0e  .setup-access-note > span
+aa30f90f37d0  .setup-access-note p
+dc43553488c7  .setup-access-note strong
+d5000b5b82ff  @container session (max-width: 720px) { .session-setup
+147ef4dafc32  @container session (max-width: 720px) { .session-setup .setup-models
+abc76c3a394f  @container session (max-width: 720px) { .session-setup .setup-split
+abc76c3a394f  @container session (max-width: 720px) { .setup-top-grid
+29007a68285a  @container session (max-width: 720px) { .setup-top-grid .setup-environments
+abc76c3a394f  @container session (max-width: 480px) { .setup-environments, .session-setup .setup-grid
+6e22c58a7a6a  @container session (max-width: 480px) { .setup-current
+894291f30eee  .setup-trigger
+322cfd9ab945  .setup-trigger > span:nth-child(2)
+4f28da72b970  .setup-trigger .caret
+fdbd526dd004  .setup-trigger.on .caret
+36f733f0b739  .setup-trigger:hover, .setup-trigger.on
+6001df8cdad4  .watch-bar
+aeddc1fcd00d  .watch-bar .watch-option
+7c0f86ab5456  .watch-option.link-block
+142317675330  .watch-option .watch-choose
+7465f8dcfe37  .watch-option.on
+716bfc05a2bf  .watch-option-head
+75c5ba74e620  .watch-option strong
+413f49c27c66  .watch-bar .watch-copy, .picker .watch-copy
+8f4a36e4251a  .switch
+47e5bd3c326a  .switch::after
+0090064d4136  .switch.on
+3003ad8781a4  .switch.on::after
+8de77ed0af45  .switch:disabled
+8293060a9f36  .watch-brains
+cdd71d165456  .watch-brain
+2d787250282c  .watch-brain:hover
+a46ecc0fedbb  .watch-brain.pick
+187895f02dc6  .watch-brain:not(.pick)
+b450671c3b23  .watch-brain:focus-visible
+8de77ed0af45  .watch-brains.off .watch-brain, .watch-brain:disabled
+22aa65c82a97  .watch-brains.off .watch-brain:not(.pick), .watch-brain:disabled:not(.pick)
+187895f02dc6  .watch-brain:disabled:not(.pick):hover
+3378c0fc4b3a  .watch-brain.warn
+f20d8e0f2c6d  .watch-brain.hold
+473b0f192cad  .watch-day-track
+5b31f35a56e8  .watch-day-track i
+d640f0dd9638  .watch-day-track i.grok
+b972529ced4d  .watch-day-track i.claude
+48e1b722ae4b  .watch-day-track i.codex
+ea14d789232c  .watch-day-track i.cursor
+33d04944face  .watch-day-track i.custom
+f20d8e0f2c6d  .watch-row.hold
+75c5ba74e620  .watch-row strong
+7013fa78bab8  .watch-row .row-meta
+f3f2ff088c48  .watch-flags
+164c294c8181  .watch-flag
+6152aba8d72d  .watch-flag.hot
+1de928ca2e2d  .goal-bar
+d67ad52a567a  .goal-bar.paused
+28636f9a87dd  .goal-bar-mark
+ea848cd4723a  .goal-bar.paused .goal-bar-mark
+74d7e0347b61  .goal-bar-copy
+fa1944e22b15  .goal-bar-copy strong
+920f7d513ad5  .goal-bar-copy span
+79d8e3d85412  .goal-bar-actions
+776f8545d2e6  .goal-action
+9abd39d67819  .goal-action:hover
+089d5b23606b  .goal-action.primary-action
+2564c4b8b13c  .goal-action.quiet
+fffee46d446d  @media (max-width: 760px) { .goal-bar
+fffee46d446d  @media (max-width: 760px) { .vendor-tasks
+3319c3110775  @media (max-width: 760px) { .goal-bar-copy
+d5c30f23520c  .watch-banners
+92276bc8656e  .watch-stack
+8dc9b23241e9  .watch-toast
+57d6f1926c24  .watch-hold-bar
+b1c82789321c  .watch-hold-bar .watch-toast-copy
+e0e079684a72  .watch-hold-bar .actions
+01bbb82c7e8a  .watch-hold-bar .actions button
+2d4eb7b13ef1  .watch-hold-bar.hold
+2d4eb7b13ef1  .watch-toast.warn, .watch-toast.hold
+6a0de7ea05cb  .watch-toast-copy
+d393b9b98a9c  .watch-toast strong
+eabaa162e47e  .watch-toast span
+5703d3a2c680  .watch-toast .actions
+d08d75561c4f  @media (max-width: 720px) { .watch-banners
+89a911999e56  @media (max-width: 720px) { .watch-toast
+2ca7b0e7d766  @media (max-width: 720px) { .watch-toast .actions
+6e22c58a7a6a  .composer-file-input
+769889337a66  .composer-attach
+a9fd68747ac5  .composer-attach:hover, .composer-attach.on
+b9f29bf23932  .composer-plus-menu
+56276571b44c  .composer-plus-menu button
+3b1d7c2bfc94  .plus-copy
+cdd9ef03d8ae  .plus-copy strong
+62a8845197ce  .plus-copy em
+bde61dc956bb  .plus-icon
+aa75644121bb  .plus-icon svg
+97a5962035e6  .plus-icon.orchestrate
+bbf54d451afd  .plus-icon.mission
+bfb85862280e  .plus-icon.attach
+2d787250282c  .composer-plus-menu button:hover
+7822ede8434c  .plus-row.orchestrate[aria-checked="true"]
+80440b28e9c5  .plus-row.mission[aria-checked="true"]
+2edc1fc1361c  .plus-row.orchestrate[aria-checked="true"]:hover
+16cbabf162c2  .plus-row.mission[aria-checked="true"]:hover
+16d0901acea8  .composer-plus-menu hr
+63b5ec396fa0  .plus-caps
+fde04037a433  .plus-caps label
+396e68aca83e  .plus-caps label span
+6b7895049b82  .plus-caps input
+cc6e5a2737b9  .plus-caps label em
+8695d8f76e28  .plus-caps p
+564692f38ac3  .composer-crew-chip-group
+6d66750ef099  .composer-crew-chip-group .composer-crew-chip
+175f5b19bcc1  .composer-crew-gear
+a9fd68747ac5  .composer-crew-gear:hover, .composer-crew-gear[aria-expanded="true"]
+f3c409ccd7a2  .composer-spawn-menu
+7822ede8434c  .composer-spawn-menu .plus-row[aria-checked="true"]
+2edc1fc1361c  .composer-spawn-menu .plus-row[aria-checked="true"]:hover
+537a54be65a2  .composer-crew
+6d8337aab3cc  .composer-crew-inner
+08eef220b09f  .composer-crew-chip
+e12ac871b758  .composer-crew-chip .crew-chip-name
+a2f5800b6b84  @keyframes crew-chip-in
+f04eec48ba7e  @keyframes crew-chip-out
+b7cbbee29b36  .composer-crew.leaving .composer-crew-chip
+d0c1f54f6e53  .composer-crew-chip span
+5ed57952437b  .composer-crew-chip.more
+ee637de01f8f  .crew-more-stack
+15bc3a59f6b6  .crew-more-stack .plus-icon
+378a34fc0ad7  .crew-more-stack .plus-icon:last-child
+3989d8ec548d  .composer-crew-chip .crew-more-count
+7b2aa80a08ef  .composer-crew-chip:hover
+f060b8273796  @media (prefers-reduced-motion: reduce) { .composer-crew, .composer-crew-chip
+50faa1174072  .bot-models
+e00e9d92f07e  .bot-models > .row-meta
+a9c77021d675  .bot-model-add
+f3727f28f901  .bot-model-add input
+df4ffff10a7f  .bot-model-search
+d529e1f5d1cf  .bot-model-group
+cb703604f1ab  .bot-model-group .section-label
+3585c1b90dd5  .bot-model-group .section-label .tiny
+dbe752fa7f4f  .bot-model-group .section-label .tiny:hover
+ad1338ab39da  .bot-model-more
+dbe752fa7f4f  .bot-model-more:hover
+0cadb8ff3a1d  .bot-models .setup-models button[disabled]
+d6f7f9ea4789  .subagent-resume
+a34b3fb3f3d9  .subagent-resume:hover
+a3977c19aa1a  .workshop-rail
+834e2a7ba250  .workshop-rail.is-collapsed
+7b1afda7c325  .workshop-rail.is-expanded
+fa8212891bc8  .workshop-rail-head
+2b9aa835ab68  .workshop-rail-head .section-label
+52454228ca93  .workshop-rail-head-side
+662614235010  .workshop-rail-toggle, .workshop-fold
+596efd9b1366  .workshop-rail.is-collapsed .workshop-rail-head
+e35763d204e9  .workshop-rail.is-collapsed .workshop-rail-head .section-label
+62b9ba76564d  .workshop-rail-head-expand
+53e32332d378  .workshop-rail-manage
+2541f98f4618  .workshop-rail.is-collapsed .workshop-rail-manage
+eed84cc24596  .workshop-rail.is-empty
+2e37cb034963  .workshop-rail.is-empty .workshop-rail-empty-stub
+5e8347285cd5  .workshop-rail-add-packs
+cb9030c7616b  .workshop-rail-strip
+2d787250282c  .workshop-rail-strip:hover
+5bd8e998647b  .workshop-rail-kv
+e09bac6fd78a  .workshop-rail-watts, .workshop-rail-strip .workshop-ring + .workshop-rail-kv
+6504ad3cab72  .workshop-pack-strip
+e00c6748e7e8  .workshop-rail-strip > * + .workshop-pack-strip
+2aa9bb36f8a3  .workshop-rail-models
+ff03d4a4cd28  .workshop-pack-strip > .workshop-rail-models:first-child
+1189b355aece  .workshop-rail-age, .workshop-rail-log
+6e3a4714ba19  .workshop-rail.is-collapsed .row-meta
+abaf087ce041  .workshop-tone-ok
+bbf54d451afd  .workshop-tone-warn
+293ebdace1f1  .workshop-rail-body
+c4957df17246  .workshop-rail-foot
+e4f7754cc661  .workshop-module + .workshop-module
+272702b28c58  .workshop-module-head
+f2881e15b28b  .workshop-module-head strong
+af04a756ec2b  .workshop-module.is-folded .workshop-module-head
+004a44f9e8ff  .workshop-rail .workshop-card
+02419cffd4a2  .workshop-rail .workshop-card p
+c98a9f1869e2  .workshop-rail .workshop-card .workshop-chip-row + .row-meta
+aba9517b15e0  .workshop-card-head
+02419cffd4a2  .workshop-card-head .section-label
+dd8d0764dec7  .workshop-label-name
+df99b1b14479  .workshop-kv
+4ea6d59d92a8  .workshop-kv > span
+97fde55c2c5c  .workshop-kv > strong
+2160468644a1  .workshop-box
+d529e1f5d1cf  .workshop-box-kv
+922cc5dfd9c1  .workshop-ring
+aa75644121bb  .workshop-ring svg
+6d9f3807cda2  .workshop-ring circle
+c521658aef4e  .workshop-ring-track
+df0faf7ee9cb  .workshop-ring-arc
+f92a6df26ed3  .workshop-ring-value
+c961c034d0b8  .workshop-ring-value strong
+5fe5d3cac7a1  .workshop-ring-value small
+2564c4b8b13c  .workshop-ring.is-unknown .workshop-ring-value strong
+5c43427e42ce  .workshop-bar
+52e633cf6bb7  .workshop-bar-track
+24d9a6081147  .workshop-bar-fill
+2564c4b8b13c  .workshop-bar.is-unknown span
+f9968a0151e4  .workshop-progress
+597865db1089  .workshop-progress > div
+8b79c39be63a  .workshop-progress strong
+6e3a4714ba19  .workshop-progress .row-meta
+c9ba435a4b08  .workshop-identity
+4b840944d826  .workshop-flags
+fa3227b1ee40  .workshop-rail-glance
+659c87d6519d  .workshop-rail-glance .workshop-bar
+6e22c58a7a6a  .workshop-rail-glance .workshop-bar > span
+ea8409e4baec  .workshop-rail-strip .workshop-bar
+56f1d9a0c8c1  .workshop-rail-strip .workshop-bar ~ .workshop-rail-kv
+2f5ff07ca24a  .workshop-rail-tpp, .workshop-rail-strip .workshop-bar + .workshop-rail-kv
+d11f2532621c  .workshop-dot
+259d47b8953e  .workshop-dot-ok
+e5c3bea62ee3  .workshop-dot-warn
+7da3d1eaefe5  .workshop-dot-mute
+79267b73dd40  .workshop-line
+e46811c32637  .workshop-law
+58b7aa773480  .workshop-hbox
+3f4fd4f20f47  .workshop-feed-note
+8c6e709859f9  .workshop-chip-row
+c858f4c6e1af  .workshop-chip
+219d9c73a0d0  .workshop-chip-ok
+38577ccb6de8  .workshop-chip-warn
+2564c4b8b13c  .workshop-chip-mute
+44a793e4f000  .workshop-breakout
+0826b80ec30e  .workshop-card
+3f10b0bc13ef  .workshop-meter
+2e2f744a9926  .workshop-track
+219c3a43da3a  .workshop-log
+d872e8837a37  .workshop-breakout .workshop-log
+02419cffd4a2  .workshop-breakout .workshop-card p
+98cfe6fbc9db  .workshop-breakout .workshop-kv
+378e76576ae0  .workshop-breakout .actions
+936d6bbab286  .workshop-breakout-pack + .workshop-breakout-pack
+4fb6cb5ded8e  .workshop-breakout-grid
+d529e1f5d1cf  .workshop-breakout-grid > .workshop-card
+4ec6408a1f87  .workshop-gallery
+da832518cea0  .workshop-gallery-item
+40e715335e00  .workshop-gallery-item:first-child
+7578d03ca9d0  .workshop-gallery-meta
+a365fe7a44da  .workshop-gallery-meta strong
+3a36683c200c  .workshop-gallery-actions
+f16b6ecdef9b  .media-create-panel
+3e96abbb5259  .media-create-field
+61e1e92263dd  .media-create-field span
+0b597e16b790  .media-create-field input, .media-create-field select
+378e76576ae0  .media-create-actions
+00e709caaefe  .media-create-refuse
+02419cffd4a2  .media-create-message
+8fe7af24f122  .workshop-manage-drawer
+efcc7f3c4494  .workshop-manage-rail-dim
+04fd13a39bf5  .workshop-manage-sheet
+9e8413a2596f  .workshop-manage-sheet-head
+5f8caa5b18aa  .workshop-manage-sheet-head h3
+8c7400c737d1  .workshop-manage-sheet-head-actions
+78e47ab62f49  .workshop-manage-sheet-body
+b3a2297a12f5  .workshop-manage-sheet-body .workshop-settings
+020fc4a5d8c7  .workshop-sheet-intro
+9cffb6a3d57e  .workshop-blurb, .workshop-pack-blurb, .workshop-pack-summary, .workshop-active-empty, .workshop-pending-empty
+ccee9a485754  .workshop-manage-toolbar
+544e0d5674d1  .workshop-active-empty, .workshop-pending-empty
+cae8c1fae4cb  .workshop-peer-add
+20ae16361338  .workshop-peer-url
+6b90b7ceaca2  .workshop-advanced-title
+11593be6ad1e  .workshop-advanced-toggle
+ff9b6fe78a40  .workshop-settings .skill-row-side .tiny.primary, .workshop-settings .pack-row-side .tiny.primary
+c44008f7e87f  .workshop-section-title:focus
+fe56f8011506  .workshop-section-title:focus-visible
+93e5d15d24f6  .workshop-settings
+5c3b25dae71d  .workshop-settings .workshop-section-title.section-label, .workshop-section-title.section-label
+5642aa0c3bb8  .workshop-catalog-empty
+c804002a4185  .workshop-advanced
+4d15d63f7dcb  .workshop-add
+2437cf6e39f4  .workshop-add .settings-search
+476623ea15e2  .workshop-pack
+aa75644121bb  .workshop-pack > .row-meta
+4f442ab9fd86  .workshop-pack strong .row-meta
+3dc22ecab666  .workshop-collector .tiny
+afa554868404  .workshop-collector
+5fe08f2244ec  .workshop-settings .pack-row
+88fb08178ce7  .workshop-settings .pack-row.is-expanded
+b851031f6236  .workshop-row-chrome
+862964d2ef02  .workshop-row-action-slot
+ff9b6fe78a40  .workshop-row-action-slot .tiny.primary
+14e35aaac74d  .workshop-turn-on-quiet
+3b76d74de133  .workshop-turn-on-quiet:hover:not(:disabled)
+79076d7ca1ca  .workshop-row-hit
+52e3bb499b6a  .workshop-row-hit .workshop-pack-mark
+88c42195c5ad  .workshop-row-hit:hover .workshop-row-title
+11c2d4338333  .workshop-pack-mark
+eca859d622c1  .workshop-row-copy
+938c9e70951a  .workshop-row-title
+3471be0ccdc2  .workshop-row-one-liner
+a93c33507fc3  .workshop-row-detail
+c7009853f77a  .workshop-row-detail > .row-meta, .workshop-row-detail > .workshop-pack-summary
+ad30b407a0f3  .workshop-pack-summary
+1c8ec610813f  .workshop-row-actions
+87c688c10487  .workshop-row-more
+c41e99d27bc4  .workshop-row-more > summary
+6e22c58a7a6a  .workshop-row-more > summary::-webkit-details-marker
+6e7202d3fced  .workshop-row-more[open] > summary
+0d495f855f0d  .workshop-rail .workshop-law
+72ad70bd7fea  .workshop-confirm
+26e4f19b0d88  .workshop-confirm select
+fa5e04d3b703  .workshop-sources-label
+c550b8c1677a  .workshop-sources
+497eb6eb80fe  .workshop-sources label
+3d3a6fa367bd  .workshop-sources strong
+02419cffd4a2  .workshop-sources .row-meta
+272012ca206e  .workshop-url
+93e5d15d24f6  .workshop-settings
+6e7202d3fced  .workshop-invite-head
+9c30e9dcf1d7  .workshop-empty-on
+757204c3dfaa  .workshop-empty-on .workshop-active-empty
+55e0cd3db5a4  .workshop-settings .pack-row.pack-card
+d23a7572616c  .workshop-settings .pack-row.pack-card.is-expanded
+d2a2c32afc65  .workshop-settings .pack-row.pack-card .workshop-row-one-liner
+22bf918435dd  .workshop-catalog-search
+4efc9de4bd56  .workshop-settings .pack-card-grid
+8e5f7e7bd9e1  .workshop-settings .pack-card-grid > .pack-row.pack-card
+2dea5d1b61f3  .workshop-pack-status
+1b69e69c7960  .workshop-grant-refuse
+f27b77866727  .workshop-grant-refuse .row-meta
+020fc4a5d8c7  .workshop-catalog-no-match
+50faa1174072  .bot-offered
+e00e9d92f07e  .bot-offered > .row-meta
+4b091930cfba  .bot-offered-row
+7b695570c5c3  .bot-offered-pick
+1d6b6c299b5d  .bot-offered-pick strong
+8755f33f50d1  .bot-offered-row .actions
+abaf087ce041  .bot-offered-ok
+73750255c6d0  .bot-offered-failed
+baf2fda59eac  .claude-sign-in
+b98d565a4cf4  .claude-sign-in .actions
+52ffe45fe10c  .claude-sign-in-paste
+9c8f8ebbd12d  .claude-sign-in-paste code
+05092d400317  .claude-sign-in-paste input

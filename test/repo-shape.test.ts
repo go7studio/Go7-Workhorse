@@ -257,6 +257,7 @@ const READS_THE_TREE_AS_TEXT = [
   "test/horse-status.test.ts", // preview-gone and sidebar size pins: reads horse CSS/Settings as text
   "test/idle-desk-paints-nothing.test.ts", // idle paint tripwire: reads the desk stylesheets as text
   "test/one-scale-per-thing.test.ts", // scale caps: counts the values the stylesheets declare
+  "test/the-split-drops-no-rule.test.ts", // rule census: reads the twelve surface sheets as text
 ];
 
 /** A string literal that resolves into the product: `"../src/…"` or `"../electron/…"`. */

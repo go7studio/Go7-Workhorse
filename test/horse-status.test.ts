@@ -25,3 +25,36 @@ test("sidebar horses are smaller than the header mark; the motion preview is gon
   assert.doesNotMatch(css, /\.horse-demo/);
   assert.doesNotMatch(profile, /horse-status|zoom:\s*0\.75/);
 });
+
+test("a status horse paints in its own bot's ink, not one silhouette for every vendor", () => {
+  const css = readFileSync(path.join(ROOT, "src", "styles", "horse-status.css"), "utf8");
+  const horse = readFileSync(path.join(ROOT, "src", "ui", "HorseStatus.tsx"), "utf8");
+  const chatRow = readFileSync(path.join(ROOT, "src", "ui", "ChatRow.tsx"), "utf8");
+  const crewTray = readFileSync(path.join(ROOT, "src", "ui", "CrewTray.tsx"), "utf8");
+
+  // The sprite is a mask so the fill can be any colour the user picked. It was
+  // `filter: brightness(0)`, inverted to white on dark: a filter chain reaches
+  // black and white and nothing else, so every vendor wore the same silhouette
+  // and the ink the component already passed down was never painted.
+  assert.match(css, /\.horse-fragment\s*\{[^}]*background-color:\s*var\(--horse-vendor/);
+  assert.match(css, /\.horse-fragment\s*\{[^}]*mask-image:\s*var\(--horse-image\)/);
+  // Against declarations, not prose: the comment above that rule names the
+  // filter it replaced, and a raw match would read the explanation as the bug.
+  assert.doesNotMatch(css.replace(/\/\*[\s\S]*?\*\//g, ""), /filter:\s*brightness\(0\)/);
+
+  // The ink has to survive the trip: the component writes the property, and
+  // both callers hand it a desk ink rather than letting it fall to tertiary.
+  assert.match(horse, /"--horse-vendor":\s*ink/);
+  assert.match(chatRow, /<HorseStatus[^>]*ink=/);
+  assert.match(crewTray, /<HorseStatus[^>]*ink=\{deskInk\(/);
+
+  // The whole mascot sits outside the cube grid and inherits no cell, so its
+  // mask arithmetic needs a default column and row or it resolves to nothing.
+  assert.match(css, /\.horse-status\s*\{[^}]*--col:\s*0;\s*--row:\s*0/);
+
+  // No theme opts out. The Workhorse theme used to paint the sprite as a
+  // picture, which is the one way a horse can be on screen and still not say
+  // whose it is — and it is the theme this desk actually runs on.
+  assert.doesNotMatch(css, /\[data-theme=[^\]]*\][^{]*\.horse-fragment/);
+  assert.doesNotMatch(css.replace(/\/\*[\s\S]*?\*\//g, ""), /background-image/);
+});

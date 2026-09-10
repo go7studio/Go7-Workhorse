@@ -20,9 +20,10 @@ When you add a feature, add it here in the same commit.
 - Only working and needs-you keep moving, and a chat at rest holds still, so a
   desk of idle chats paints nothing.
 - Only the failed mound overlaps. Every other motion keeps the pieces separated.
-- Light and dark themes use contrasting silhouettes, Workhorse keeps its mascot
-  colours, sidebar horses sit smaller than the header mark, and reduced-motion
-  preferences keep static poses.
+- The mascot wears its own bot's colour on every theme, so a row says which bot
+  is working before you read it. That is the colour set for the bot in Settings,
+  falling back to the vendor's own. Sidebar horses sit smaller than the header
+  mark, and reduced-motion preferences keep static poses.
 
 ## Bots and logins
 

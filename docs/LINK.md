@@ -168,6 +168,16 @@ fields. That is what lets one reader serve both paths. No route carries a
 credential, an environment value or attachment bytes. The desk drops those
 before it answers, so a helper never holds them at all.
 
+Each projector in `src/lib/link-read.ts` names the fields it copies and copies
+nothing else, down through every field that carries a shape of its own: the
+session row, its run, its findings, its mission, the settings, each bot, each
+local compute host, each ledger line, each plan and each external task. A field
+added to any of them cannot reach a helper until someone writes its name there.
+The scrub that drops any key called `apiKey`, `credentialId`, `env`, `token`,
+`bearer`, `secret`, `tokenFile`, `bookmark` or `data` runs after that, as the
+second net rather than the first, and a shape nested deeper than the scrub will
+walk is dropped rather than passed through.
+
 When the desk is down the helper reads the saved file, as it did before, and
 `desk` is `offline`. A desk that cannot answer a route does the same. Both
 paths run the same reader, so the answers match.

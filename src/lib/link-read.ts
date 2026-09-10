@@ -1,4 +1,4 @@
-import type { ChatMessage, Session, UsageEvent } from "./types";
+import type { ChatMessage, Session } from "./types";
 
 /**
  * A Link helper reads through the desk while the desk is up.
@@ -11,6 +11,13 @@ import type { ChatMessage, Session, UsageEvent } from "./types";
  * Every reply here is a subset of the saved shape: same field names, fewer
  * fields. That is the whole contract. It lets one reader serve both paths, so
  * when the desk is down the helper parses the file and the same code runs on it.
+ *
+ * Every projector is an allowlist. Each one names the fields it copies and
+ * copies nothing else, so a field added to a session, a bot or the settings
+ * later cannot reach a helper until someone writes its name here. A field that
+ * carries a shape of its own gets its own list, so no projector copies an
+ * object it has not read. `scrubLinkRead` runs after that as the second net,
+ * for a value that arrives under a field the desk did not write.
  */
 
 export const LINK_READ_ROUTES = ["chats", "chat", "capacity", "status"] as const;
@@ -58,10 +65,20 @@ export type LinkReadState = {
 export type LinkReadRequest = { route: LinkReadRoute; id: string; limit?: number };
 
 /**
- * Keys that never leave the desk on a read route. The projectors below are
- * allowlists already, so this is the second latch: a field added to a session
- * or a project later cannot ride out on a snapshot without someone reading this
- * list first.
+ * Keys that never leave the desk on a read route.
+ *
+ * The second latch, not the first. Every projector below names the fields it
+ * copies, so a credential can only reach a helper if an allowlist asks for its
+ * field AND this list does not know the name. This catches the case where
+ * someone widens an allowlist without thinking, and it catches a value that
+ * arrives under a field the desk itself did not write.
+ *
+ * Read against `src/lib/types.ts` end to end: every other field whose name or
+ * comment says credential, token, key, secret, password, bearer, cookie, env or
+ * a path to one of those is already here. Deliberately absent are the counters
+ * (`tokenBudget`, `usedTokens`, `inputTokens`, `cacheReadTokens`) and the ids
+ * that only read like keys: `idempotencyKey` is a request id,
+ * `PermissionGrant.key` is a normalized scope, `lockKeys` names bots.
  */
 const NEVER_SENT = new Set([
   "apiKey",
@@ -79,15 +96,35 @@ const NEVER_SENT = new Set([
   "authorization",
   "bookmark",
   "data",
+  // Settings.localCompute.hosts[].tokenFile. A path to a host's token file is
+  // not a token, and it still has no business in a reply.
+  "tokenFile",
 ]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
-/** Drop a credential, an environment value or attachment bytes wherever they sit. */
+/** How deep the scrub walks before it stops trusting what it is looking at. */
+export const LINK_SCRUB_MAX_DEPTH = 12;
+
+/** What a shape past the depth cap becomes. Never the shape itself. */
+export const LINK_SCRUB_TOO_DEEP = "[too deep to scrub]";
+
+/**
+ * Drop a credential, an environment value or attachment bytes wherever they sit.
+ *
+ * Past the cap the walk stops, so a record or a list below it would travel with
+ * its keys never read: thirteen wraps around an `apiKey` used to be enough to
+ * carry one out. A cap has to drop what it cannot check, so a shape that deep
+ * becomes a marker string and a reader sees plainly that something was cut. A
+ * scalar is kept, because its own key was already tested one level up and a
+ * scalar hides nothing beneath it.
+ */
 export function scrubLinkRead<T>(value: T, depth = 0): T {
-  if (depth > 12) return value;
+  if (depth > LINK_SCRUB_MAX_DEPTH) {
+    return (isRecord(value) || Array.isArray(value) ? LINK_SCRUB_TOO_DEEP : value) as unknown as T;
+  }
   if (Array.isArray(value)) return value.map((item) => scrubLinkRead(item, depth + 1)) as unknown as T;
   if (!isRecord(value)) return value;
   const out: Record<string, unknown> = {};
@@ -96,6 +133,28 @@ export function scrubLinkRead<T>(value: T, depth = 0): T {
     out[key] = scrubLinkRead(item, depth + 1);
   }
   return out as unknown as T;
+}
+
+/**
+ * Copy the named fields and nothing else.
+ *
+ * Every list handed to this holds scalars and lists of scalars only. A field
+ * that carries a shape of its own (`agentRun`, `routingDecision`, `hosts`) gets
+ * its own list and its own call, so no projector ever copies an object it has
+ * not read.
+ */
+function pick(source: Record<string, unknown>, fields: readonly string[]): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const field of fields) {
+    if (source[field] !== undefined) out[field] = source[field];
+  }
+  return out;
+}
+
+/** `pick` over a list of rows, dropping anything that is not a row. */
+function pickRows(source: unknown, fields: readonly string[]): Record<string, unknown>[] | undefined {
+  if (!Array.isArray(source)) return undefined;
+  return source.filter(isRecord).map((row) => pick(row, fields));
 }
 
 /** `/link/chats`, `/link/chat/:id`, `/link/capacity`, `/link/status/:id`. */
@@ -215,23 +274,120 @@ function sessionMessages(session: LooseMessage): LooseMessage[] {
 }
 
 /**
+ * Every scalar a session row carries on a read route.
+ *
+ * An allowlist, not a filter. A field added to `Session` later cannot reach a
+ * helper until its name is written here, whatever it is called. Each name is
+ * here because a reader on one of the four routes asks for it: `catalogSessions`
+ * decides which chats are listed and how each row prints, and
+ * `workerStatusSnapshot` prints a worker's own row.
+ *
+ * What is not here is the weight and the desk's own business: the transcript
+ * and its attachments, the composer draft, the vendor session handle, the
+ * lineup, the plan, the ledger, the permission grants, the environment. No
+ * reader on these routes asks for any of it.
+ */
+const SESSION_FIELDS = [
+  "id",
+  "parentId",
+  "projectId",
+  "title",
+  "workerName",
+  "hidden",
+  "archivedAt",
+  "provider",
+  "model",
+  "customBotId",
+  "effort",
+  "mode",
+  "status",
+  "routingMode",
+] as const;
+
+/** `RoutingDecision`: why Auto picked this bot. All scalars. */
+const ROUTING_DECISION_FIELDS = [
+  "at",
+  "taskTier",
+  "provider",
+  "model",
+  "effort",
+  "customBotId",
+  "score",
+  "reason",
+  "usedPercent",
+  "expectedUsedPercent",
+] as const;
+
+/** `WorkerFinding`: the fixed review receipt. */
+const FINDING_FIELDS = ["severity", "title", "file", "evidence"] as const;
+
+/** `MissionIteration`: the campaign a worker is carrying. */
+const MISSION_FIELDS = [
+  "id",
+  "mode",
+  "objective",
+  "acceptanceCriteria",
+  "iteration",
+  "maxIterations",
+  "previousWorkerIds",
+  "phase",
+] as const;
+
+/**
+ * `AgentRun`, as the four routes read it: `workerStatusSnapshot` prints it,
+ * `workerProgressCheckpoint` dates it, `deskRoleOf` reads the role, and the
+ * completion watch settles a worker on status, `finishedAt` and `correlationId`.
+ *
+ * The budget meters, the granted seat and the skills a worker was handed are
+ * the desk's own and stay there.
+ */
+const AGENT_RUN_FIELDS = [
+  "status",
+  "startedAt",
+  "finishedAt",
+  "error",
+  "role",
+  "correlationId",
+  "changedFiles",
+  "exclusions",
+  "executionOwner",
+  "takeoverReason",
+  "usedTokens",
+  "budgetPhase",
+] as const;
+
+function compactAgentRun(run: unknown): LooseMessage | undefined {
+  if (!isRecord(run)) return undefined;
+  const findings = pickRows(run.findings, FINDING_FIELDS);
+  const mission = isRecord(run.mission) ? pick(run.mission, MISSION_FIELDS) : undefined;
+  return {
+    ...pick(run, AGENT_RUN_FIELDS),
+    ...(findings ? { findings } : {}),
+    ...(mission ? { mission } : {}),
+  };
+}
+
+/**
  * One session row minus its weight. Attachments and composer drafts never
  * travel. The queue keeps the ids the preview filters on, nothing else.
+ *
+ * The row is built by naming what goes on it, so nothing rides out because a
+ * spread carried it. The scrub after is the second net, not the first.
  */
 function compactSession(session: LooseMessage, messages: LooseMessage[], count: number): LooseMessage {
-  const {
-    messages: _messages,
-    queue: _queue,
-    composerImages: _composerImages,
-    ...rest
-  } = session;
   const queue = Array.isArray(session.queue)
     ? (session.queue as LooseMessage[])
         .filter(isRecord)
         .map((item) => (typeof item.userMessageId === "string" ? { userMessageId: item.userMessageId } : {}))
     : undefined;
+  const run = compactAgentRun(session.agentRun);
+  const routing = isRecord(session.routingDecision)
+    ? pick(session.routingDecision, ROUTING_DECISION_FIELDS)
+    : undefined;
   return scrubLinkRead({
-    ...rest,
+    ...pick(session, SESSION_FIELDS),
+    ...(routing ? { routingDecision: routing } : {}),
+    ...(run ? { agentRun: run } : {}),
     messages,
     messageCount: count,
     ...(queue ? { queue } : {}),
@@ -282,6 +438,240 @@ function compactProjects(projects: unknown): unknown[] {
   }));
 }
 
+/** A map the desk keyed itself, holding plain values. A shape under a key is dropped. */
+function scalarMap(source: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(source)) {
+    if (value === null || typeof value !== "object") out[key] = value;
+  }
+  return out;
+}
+
+/** `UsageEvent`: one line of the desk ledger. All scalars. */
+const USAGE_FIELDS = [
+  "id",
+  "at",
+  "provider",
+  "model",
+  "projectId",
+  "sessionId",
+  "customBotId",
+  "inputTokens",
+  "outputTokens",
+  "cacheReadTokens",
+  "cacheWriteTokens",
+  "costUsd",
+  "contextUsed",
+  "source",
+  "lane",
+] as const;
+
+/** The ledger lines one route asked for, each cut to the fields above. */
+function compactUsage(usage: unknown, keep: (event: Record<string, unknown>) => boolean): Record<string, unknown>[] {
+  if (!Array.isArray(usage)) return [];
+  return usage.filter(isRecord).filter(keep).map((event) => pick(event, USAGE_FIELDS));
+}
+
+/** `LlmLink`: whether a stock vendor is here and whether the desk can start it. */
+const LLM_LINK_FIELDS = [
+  "connected",
+  "enabled",
+  "available",
+  "needsAuth",
+  "launchable",
+  "launchBlocker",
+  "name",
+  "color",
+] as const;
+
+/**
+ * `CustomLlm`: the legacy single custom connection.
+ *
+ * `discovered` is what a provider last offered and is never saved on the bot,
+ * so it is not sent either.
+ */
+const CUSTOM_LLM_FIELDS = [
+  "connected",
+  "baseUrl",
+  "model",
+  "contextWindow",
+  "api",
+  "source",
+  "name",
+  "color",
+  "tested",
+  "models",
+] as const;
+
+/** `CustomBot`: the roster row `deskCallCatalog` prints and meters. */
+const CUSTOM_BOT_FIELDS = [
+  "id",
+  "name",
+  "color",
+  "baseUrl",
+  "model",
+  "models",
+  "api",
+  "contextWindow",
+  "createdAt",
+  "enabled",
+] as const;
+
+const WATCH_FIELDS = [
+  "dailyLimitPercent",
+  "lockDaily",
+  "desktopNotify",
+  "lockKeys",
+  "blockSpentSpawns",
+  "spentPercent",
+] as const;
+
+const ROUTING_FIELDS = [
+  "enabled",
+  "capacityAware",
+  "preferExcess",
+  "allowLocal",
+  "reservePercent",
+  "includeExternalAgents",
+] as const;
+
+const LEARNING_FIELDS = [
+  "mode",
+  "compilerProvider",
+  "compilerModel",
+  "compilerEffort",
+  "compilerCustomBotId",
+  "autoRetrieve",
+] as const;
+
+/** `LocalComputeHostSettings` minus `tokenFile`, which is where a host's token lives. */
+const LOCAL_HOST_FIELDS = ["id", "label", "baseUrl", "enabled", "allowedCallerRoles", "allowedCapabilities"] as const;
+
+/**
+ * Settings for a capacity read: the bots, their meters and the watch that holds
+ * them. Named field by field, because this is the object that holds every key
+ * the desk owns.
+ *
+ * `mcpServers` is gone entirely. It carries `env`, `envCredentialIds` and a
+ * command line that routinely has a key in `args`, and no reader on this route
+ * asks for it. `profile` is the person's own name and nothing reads that here.
+ * `access`, `skills`, `agentSystems` and `workshop` are the desk's own settings;
+ * `normalizeSettings` fills each with its default when it is absent, so a
+ * reader gets the same answer either way.
+ */
+function compactSettings(settings: unknown): LooseMessage | undefined {
+  if (!isRecord(settings)) return undefined;
+  const llms = isRecord(settings.llms) ? settings.llms : undefined;
+  const stock: LooseMessage = {};
+  for (const id of ["grok", "claude", "codex", "cursor"] as const) {
+    const link = llms && isRecord(llms[id]) ? llms[id] : undefined;
+    if (link) stock[id] = pick(link as Record<string, unknown>, LLM_LINK_FIELDS);
+  }
+  const custom = llms && isRecord(llms.custom) ? pick(llms.custom, CUSTOM_LLM_FIELDS) : undefined;
+  const hosts = isRecord(settings.localCompute) ? pickRows(settings.localCompute.hosts, LOCAL_HOST_FIELDS) : undefined;
+  return {
+    llms: { ...stock, ...(custom ? { custom } : {}) },
+    customBots: pickRows(settings.customBots, CUSTOM_BOT_FIELDS) ?? [],
+    ...(isRecord(settings.usageBudgets) ? { usageBudgets: scalarMap(settings.usageBudgets) } : {}),
+    ...(isRecord(settings.watch) ? { watch: pick(settings.watch, WATCH_FIELDS) } : {}),
+    ...(isRecord(settings.routing) ? { routing: pick(settings.routing, ROUTING_FIELDS) } : {}),
+    ...(isRecord(settings.learning) ? { learning: pick(settings.learning, LEARNING_FIELDS) } : {}),
+    ...(hosts
+      ? {
+          localCompute: {
+            ...(isRecord(settings.localCompute) && settings.localCompute.version !== undefined
+              ? { version: settings.localCompute.version }
+              : {}),
+            hosts,
+          },
+        }
+      : {}),
+  };
+}
+
+/** `GrokPlanProduct`: one metered window inside a plan. */
+const PLAN_PRODUCT_FIELDS = ["product", "label", "usagePercent", "resetsAt", "unlimited"] as const;
+
+/** `GrokPlanUsage`: the official leftover the rings print. */
+const PLAN_FIELDS = ["usedPercent", "leftPercent", "period", "resetsAt", "observedAt", "prepaidBalance"] as const;
+
+function compactPlan(plan: unknown): LooseMessage | undefined {
+  if (!isRecord(plan)) return undefined;
+  const products = pickRows(plan.products, PLAN_PRODUCT_FIELDS);
+  return { ...pick(plan, PLAN_FIELDS), ...(products ? { products } : {}) };
+}
+
+function compactDeskPlans(plans: unknown): LooseMessage | undefined {
+  if (!isRecord(plans)) return undefined;
+  const out: LooseMessage = {};
+  for (const id of ["grok", "codex", "claude", "cursor"] as const) {
+    const plan = compactPlan(plans[id]);
+    if (plan) out[id] = plan;
+  }
+  if (isRecord(plans.custom)) {
+    const custom: LooseMessage = {};
+    for (const [id, plan] of Object.entries(plans.custom)) {
+      const row = compactPlan(plan);
+      if (row) custom[id] = row;
+    }
+    out.custom = custom;
+  }
+  return out;
+}
+
+/** `WatchPermit`: who was let past the daily bank, and for how long. */
+const WATCH_PERMIT_FIELDS = ["untilReset", "day"] as const;
+
+function compactWatchPermits(permits: unknown): LooseMessage | undefined {
+  if (!isRecord(permits)) return undefined;
+  const out: LooseMessage = {};
+  for (const [key, permit] of Object.entries(permits)) {
+    if (!isRecord(permit)) continue;
+    const sessions = isRecord(permit.sessions) ? scalarMap(permit.sessions) : undefined;
+    out[key] = { ...pick(permit, WATCH_PERMIT_FIELDS), ...(sessions ? { sessions } : {}) };
+  }
+  return out;
+}
+
+/** `WatchDayMark`: where a vendor's leftover stood when the day turned. */
+const DAY_MARK_FIELDS = ["day", "leftover"] as const;
+
+function compactWatchDayMarks(marks: unknown): LooseMessage | undefined {
+  if (!isRecord(marks)) return undefined;
+  const out: LooseMessage = {};
+  for (const [key, mark] of Object.entries(marks)) {
+    if (isRecord(mark)) out[key] = pick(mark, DAY_MARK_FIELDS);
+  }
+  return out;
+}
+
+/** `ExternalTask`: one slice sent out to OpenClaw or Hermes. */
+const EXTERNAL_TASK_FIELDS = [
+  "id",
+  "status",
+  "startedAt",
+  "finishedAt",
+  "workspace",
+  "result",
+  "evidence",
+  "grantId",
+] as const;
+
+const EXTERNAL_REF_FIELDS = ["runtimeId", "agentId"] as const;
+
+const ENVELOPE_FIELDS = ["traceId", "idempotencyKey", "origin", "visitedSystems", "hopCount"] as const;
+
+function compactExternalTask(task: unknown): LooseMessage | undefined {
+  if (!isRecord(task)) return undefined;
+  const ref = isRecord(task.ref) ? pick(task.ref, EXTERNAL_REF_FIELDS) : undefined;
+  const envelope = isRecord(task.envelope) ? pick(task.envelope, ENVELOPE_FIELDS) : undefined;
+  return {
+    ...pick(task, EXTERNAL_TASK_FIELDS),
+    ...(ref ? { ref } : {}),
+    ...(envelope ? { envelope } : {}),
+  };
+}
+
 function sessionsOf(state: LinkReadState): LooseMessage[] {
   return Array.isArray(state.sessions) ? (state.sessions as LooseMessage[]).filter(isRecord) : [];
 }
@@ -329,22 +719,23 @@ export function projectLinkChat(
 }
 
 /**
- * `/link/capacity`: plans, permits, day marks and the recent ledger. Settings
- * travel without their keys, and every bot keeps the fields the roster prints.
+ * `/link/capacity`: plans, permits, day marks and the recent ledger. Every
+ * field on every one of them is named above, and the scrub is the net after.
  */
 export function projectLinkCapacity(state: LinkReadState, from = "", now = Date.now()): LinkReadState {
   const since = now - LINK_CAPACITY_USAGE_DAYS * 24 * 60 * 60 * 1000;
-  const usage = Array.isArray(state.usage)
-    ? (state.usage as UsageEvent[]).filter((event) => isRecord(event) && typeof event.at === "number" && event.at >= since)
-    : [];
+  const usage = compactUsage(state.usage, (event) => typeof event.at === "number" && event.at >= since);
   const sessions = sessionsOf(state);
   const caller = callerRow(sessions, from);
+  const plans = compactDeskPlans(state.deskPlans);
+  const permits = compactWatchPermits(state.watchPermits);
+  const dayMarks = compactWatchDayMarks(state.watchDayMarks);
   return {
-    settings: scrubLinkRead(state.settings),
+    settings: scrubLinkRead(compactSettings(state.settings)),
     usage: scrubLinkRead(usage),
-    ...(state.deskPlans === undefined ? {} : { deskPlans: scrubLinkRead(state.deskPlans) }),
-    ...(state.watchPermits === undefined ? {} : { watchPermits: scrubLinkRead(state.watchPermits) }),
-    ...(state.watchDayMarks === undefined ? {} : { watchDayMarks: scrubLinkRead(state.watchDayMarks) }),
+    ...(plans ? { deskPlans: scrubLinkRead(plans) } : {}),
+    ...(permits ? { watchPermits: scrubLinkRead(permits) } : {}),
+    ...(dayMarks ? { watchDayMarks: scrubLinkRead(dayMarks) } : {}),
     ...(caller ? { sessions: [caller] } : {}),
   };
 }
@@ -358,12 +749,10 @@ export function projectLinkStatus(state: LinkReadState, id: string, from = ""): 
   const sessions = sessionsOf(state);
   const keep = new Set([wanted, from.trim()].filter(Boolean));
   const rows = sessions.map((session) => (keep.has(String(session.id)) ? listSession(session) : treeSession(session)));
-  const usage = Array.isArray(state.usage)
-    ? (state.usage as UsageEvent[]).filter((event) => isRecord(event) && event.sessionId === wanted)
-    : [];
+  const usage = compactUsage(state.usage, (event) => event.sessionId === wanted);
   const tasks = isRecord(state.externalTasks) ? state.externalTasks : null;
   const byId = tasks && isRecord(tasks.byId) ? tasks.byId : null;
-  const task = byId && isRecord(byId[wanted]) ? byId[wanted] : null;
+  const task = byId ? compactExternalTask(byId[wanted]) : undefined;
   return {
     sessions: rows,
     usage: scrubLinkRead(usage),

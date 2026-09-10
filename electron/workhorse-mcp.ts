@@ -53,6 +53,7 @@ import {
   MISSION_CAP_PREFIX,
   resolveWorkerIsolation,
   shouldSpawnInsteadOfAsk,
+  spawnTurnOf,
   SPAWN_ONLY_PROMPT_ERROR,
   withFollowThrough,
   listedChatFollowThrough,
@@ -2081,6 +2082,9 @@ type SpawnCaller = {
   hidden?: boolean;
   projectId?: string | null;
   crewModes?: string[];
+  /** Read only for the turn a spawn was called on. See spawnTurnOf. */
+  messages?: Array<{ id?: string; role?: string; text?: string }>;
+  queue?: Array<{ userMessageId?: string }>;
   lineup?: { mission?: MissionIteration; rows?: Array<{ childId?: string; status?: string }> };
   agentRun?: { mission?: MissionIteration; paths?: string[]; tokenBudget?: number; usedTokens?: number };
   environment?: SessionEnvironment;
@@ -2356,6 +2360,12 @@ async function spawnAgent(
         folder: spawnInput.folder,
         prompt: spawnInput.prompt,
         allowNested: isNested,
+        // Every door into this function is a tool a model can call — spawn,
+        // delegate, continue_mission, local_continue, an ask that resolves to
+        // a spawn — so the turn is read here, once, for all of them. A door
+        // that had to ask to be held was a door that could forget to.
+        turn: spawnTurnOf(caller),
+        deskLoop: isLinkProfile(),
         folderExists: (value) => {
           try {
             return fs.existsSync(value) && fs.statSync(value).isDirectory();

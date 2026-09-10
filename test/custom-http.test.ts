@@ -224,6 +224,7 @@ import {
 import {
   CUSTOM_HTTP_PEER_HINT,
   CUSTOM_HTTP_SESSION_RULES,
+  DESK_SPAWN_LAW,
   looksLikePeerRequest,
   withCustomPeerHint,
 } from "../src/lib/workhorse-rules";
@@ -1281,7 +1282,11 @@ test("MiniMax Anthropic request and stream usage parse", async () => {
   });
   assert.equal(body.model, "MiniMax-M3");
   assert.equal(body.stream, true);
-  assert.equal(body.system, "Stay in the project.");
+  // The system block rides every request, so it goes as a cacheable text
+  // block in the shape Anthropic documents, not a bare string.
+  assert.deepEqual(body.system, [
+    { type: "text", text: "Stay in the project.", cache_control: { type: "ephemeral" } },
+  ]);
   assert.deepEqual(body.thinking, { type: "enabled", budget_tokens: 8192 });
   assert.equal(body.max_tokens, 8192 + 4096);
   assert.ok((body.max_tokens as number) > 8192);
@@ -1964,22 +1969,22 @@ test("custom HTTP request includes tools and parses tool_use then gates by sandb
   assert.match(CUSTOM_HTTP_SESSION_RULES, /puts THIS chat/);
   assert.match(CUSTOM_HTTP_SESSION_RULES, /search likely folders first/i);
   assert.match(CUSTOM_HTTP_SESSION_RULES, /Documents, Desktop, and Projects/);
-  assert.match(CUSTOM_HTTP_SESSION_RULES, /If they name a drive or folder/);
-  assert.match(CUSTOM_HTTP_SESSION_RULES, /Do not ask the user for a path when a matching folder exists/);
+  assert.match(CUSTOM_HTTP_SESSION_RULES, /Search a named drive or folder now/);
+  assert.match(CUSTOM_HTTP_SESSION_RULES, /never ask the user for a path when a matching folder exists/);
   assert.match(CUSTOM_HTTP_SESSION_RULES, /Never delete this chat on a bulk list/);
   assert.match(CUSTOM_HTTP_SESSION_RULES, /onlyThis=true only when the user asked to delete this chat alone/);
   assert.match(CUSTOM_HTTP_SESSION_RULES, /After you ask the user to pick, stop/);
   assert.match(CUSTOM_HTTP_SESSION_RULES, /scope=loose/);
-  assert.match(CUSTOM_HTTP_SESSION_RULES, /Do not offer A\/B\/C/);
+  assert.match(CUSTOM_HTTP_SESSION_RULES, /do not offer A\/B\/C/);
   assert.match(CUSTOM_HTTP_SESSION_RULES, /workhorse_request_permission/);
   assert.match(CUSTOM_HTTP_SESSION_RULES, /only RAISES access/);
   assert.match(CUSTOM_HTTP_SESSION_RULES, /USER DECLINED/);
   assert.match(CUSTOM_HTTP_SESSION_RULES, /said no/);
-  assert.match(CUSTOM_HTTP_SESSION_RULES, /Do not ask which vendor/);
-  assert.match(CUSTOM_HTTP_SESSION_RULES, /that vendor is a no-go/);
-  assert.match(CUSTOM_HTTP_SESSION_RULES, /Do not call workhorse_request_vendor/);
-  assert.match(CUSTOM_HTTP_SESSION_RULES, /API key is on the desk/);
-  assert.match(CUSTOM_HTTP_SESSION_RULES, /If a vendor is not on the list/);
+  assert.match(DESK_SPAWN_LAW, /Do not ask which vendor/);
+  assert.match(DESK_SPAWN_LAW, /that vendor is a no-go/);
+  assert.match(DESK_SPAWN_LAW, /Do not call workhorse_request_vendor/);
+  assert.match(DESK_SPAWN_LAW, /API key is already on the desk/);
+  assert.match(DESK_SPAWN_LAW, /If a vendor is not on the list/);
   assert.match(CUSTOM_HTTP_SESSION_RULES, /does not need Allow/);
   assert.match(CUSTOM_HTTP_SESSION_RULES, /not limited by this chat’s Permission or Sandbox/);
   assert.doesNotMatch(CUSTOM_HTTP_SESSION_RULES, /pops a card|auto-approve|fetch failed/);
@@ -2080,7 +2085,7 @@ test("custom HTTP request includes tools and parses tool_use then gates by sandb
   assert.match(CUSTOM_HTTP_SESSION_RULES, /list_dir/);
   assert.match(CUSTOM_HTTP_SESSION_RULES, /Sandbox is Off \(machine-wide/);
   assert.match(CUSTOM_HTTP_SESSION_RULES, /exact name/);
-  assert.match(CUSTOM_HTTP_SESSION_RULES, /Only claim it exists if list_projects shows that name/);
+  assert.match(CUSTOM_HTTP_SESSION_RULES, /only tell the user it exists if that list shows the name and folder/);
   const listDir = customHttpTools().find((tool) => tool.name === "list_dir");
   assert.match(listDir?.description ?? "", /Omit path to list this chat/);
   assert.match(listDir?.description ?? "", /Sandbox is Off \(machine-wide\)/);

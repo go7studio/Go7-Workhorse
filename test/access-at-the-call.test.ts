@@ -364,11 +364,25 @@ test("the store seats a worker from the parent, not from the call", () => {
   assert.match(store, /if \(from\.hidden\) \{[\s\S]{0,3400}?const need = classified\.need;[\s\S]{0,600}?kind: "elevate",/);
 });
 
-test("the rules text tells a coordinator not to pass permission or sandbox", () => {
+test("the rules text tells a coordinator not to pass permission or sandbox", async () => {
   const rules = source("src", "lib", "workhorse-rules.ts");
   assert.match(rules, /Do not pass permission or sandbox on a spawn/);
   assert.match(rules, /You cannot raise, lower, or retune a worker's access from the call/);
-  assert.equal((rules.match(/SPAWN_ACCESS_LAW \+/g) ?? []).length, 3, "every coordinator surface carries it");
+  // Since S11 there is one spawn law, and every coordinator surface reaches it
+  // rather than keeping its own copy. Checked on the built text, not on how
+  // many times the source concatenates the constant.
+  const { DESK_SPAWN_LAW, SPAWN_TURN_HINT, withCrewModeHint, withSpawnHint } = await import(
+    "../src/lib/workhorse-rules"
+  );
+  assert.match(DESK_SPAWN_LAW, /Do not pass permission or sandbox on a spawn/);
+  for (const surface of [
+    SPAWN_TURN_HINT,
+    withSpawnHint("Spawn two agents to review this."),
+    withCrewModeHint("Do the work.", "orchestrate"),
+    withCrewModeHint("Do the work.", "mission"),
+  ]) {
+    assert.ok(surface.includes(DESK_SPAWN_LAW), "every coordinator surface carries it");
+  }
   assert.match(rules, /Do not pass permission or sandbox on a helper spawn/);
   assert.equal((rules.match(/HELPER_ACCESS_LAW \+/g) ?? []).length, 2, "both worker surfaces carry the short form");
 });

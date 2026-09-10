@@ -31,7 +31,13 @@ import type {
 } from "./types";
 import { sessionSpend } from "./usage";
 import { beginAssignmentBudget } from "./worker-budget";
-import { looksLikeWorkerBrief, type DeskRole } from "./workhorse-rules";
+import {
+  looksLikeWorkerBrief,
+  normalizeCrewModes,
+  SPAWN_LAW_MISSING_ERROR,
+  turnCarriesSpawnLaw,
+  type DeskRole,
+} from "./workhorse-rules";
 
 export type { DeskRole };
 
@@ -1521,6 +1527,42 @@ export function formatWorkerPrompt(input: WorkerBriefInput): string {
   return lines.join("\n");
 }
 
+/**
+ * The turn a model called workhorse_spawn_agent on: the user's own words and
+ * this chat's pins, which together decide whether DESK_SPAWN_LAW was injected.
+ * Both are already on the caller session, so nothing new has to be persisted.
+ */
+export type SpawnTurn = { text: string; crewModes?: readonly string[] | null };
+
+/**
+ * That turn, read off the caller session. Both doors call this rather than
+ * each picking their own last message: a queued prompt has not been through
+ * composeVendorPrompt yet, so a queued "spawn two reviewers" sitting behind a
+ * plain live turn never handed anybody the law and must not admit one.
+ */
+export function spawnTurnOf(
+  session:
+    | {
+        messages?: ReadonlyArray<{ id?: string; role?: string; text?: string }> | null;
+        queue?: ReadonlyArray<{ userMessageId?: string }> | null;
+        crewModes?: readonly string[] | null;
+      }
+    | null
+    | undefined,
+): SpawnTurn {
+  const messages = session?.messages ?? [];
+  const queued = new Set((session?.queue ?? []).map((item) => item.userMessageId).filter(Boolean));
+  let text = "";
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message?.role !== "user") continue;
+    if (message.id && queued.has(message.id)) continue;
+    text = message.text ?? "";
+    break;
+  }
+  return { text, crewModes: session?.crewModes ?? undefined };
+}
+
 export type SpawnAdmissionInput = {
   // `agentRun` is read here too: deskRoleOf uses it to spot an auditor parent.
   parent?: { parentId?: string | null; hidden?: boolean; projectId?: string | null; agentRun?: unknown } | null;
@@ -1529,6 +1571,26 @@ export type SpawnAdmissionInput = {
   prompt: string;
   folderExists?: (path: string) => boolean;
   allowNested?: boolean;
+  /**
+   * The turn this spawn was asked on, read off the caller session with
+   * `spawnTurnOf`. Every caller passes it. A door that forgets is refused,
+   * because a turn nobody can produce carried nothing.
+   */
+  turn?: SpawnTurn;
+  /**
+   * The whole exempt set, and it is short. Today it is the Link harness
+   * profile, which never opened with a desk core and so never had the law to
+   * lose; each door works that out from the profile it runs under rather than
+   * from anything the caller sent. A desk loop that ever spawns with no model
+   * turn behind it says so here, and that is the only way in.
+   *
+   * Every other caller is a door a model can reach — workhorse_delegate, an
+   * ask that resolves to a spawn, a mission continuation, a plan step — and
+   * the law is read for all of them. Opt out, never opt in: the first cut of
+   * this was a flag each door set to be held, and the doors that set nothing
+   * were the hole.
+   */
+  deskLoop?: boolean;
 };
 
 export type SpawnAdmission = { ok: true; cwd: string } | { ok: false; error: string };
@@ -1538,6 +1600,21 @@ export function admitSpawn(input: SpawnAdmissionInput): SpawnAdmission {
   if (parentRole === "auditor") return { ok: false, error: "Auditors cannot spawn." };
   if (parentRole === "helper") return { ok: false, error: WORKER_SPAWN_ERROR };
   if (parentRole === "worker" && !input.allowNested) return { ok: false, error: WORKER_SPAWN_ERROR };
+  // The refusal behind SPAWN_GATE_LAW. A chat whose turn never carried the
+  // spawn law still holds the tool and still reads a core that names it, and
+  // it cannot see which system text it did not receive, so the desk is the
+  // only thing that can turn the call away. A worker is exempt by role: its
+  // own rules carry the one-helper licence, and it never receives the law.
+  //
+  // Read for every caller, and an absent turn is an empty one. Held to the
+  // doors that asked to be held, this refused a model calling the spawn tool
+  // and admitted the same model calling workhorse_delegate one line later.
+  if (parentRole === "orchestrator" && !input.deskLoop) {
+    const turn = input.turn ?? { text: "" };
+    if (!turnCarriesSpawnLaw({ text: turn.text, crewMode: normalizeCrewModes(turn.crewModes) })) {
+      return { ok: false, error: SPAWN_LAW_MISSING_ERROR };
+    }
+  }
   if (isSpawnOnlyPrompt(input.prompt)) return { ok: false, error: SPAWN_ONLY_PROMPT_ERROR };
   const cwd = (input.folder ?? "").trim() || (input.projectFolder ?? "").trim();
   if (!cwd) return { ok: false, error: UNBOUND_SPAWN_ERROR };

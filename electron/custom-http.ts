@@ -369,7 +369,17 @@ export function buildAnthropicBody(input: {
     messages,
     tools: customHttpTools(input.tools, { role: input.role }),
   };
-  if (input.preface?.trim()) body.system = input.preface.trim();
+  if (input.preface?.trim()) {
+    /*
+     * The system block is the same core on every request in a chat, and only
+     * the messages after it move. Anthropic publishes caching on this block,
+     * so it is marked in the shape they document: a text block carrying
+     * cache_control. A host that does not honour it reads a plain text block
+     * and loses nothing. Chat Completions has no such marker to send, so the
+     * OpenAI body below keeps a plain system message.
+     */
+    body.system = [{ type: "text", text: input.preface.trim(), cache_control: { type: "ephemeral" } }];
+  }
   if (thinking) body.thinking = thinking;
   return body;
 }

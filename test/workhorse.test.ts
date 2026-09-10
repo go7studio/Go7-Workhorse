@@ -79,7 +79,7 @@ import { startWorkhorseBridge } from "../electron/workhorse-bridge";
 import { mediaFileCandidates } from "../electron/media-src";
 import { estimateChatContext, parseSessionContext } from "../src/lib/context-stats";
 import { buildSessionPreface, buildVendorPreface, composeVendorPrompt, withVendorPreface } from "../src/lib/context-preface";
-import { CREW_STATUS_HINT, CURSOR_SESSION_RULES, CUSTOM_HTTP_SESSION_RULES, DESK_BOT_TURN_HINT, LOOSE_DELETE_HINT, MISSION_MODE_HINT, ORCHESTRATE_MODE_HINT, SPAWN_TURN_HINT, WORKER_SESSION_RULES, crewModeLabel, looksLikeCrewImpatience, looksLikeDeskBotRequest, looksLikeGoalCommand, looksLikeLooseDeleteRequest, looksLikePermissionQuestion, looksLikePreviewQuestion, looksLikeSpawnRequest, looksLikeWorkerBrief, orderedCrewModes, PERMISSION_TURN_HINT, PREVIEW_TURN_HINT, toggleCrewMode, withCrewModeHint, withCrewStatusHint, withDeskBotHint, withLooseDeleteHint, withPermissionHint, withSpawnHint, withCustomPeerHint, CUSTOM_HTTP_PEER_HINT, CUSTOM_HTTP_WORKER_RULES } from "../src/lib/workhorse-rules";
+import { CREW_STATUS_HINT, CURSOR_SESSION_RULES, DESK_SPAWN_LAW, CUSTOM_HTTP_SESSION_RULES, DESK_BOT_TURN_HINT, LOOSE_DELETE_HINT, MISSION_MODE_HINT, ORCHESTRATE_MODE_HINT, SPAWN_TURN_HINT, WORKER_SESSION_RULES, crewModeLabel, looksLikeCrewImpatience, looksLikeDeskBotRequest, looksLikeGoalCommand, looksLikeLooseDeleteRequest, looksLikePermissionQuestion, looksLikePreviewQuestion, looksLikeSpawnRequest, looksLikeWorkerBrief, orderedCrewModes, PERMISSION_TURN_HINT, PREVIEW_TURN_HINT, toggleCrewMode, withCrewModeHint, withCrewStatusHint, withDeskBotHint, withLooseDeleteHint, withPermissionHint, withSpawnHint, withCustomPeerHint, CUSTOM_HTTP_PEER_HINT, CUSTOM_HTTP_WORKER_RULES } from "../src/lib/workhorse-rules";
 import { applySessionElevation, applySessionModelChange, applySessionPolicyChange, brainCaption, brainStamp, formatChatSidebar, isSessionIntro, messageBrain, normalizeMessage, normalizeSession, stampUnstampedMessages, vendorSessionForSend } from "../src/lib/session";
 import { workerSidebarLabel } from "../src/ui/ChatRow";
 import { buildAcpPrompt, droppedFromPickerFile, groupAttachments, imageMime, normalizeImages, shouldSkipDropDir } from "../src/lib/images";
@@ -2987,7 +2987,7 @@ test("session bridge lists, finds, and reads chats for peer tools", async () => 
   assert.match(WORKHORSE_SESSION_RULES, /workhorse_spawn_agent/);
   assert.match(WORKHORSE_SESSION_RULES, /workhorse_setup_custom_bot/);
   assert.doesNotMatch(WORKHORSE_SESSION_RULES, /importFrom=auto/);
-  assert.match(WORKHORSE_SESSION_RULES, /OpenClaw and Hermes are harnesses; do not spawn them from that list/);
+  assert.match(DESK_SPAWN_LAW, /OpenClaw and Hermes are harnesses; do not spawn them from that list/);
   assert.match(WORKHORSE_SESSION_RULES, /workhorse_add_reference/);
   assert.match(WORKHORSE_SESSION_RULES, /workhorse_create_project/);
   assert.match(WORKHORSE_SESSION_RULES, /workhorse_move_chat/);
@@ -3002,14 +3002,14 @@ test("session bridge lists, finds, and reads chats for peer tools", async () => 
   assert.match(WORKHORSE_SESSION_RULES, /After you ask the user to pick, stop/);
   assert.match(WORKHORSE_SESSION_RULES, /search likely folders first/i);
   assert.match(WORKHORSE_SESSION_RULES, /Documents, Desktop, and Projects/);
-  assert.match(WORKHORSE_SESSION_RULES, /If they name a drive or folder/);
-  assert.match(WORKHORSE_SESSION_RULES, /Do not ask the user for a path when a matching folder exists/);
+  assert.match(WORKHORSE_SESSION_RULES, /Search a named drive or folder now/);
+  assert.match(WORKHORSE_SESSION_RULES, /never ask the user for a path when a matching folder exists/);
   assert.match(WORKHORSE_SESSION_RULES, /Never delete this chat on a bulk list/);
   assert.match(WORKHORSE_SESSION_RULES, /onlyThis=true only when the user asked to delete this chat alone/);
   assert.match(WORKHORSE_SESSION_RULES, /not a file on disk/);
-  assert.match(WORKHORSE_SESSION_RULES, /Only tell the user it exists if that list shows/);
+  assert.match(WORKHORSE_SESSION_RULES, /only tell the user it exists if that list shows/);
   assert.doesNotMatch(WORKHORSE_SESSION_RULES, /sidebar project/);
-  assert.match(WORKHORSE_SESSION_RULES, /Do not call it a sidebar anything/);
+  assert.match(WORKHORSE_SESSION_RULES, /never a sidebar anything/);
   const publicLaw = [
     WORKHORSE_SESSION_RULES,
     CUSTOM_HTTP_SESSION_RULES,
@@ -3032,15 +3032,15 @@ test("session bridge lists, finds, and reads chats for peer tools", async () => 
   assert.match(WORKHORSE_SESSION_RULES, /do not fall back to reading source/);
   assert.match(WORKHORSE_SESSION_RULES, /sidebar subtitle/);
   assert.match(WORKHORSE_SESSION_RULES, /last user\/assistant snippet/);
-  assert.match(WORKHORSE_SESSION_RULES, /Archived and deleted chats/);
+  assert.match(WORKHORSE_SESSION_RULES, /archived and deleted chats/);
   assert.match(WORKHORSE_SESSION_RULES, /do not try a write to see if it fails/);
   assert.match(WORKHORSE_SESSION_RULES, /USER DECLINED/);
   assert.match(WORKHORSE_SESSION_RULES, /user said no for this chat/);
-  assert.match(WORKHORSE_SESSION_RULES, /Do not ask which vendor/);
-  assert.match(WORKHORSE_SESSION_RULES, /that vendor is a no-go/);
-  assert.match(WORKHORSE_SESSION_RULES, /Do not call workhorse_request_vendor/);
-  assert.match(WORKHORSE_SESSION_RULES, /API key is already on the desk|this chat’s own slot/);
-  assert.match(WORKHORSE_SESSION_RULES, /zero canCall rows/);
+  assert.match(DESK_SPAWN_LAW, /Do not ask which vendor/);
+  assert.match(DESK_SPAWN_LAW, /that vendor is a no-go/);
+  assert.match(DESK_SPAWN_LAW, /Do not call workhorse_request_vendor/);
+  assert.match(DESK_SPAWN_LAW, /API key is already on the desk|this chat’s own slot/);
+  assert.match(DESK_SPAWN_LAW, /zero canCall rows/);
   assert.match(WORKHORSE_SESSION_RULES, /never say no custom bot is attached/);
   assert.match(WORKHORSE_SESSION_RULES, /Turned-off vendors are omitted/);
   assert.match(WORKHORSE_SESSION_RULES, /Talking to an existing sidebar chat is always allowed/);
@@ -7489,7 +7489,7 @@ test("Grok /goal is not a desk spawn and keeps the typed slash", () => {
   // The rule must still hold both halves: no fan-out for a bare goal, and
   // desk workers when the objective asks for them.
   assert.match(WORKHORSE_SESSION_RULES, /Do not spawn workers for a \/goal that only names work/);
-  assert.match(WORKHORSE_SESSION_RULES, /asks for bots, workers, agents, or subagents, spawn them with workhorse_spawn_agent/);
+  assert.match(DESK_SPAWN_LAW, /asks for bots, workers, agents, or subagents, spawn them with workhorse_spawn_agent/);
   assert.equal(buildGrokLaunchSpec({ model: "grok-4.6", effort: "medium", cwd: ROOT, mode: "ask" }).sessionParams._meta?.goalMode, true);
 
   assert.equal(
@@ -9393,9 +9393,11 @@ test("composer + pins Orchestrate and Mission and those modes inject the bible",
   assert.ok(missioned.startsWith(MISSION_MODE_HINT));
   assert.match(MISSION_MODE_HINT, /not a request to spawn or summon agents/);
   assert.match(missioned, /workhorse_continue_mission/);
-  assert.doesNotMatch(missioned, new RegExp(SPAWN_TURN_HINT.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
-  assert.doesNotMatch(missioned, /The user asked you to spawn or summon agents/);
-  assert.doesNotMatch(missioned, /Call workhorse_list_bots now/);
+  // Mission spawns a wave and continues the rest, so it needs the spawn law.
+  // It used to take that law for free, from the bible every desk chat opened
+  // with; since S11 held the law out of the core, this pin asks for it by name.
+  assert.match(missioned, new RegExp(SPAWN_TURN_HINT.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.ok(missioned.indexOf(MISSION_MODE_HINT) < missioned.indexOf(SPAWN_TURN_HINT));
   const both = withCrewModeHint(review, ["orchestrate", "mission"]);
   assert.ok(both.startsWith(ORCHESTRATE_MODE_HINT));
   assert.match(both, new RegExp(MISSION_MODE_HINT.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
@@ -9412,14 +9414,12 @@ test("composer + pins Orchestrate and Mission and those modes inject the bible",
   assert.match(composed, /canCall/);
   const composedMission = composeVendorPrompt(review, WORKHORSE_SESSION_RULES, "session/load", { crewMode: "mission" });
   assert.match(composedMission, /workhorse_continue_mission/);
-  assert.doesNotMatch(composedMission, /The user asked you to spawn or summon agents/);
-  assert.doesNotMatch(composedMission, /Call workhorse_list_bots now/);
+  assert.match(composedMission, /The user asked you to spawn or summon agents/);
   const craft = "Brother you just put some weird wings on it, please make this unique different using the other crafts as references to create your perfect craft";
   assert.equal(looksLikeSpawnRequest(craft), false);
   const composedCraft = composeVendorPrompt(craft, WORKHORSE_SESSION_RULES, "session/load", { crewMode: "mission" });
   assert.match(composedCraft, /The user selected Mission on this chat/);
-  assert.doesNotMatch(composedCraft, /The user asked you to spawn or summon agents/);
-  assert.doesNotMatch(composedCraft, /Call workhorse_list_bots now/);
+  assert.match(composedCraft, /The user asked you to spawn or summon agents/);
   const composedSpawnMission = composeVendorPrompt(
     "please spawn subagents to review this",
     WORKHORSE_SESSION_RULES,
@@ -9571,10 +9571,14 @@ test("desk-enforced orchestrator vs worker lineup", async () => {
     ["list_dir", "workhorse_spawn_agent", "workhorse_await_agents", "workhorse_read_chat"],
   );
 
+  // Since S11 every caller is held to the turn it spawned on, so these carry
+  // the pin the folder rules were always tested under.
+  const turn = { text: "Read project.godot and say what this game is.", crewModes: ["orchestrate"] };
   const bound = admitSpawn({
     parent: { parentId: null },
     projectFolder: "D:\\Godot\\Projects\\demo-game",
     prompt: "Read project.godot and say what this game is.",
+    turn,
   });
   assert.equal(bound.ok, true);
   if (bound.ok) assert.equal(bound.cwd, "D:\\Godot\\Projects\\demo-game");
@@ -9582,6 +9586,7 @@ test("desk-enforced orchestrator vs worker lineup", async () => {
   const unbound = admitSpawn({
     parent: { parentId: null },
     prompt: "Read project.godot and say what this game is.",
+    turn,
   });
   assert.equal(unbound.ok, false);
   if (!unbound.ok) assert.equal(unbound.error, UNBOUND_SPAWN_ERROR);
@@ -9589,7 +9594,9 @@ test("desk-enforced orchestrator vs worker lineup", async () => {
   assert.match(UNBOUND_SPAWN_ERROR, /Do not refuse the parent turn/);
   assert.match(readFileSync(path.join(ROOT, "electron", "main.ts"), "utf8"), /resolveOrBaseSessionCwd/);
   assert.match(readFileSync(path.join(ROOT, "docs", "FEATURES.md"), "utf8"), /loose top-level chat can search from the desk base/);
-  assert.match(WORKHORSE_SESSION_RULES, /missing linked folder does not fail this turn/);
+  // Since S11 the spawn law travels apart from the core, so this rule lives
+  // with the rest of the spawn rules rather than in the desk bible.
+  assert.match(DESK_SPAWN_LAW, /missing linked folder does not fail this turn/);
 
   const nested = admitSpawn({
     parent: { parentId: "sess_orch", hidden: true },
@@ -9625,6 +9632,7 @@ test("desk-enforced orchestrator vs worker lineup", async () => {
     parent: { parentId: null },
     projectFolder: "D:\\Godot\\Projects\\demo-game",
     prompt: "please spawn MiniMax",
+    turn,
   });
   assert.equal(spawnOnly.ok, false);
   if (!spawnOnly.ok) assert.equal(spawnOnly.error, SPAWN_ONLY_PROMPT_ERROR);
@@ -9634,6 +9642,7 @@ test("desk-enforced orchestrator vs worker lineup", async () => {
     folder: "D:\\Godot\\Projects\\demo-game",
     prompt: "Read project.godot and say what this game is.",
     folderExists: (value) => value === "D:\\Godot\\Projects\\demo-game",
+    turn,
   });
   assert.equal(explicit.ok, true);
   if (explicit.ok) assert.equal(explicit.cwd, "D:\\Godot\\Projects\\demo-game");
@@ -9795,9 +9804,9 @@ test("desk-enforced orchestrator vs worker lineup", async () => {
     ]).map((group) => group.length),
     [1, 2, 1],
   );
-  assert.match(WORKHORSE_SESSION_RULES, /wait=false/);
-  assert.match(WORKHORSE_SESSION_RULES, /workhorse_await_agents/);
-  assert.match(WORKHORSE_SESSION_RULES, /Do not sit on workhorse_await_agents|do not ask 1\/2\/3/i);
+  assert.match(DESK_SPAWN_LAW, /wait=false/);
+  assert.match(DESK_SPAWN_LAW, /workhorse_await_agents/);
+  assert.match(DESK_SPAWN_LAW, /Do not sit on workhorse_await_agents|do not ask 1\/2\/3/i);
   assert.equal(looksLikeCrewImpatience("timed out twice. pick one: re-await or scrape myself"), true);
   assert.equal(withCrewStatusHint("workers are still running").startsWith(CREW_STATUS_HINT), true);
   const awaitNow = peerAskTimeoutMs({ mode: "bots", action: "await-agents", timeoutSeconds: 600 });
@@ -9963,10 +9972,25 @@ test("desk-enforced orchestrator vs worker lineup", async () => {
           },
         ],
         sessions: [
-          { id: "sess_orch", title: "Main", provider: "custom", projectId: "proj_ships" },
+          // Each orchestrator carries the turn it was asked on: a spawn the
+          // desk law never reached is refused before the folder is looked at,
+          // so a chat that did ask is what proves the folder rule still fires.
+          {
+            id: "sess_orch",
+            title: "Main",
+            provider: "custom",
+            projectId: "proj_ships",
+            messages: [{ id: "m_orch", role: "user", text: "Spawn a worker on the src tree." }],
+          },
           { id: "sess_worker", title: "src tree review", provider: "custom", parentId: "sess_orch", hidden: true, projectId: "proj_ships" },
           { id: "sess_helper", title: "nested check", provider: "custom", parentId: "sess_worker", hidden: true, projectId: "proj_ships" },
-          { id: "sess_loose", title: "Loose", provider: "custom", projectId: null },
+          {
+            id: "sess_loose",
+            title: "Loose",
+            provider: "custom",
+            projectId: null,
+            messages: [{ id: "m_loose", role: "user", text: "Spawn a worker to read project.godot." }],
+          },
         ],
       }),
     );
@@ -10048,23 +10072,23 @@ test("desk-enforced orchestrator vs worker lineup", async () => {
   assert.doesNotMatch(WORKHORSE_SESSION_RULES, /spawn every canCall|every row whose canCall/);
   assert.doesNotMatch(CUSTOM_HTTP_SESSION_RULES, /spawn every canCall|every canCall row/);
   assert.doesNotMatch(SPAWN_TURN_HINT, /Spawn every canCall/);
-  assert.match(WORKHORSE_SESSION_RULES, /One bounded assignment is one workhorse_spawn_agent/);
-  assert.match(WORKHORSE_SESSION_RULES, /A second spawn only to independently check that worker's output/);
-  assert.match(WORKHORSE_SESSION_RULES, /Leave model unset so Auto ranks the slice/);
-  assert.match(WORKHORSE_SESSION_RULES, /Grok 4.6 is ACP Grok or Cursor Grok, never Grok Bot/);
-  assert.match(WORKHORSE_SESSION_RULES, /Do not spawn grok-bot as a worker, builder, or auditor/);
-  assert.match(WORKHORSE_SESSION_RULES, /Grok Bot may call, analyze, and dispatch only/);
-  assert.match(WORKHORSE_SESSION_RULES, /Naming grok-4.6 with no vendor lets the desk pick by leftover/);
-  assert.match(CUSTOM_HTTP_SESSION_RULES, /Grok 4.6 is ACP Grok or Cursor Grok, never Grok Bot/);
+  assert.match(DESK_SPAWN_LAW, /One bounded assignment is one workhorse_spawn_agent/);
+  assert.match(DESK_SPAWN_LAW, /A second spawn only to independently check that worker's output/);
+  assert.match(DESK_SPAWN_LAW, /Leave model unset so Auto ranks the slice/);
+  assert.match(DESK_SPAWN_LAW, /Grok 4.6 is ACP Grok or Cursor Grok, never Grok Bot/);
+  assert.match(DESK_SPAWN_LAW, /Do not spawn grok-bot as a worker, builder, or auditor/);
+  assert.match(DESK_SPAWN_LAW, /Grok Bot may call, analyze, and dispatch only/);
+  assert.match(DESK_SPAWN_LAW, /Naming grok-4.6 with no vendor lets the desk pick by leftover/);
+  assert.match(DESK_SPAWN_LAW, /Grok 4.6 is ACP Grok or Cursor Grok, never Grok Bot/);
   assert.match(SPAWN_TURN_HINT, /Grok 4.6 is ACP Grok or Cursor Grok, never Grok Bot/);
   assert.match(readFileSync(path.join(ROOT, "skills", "desk", "SKILL.md"), "utf8"), /Do not spawn `grok-bot` as a worker/);
-  assert.match(WORKHORSE_SESSION_RULES, /a named vendor without a model still Auto-ranks that vendor's models/);
-  assert.match(WORKHORSE_SESSION_RULES, /Do not pick a model because it is first in the list/);
-  assert.match(WORKHORSE_SESSION_RULES, /Fan-out only when they asked for every vendor/);
-  assert.match(WORKHORSE_SESSION_RULES, /Do not spawn several of one vendor with split tasks to fill a crew/);
+  assert.match(DESK_SPAWN_LAW, /a named vendor without a model still Auto-ranks that vendor's models/);
+  assert.match(DESK_SPAWN_LAW, /Do not pick a model because it is first in the list/);
+  assert.match(DESK_SPAWN_LAW, /Fan-out only when they asked for every vendor/);
+  assert.match(DESK_SPAWN_LAW, /Do not spawn several of one vendor with split tasks to fill a crew/);
   assert.match(SPAWN_TURN_HINT, /One bounded assignment is one workhorse_spawn_agent/);
   assert.match(readFileSync(path.join(ROOT, "skills", "desk", "SKILL.md"), "utf8"), /One bounded assignment is one/);
-  assert.match(WORKHORSE_SESSION_RULES, /one bounded quick-route helper/);
+  assert.match(DESK_SPAWN_LAW, /one bounded quick-route helper/);
 });
 
 test("desk builds one named join prompt and syncs idle children", () => {

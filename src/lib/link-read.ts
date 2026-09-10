@@ -304,6 +304,10 @@ const SESSION_FIELDS = [
   "mode",
   "status",
   "routingMode",
+  // How many rows retirement moved to disk. The roster keeps a chat that has
+  // none of its own left on the strength of this, so both paths keep the same
+  // chats. A count, and nothing that was in them.
+  "transcriptOffloaded",
 ] as const;
 
 /** `RoutingDecision`: why Auto picked this bot. All scalars. */
@@ -375,8 +379,14 @@ function compactAgentRun(run: unknown): LooseMessage | undefined {
  *
  * The row is built by naming what goes on it, so nothing rides out because a
  * spread carried it. The scrub after is the second net, not the first.
+ *
+ * A retired chat holds no rows at all: its transcript is on disk and it keeps
+ * only the count and the report it left behind. Both are named here, because
+ * without them a desk-answered roster drops the chat entirely while the file
+ * path still lists it, and a harness asking after a retired worker is handed
+ * nothing where its report should be.
  */
-function compactSession(session: LooseMessage, messages: LooseMessage[], count: number): LooseMessage {
+function compactSession(session: LooseMessage, messages: LooseMessage[], count: number, chars: number): LooseMessage {
   const queue = Array.isArray(session.queue)
     ? (session.queue as LooseMessage[])
         .filter(isRecord)
@@ -386,14 +396,21 @@ function compactSession(session: LooseMessage, messages: LooseMessage[], count: 
   const routing = isRecord(session.routingDecision)
     ? pick(session.routingDecision, ROUTING_DECISION_FIELDS)
     : undefined;
+  const report = typeof session.retainedReport === "string" ? session.retainedReport.slice(0, chars) : "";
   return scrubLinkRead({
     ...pick(session, SESSION_FIELDS),
     ...(routing ? { routingDecision: routing } : {}),
     ...(run ? { agentRun: run } : {}),
     messages,
     messageCount: count,
+    ...(report ? { retainedReport: report } : {}),
     ...(queue ? { queue } : {}),
   });
+}
+
+/** Rows the desk no longer holds, so a count matches what the file would say. */
+function offloadedCount(session: LooseMessage): number {
+  return typeof session.transcriptOffloaded === "number" ? session.transcriptOffloaded : 0;
 }
 
 function isRunning(session: LooseMessage): boolean {
@@ -411,7 +428,8 @@ function listSession(session: LooseMessage): LooseMessage {
     kept.map((index) =>
       whole.has(index) ? compactMessage(messages[index], LINK_LIST_MESSAGE_CHARS) : { role: messageRole(messages[index]) },
     ),
-    messages.length,
+    messages.length + offloadedCount(session),
+    LINK_LIST_MESSAGE_CHARS,
   );
 }
 
@@ -420,7 +438,8 @@ function tailSession(session: LooseMessage, limit: number): LooseMessage {
   return compactSession(
     session,
     messages.slice(-Math.max(1, limit)).map((message) => compactMessage(message)),
-    messages.length,
+    messages.length + offloadedCount(session),
+    LINK_READ_MESSAGE_CHARS,
   );
 }
 

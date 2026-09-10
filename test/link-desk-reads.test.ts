@@ -292,6 +292,44 @@ test("the roster the desk sends lists the same chats as the whole file", () => {
   );
 });
 
+test("a retired chat is listed on either path, with its count and its report", () => {
+  // Retirement moves the rows to disk and leaves the count and the report
+  // behind. A row with no messages of its own is dropped from a roster unless
+  // that count says its transcript went somewhere, so both have to travel.
+  const retired: LinkReadState = {
+    sessions: [
+      {
+        id: "sess_retired",
+        title: "Retired worker",
+        workerName: "Kestrel",
+        provider: "claude",
+        model: "claude-opus-5",
+        status: "idle",
+        agentRun: { status: "completed", startedAt: 1, finishedAt: 4 },
+        messages: [],
+        transcriptOffloaded: 96,
+        retainedReport: "the slice landed and the suite is green",
+        privateKey: SECRETS.sessionPrivate,
+      },
+    ],
+    projects: [],
+  };
+  const compact = projectLinkChats(retired, "");
+  assert.deepEqual(
+    catalogSessions(compact, { fromSessionId: "", includeWorkers: true }),
+    catalogSessions(retired, { fromSessionId: "", includeWorkers: true }),
+    "a chat whose transcript is on disk must read the same from either shape",
+  );
+  const listed = catalogSessions(compact, { fromSessionId: "", includeWorkers: true });
+  assert.equal(listed.length, 1, "the desk path must not drop a chat that holds no rows");
+  assert.equal(listed[0].messageCount, 96, "the count is what the file would have counted");
+  assert.match(listed[0].preview, /the slice landed/, "the report is the preview when the rows have gone");
+  // The report travels; the key on the same row still does not.
+  const row = (compact.sessions as Array<Record<string, unknown>>)[0];
+  assert.equal(row.retainedReport, "the slice landed and the suite is green");
+  assert.deepEqual(secretsIn(JSON.stringify(compact)), []);
+});
+
 test("a transcript the desk sends reads the same as the one in the file", () => {
   const full = deskState();
   const compact = projectLinkChat(full, "Marlow", 40, "sess_parent", resolveOnDesk);

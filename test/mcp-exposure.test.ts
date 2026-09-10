@@ -1680,8 +1680,9 @@ test("workhorse_query_capacity is read-only on external-runtime and omits trap f
 test("Settings and FEATURES name leftover share without a new tab", () => {
   const settingsUi = readFileSync(path.join(ROOT, "src", "ui", "Settings.tsx"), "utf8");
   const features = readFileSync(path.join(ROOT, "docs", "FEATURES.md"), "utf8");
-  assert.match(settingsUi, /The installed MCP can read leftover and availability/);
-  assert.match(settingsUi, /That check does not share keys or chats/);
+  // The explainer is one line now; the rest of it is in docs/LINK.md.
+  assert.match(settingsUi, /Workhorse Link lets an outside app read chats and delegate a task/);
+  assert.match(settingsUi, /page="LINK\.md#the-tools"/);
   assert.doesNotMatch(settingsUi, /id: "harnesses"/);
   assert.doesNotMatch(settingsUi, /id: "mesh"/);
   assert.match(features, /OpenClaw and Hermes are \*\*harnesses\*\*, not vendors/);

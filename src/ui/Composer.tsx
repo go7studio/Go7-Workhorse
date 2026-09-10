@@ -797,7 +797,9 @@ export const Composer = memo(function Composer({
                       <span className={`plus-icon ${mode}`} aria-hidden="true">
                         <CrewModeIcon mode={mode} />
                       </span>
-                      {mode === "orchestrate" ? orchestrateChipLabel(session?.spawnAllowlist) : crewModeLabel(mode)}
+                      <span className="crew-chip-name">
+                        {mode === "orchestrate" ? orchestrateChipLabel(session?.spawnAllowlist) : crewModeLabel(mode)}
+                      </span>
                       <span aria-hidden="true">×</span>
                     </button>
                     {mode === "orchestrate" ? (

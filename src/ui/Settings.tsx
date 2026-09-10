@@ -40,6 +40,21 @@ const SECTIONS: { id: SettingsSection; label: string }[] = [
 
 const DESK_STOCK: Exclude<ProviderId, "custom">[] = ["grok", "codex", "claude", "cursor"];
 
+const DOCS = "https://github.com/go7studio/Go7-Workhorse/blob/main/docs";
+
+/**
+ * A control gets one line. Four sentences under a switch is a page nobody
+ * reads standing up, so the rest of the explanation lives in the docs and
+ * this is the way there.
+ */
+function LearnMore({ page }: { page: string }) {
+  return (
+    <a className="settings-learn" href={`${DOCS}/${page}`} target="_blank" rel="noreferrer">
+      Learn more
+    </a>
+  );
+}
+
 type LlmFocus = Exclude<ProviderId, "custom"> | `bot:${string}` | null;
 
 export function Settings() {
@@ -998,8 +1013,7 @@ function OfferedModels({ bot }: { bot: import("../lib/types").CustomBot }) {
       <span>Offered models</span>
       {!live ? (
         <p className="row-meta">
-          This bot is off, so its host is not asked and its models cannot be tested. Turn it on to pick and test what
-          it serves.
+          This bot is off, so its host is not asked. <LearnMore page="FEATURES.md#bots-and-logins" />
         </p>
       ) : catalog === undefined ? (
         <p className="row-meta">Asking the host what it serves…</p>
@@ -1009,8 +1023,8 @@ function OfferedModels({ bot }: { bot: import("../lib/types").CustomBot }) {
         </p>
       ) : (
         <p className="row-meta">
-          {listed.length} model{listed.length === 1 ? "" : "s"} on this host. Tick the ones this bot may offer. Test only
-          keeps a model off Auto; a person or a named call can still use it.
+          {listed.length} model{listed.length === 1 ? "" : "s"} on this host. Tick the ones this bot may offer.{" "}
+          <LearnMore page="FEATURES.md#bots-and-logins" />
         </p>
       )}
       {catalog || !live
@@ -1235,12 +1249,7 @@ function DeskAccessBlock() {
         <div className="settings-row-copy">
           <strong>Desk access</strong>
           <span>
-            What a CLI, MCP or tool call runs under when it names no chat. Always allow so inbound work does not stop
-            on a prompt. Narrow it here when you want inbound work held back.
-          </span>
-          <span>
-            A chat that names itself as the parent lends its own setting instead. A vendor app's own config does not
-            move this. Nothing else writes this — connecting or dropping a vendor leaves it alone.
+            What inbound work runs under when it names no chat. <LearnMore page="LINK.md#the-seat-a-worker-runs-under" />
           </span>
         </div>
       </div>
@@ -1319,9 +1328,7 @@ function AgentSystemsBlock() {
           <strong>Harnesses</strong>
           <span>Installed runtimes the desk can grant work to.</span>
           <span>
-            Workhorse Link lets an outside app call this desk: list, read and ask chats, read leftover, and delegate a
-            task. The installed MCP can read leftover and availability. That check does not share keys or chats.
-            Connecting creates no vendor, login or Usage ring.
+            Workhorse Link lets an outside app read chats and delegate a task. <LearnMore page="LINK.md#the-tools" />
           </span>
           {note ? <span className="settings-row-note">{note}</span> : null}
         </div>
@@ -1442,8 +1449,8 @@ function AgentSystemsBlock() {
         <div className="settings-row-copy">
           <strong>Inbound parent</strong>
           <span>
-            When OpenClaw or Hermes spawns a worker here without naming a chat, a new chat is created there. Chats is
-            the default. Pick a project to land it in that project, or a thread to nest under that chat.
+            Where a worker lands when an outside app names no chat.{" "}
+            <LearnMore page="LINK.md#the-seat-a-worker-runs-under" />
           </span>
         </div>
         <div className="settings-control">

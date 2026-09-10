@@ -472,15 +472,15 @@ export function UsagePane({
         )
       : undefined;
   const weeklyUnlimited = Boolean(plan?.products.some((item) => item.unlimited && /weekly/i.test(item.product)));
-  const showCodexLeftover = focused?.provider === "codex";
   const selectedUsagePercent =
     windowPick?.usagePercent ??
     (focused?.provider === "claude"
       ? (claudePick?.usagePercent ?? plan?.usedPercent ?? 0)
       : (plan?.usedPercent ?? 0));
-  const allowanceFact = windowPick?.unlimited
-    ? "∞"
-    : `${Math.round(showCodexLeftover ? Math.max(0, 100 - selectedUsagePercent) : selectedUsagePercent)}%`;
+  // Every number on this page is leftover. Codex used to be the one vendor
+  // shown that way and the rest read as spend, so the same ring meant two
+  // things depending on which card you opened.
+  const allowanceFact = windowPick?.unlimited ? "∞" : `${Math.round(Math.max(0, 100 - selectedUsagePercent))}%`;
   const planCopyBase = plan
     ? weeklyUnlimited
       ? windowPick && !windowPick.unlimited && windowPick.resetsAt
@@ -582,7 +582,7 @@ export function UsagePane({
                       {chip
                         ? chip
                         : row.provider === "claude" && claudePick
-                          ? `${Math.round(Math.max(0, 100 - claudePick.usagePercent))}% ${claudePick.label.toLowerCase()}`
+                          ? `${claudePick.label}: ${Math.round(Math.max(0, 100 - claudePick.usagePercent))}%`
                           : formatIoLine(row)}
                     </em>
                   </button>
@@ -639,9 +639,7 @@ export function UsagePane({
                 </div>
               ) : null}
               {timeWindows.map((item) => {
-                const displayPercent = showCodexLeftover
-                  ? Math.max(0, 100 - item.usagePercent)
-                  : item.usagePercent;
+                const displayPercent = Math.max(0, 100 - item.usagePercent);
                 return (
                   <button
                     key={item.product}
@@ -651,7 +649,7 @@ export function UsagePane({
                   >
                     <div className="usage-limit-top">
                       <strong>{item.label}</strong>
-                      <em>{item.unlimited ? "Unlimited" : `${Math.round(displayPercent)}% ${showCodexLeftover ? "left" : "used"}`}</em>
+                      <em>{item.unlimited ? "Unlimited" : `${Math.round(displayPercent)}% left`}</em>
                     </div>
                     <div className="usage-split-track wide">
                       <i
@@ -714,7 +712,7 @@ export function UsagePane({
               <strong>{focusFacts?.apiTraffic ?? "-"}</strong>
             </div>
             <div className="usage-fact">
-              <span>{plan ? (showCodexLeftover ? "Left" : "Used") : "Cost"}</span>
+              <span>{plan ? "Left" : "Cost"}</span>
               <strong>
                 {plan ? allowanceFact : formatCost(focused)}
               </strong>

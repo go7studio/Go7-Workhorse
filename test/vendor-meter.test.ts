@@ -98,7 +98,8 @@ test("Claude MiniMax and Synthetic leftovers stay on their own rings", () => {
     leftoverForCard({ focus: "cursor:cursor-models", provider: "cursor", key: "cursor:cursor-models" }, plans),
     { provider: "cursor" },
   );
-  assert.match(cursorChip ?? "", /90%/);
+  // The chip is leftover, like the ring above it: 90% spent is 10% left.
+  assert.match(cursorChip ?? "", /10%/);
 });
 
 test("prepaid custom meters fill balance and do not invent leftover percent", () => {

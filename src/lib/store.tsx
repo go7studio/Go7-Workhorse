@@ -217,10 +217,12 @@ import {
 import { catalogSessions, chatPreview, formatPeerPrompt, matchListedChat, sameSessionCrew } from "./session-bridge";
 import {
   boundLinkRead,
+  linkReadMaxBytes,
   projectLinkCapacity,
   projectLinkChat,
   projectLinkChats,
   projectLinkStatus,
+  type LinkReadRoute,
   type LinkReadState,
 } from "./link-read";
 import {
@@ -5124,7 +5126,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 await replyAsk({ error: snapshot.error });
                 return;
               }
-              await replyAsk(boundLinkRead(JSON.stringify(snapshot)));
+              await replyAsk(boundLinkRead(JSON.stringify(snapshot), linkReadMaxBytes(route as LinkReadRoute)));
               return;
             }
             if (action === "agent-status") {

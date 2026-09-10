@@ -20,8 +20,25 @@ export type LinkReadRoute = (typeof LINK_READ_ROUTES)[number];
 /** Bound on a read route request body and on its reply. Bigger is refused, never cut. */
 export const LINK_READ_MAX_BYTES = 256 * 1024;
 
-/** Messages kept whole at the end of a listed chat. Older ones keep their role only. */
-export const LINK_LIST_MESSAGE_TAIL = 12;
+/**
+ * The roster is one row per live chat, so it grows with the desk while the
+ * other three routes answer about one thing. A 29 MB desk of 587 chats
+ * measured 325 KB here, so the roster gets its own wider bound.
+ */
+export const LINK_CHATS_MAX_BYTES = 1024 * 1024;
+
+export function linkReadMaxBytes(route: LinkReadRoute): number {
+  return route === "chats" ? LINK_CHATS_MAX_BYTES : LINK_READ_MAX_BYTES;
+}
+
+/**
+ * Text kept on a message a listed chat still needs.
+ *
+ * The list reader slices a preview to 160 characters and takes the first line
+ * of a worker's step, so this is already more than it reads. Sending whole
+ * transcripts here put one reply at 6.5 MB against a 29 MB desk.
+ */
+export const LINK_LIST_MESSAGE_CHARS = 240;
 
 /** Ledger window sent for a capacity read. Wider than any plan window the desk scores. */
 export const LINK_CAPACITY_USAGE_DAYS = 32;
@@ -135,14 +152,14 @@ function messageText(message: LooseMessage): string {
 }
 
 /**
- * Indexes a listed chat still needs whole. The rest keep their role, because
- * the reader counts messages and asks whether a person ever wrote one.
+ * The few messages a listed chat still needs, in the order they were written.
+ *
+ * A running worker needs two more than a settled one: the tool line that says
+ * what it is doing and the note that says when it last did anything.
  */
-function keptListIndexes(messages: LooseMessage[]): Set<number> {
+function keptListMessages(messages: LooseMessage[], running: boolean): { whole: Set<number>; roleOnly: Set<number> } {
   const kept = new Set<number>();
-  for (let index = Math.max(0, messages.length - LINK_LIST_MESSAGE_TAIL); index < messages.length; index += 1) {
-    kept.add(index);
-  }
+  const roleOnly = new Set<number>();
   const findLast = (match: (message: LooseMessage) => boolean) => {
     for (let index = messages.length - 1; index >= 0; index -= 1) {
       if (match(messages[index])) {
@@ -153,9 +170,17 @@ function keptListIndexes(messages: LooseMessage[]): Set<number> {
   };
   // The chat preview.
   findLast((message) => messageRole(message) !== "system" && Boolean(messageText(message).trim()));
-  // What a running worker is doing now.
+  // Whether a person ever wrote here, which decides if the chat is listed at
+  // all. Only the role is asked for, so only the role travels.
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    if (messageRole(messages[index]) !== "user") continue;
+    if (!kept.has(index)) roleOnly.add(index);
+    break;
+  }
+  if (!running) return { whole: kept, roleOnly };
+  // What this worker is doing now.
   findLast((message) => message.kind === "tool" && Boolean(messageText(message).trim()));
-  // The worker's last note, which is both its step and its clock.
+  // Its last note, which is both a step and a clock.
   findLast(
     (message) =>
       messageRole(message) === "assistant" &&
@@ -165,18 +190,18 @@ function keptListIndexes(messages: LooseMessage[]): Set<number> {
   );
   // The clock again, which a plain user or tool line can also set.
   findLast((message) => Boolean(messageText(message).trim()));
-  return kept;
+  return { whole: kept, roleOnly };
 }
 
-/** Message text bound, so one long report cannot fill a whole reply on its own. */
+/** Message text bound on a transcript read, so one long report cannot fill a reply. */
 export const LINK_READ_MESSAGE_CHARS = 8_000;
 
-function compactMessage(message: LooseMessage): LooseMessage {
+function compactMessage(message: LooseMessage, chars = LINK_READ_MESSAGE_CHARS): LooseMessage {
   const text = messageText(message);
   const out: LooseMessage = {
     ...(typeof message.id === "string" ? { id: message.id } : {}),
     role: messageRole(message) || "system",
-    text: text.length > LINK_READ_MESSAGE_CHARS ? text.slice(0, LINK_READ_MESSAGE_CHARS) : text,
+    text: text.length > chars ? text.slice(0, chars) : text,
     ...(typeof message.createdAt === "number" ? { createdAt: message.createdAt } : {}),
     ...(typeof message.kind === "string" ? { kind: message.kind } : {}),
     ...(typeof message.correlationId === "string" ? { correlationId: message.correlationId } : {}),
@@ -193,7 +218,7 @@ function sessionMessages(session: LooseMessage): LooseMessage[] {
  * One session row minus its weight. Attachments and composer drafts never
  * travel. The queue keeps the ids the preview filters on, nothing else.
  */
-function compactSession(session: LooseMessage, messages: LooseMessage[]): LooseMessage {
+function compactSession(session: LooseMessage, messages: LooseMessage[], count: number): LooseMessage {
   const {
     messages: _messages,
     queue: _queue,
@@ -208,22 +233,37 @@ function compactSession(session: LooseMessage, messages: LooseMessage[]): LooseM
   return scrubLinkRead({
     ...rest,
     messages,
+    messageCount: count,
     ...(queue ? { queue } : {}),
   });
 }
 
+function isRunning(session: LooseMessage): boolean {
+  const run = isRecord(session.agentRun) ? session.agentRun : {};
+  const status = typeof run.status === "string" ? run.status : typeof session.status === "string" ? session.status : "";
+  return status === "running";
+}
+
 function listSession(session: LooseMessage): LooseMessage {
   const messages = sessionMessages(session);
-  const kept = keptListIndexes(messages);
+  const { whole, roleOnly } = keptListMessages(messages, isRunning(session));
+  const kept = [...whole, ...roleOnly].sort((left, right) => left - right);
   return compactSession(
     session,
-    messages.map((message, index) => (kept.has(index) ? compactMessage(message) : { role: messageRole(message) || "system" })),
+    kept.map((index) =>
+      whole.has(index) ? compactMessage(messages[index], LINK_LIST_MESSAGE_CHARS) : { role: messageRole(messages[index]) },
+    ),
+    messages.length,
   );
 }
 
 function tailSession(session: LooseMessage, limit: number): LooseMessage {
   const messages = sessionMessages(session);
-  return compactSession(session, messages.slice(-Math.max(1, limit)).map(compactMessage));
+  return compactSession(
+    session,
+    messages.slice(-Math.max(1, limit)).map((message) => compactMessage(message)),
+    messages.length,
+  );
 }
 
 /** id and parentId only. The status reader walks the whole tree to place a worker. */

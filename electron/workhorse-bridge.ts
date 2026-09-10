@@ -1,6 +1,6 @@
 import http from "node:http";
 import crypto from "node:crypto";
-import { LINK_READ_MAX_BYTES, parseLinkReadPath } from "../src/lib/link-read";
+import { LINK_CHATS_MAX_BYTES, LINK_READ_MAX_BYTES, parseLinkReadPath } from "../src/lib/link-read";
 import type { PeerAsk, PeerAskResult } from "./peer-inbox";
 
 export type { PeerAsk, PeerAskResult };
@@ -8,8 +8,12 @@ export type { PeerAsk, PeerAskResult };
 /** Request bound. A body over this is refused before it is held, never buffered whole. */
 export const BRIDGE_MAX_BODY_BYTES = LINK_READ_MAX_BYTES;
 
-/** Reply bound. An answer over this is refused by name, never cut short in silence. */
-export const BRIDGE_MAX_REPLY_BYTES = LINK_READ_MAX_BYTES;
+/**
+ * Transport ceiling on any reply. Each read route holds itself to a tighter
+ * bound of its own; this is the backstop that stops any route, old or new,
+ * writing without an end. Over it the caller gets the size, never a cut reply.
+ */
+export const BRIDGE_MAX_REPLY_BYTES = LINK_CHATS_MAX_BYTES;
 
 export function bridgeReplyTooLarge(bytes: number, max = BRIDGE_MAX_REPLY_BYTES): { error: string } {
   return { error: `Workhorse bridge reply is ${bytes} bytes, over the ${max} byte bound. Ask for a smaller slice.` };

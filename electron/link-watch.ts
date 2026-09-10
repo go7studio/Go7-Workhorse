@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { loadLinkState } from "./link-state";
+import { loadLinkRunRows } from "./link-state";
 import { settledWorkers, type WorkerRunRow } from "../src/lib/worker-settled";
 import { unannounced, workerTerminalNotification } from "../src/lib/link-notify";
 
@@ -27,10 +27,14 @@ export type LinkWatchHandle = { stop: () => void };
  * that rule: every currently-running worker would read as already finished,
  * get marked announced, and its real completion would never be sent. So this
  * takes the raw rows.
+ *
+ * Rows, not state. This runs on every desk write, so it parses without the
+ * transcripts and holds nothing between calls. Going through the shared
+ * snapshot instead pinned the whole 29 MB file in every helper.
  */
 function readWorkerRows(statePath: string): WorkerRunRow[] {
   try {
-    const raw = loadLinkState(statePath);
+    const raw = loadLinkRunRows(statePath);
     if (!Array.isArray(raw.sessions)) return [];
     const rows: WorkerRunRow[] = [];
     for (const entry of raw.sessions) {
@@ -69,12 +73,32 @@ export function watchWorkerCompletions(input: {
   emit: (frame: object) => void;
   /** Injected in tests. */
   watch?: typeof fs.watch;
+  /**
+   * Run rows from the live desk. Returns null when the desk is down, and then
+   * the file is read instead.
+   *
+   * The state file only changes while a desk is running, so a watch tick has a
+   * desk to ask nearly every time. Asking is what keeps this helper small: the
+   * file read costs a 29 MB parse on every desk write.
+   */
+  deskRows?: () => Promise<WorkerRunRow[] | null>;
 }): LinkWatchHandle {
   const statePath = input.statePath.trim();
   if (!statePath) return { stop: () => undefined };
   const directory = path.dirname(statePath);
   const basename = path.basename(statePath);
   const announced = new Set<string>();
+  const rows = async (): Promise<WorkerRunRow[]> => {
+    if (input.deskRows) {
+      try {
+        const live = await input.deskRows();
+        if (live) return live;
+      } catch {
+        // The desk went down mid call. The file still answers.
+      }
+    }
+    return readWorkerRows(statePath);
+  };
 
   // The first read is a baseline, not an announcement: workers already
   // terminal when this helper started belong to somebody else's turn, and
@@ -86,21 +110,47 @@ export function watchWorkerCompletions(input: {
   // existed, and guessing wrong wakes a host for someone else's slice.
   // workhorse_agent_status is the answer for that, which is why the pull stays
   // the contract rather than being replaced by this.
-  let previous = readWorkerRows(statePath);
-  for (const worker of previous) {
-    if (worker.agentRun?.status && worker.agentRun.status !== "running") announced.add(worker.id);
-  }
+  let previous: WorkerRunRow[] = [];
+  let baseline: Promise<void> | null = null;
+  let running = false;
+  let again = false;
+  let stopped = false;
+
+  baseline = rows().then((seed) => {
+    previous = seed;
+    for (const worker of seed) {
+      if (worker.agentRun?.status && worker.agentRun.status !== "running") announced.add(worker.id);
+    }
+  });
+
+  // One tick at a time. A desk write raises several events, and a second read
+  // starting inside the first would diff against a roster nobody has yet.
+  const tick = async () => {
+    if (running) {
+      again = true;
+      return;
+    }
+    running = true;
+    try {
+      do {
+        again = false;
+        const next = await rows();
+        if (stopped || next.length === 0) continue;
+        for (const worker of unannounced(settledWorkers(previous, next), announced)) {
+          input.emit(workerTerminalNotification(worker));
+        }
+        previous = next;
+      } while (again);
+    } finally {
+      running = false;
+    }
+  };
 
   const onChange = (_event: string, filename: string | Buffer | null) => {
     const name = typeof filename === "string" ? filename : filename?.toString();
     // Atomic replace shows up as a rename of the real name or its temp files.
     if (name && !name.startsWith(basename)) return;
-    const next = readWorkerRows(statePath);
-    if (next.length === 0) return;
-    for (const worker of unannounced(settledWorkers(previous, next), announced)) {
-      input.emit(workerTerminalNotification(worker));
-    }
-    previous = next;
+    void baseline?.then(tick);
   };
 
   let watcher: fs.FSWatcher | undefined;
@@ -114,6 +164,7 @@ export function watchWorkerCompletions(input: {
   watcher.on("error", () => undefined);
   return {
     stop: () => {
+      stopped = true;
       try {
         watcher?.close();
       } catch {

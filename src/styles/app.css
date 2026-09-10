@@ -8936,6 +8936,51 @@ html.pane-dragging * {
   margin: 4px 6px;
 }
 
+.plus-caps {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 10px 8px;
+}
+
+.plus-caps label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.plus-caps label span {
+  flex: 1;
+  min-width: 0;
+}
+
+.plus-caps input {
+  width: 84px;
+  padding: 4px 6px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg-solid);
+  color: var(--text);
+  font-size: 12px;
+  text-align: right;
+}
+
+.plus-caps label em {
+  width: 44px;
+  font-style: normal;
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.plus-caps p {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--text-tertiary);
+}
+
 .composer-crew-chip-group {
   display: inline-flex;
   align-items: center;

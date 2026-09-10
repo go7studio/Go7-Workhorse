@@ -71,6 +71,13 @@ export function fitComposerField(el: HTMLTextAreaElement, value: string, paneHei
   el.style.height = `${Math.min(el.scrollHeight, cap)}px`;
 }
 
+/** A blank field is no ceiling. Only a positive number caps a mission. */
+export function missionCapValue(raw: string): number | undefined {
+  const value = Number(raw.trim());
+  if (!raw.trim() || !Number.isFinite(value) || value <= 0) return undefined;
+  return value;
+}
+
 function CrewModeIcon({ mode, size = 12 }: { mode: CrewMode; size?: number }) {
   if (mode === "mission") {
     return (
@@ -115,6 +122,7 @@ export const Composer = memo(function Composer({
     settings,
     setComposerDraft,
     setCrewMode,
+    setMissionCaps,
     setSpawnAllowlist,
     deskSkills,
   } = useStoreSelector(selectComposerDesk, sameComposerDesk);
@@ -621,6 +629,49 @@ export const Composer = memo(function Composer({
                 <em>Adaptive waves until done</em>
               </span>
             </button>
+            {hasCrewMode(session?.crewModes, "mission") ? (
+              <div className="plus-caps">
+                <label>
+                  <span>Cost cap</span>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.5"
+                    inputMode="decimal"
+                    placeholder="No cap"
+                    aria-label="Mission cost cap in dollars"
+                    value={session?.missionCaps?.maxCostUsd ?? ""}
+                    onChange={(event) =>
+                      setMissionCaps({
+                        maxCostUsd: missionCapValue(event.target.value),
+                        maxTokens: session?.missionCaps?.maxTokens,
+                      })
+                    }
+                  />
+                  <em>dollars</em>
+                </label>
+                <label>
+                  <span>Token cap</span>
+                  <input
+                    type="number"
+                    min="0"
+                    step="1000"
+                    inputMode="numeric"
+                    placeholder="No cap"
+                    aria-label="Mission token cap"
+                    value={session?.missionCaps?.maxTokens ?? ""}
+                    onChange={(event) =>
+                      setMissionCaps({
+                        maxCostUsd: session?.missionCaps?.maxCostUsd,
+                        maxTokens: missionCapValue(event.target.value),
+                      })
+                    }
+                  />
+                  <em>tokens</em>
+                </label>
+                <p>The desk stops the mission between passes. It never stops a worker mid-turn.</p>
+              </div>
+            ) : null}
             <hr />
             <button type="button" className="plus-row attach" role="menuitem" onClick={() => void attachFromMenu()}>
               <span className="plus-icon attach" aria-hidden="true">

@@ -333,6 +333,55 @@ A desk `/goal` or `/loop` is still the composer. Link assigns the objective as
 a mission: `workhorse_delegate` with `loop.acceptanceCriteria`. Remaining work
 is `workhorse_continue_mission`.
 
+## Mission cost cap
+
+A mission can carry a ceiling. Set either field, or both, on
+`workhorse_delegate`:
+
+```json
+{ "loop": { "acceptanceCriteria": ["…"], "maxCostUsd": 12, "maxTokens": 800000 } }
+```
+
+Both are optional and both must be positive. Zero is rejected, so a caller
+cannot switch a ceiling off by sending one.
+
+Before it starts the next pass the desk sums what the mission spent across
+every worker that belongs to it, from the same ledger `spend` reads. If the sum
+meets or passes either ceiling the pass does not start. The reply is a shape
+you already read:
+
+```json
+{ "next": "failed", "spawned": false, "error": "mission cap reached: $12.40 of $12.00" }
+```
+
+A token ceiling says `mission cap reached: 840000 of 800000 tokens`. Dollars
+are read first, so a mission over both reports the money.
+
+Two things this never does. It never stops a worker mid-turn: usage lands at
+turn end, so the sum is whatever the desk has recorded when the next pass is
+about to start. And it never counts a price the desk does not know: a vendor
+that bills a flat plan adds no dollars, though its tokens still count against
+`maxTokens`. Read a missing price as unpriced, never as free.
+
+A ceiling holds for the rest of the mission. Send a new one on
+`workhorse_continue_mission` to change it:
+
+```json
+{ "loop": { "maxCostUsd": 25 } }
+```
+
+A higher ceiling lets a mission that stopped at its cap carry on. Omit `loop`
+to keep the one the mission already has. A plain delegate with no `loop` starts
+no mission, so no cap can stop it.
+
+A cap the person set under Mission on the chat is a ceiling and never a
+default: where the call names one too the lower of the two runs the mission,
+dollars and tokens read apart, so a call may tighten the person's stop and
+never loosen it, the call's number stands where the person set no field, the
+person's number stands where the call sent none, and a raise on
+`workhorse_continue_mission` lifts the call's own number as far as the person's
+ceiling and no further, or freely where the person left that field blank.
+
 ## Execution contract
 
 A call that changes the desk carries:

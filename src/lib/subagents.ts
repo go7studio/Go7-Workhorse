@@ -16,6 +16,7 @@ import type {
   EffortLevel,
   ExecutionOwner,
   FileLease,
+  MissionCaps,
   MissionIteration,
   ProviderId,
   RoutingDecision,
@@ -1941,6 +1942,12 @@ export function normalizeMissionIteration(raw: unknown): MissionIteration | unde
         }
       : {}),
     ...(typeof row.tokenBudget === "number" && row.tokenBudget > 0 ? { tokenBudget: Math.floor(row.tokenBudget) } : {}),
+    ...(typeof row.maxCostUsd === "number" && Number.isFinite(row.maxCostUsd) && row.maxCostUsd > 0
+      ? { maxCostUsd: row.maxCostUsd }
+      : {}),
+    ...(typeof row.maxTokens === "number" && Number.isFinite(row.maxTokens) && row.maxTokens > 0
+      ? { maxTokens: Math.floor(row.maxTokens) }
+      : {}),
   };
 }
 
@@ -2267,6 +2274,126 @@ export function missionWave(
   return [...new Set([...ids, ...bearing.map((session) => session.id), ...plain.map((session) => session.id)])];
 }
 
+/**
+ * Every worker that belongs to the mission, pass one up to the pass named. It
+ * is the wave of each pass unioned, so a plain sibling that ran beside a
+ * coordinator is counted with it.
+ */
+export function missionMembers(
+  sessions: Session[],
+  parentId: string,
+  mission: { id: string; iteration: number },
+): string[] {
+  const ids = new Set<string>();
+  for (let pass = 1; pass <= mission.iteration; pass += 1) {
+    for (const id of missionWave(sessions, parentId, [], { id: mission.id, iteration: pass })) ids.add(id);
+  }
+  return [...ids];
+}
+
+/** Mission spend, summed in the shape one worker's spend already reports. */
+export type MissionSpend = {
+  tokens: number;
+  costUsd: number;
+  /** False when the ledger priced none of the mission's workers. */
+  costKnown: boolean;
+  /** How many of the mission's workers the ledger holds anything for. */
+  workers: number;
+};
+
+/**
+ * What the mission has cost across every worker that belongs to it. Usage
+ * lands at turn end, so this is whatever the desk has recorded when the next
+ * pass is about to start. A worker the meter never priced adds no dollars; its
+ * tokens still count.
+ */
+export function missionSpend(
+  sessions: Session[],
+  parentId: string,
+  mission: { id: string; iteration: number },
+  usage?: UsageEvent[],
+): MissionSpend {
+  return missionMembers(sessions, parentId, mission).reduce<MissionSpend>(
+    (sum, id) => {
+      const spend = sessionSpend(usage, id);
+      if (!spend) return sum;
+      return {
+        tokens: sum.tokens + spend.tokens,
+        costUsd: sum.costUsd + (spend.costUsd ?? 0),
+        costKnown: sum.costKnown || spend.costUsd !== undefined,
+        workers: sum.workers + 1,
+      };
+    },
+    { tokens: 0, costUsd: 0, costKnown: false, workers: 0 },
+  );
+}
+
+function missionCap(value: unknown): number | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) return undefined;
+  return value;
+}
+
+/**
+ * The tighter of two ceilings, which is how a cap may be narrowed and never
+ * widened. One side missing leaves the other standing.
+ */
+export function lowerMissionCap(left: unknown, right: unknown): number | undefined {
+  const first = missionCap(left);
+  const second = missionCap(right);
+  if (first === undefined) return second;
+  if (second === undefined) return first;
+  return Math.min(first, second);
+}
+
+/**
+ * The two ceilings this pass runs under: the call's own number, with any raise
+ * this continuation asked for, held under the field the person typed on the
+ * chat. A raise lifts the call's number as far as the person's ceiling and no
+ * further; where the person left the field blank it lifts freely.
+ */
+export function missionCapsFor(
+  mission: Pick<MissionIteration, "maxCostUsd" | "maxTokens">,
+  raise?: MissionCaps,
+  desk?: MissionCaps,
+): MissionCaps {
+  const maxCostUsd = lowerMissionCap(missionCap(raise?.maxCostUsd) ?? mission.maxCostUsd, desk?.maxCostUsd);
+  const maxTokens = lowerMissionCap(missionCap(raise?.maxTokens) ?? mission.maxTokens, desk?.maxTokens);
+  return {
+    ...(maxCostUsd === undefined ? {} : { maxCostUsd }),
+    ...(maxTokens === undefined ? {} : { maxTokens }),
+  };
+}
+
+/** How every cap refusal opens, so a caller can tell a stop from a bad call. */
+export const MISSION_CAP_PREFIX = "mission cap reached:";
+
+/**
+ * The stop before the next pass starts. Undefined means the pass may start.
+ * Dollars are read before tokens, so a mission over both says what the money
+ * did. A mission with no cap is never stopped. The desk still never stops a
+ * worker mid-turn on either ceiling.
+ */
+export function missionCapError(input: {
+  sessions: Session[];
+  parentId: string;
+  mission: Pick<MissionIteration, "id" | "iteration" | "maxCostUsd" | "maxTokens">;
+  usage?: UsageEvent[];
+  raise?: MissionCaps;
+  /** The ceilings the person set under Mission on this chat. */
+  desk?: MissionCaps;
+}): string | undefined {
+  const caps = missionCapsFor(input.mission, input.raise, input.desk);
+  if (caps.maxCostUsd === undefined && caps.maxTokens === undefined) return undefined;
+  const spend = missionSpend(input.sessions, input.parentId, input.mission, input.usage);
+  if (caps.maxCostUsd !== undefined && spend.costUsd >= caps.maxCostUsd) {
+    return `${MISSION_CAP_PREFIX} $${spend.costUsd.toFixed(2)} of $${caps.maxCostUsd.toFixed(2)}`;
+  }
+  if (caps.maxTokens !== undefined && spend.tokens >= caps.maxTokens) {
+    return `${MISSION_CAP_PREFIX} ${spend.tokens} of ${caps.maxTokens} tokens`;
+  }
+  return undefined;
+}
+
 export function nextMissionIteration(
   sessions: Session[],
   parentId: string,
@@ -2279,7 +2406,18 @@ export function nextMissionIteration(
    * mission at a phase is what forgery rejection rests on — a pass nobody
    * finished is not proof the desk reached the next one.
    */
-  options?: { allowUnfinished?: boolean },
+  options?: {
+    allowUnfinished?: boolean;
+    /** The desk ledger. Pass it and the mission's cost cap is read here. */
+    usage?: UsageEvent[];
+    /** New ceilings this continuation asked for. A higher one resumes the mission. */
+    raise?: MissionCaps;
+    /**
+     * The ceilings the person set under Mission on the parent chat. A raise is
+     * held under them, so a continuation cannot lift a cap the person set.
+     */
+    deskCaps?: MissionCaps;
+  },
 ): MissionContinuationDecision {
   const ids = [...new Set(previousWorkerIds.map((id) => id.trim()).filter(Boolean))];
   if (ids.length === 0) return { ok: false, error: "previous worker ids are required" };
@@ -2321,6 +2459,20 @@ export function nextMissionIteration(
   // straight into build, which is the forgery the campaign gate exists to stop.
   const phase = unfinished.length > 0 ? first.phase : nextCampaignPhase(first.phase);
   if (!phase) return { ok: false, error: "mission campaign phase is missing or invalid" };
+  // Last gate, because it is a stop before the next pass starts. The caller
+  // hands the ledger in, so this reads what the desk has recorded, and a
+  // continuation that raised the ceiling is measured against the new one, up
+  // to the person's ceiling, which no raise reaches past.
+  const caps = missionCapsFor(first, options?.raise, options?.deskCaps);
+  const capped = missionCapError({
+    sessions,
+    parentId,
+    mission: first,
+    usage: options?.usage,
+    raise: options?.raise,
+    desk: options?.deskCaps,
+  });
+  if (capped) return { ok: false, error: capped };
   return {
     ok: true,
     mission: {
@@ -2329,6 +2481,8 @@ export function nextMissionIteration(
       previousWorkerIds: wave,
       phase,
       clearance: undefined,
+      maxCostUsd: caps.maxCostUsd,
+      maxTokens: caps.maxTokens,
     },
   };
 }

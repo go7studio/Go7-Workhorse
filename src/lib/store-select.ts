@@ -28,6 +28,7 @@ export type ComposerDesk = {
   clearWatchRestore: Store["clearWatchRestore"];
   setComposerDraft: Store["setComposerDraft"];
   setCrewMode: Store["setCrewMode"];
+  setMissionCaps: Store["setMissionCaps"];
   setSpawnAllowlist: Store["setSpawnAllowlist"];
 };
 
@@ -44,6 +45,7 @@ export function selectComposerDesk(store: Store): ComposerDesk {
     clearWatchRestore: store.clearWatchRestore,
     setComposerDraft: store.setComposerDraft,
     setCrewMode: store.setCrewMode,
+    setMissionCaps: store.setMissionCaps,
     setSpawnAllowlist: store.setSpawnAllowlist,
   };
 }
@@ -62,6 +64,8 @@ export function sameComposerSession(left: Session | null, right: Session | null)
     left.mode === right.mode &&
     left.routingMode === right.routingMode &&
     (left.crewModes ?? []).join() === (right.crewModes ?? []).join() &&
+    left.missionCaps?.maxCostUsd === right.missionCaps?.maxCostUsd &&
+    left.missionCaps?.maxTokens === right.missionCaps?.maxTokens &&
     left.queue === right.queue &&
     left.grokCommands === right.grokCommands &&
     left.composerDraft === right.composerDraft &&
@@ -84,6 +88,7 @@ export function sameComposerDesk(left: ComposerDesk, right: ComposerDesk): boole
     left.clearWatchRestore === right.clearWatchRestore &&
     left.setComposerDraft === right.setComposerDraft &&
     left.setCrewMode === right.setCrewMode &&
+    left.setMissionCaps === right.setMissionCaps &&
     left.setSpawnAllowlist === right.setSpawnAllowlist
   );
 }

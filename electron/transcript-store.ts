@@ -84,10 +84,28 @@ const RETAINED_RUN_FIELDS = [
  *
  * An allowlist, not a delete list, for the same reason `normalizeSession` is
  * one: a field added later must not start surviving retention because nobody
- * remembered to name it. The first line is what the brief names — who this
- * worker was, what it was for, how it ended. The second is what the desk needs
- * to still treat the row as a worker: drop `hidden` and eight hundred finished
- * workers walk back into the sidebar.
+ * remembered to name it. The first group is who this worker was, what it was
+ * for, and how it ended. The second is what the desk needs to still treat the
+ * row as a worker: drop `hidden` and eight hundred finished workers walk back
+ * into the sidebar. The last two are what a person wants a week later.
+ * `permissionGrants` is what the run was allowed to do and `vendorSessionId` is
+ * how the vendor is asked to pick the worker up again, and both are cheap: on
+ * this desk `vendorSessionId` is 38 bytes on each of 662 finished workers, and
+ * not one of the 865 carries a `permissionGrants` at all.
+ *
+ * What is dropped, measured on the same desk file:
+ *
+ * - `ledger`, 1.0 MB across 97 rows, the largest 70 KB. It is a reconstructable
+ *   turn log of a transcript that is already row for row in the sidecar. No
+ *   spend the desk shows reads it: `ChatSpend` and `workerStatusSnapshot` both
+ *   roll up `state.usage`, which retention never touches, and a mission's cap
+ *   sums `agentRun.usedTokens`, which stays on the row. Not one of those 865
+ *   ledgers carries a single usage event, so dropping it records no fewer
+ *   tokens per chat than before.
+ * - `contextCheckpoint`, a compaction summary of rows that are now on disk.
+ * - `routingDecision`, 65 KB across 293 rows, and `agentRun.findings`, 323 KB
+ *   across 218. Both describe a run that ended a week ago, and the findings come
+ *   back off `retainedReport` when a harness asks.
  */
 const RETAINED_SESSION_FIELDS = [
   "id",
@@ -107,6 +125,8 @@ const RETAINED_SESSION_FIELDS = [
   "titleLocked",
   "contextUsed",
   "archivedAt",
+  "permissionGrants",
+  "vendorSessionId",
 ] as const;
 
 export type { TranscriptSidecar };

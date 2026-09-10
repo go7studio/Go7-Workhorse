@@ -1049,11 +1049,15 @@ function agedWorker(id: string, finishedAt: number, bulk = 400, report = "the fi
     environment: { kind: "local" },
     contextUsed: 40_000,
     archivedAt: null,
+    // Small, and worth having a week later: what the run was allowed to do, and
+    // the vendor's own id for it, which is how the worker is picked up again.
+    permissionGrants: [{ id: "g1", tool: "Bash", detail: "read the tree" }],
+    vendorSessionId: "vendor_sess_9f2c",
     // The carriers that make a settled worker heavy. None of them describes
     // anything anyone can act on a week after the run ended.
     ledger: { turns: Array.from({ length: 5 }, (_, index) => ({ id: `t${index}`, text: "z".repeat(bulk) })) },
     contextCheckpoint: { summary: "z".repeat(bulk), omittedMessages: 4 },
-    permissionGrants: [{ id: "g1", tool: "Bash", detail: "z".repeat(bulk) }],
+    routingDecision: { mode: "auto", reason: "z".repeat(bulk) },
     agentRun: {
       status: "completed",
       startedAt: finishedAt - 60_000,
@@ -1063,6 +1067,7 @@ function agedWorker(id: string, finishedAt: number, bulk = 400, report = "the fi
       usedTokens: 1234,
       grantedAccess: { paths: ["/tmp"], source: "desk" },
       constraints: ["z".repeat(bulk)],
+      findings: [{ severity: "high", title: "z".repeat(bulk), file: "src/lib/store.tsx:1" }],
       events: [{ at: finishedAt, type: "budget-warn", detail: "z".repeat(bulk) }],
     },
     messages: [
@@ -1125,10 +1130,20 @@ test("a worker past the window keeps who it was and gives back every row", () =>
     ]);
     assert.equal(row.retainedReport, "the final report");
 
-    // The heavy carriers go. They describe a run that ended a week ago.
-    for (const gone of ["ledger", "contextCheckpoint", "permissionGrants"]) {
+    // Small, and worth having a week later. A person auditing the run wants to
+    // see what it was allowed to do; a person reusing the worker needs the
+    // vendor's own id for it.
+    assert.deepEqual(row.permissionGrants, [{ id: "g1", tool: "Bash", detail: "read the tree" }]);
+    assert.equal(row.vendorSessionId, "vendor_sess_9f2c");
+
+    // The heavy carriers go. They describe a run that ended a week ago, and
+    // nothing the desk shows reads them off the row: spend rolls up
+    // `state.usage`, which retention never touches, and a mission's cap sums
+    // `agentRun.usedTokens`, which is still here.
+    for (const gone of ["ledger", "contextCheckpoint", "routingDecision"]) {
       assert.equal(gone in row, false, `${gone} has no business surviving retirement`);
     }
+    assert.equal("findings" in (row.agentRun as object), false, "findings come back off the retained report");
 
     // And the transcript itself is intact, row for row, in the order it was in.
     const sidecar = readTranscriptSidecar(row.transcriptSidecar as string)!;

@@ -9436,7 +9436,7 @@ html.pane-dragging * {
   font-variant-numeric: tabular-nums;
 }
 
-/* The number right under the ring is the strip's second headline (watts on the Spark pack). */
+/* The number right under the ring is the strip's second headline. */
 .workshop-rail-watts,
 .workshop-rail-strip .workshop-ring + .workshop-rail-kv {
   font-size: var(--text-13);
@@ -9710,7 +9710,6 @@ html.pane-dragging * {
 
 .workshop-rail-strip .workshop-bar ~ .workshop-rail-kv { margin-top: -5px; }
 
-.workshop-rail-tpp,
 .workshop-rail-strip .workshop-bar + .workshop-rail-kv { font-weight: 590; }
 
 .workshop-dot {

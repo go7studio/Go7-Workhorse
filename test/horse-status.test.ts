@@ -52,7 +52,9 @@ test("a status horse paints in its own bot's ink, not one silhouette for every v
   // mask arithmetic needs a default column and row or it resolves to nothing.
   assert.match(css, /\.horse-status\s*\{[^}]*--col:\s*0;\s*--row:\s*0/);
 
-  // This theme shows the real artwork rather than a silhouette: it keeps the
-  // picture and takes no tint.
-  assert.match(css, /\[data-theme="workhorse"\] \.horse-fragment\s*\{[^}]*background-image:\s*var\(--horse-image\)/);
+  // No theme opts out. The Workhorse theme used to paint the sprite as a
+  // picture, which is the one way a horse can be on screen and still not say
+  // whose it is — and it is the theme this desk actually runs on.
+  assert.doesNotMatch(css, /\[data-theme=[^\]]*\][^{]*\.horse-fragment/);
+  assert.doesNotMatch(css.replace(/\/\*[\s\S]*?\*\//g, ""), /background-image/);
 });

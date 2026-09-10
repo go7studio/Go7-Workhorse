@@ -41,19 +41,8 @@
 .horse-solid {
   position: absolute; inset: 0 auto auto 0; width: 24px; height: 24px;
   -webkit-mask-position: 0 0; mask-position: 0 0;
-  background-position: 0 0; clip-path: none; opacity: 0;
+  clip-path: none; opacity: 0;
   transition: opacity 160ms ease-out; pointer-events: none;
-}
-/* This theme shows the real artwork rather than a silhouette, so it keeps the
-   picture and takes no tint. Ordered after `.horse-solid` so the whole-mascot
-   cell override is not resurrected by the higher specificity here. */
-[data-theme="workhorse"] .horse-fragment {
-  background-color: transparent;
-  background-image: var(--horse-image);
-  background-size: 24px 24px;
-  background-position: calc(var(--col) * -8px) calc(var(--row) * -8px);
-  background-repeat: no-repeat;
-  -webkit-mask-image: none; mask-image: none;
 }
 .horse-status:is(.is-idle, .is-needs-you) .horse-solid { opacity: 1; }
 .horse-status:is(.is-idle, .is-needs-you) .horse-cube { opacity: 0; }

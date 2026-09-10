@@ -73,15 +73,16 @@ export async function startWorkhorseBridge(handler: (ask: PeerAsk) => Promise<Pe
       })();
       return;
     }
+    // The refusal answers at once and the rest of the body is read and thrown
+    // away. Dropping the socket instead leaves the caller holding a broken pipe
+    // where it should be holding the reason.
     const declared = Number(req.headers["content-length"] ?? 0);
-    if (Number.isFinite(declared) && declared > BRIDGE_MAX_BODY_BYTES) {
-      send(413, { error: `request body is ${declared} bytes, over the ${BRIDGE_MAX_BODY_BYTES} byte bound` });
-      req.destroy();
-      return;
-    }
     const chunks: Buffer[] = [];
     let held = 0;
-    let refused = false;
+    let refused = Number.isFinite(declared) && declared > BRIDGE_MAX_BODY_BYTES;
+    if (refused) {
+      send(413, { error: `request body is ${declared} bytes, over the ${BRIDGE_MAX_BODY_BYTES} byte bound` });
+    }
     req.on("data", (chunk) => {
       if (refused) return;
       held += (chunk as Buffer).length;
@@ -89,7 +90,6 @@ export async function startWorkhorseBridge(handler: (ask: PeerAsk) => Promise<Pe
         refused = true;
         chunks.length = 0;
         send(413, { error: `request body is over the ${BRIDGE_MAX_BODY_BYTES} byte bound` });
-        req.destroy();
         return;
       }
       chunks.push(chunk as Buffer);

@@ -16,7 +16,15 @@ import { unannounced, workerTerminalNotification } from "../src/lib/link-notify"
  * first write and a watcher bound to the file silently stops firing — which
  * looks exactly like "no workers ever finished".
  */
-export type LinkWatchHandle = { stop: () => void };
+export type LinkWatchHandle = {
+  stop: () => void;
+  /**
+   * Settles once the watcher has finished every read it has been asked for.
+   * Reading through the desk made these reads asynchronous, and this is how a
+   * caller waits for one without racing a clock.
+   */
+  idle: () => Promise<void>;
+};
 
 /**
  * Read what was written, not what a restarting desk would infer.
@@ -84,7 +92,7 @@ export function watchWorkerCompletions(input: {
   deskRows?: () => Promise<WorkerRunRow[] | null>;
 }): LinkWatchHandle {
   const statePath = input.statePath.trim();
-  if (!statePath) return { stop: () => undefined };
+  if (!statePath) return { stop: () => undefined, idle: () => Promise.resolve() };
   const directory = path.dirname(statePath);
   const basename = path.basename(statePath);
   const announced = new Set<string>();
@@ -111,46 +119,35 @@ export function watchWorkerCompletions(input: {
   // workhorse_agent_status is the answer for that, which is why the pull stays
   // the contract rather than being replaced by this.
   let previous: WorkerRunRow[] = [];
-  let baseline: Promise<void> | null = null;
-  let running = false;
-  let again = false;
   let stopped = false;
 
-  baseline = rows().then((seed) => {
+  // One read at a time, in order. A desk write raises several events, and a
+  // second read starting inside the first would diff against a roster nobody
+  // has yet. `pending` is every read asked for so far.
+  let pending: Promise<void> = rows().then((seed) => {
     previous = seed;
     for (const worker of seed) {
       if (worker.agentRun?.status && worker.agentRun.status !== "running") announced.add(worker.id);
     }
   });
-
-  // One tick at a time. A desk write raises several events, and a second read
-  // starting inside the first would diff against a roster nobody has yet.
-  const tick = async () => {
-    if (running) {
-      again = true;
-      return;
-    }
-    running = true;
-    try {
-      do {
-        again = false;
-        const next = await rows();
-        if (stopped || next.length === 0) continue;
-        for (const worker of unannounced(settledWorkers(previous, next), announced)) {
-          input.emit(workerTerminalNotification(worker));
-        }
-        previous = next;
-      } while (again);
-    } finally {
-      running = false;
-    }
-  };
+  let queued = false;
 
   const onChange = (_event: string, filename: string | Buffer | null) => {
     const name = typeof filename === "string" ? filename : filename?.toString();
     // Atomic replace shows up as a rename of the real name or its temp files.
     if (name && !name.startsWith(basename)) return;
-    void baseline?.then(tick);
+    if (queued) return;
+    queued = true;
+    pending = pending.then(async () => {
+      queued = false;
+      if (stopped) return;
+      const next = await rows();
+      if (stopped || next.length === 0) return;
+      for (const worker of unannounced(settledWorkers(previous, next), announced)) {
+        input.emit(workerTerminalNotification(worker));
+      }
+      previous = next;
+    });
   };
 
   let watcher: fs.FSWatcher | undefined;
@@ -159,7 +156,7 @@ export function watchWorkerCompletions(input: {
   } catch {
     // No watch (unsupported filesystem, missing directory): the caller still
     // has workhorse_agent_status, which is the contract either way.
-    return { stop: () => undefined };
+    return { stop: () => undefined, idle: () => pending };
   }
   watcher.on("error", () => undefined);
   return {
@@ -171,5 +168,6 @@ export function watchWorkerCompletions(input: {
         // already gone
       }
     },
+    idle: () => pending,
   };
 }

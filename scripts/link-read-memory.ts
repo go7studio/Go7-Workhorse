@@ -160,7 +160,11 @@ async function main(): Promise<number> {
         return answerRead(state, ask.name ?? "", ask.message ?? "", ask.limit ?? 40, ask.fromSessionId ?? "");
       });
     }
-    const first = (state.sessions as Array<{ id: string }>)[0].id;
+    const rows = state.sessions as Array<{ id: string; parentId?: string }>;
+    const first = rows[0].id;
+    // Status is asked about a worker of the calling chat, which is what a host
+    // actually asks about.
+    const worker = rows.find((row) => row.parentId === first)!.id;
     child = spawn(process.execPath, [script], {
       stdio: ["pipe", "pipe", "pipe"],
       env: {
@@ -195,7 +199,7 @@ async function main(): Promise<number> {
       if (turn === 0) return { name: "workhorse_list_chats", arguments: {} };
       if (turn === 1) return { name: "workhorse_read_chat", arguments: { chat: first, limit: 40 } };
       if (turn === 2) return { name: "workhorse_query_capacity", arguments: {} };
-      return { name: "workhorse_agent_status", arguments: { id: first } };
+      return { name: "workhorse_agent_status", arguments: { id: worker } };
     });
     for (const [index, params] of calls.entries()) {
       const body = JSON.stringify({ jsonrpc: "2.0", id: index + 1, method: "tools/call", params });

@@ -332,6 +332,16 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
 - A worker's status also says what it spent: tokens in, out and cached, plus
   dollars when the desk knows the price. The join report the parent chat
   receives says the same for each worker in the wave.
+- While the desk is running, a linked app's reads come from the live desk over
+  the loopback bridge, not from the saved file.
+- So a read never lands on a file caught halfway through a save, and answers
+  what the desk holds right now.
+- A read carries no credential, no environment value and no attachment bytes.
+  The desk drops those before it answers.
+- With the desk closed, reads still answer from the last saved state as they
+  always did, and say `desk: offline`.
+- A helper that used to hold about 390 MB against a 29 MB desk now holds about
+  114 MB after ten reads.
 - List chats is compact by default so a host output cap cannot clip the roster.
 - It lists every parent chat and every worker running or finished within the
   last day, and `all` adds back the older finished ones.

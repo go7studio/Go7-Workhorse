@@ -139,6 +139,39 @@ reads still answer from the last saved state, delegation does not.
 | `workhorse_local_materialize` | byte-range download into Workhorse's SHA-verified cache | yes |
 | `workhorse_local_continue` | dispatch one approved, allowlisted continuation as a visible worker | yes |
 
+## Where a read comes from
+
+While the desk is running, a read comes from the desk and not from the saved
+file. The helper asks over the same loopback bridge the writes already use,
+with the same bearer token, on four routes:
+
+| Route | Answers | Reply bound |
+| --- | --- | --- |
+| `GET /link/chats` | `workhorse_list_chats`, and the finished-worker watch | 1 MB |
+| `GET /link/chat/:id` | `workhorse_read_chat`. The id may be an id, a worker name or a title | 256 KB |
+| `GET /link/capacity` | `workhorse_query_capacity` | 256 KB |
+| `GET /link/status/:id` | `workhorse_agent_status`, and the caller's own row for `workhorse_capabilities` | 256 KB |
+
+These routes read. They change nothing. They are bearer authenticated like
+every other bridge route. A request body is bounded at 256 KB and every reply
+is bounded too. Over the bound the caller gets an error object naming the size.
+No reply is ever cut short in silence.
+
+The desk answers from the state it already holds in memory. A helper is never
+handed a file caught halfway through a save, and never holds a whole file to
+answer one question. The roster is one row per live chat, so it grows with the
+desk and is bounded wider than the other three. A desk of 587 chats measures
+407 KB there.
+
+A reply carries a subset of the saved shape: the same field names, fewer
+fields. That is what lets one reader serve both paths. No route carries a
+credential, an environment value or attachment bytes. The desk drops those
+before it answers, so a helper never holds them at all.
+
+When the desk is down the helper reads the saved file, as it did before, and
+`desk` is `offline`. A desk that cannot answer a route does the same. Both
+paths run the same reader, so the answers match.
+
 ### The seat a worker runs under
 
 Permission and Sandbox are the person's settings — This chat, or Settings ›

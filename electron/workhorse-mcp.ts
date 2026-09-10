@@ -1399,14 +1399,16 @@ async function postBridge(
 /** A read route is a snapshot, not a turn. It answers or it does not. */
 const LINK_READ_TIMEOUT_MS = 8_000;
 
-class DeskReadRefused extends Error {}
-
 /**
  * Ask the desk for the compact shape one read needs.
  *
- * A refusal from the desk — an ambiguous chat name, a reply over the bound — is
- * the desk's answer and is raised. A transport failure is not an answer, so it
- * returns null and the caller falls back to the file.
+ * Null means the desk did not answer. A dropped socket, a desk too old to know
+ * these routes and a reply over the bound all land here, and the caller reads
+ * the file instead. The tool then behaves as it did before these routes
+ * existed, which is the only safe way to fail: a helper that refused the call
+ * would break a read the desk can still serve from disk. A refusal the desk
+ * means, like a worker name two chats answer to, comes back the same either
+ * way, because both paths run the same reader.
  */
 async function deskRead(route: LinkReadRequest, from: string): Promise<LinkDeskState | null> {
   const ask: PeerAsk = {
@@ -1421,16 +1423,13 @@ async function deskRead(route: LinkReadRequest, from: string): Promise<LinkDeskS
   const max = linkReadMaxBytes(route.route);
   const parse = (text: string | undefined): LinkDeskState | null => {
     if (typeof text !== "string" || !text.trim()) return null;
-    if (Buffer.byteLength(text, "utf8") > max) {
-      throw new DeskReadRefused(`Workhorse desk read is over the ${max} byte bound.`);
-    }
+    if (Buffer.byteLength(text, "utf8") > max) return null;
     const parsed = JSON.parse(text) as unknown;
     return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as LinkDeskState) : null;
   };
   if (deskAsk) {
     const result = await deskAsk(ask);
-    if (result.error) throw new DeskReadRefused(result.error);
-    return parse(result.text);
+    return result.error ? null : parse(result.text);
   }
   const live = readBridgeRecord(process.env.WORKHORSE_STATE_PATH);
   const url = live?.url || process.env.WORKHORSE_BRIDGE_URL;
@@ -1444,10 +1443,7 @@ async function deskRead(route: LinkReadRequest, from: string): Promise<LinkDeskS
       signal: controller.signal,
     });
     const payload = (await response.json().catch(() => null)) as { text?: string; error?: string } | null;
-    if (response.status === 404 || response.status === 401) return null;
-    if (!response.ok || payload?.error) {
-      throw new DeskReadRefused(payload?.error || `Workhorse desk read failed with ${response.status}`);
-    }
+    if (!response.ok || payload?.error) return null;
     return parse(payload?.text);
   } finally {
     clearTimeout(timer);
@@ -1476,8 +1472,7 @@ export async function readSnapshot(route: LinkReadRequest | null, caller: string
     try {
       const snapshot = await deskRead(route, caller);
       if (snapshot) return snapshot;
-    } catch (error) {
-      if (error instanceof DeskReadRefused) throw error;
+    } catch {
       // A dropped socket is the desk going down mid call, not an answer.
     }
   }

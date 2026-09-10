@@ -2346,6 +2346,9 @@ export function missionCapsFor(
   };
 }
 
+/** How every cap refusal opens, so a caller can tell a stop from a bad call. */
+export const MISSION_CAP_PREFIX = "mission cap reached:";
+
 /**
  * The stop before the next pass starts. Undefined means the pass may start.
  * Dollars are read before tokens, so a mission over both says what the money
@@ -2363,10 +2366,10 @@ export function missionCapError(input: {
   if (caps.maxCostUsd === undefined && caps.maxTokens === undefined) return undefined;
   const spend = missionSpend(input.sessions, input.parentId, input.mission, input.usage);
   if (caps.maxCostUsd !== undefined && spend.costUsd >= caps.maxCostUsd) {
-    return `mission cap reached: $${spend.costUsd.toFixed(2)} of $${caps.maxCostUsd.toFixed(2)}`;
+    return `${MISSION_CAP_PREFIX} $${spend.costUsd.toFixed(2)} of $${caps.maxCostUsd.toFixed(2)}`;
   }
   if (caps.maxTokens !== undefined && spend.tokens >= caps.maxTokens) {
-    return `mission cap reached: ${spend.tokens} of ${caps.maxTokens} tokens`;
+    return `${MISSION_CAP_PREFIX} ${spend.tokens} of ${caps.maxTokens} tokens`;
   }
   return undefined;
 }

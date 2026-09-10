@@ -198,6 +198,8 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
   Spawn a wave, then continue the rest with `workhorse_continue_mission`.
 - With both pins on, the chat spawns as orchestrator, then continues unmet work
   as a mission.
+- Set a cost cap or a token cap under Mission, and the desk stops the mission
+  before the next pass once the crew's spend reaches it, never mid-turn.
 - The crew tray shows direct workers, their model, effort and latest activity.
 - Expand it to stop a worker or the crew, preview a worker chat, queue a
   follow-up, or open the full chat. Drafts stay local while you type.

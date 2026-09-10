@@ -16,7 +16,7 @@ import { applyCreateWorkhorseProject, normalizeProject } from "../src/lib/projec
 import { normalizeSettings } from "../src/lib/settings";
 import { applyVendorCatalog, resetVendorCatalog } from "../src/lib/models";
 import { passGrantedAccess } from "../src/lib/permissions";
-import type { AttachmentKind, ChatImage, CustomLlm, MissionIteration, Session, SessionEnvironment, UsageEvent, WatchDayMarks, WatchPermits } from "../src/lib/types";
+import type { AttachmentKind, ChatImage, CustomLlm, MissionCaps, MissionIteration, Session, SessionEnvironment, UsageEvent, WatchDayMarks, WatchPermits } from "../src/lib/types";
 import {
   attachmentKind,
   attachmentMime,
@@ -43,6 +43,7 @@ import {
   nestedWorkerPolicy,
   nextMissionIteration,
   normalizeMissionIteration,
+  MISSION_CAP_PREFIX,
   resolveWorkerIsolation,
   shouldSpawnInsteadOfAsk,
   SPAWN_ONLY_PROMPT_ERROR,
@@ -416,6 +417,8 @@ const TOOLS = [
           properties: {
             acceptanceCriteria: { type: "array", items: { type: "string" }, description: "Concrete completion checks" },
             maxIterations: { type: "number", description: "2-8 passes; default 4" },
+            maxCostUsd: { type: "number", description: "Mission dollar ceiling. Before each new pass the desk sums what the mission spent across every worker in it. At or over the ceiling the pass does not start. A worker mid-turn is never stopped. A vendor the desk cannot price adds no dollars." },
+            maxTokens: { type: "number", description: "Mission token ceiling, summed the same way and checked the same moment. Tokens count even when the desk does not know the price." },
           },
           required: ["acceptanceCriteria"],
           additionalProperties: false,
@@ -462,6 +465,15 @@ const TOOLS = [
             provider: { type: "string", description: "Replacement vendor: grok, claude, codex, cursor, custom, or grok-bot shorthand" },
             model: { type: "string", description: "Replacement model" },
             effort: { type: "string", description: "Replacement thinking effort" },
+          },
+          additionalProperties: false,
+        },
+        loop: {
+          type: "object",
+          description: "Optional new ceilings for the rest of the mission. Omit to keep the ones it already carries. A higher ceiling lets a mission that stopped at its cap go on.",
+          properties: {
+            maxCostUsd: { type: "number", description: "New mission dollar ceiling, read before this pass starts" },
+            maxTokens: { type: "number", description: "New mission token ceiling, read before this pass starts" },
           },
           additionalProperties: false,
         },
@@ -2370,7 +2382,37 @@ function missionIterationFromArgs(args: Record<string, unknown>, task: string, t
     maxIterations: requestedMax,
     previousWorkerIds: [],
     phase: "scout",
+    ...missionCapsFromLoop(loop),
   };
+}
+
+/**
+ * The two mission ceilings a caller may set. Both are optional and both must
+ * be positive, so a caller cannot switch a cap off by sending zero.
+ */
+function missionCapsFromLoop(loop: Record<string, unknown>): MissionCaps {
+  const read = (key: "maxCostUsd" | "maxTokens"): number | undefined => {
+    const raw = loop[key];
+    if (raw === undefined || raw === null) return undefined;
+    if (typeof raw !== "number" || !Number.isFinite(raw) || raw <= 0) {
+      throw new Error(`loop.${key} must be a positive number`);
+    }
+    return key === "maxTokens" ? Math.floor(raw) : raw;
+  };
+  const maxCostUsd = read("maxCostUsd");
+  const maxTokens = read("maxTokens");
+  return {
+    ...(maxCostUsd === undefined ? {} : { maxCostUsd }),
+    ...(maxTokens === undefined ? {} : { maxTokens }),
+  };
+}
+
+/** `loop` on a continuation carries only the raise. There is no new objective. */
+function missionRaiseFromArgs(args: Record<string, unknown>): MissionCaps | undefined {
+  if (args.loop === undefined) return undefined;
+  if (!args.loop || typeof args.loop !== "object" || Array.isArray(args.loop)) throw new Error("loop must be an object");
+  const caps = missionCapsFromLoop(args.loop as Record<string, unknown>);
+  return caps.maxCostUsd === undefined && caps.maxTokens === undefined ? undefined : caps;
 }
 
 type AwaitMissionReport = {
@@ -2456,6 +2498,7 @@ async function continueMission(args: Record<string, unknown>, from?: string): Pr
     ? Math.floor(args.previousPass)
     : 0;
   if (previousPass < 1) throw new Error("previousPass must be a positive number");
+  const raise = missionRaiseFromArgs(args);
   const snapshotText = await awaitAgents(parentId, undefined, false, undefined, previousWorkerIds);
   let snapshot: { running?: string[]; reports?: AwaitMissionReport[] };
   try {
@@ -2484,8 +2527,31 @@ async function continueMission(args: Record<string, unknown>, from?: string): Pr
         },
       };
     });
-  const next = nextMissionIteration(sessions, parentId, previousWorkerIds, previousPass, { allowUnfinished: true });
-  if (!next.ok) throw new Error(next.error);
+  // The ledger goes in, so the cap reads what the desk has recorded now. A
+  // raise sent on this call is measured instead of the old ceiling, which is
+  // how a mission that stopped at its cap carries on.
+  const next = nextMissionIteration(sessions, parentId, previousWorkerIds, previousPass, {
+    allowUnfinished: true,
+    usage: readState().usage,
+    ...(raise ? { raise } : {}),
+  });
+  if (!next.ok) {
+    // A cap is a stop, not a broken call. It answers in the shape a caller
+    // already reads, so the harness reports the spend instead of retrying.
+    if (next.error.startsWith(MISSION_CAP_PREFIX)) {
+      return JSON.stringify(
+        {
+          next: "failed",
+          spawned: false,
+          error: next.error,
+          how: "The mission met its ceiling. Report the spend. Call again with a higher loop.maxCostUsd or loop.maxTokens to go on.",
+        },
+        null,
+        2,
+      );
+    }
+    throw new Error(next.error);
+  }
   // A worker that ended badly does not end the mission. The pass carries what
   // did not finish, so the next one can pick that work up instead of the
   // mission dying with its id and acceptance criteria stranded. The list is

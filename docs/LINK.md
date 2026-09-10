@@ -281,10 +281,19 @@ The same loop for Claude, Codex, Grok, OpenClaw, and Hermes:
    }
    ```
 
-   Nothing is lost. The full report and the full title stay on the worker:
-   `workhorse_agent_status` with that row's `childSessionId`, or
-   `workhorse_read_chat` for the whole transcript. The same bounds apply to a
-   `workhorse_continue_mission` reply, which is the same spawn underneath.
+   The last five rows carry their own `childSessionId`, and the full report and
+   the full title stay on the worker: `workhorse_agent_status` with that id, or
+   `workhorse_read_chat` for the whole transcript. The finished workers before
+   those five are not on the reply at all, and `finishedCount` is a count, not
+   their ids, so reach them through the chat list. `workhorse_list_chats` names
+   every worker with its `id`. That list has a bound of its own, so a worker
+   that finished over 24 hours ago takes `all`, and the CLI pages a long list
+   with `--limit` and `--cursor`. Then read that row's `id` with
+   `workhorse_agent_status` or `workhorse_read_chat`.
+
+   The reply cannot carry the ids it left out. On a desk of 800 workers that
+   array runs to 20 KB, against a whole reply of 5.6 KB. The same bounds apply
+   to a `workhorse_continue_mission` reply, which is the same spawn underneath.
 3. Later, `workhorse_agent_status` with the worker or asked-chat id
    (`childSessionId` from ask or delegate). `next` is `wait`, `done`, or
    `failed`. When `done`, the report is that turn's reply, not an older

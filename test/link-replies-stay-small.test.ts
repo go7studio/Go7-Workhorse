@@ -112,6 +112,43 @@ function startedReply(): string {
   );
 }
 
+/**
+ * The synthetic desk on disk, for a call that has to go through the helper.
+ * The state path and the profile are process-wide, so they go back afterwards
+ * whatever the call did.
+ */
+async function onSyntheticDesk<T>(body: () => Promise<T>): Promise<T> {
+  const dir = mkdtempSync(path.join(tmpdir(), "link-reply-"));
+  const statePath = path.join(dir, "workhorse-state.json");
+  const previous = { state: process.env.WORKHORSE_STATE_PATH, profile: process.env.WORKHORSE_MCP_PROFILE };
+  try {
+    writeFileSync(statePath, JSON.stringify({ sessions: syntheticSessions() }), "utf8");
+    process.env.WORKHORSE_STATE_PATH = statePath;
+    process.env.WORKHORSE_MCP_PROFILE = "external-runtime";
+    resetLinkStateCache();
+    return await body();
+  } finally {
+    if (previous.state === undefined) delete process.env.WORKHORSE_STATE_PATH;
+    else process.env.WORKHORSE_STATE_PATH = previous.state;
+    if (previous.profile === undefined) delete process.env.WORKHORSE_MCP_PROFILE;
+    else process.env.WORKHORSE_MCP_PROFILE = previous.profile;
+    resetLinkStateCache();
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+/** One Link tool call against that desk, through the handler MCP uses. */
+async function linkCall(name: string, args: Record<string, unknown>): Promise<string> {
+  const reply = (await handleWorkhorseRpc({
+    jsonrpc: "2.0",
+    id: 1,
+    method: "tools/call",
+    params: { name, arguments: args },
+  })) as { error?: { message?: string }; result?: { content?: Array<{ text?: string }> } };
+  assert.equal(reply.error, undefined, reply.error?.message);
+  return reply.result?.content?.[0]?.text ?? "";
+}
+
 test("a delegate reply on a desk of 800 finished workers stays under 8 KB", () => {
   const reply = startedReply();
   const bytes = Buffer.byteLength(reply, "utf8");
@@ -169,31 +206,49 @@ test("a truncated report says so and the full one is still readable by id", asyn
   assert.ok(last.report.length < `${REPORT} [worker 799]`.length, "the report was not bounded");
   assert.equal(last.childSessionId, workerId(799));
 
-  const dir = mkdtempSync(path.join(tmpdir(), "link-reply-"));
-  const statePath = path.join(dir, "workhorse-state.json");
-  const previous = { state: process.env.WORKHORSE_STATE_PATH, profile: process.env.WORKHORSE_MCP_PROFILE };
-  try {
-    writeFileSync(statePath, JSON.stringify({ sessions: syntheticSessions() }), "utf8");
-    process.env.WORKHORSE_STATE_PATH = statePath;
-    process.env.WORKHORSE_MCP_PROFILE = "external-runtime";
-    resetLinkStateCache();
-    const reply = (await handleWorkhorseRpc({
-      jsonrpc: "2.0",
-      id: 1,
-      method: "tools/call",
-      params: { name: "workhorse_read_chat", arguments: { chat: last.childSessionId } },
-    })) as { error?: { message?: string }; result?: { content?: Array<{ text?: string }> } };
-    assert.equal(reply.error, undefined, reply.error?.message);
-    const transcript = JSON.parse(reply.result?.content?.[0]?.text ?? "{}") as { messages: Array<{ text: string }> };
+  await onSyntheticDesk(async () => {
+    const transcript = JSON.parse(await linkCall("workhorse_read_chat", { chat: last.childSessionId })) as {
+      messages: Array<{ text: string }>;
+    };
     assert.equal(transcript.messages.at(-1)?.text, `${REPORT} [worker 799]`, "the full report was not readable by id");
-  } finally {
-    if (previous.state === undefined) delete process.env.WORKHORSE_STATE_PATH;
-    else process.env.WORKHORSE_STATE_PATH = previous.state;
-    if (previous.profile === undefined) delete process.env.WORKHORSE_MCP_PROFILE;
-    else process.env.WORKHORSE_MCP_PROFILE = previous.profile;
-    resetLinkStateCache();
-    rmSync(dir, { recursive: true, force: true });
-  }
+  });
+});
+
+test("a finished worker the reply left out is found on the chat list and read by id", async () => {
+  // The five-row bound drops this row, and `finishedCount` is a count, not the
+  // ids it left out. So the walk back to a dropped report starts at the chat
+  // list, which is what docs/LINK.md now tells a harness to do.
+  const bounded = boundLinkLineup(lineupSnapshot(syntheticLineup(), []));
+  const dropped = workerId(400);
+  assert.equal(bounded.finishedCount, FINISHED);
+  assert.ok(
+    !bounded.finished.some((row) => row.childSessionId === dropped),
+    "the row this walk calls dropped was on the reply after all",
+  );
+
+  await onSyntheticDesk(async () => {
+    type ChatRow = { id: string; worker?: string; parentId?: string };
+    // Step one bounds its own list: this worker finished long ago, so the
+    // default board leaves it out and `all` is the flag that brings it back.
+    const board = JSON.parse(await linkCall("workhorse_list_chats", {})) as ChatRow[];
+    assert.ok(!board.some((row) => row.id === dropped), "the default list carried a worker that finished long ago");
+
+    const all = JSON.parse(await linkCall("workhorse_list_chats", { all: true })) as ChatRow[];
+    const found = all.find((row) => row.id === dropped);
+    assert.ok(found, "`all` did not restore the dropped worker");
+    assert.equal(found.parentId, PARENT, "the restored row did not name the parent it belongs to");
+    assert.equal(found.worker, "Worker400");
+
+    // Step two: the id off that list reads the whole report the reply cut.
+    const transcript = JSON.parse(await linkCall("workhorse_read_chat", { chat: found.id })) as {
+      messages: Array<{ text: string }>;
+    };
+    assert.equal(
+      transcript.messages.at(-1)?.text,
+      `${REPORT} [worker 400]`,
+      "the dropped worker's full report was not readable by id",
+    );
+  });
 });
 
 test("a short report is not marked truncated", () => {

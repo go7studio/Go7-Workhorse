@@ -270,6 +270,13 @@ export async function askViaInbox(inbox: string, ask: PeerAsk, timeoutMs = 10 * 
       }
       await sleep(80);
     }
+    // One last look. The answer can land during that final sleep, or while a
+    // busy machine overruns it, and throwing then loses a reply that arrived.
+    if (fs.existsSync(resPath)) {
+      const result = JSON.parse(fs.readFileSync(resPath, "utf8")) as PeerAskResult;
+      if ("error" in result && result.error) throw new Error(result.error);
+      return "text" in result ? result.text : "";
+    }
     throw new Error("the other chat did not answer in time");
   } finally {
     try {
@@ -285,13 +292,29 @@ export async function askViaInbox(inbox: string, ask: PeerAsk, timeoutMs = 10 * 
   }
 }
 
-/** The inbox is read this often when `fs.watch` is healthy: a floor under how long a peer ask can sit. */
-export const IDLE_INBOX_SCAN_MS = 1_000;
+/**
+ * How often the inbox is read when nothing has woken it. This is the ceiling on
+ * how long one chat waits to reach another while the bridge is down, so it is
+ * not a knob to turn for tidiness. It was raised to five seconds beside a paint
+ * fix and that broke the desk's own peer round trip on a loaded runner, on this
+ * Mac and then on CI. Measured here: an empty readdir of that directory is
+ * 0.0097ms at p50, so four a second costs 0.039ms of CPU per second, which is
+ * 3.4 seconds of CPU in a day. That is what the five seconds bought.
+ */
+export const INBOX_SCAN_MS = 250;
 
-/** And this often when the watch is not usable at all, where the read is the only signal there is. */
-export const WATCHLESS_INBOX_SCAN_MS = 250;
+/** A watcher the desk can drive, so a test can prove the scan answers without waiting on a clock. */
+export type InboxWatchIo = {
+  watch?: (dir: string, onChange: () => void) => { close: () => void; on: (event: "error", fn: () => void) => void };
+  /** Runs `tick` every `ms` and returns the cancel. */
+  schedule?: (tick: () => void, ms: number) => () => void;
+};
 
-export function watchPeerInbox(inbox: string, handler: (ask: PeerAsk) => Promise<PeerAskResult>): () => void {
+export function watchPeerInbox(
+  inbox: string,
+  handler: (ask: PeerAsk) => Promise<PeerAskResult>,
+  io: InboxWatchIo = {},
+): () => void {
   fs.mkdirSync(inbox, { recursive: true });
   const seen = new Set<string>();
   const scan = () => {
@@ -322,44 +345,37 @@ export function watchPeerInbox(inbox: string, handler: (ask: PeerAsk) => Promise
     }
   };
   /*
-   * `fs.watch` is the signal here; the interval only covers a filesystem that
-   * does not deliver events. It used to run every 250ms for the life of the
-   * app, so an idle desk read this directory 345,600 times a day to find
-   * nothing.
-   *
-   * The safety net was five seconds for one release, and that was too long.
-   * This is the path a chat takes to reach another chat when the bridge is
-   * down, and under a loaded machine the watch event can arrive late or not at
-   * all: the suite's own peer round trip, which allows four seconds, failed
-   * once at five and passed three times out of three on an idle machine. One
-   * second bounds the wait without going back to four reads a second, and it
-   * leaves the same test four chances instead of none. A watch that throws or
-   * reports an error is the one case that still earns the fast scan.
+   * `fs.watch` wakes this immediately when the filesystem tells us. The scan is
+   * the floor under that, for a filesystem that does not deliver, a watch that
+   * is late, and a machine busy enough that a queued event arrives after the
+   * caller has given up. It reads a small directory and returns; see
+   * INBOX_SCAN_MS for what that costs.
    */
-  const poll = (ms: number) => {
-    const timer = setInterval(scan, ms);
-    timer.unref();
-    return timer;
-  };
-  let fallback = poll(IDLE_INBOX_SCAN_MS);
-  let fast = false;
-  const hurry = () => {
-    if (fast) return;
-    fast = true;
-    clearInterval(fallback);
-    fallback = poll(WATCHLESS_INBOX_SCAN_MS);
-  };
-  let watcher: fs.FSWatcher | undefined;
+  const schedule =
+    io.schedule ??
+    ((tick: () => void, ms: number) => {
+      const timer = setInterval(tick, ms);
+      timer.unref();
+      return () => clearInterval(timer);
+    });
+  const stopScanning = schedule(scan, INBOX_SCAN_MS);
+  let watcher: { close: () => void; on: (event: "error", fn: () => void) => void } | undefined;
   try {
-    watcher = fs.watch(inbox, scan);
-    watcher.unref();
-    watcher.on("error", hurry);
+    const watch =
+      io.watch ??
+      ((dir: string, onChange: () => void) => {
+        const live = fs.watch(dir, onChange);
+        live.unref();
+        return live;
+      });
+    watcher = watch(inbox, scan);
+    watcher.on("error", scan);
   } catch {
-    hurry();
+    /* No watch on this filesystem. The scan above is the whole signal. */
   }
   scan();
   return () => {
-    clearInterval(fallback);
+    stopScanning();
     watcher?.close();
   };
 }

@@ -158,6 +158,126 @@ function headIsReachable(repo: string, target: string): boolean {
   return refs.out.length > 0;
 }
 
+/**
+ * Anything `git status` can see, staged or not, tracked or not.
+ *
+ * `git worktree remove` refuses a dirty tree on its own, and its refusal is
+ * still the last word. This runs first so the sweep can say what it found —
+ * "it holds uncommitted changes" is a reason a person can act on, and
+ * git's own line is written for somebody at a terminal.
+ */
+function worktreeIsDirty(target: string): { held: string; paths: string[]; unknown: boolean } {
+  const status = gitSync(["-C", target, "status", "--porcelain"]);
+  if (!status.ok) return { held: "", paths: [], unknown: true };
+  const rows = status.out.split("\n").map((row) => row.trimEnd()).filter(Boolean);
+  if (rows.length === 0) return { held: "", paths: [], unknown: false };
+  const untracked = rows.filter((row) => row.startsWith("??"));
+  const held =
+    untracked.length === rows.length
+      ? "untracked files"
+      : untracked.length > 0
+        ? "uncommitted changes and untracked files"
+        : "uncommitted changes";
+  // The status field, then the path. Not a fixed offset: `gitSync` trims its
+  // output, so the leading space of a worktree-only change is already gone from
+  // the first row and every column after it has moved.
+  const paths = rows.map((row) => row.replace(/^\S+\s+/, "").trim() || row).filter(Boolean);
+  return { held, paths, unknown: false };
+}
+
+/**
+ * Is this tree's work on a remote?
+ *
+ * `headIsReachable` above asks whether any ref can reach the commit, which a
+ * local branch satisfies. That is enough to stop garbage collection and not
+ * enough to survive the disk it is on. A worker's commits live in one clone; if
+ * no remote branch contains them, removing the tree is the last copy going.
+ *
+ * A repository with no remote configured, or one whose remote has been deleted,
+ * answers the same way: nothing on a remote contains this, so the tree stays.
+ * That keeps more trees than a cleverer rule would, and a kept tree costs disk
+ * where a wrong one costs an afternoon.
+ */
+function headIsOnARemote(target: string): { pushed: boolean; unknown: boolean } {
+  const head = gitSync(["-C", target, "rev-parse", "HEAD"]);
+  if (!head.ok || !head.out) return { pushed: false, unknown: true };
+  const remotes = gitSync(["-C", target, "branch", "-r", "--contains", head.out]);
+  if (!remotes.ok) return { pushed: false, unknown: true };
+  return { pushed: remotes.out.length > 0, unknown: false };
+}
+
+/**
+ * The default branch as this clone knows it, or "" when it cannot be named.
+ *
+ * `origin/HEAD` first because it is the answer the remote gave; then the two
+ * names a default branch actually has. That is also the order `for-each-ref`
+ * sorts them in, so `--count=1` picks the first that exists in one call.
+ *
+ * A repository whose default branch lives on a remote not called `origin` is
+ * not named here and its trees are kept. That is the same trade the rest of
+ * this file makes: a kept tree costs disk, a wrong one costs an afternoon.
+ */
+function defaultBranchRef(target: string): string {
+  const found = gitSync([
+    "-C",
+    target,
+    "for-each-ref",
+    "--count=1",
+    "--format=%(refname)",
+    "refs/remotes/origin/HEAD",
+    "refs/remotes/origin/main",
+    "refs/remotes/origin/master",
+  ]);
+  return found.ok ? found.out : "";
+}
+
+/**
+ * Is everything this tree holds already in the default branch?
+ *
+ * `headIsOnARemote` asks whether a remote branch contains HEAD, and for a
+ * worker whose pull request merged that question has one answer: no. This
+ * repository squash merges and deletes the branch, so the commit that lands on
+ * main carries the branch's tree and none of its commits. Once the branch is
+ * deleted, nothing on a remote contains HEAD, and the tree is held as unsaved
+ * for ever. Six of the last seven merges on main are squashes, so that is the
+ * ordinary shape of a finished worker, not a corner of it.
+ *
+ * So the second test is about content, not commits: for every path the branch
+ * changed since its merge base with the default branch, HEAD's blob and the
+ * default branch's blob have to be the same. Comparing HEAD's whole tree to the
+ * squash commit's tree was the other candidate and it does not work. A branch
+ * merged after main moved on has a tree that matches no commit on main, and a
+ * deleted branch leaves nothing pointing at the commit that squashed it, so
+ * finding that commit means scanning main's history and hoping.
+ *
+ * Every direction errs toward keeping. A path the default branch has since
+ * moved on reads as missing and holds the tree. Anything this cannot decide is
+ * not decided: no default branch, no merge base, a `git` that failed or outran
+ * its buffer, all answer no. And the answer is only ever used to clear a
+ * refusal, never to make one.
+ *
+ * It is about content and not authorship on purpose. A tree whose every changed
+ * path is byte for byte in the default branch holds nothing that is not already
+ * saved, whoever wrote it.
+ */
+function headContentIsOnDefaultBranch(target: string): boolean {
+  const main = defaultBranchRef(target);
+  if (!main) return false;
+  const base = gitSync(["-C", target, "merge-base", "HEAD", main]);
+  if (!base.ok || !base.out) return false;
+  // `--no-renames` so a rename is asked about as a delete and an add, and both
+  // paths are checked. `-z` so a path with a space or an accent in it stays one
+  // entry instead of arriving quoted.
+  const changed = gitSync(["-C", target, "diff", "-z", "--name-only", "--no-renames", base.out, "HEAD"]);
+  if (!changed.ok) return false;
+  const paths = new Set(changed.out.split("\0").filter(Boolean));
+  // HEAD adds nothing to a merge base the default branch already contains.
+  if (paths.size === 0) return true;
+  const drifted = gitSync(["-C", target, "diff", "-z", "--name-only", "--no-renames", "HEAD", main]);
+  if (!drifted.ok) return false;
+  return !drifted.out.split("\0").some((row) => row.length > 0 && paths.has(row));
+}
+
 /** The repository a managed worktree belongs to, or null when Git disowns the directory. */
 function owningRepo(target: string): string | null {
   const common = gitSync(["-C", target, "rev-parse", "--git-common-dir"]);
@@ -264,12 +384,55 @@ function holdsNoFiles(target: string): boolean {
  * art is untracked, exists in no commit, and no diff would carry it. Removing the
  * directory ourselves with `fs.rmSync` destroyed that work and left a stale
  * registration behind in the owning repository.
+ *
+ * Two questions come before git's own: is the tree clean, and does it hold
+ * nothing unsaved. Both have to answer yes. Clean is not saved. A commit sitting
+ * in one clone is one disk away from gone, and the sweep now removes folders on
+ * a clock rather than only when a chat was deleted, so the bar for taking one
+ * has to be the higher of the two.
+ *
+ * Saved has two halves, and either will do. A remote branch contains HEAD, or
+ * nothing in HEAD is missing from the default branch. The second half is there
+ * because the first one alone never lets go of a merged worker: this repository
+ * squash merges and deletes the branch, which leaves the work on main and the
+ * commits on no remote branch at all.
  */
 function dropManagedWorktree(target: string): { dropped: boolean; reason: string } {
   const repo = owningRepo(target);
   if (repo) {
-    if (!headIsReachable(repo, target)) {
+    const status = worktreeIsDirty(target);
+    if (status.unknown) {
+      return { dropped: false, reason: "git could not say what it holds, so nothing can vouch for its contents" };
+    }
+    if (status.held) {
+      return {
+        dropped: false,
+        reason: `it holds ${status.held} (${namedSample(status.paths)}) — open it, save what you need, then remove it yourself`,
+      };
+    }
+    // The one thing that answers both refusals below, asked once and only when
+    // one of them is about to fire. It is three or four `git` calls and most
+    // trees never need it.
+    let onDefaultBranch: boolean | null = null;
+    const alreadySaved = () => {
+      if (onDefaultBranch === null) onDefaultBranch = headContentIsOnDefaultBranch(target);
+      return onDefaultBranch;
+    };
+
+    // The narrower finding first. "No ref at all" and "no remote ref" are both
+    // refusals; a person reading the log is better served by the one that says
+    // the commit is not even on a local branch.
+    if (!headIsReachable(repo, target) && !alreadySaved()) {
       return { dropped: false, reason: "it holds a commit no branch or tag can reach" };
+    }
+    const remote = headIsOnARemote(target);
+    if (!remote.pushed && !alreadySaved()) {
+      return {
+        dropped: false,
+        reason: remote.unknown
+          ? "git could not say whether its commits are on a remote"
+          : "it holds commits no remote branch has — push them, then it will go",
+      };
     }
     const ignored = ignoredWorkAtRisk(target);
     if (ignored.unknown) {

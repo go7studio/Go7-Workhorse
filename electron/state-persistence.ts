@@ -236,9 +236,17 @@ export const WORKTREE_KEEP_AFTER_FINISH_MS = 7 * 24 * 60 * 60 * 1000;
  * age floor. No `agentRun`, no status, an unknown status, no timestamp — all keep
  * the tree, because none of them is evidence that the work is done with.
  *
+ * A retired worker is a candidate whatever its clock says. Its transcript has
+ * already been moved to the transcript store, which is the desk stating that
+ * this run is finished with; holding its folder on an age floor after that would
+ * be two answers to one question. A worker whose steps alone were offloaded is
+ * not retired — it still holds its prose — and is aged as before.
+ *
  * Being a candidate is not permission to delete. Every refusal in
- * `worktree-host.ts` still runs on the tree itself: unreachable commits, ignored
- * work git would silently take, and a `.git`-less folder that still holds files.
+ * `worktree-host.ts` still runs on the tree itself: uncommitted changes, work
+ * that is on no remote branch and not in the default branch either, unreachable
+ * commits, ignored work git would silently take, and a `.git`-less folder that
+ * still holds files.
  */
 export function worktreeKeepSet(
   sessions: readonly unknown[],
@@ -249,7 +257,7 @@ export function worktreeKeepSet(
   const keep: string[] = [];
   for (const item of sessions) {
     if (!item || typeof item !== "object" || Array.isArray(item)) continue;
-    const row = item as { id?: unknown; hidden?: unknown; agentRun?: unknown };
+    const row = item as { id?: unknown; hidden?: unknown; agentRun?: unknown; messages?: unknown; transcriptSidecar?: unknown };
     const id = typeof row.id === "string" ? row.id.trim() : "";
     if (!id) continue;
     if (row.hidden !== true) {
@@ -265,11 +273,28 @@ export function worktreeKeepSet(
       keep.push(id);
       continue;
     }
+    if (isRetiredWorkerRow(row)) continue;
     const finishedAt = firstFiniteNumber(run?.finishedAt, run?.startedAt);
     // A finished run with no clock on it cannot be aged, so it is kept.
     if (finishedAt === null || now - finishedAt < keepMs) keep.push(id);
   }
   return keep;
+}
+
+/**
+ * A worker whose whole transcript has been moved to the transcript store.
+ *
+ * Both halves, or it is not retired. A pointer with rows still beside it is the
+ * older offload, where only the thinking and tool rows moved and the chat kept
+ * its prose — that worker may have finished ten minutes ago, and its folder is
+ * still what a person would open to check the report against.
+ */
+export function isRetiredWorkerRow(row: { messages?: unknown; transcriptSidecar?: unknown }): boolean {
+  const pointer = typeof row.transcriptSidecar === "string" && row.transcriptSidecar.trim().length > 0;
+  // An actual empty array, not a missing one. A row whose messages cannot be
+  // read is a row nothing can vouch for, and the honest answer there is to fall
+  // back to the age floor rather than call it finished with.
+  return pointer && Array.isArray(row.messages) && row.messages.length === 0;
 }
 
 function firstFiniteNumber(...values: unknown[]): number | null {

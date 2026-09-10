@@ -23,6 +23,7 @@ import {
   STATE_FSYNC_INTERVAL_MS,
   WORKTREE_KEEP_AFTER_FINISH_MS,
   dueByInterval,
+  isRetiredWorkerRow,
   sameJsonValue,
   worktreeKeepSet,
 } from "../electron/state-persistence";
@@ -1459,4 +1460,53 @@ test("reader: opening a retired chat asks once and merges what comes back", () =
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+/* --------------------- item 6: a worker's tree goes when nothing is unsaved */
+
+test("a retired worker's tree is a candidate whatever its clock says", () => {
+  // Retired ten minutes ago. The transcript has already been moved out, which is
+  // the desk saying this run is finished with; holding the folder on an age
+  // floor after that would be two answers to one question.
+  const retired = { ...worker("sess_retired", "completed", NOW - 10 * 60_000), messages: [], transcriptSidecar: "/t/sess_retired.json" };
+  assert.deepEqual(worktreeKeepSet([retired], { now: NOW }), []);
+
+  // Steps offloaded is not retired. That worker still holds its prose, may have
+  // finished ten minutes ago, and its folder is what a person opens to check
+  // the report against.
+  const stepped = {
+    ...worker("sess_stepped", "completed", NOW - 10 * 60_000),
+    messages: [{ id: "m1", role: "assistant", text: "the final report" }],
+    transcriptSidecar: "/t/sess_stepped.json",
+  };
+  assert.deepEqual(worktreeKeepSet([stepped], { now: NOW }), ["sess_stepped"]);
+
+  // Both halves, or it is not retired.
+  assert.equal(isRetiredWorkerRow({ messages: [], transcriptSidecar: "/t/a.json" }), true);
+  assert.equal(isRetiredWorkerRow({ messages: [], transcriptSidecar: "  " }), false);
+  assert.equal(isRetiredWorkerRow({ transcriptSidecar: "/t/a.json" }), false);
+  assert.equal(isRetiredWorkerRow({ messages: [] }), false);
+
+  // A candidate is not permission. A running worker with no rows in it is still
+  // running, and being retired never overrides the status gate.
+  const running = { ...worker("sess_live", "running"), messages: [], transcriptSidecar: "/t/sess_live.json" };
+  assert.deepEqual(worktreeKeepSet([running], { now: NOW }), ["sess_live"]);
+});
+
+test("every worktree the sweep takes writes its own line", () => {
+  const main = source("electron", "main.ts");
+  // A removal is the only thing this sweep does that a person cannot undo, so
+  // it is the one thing the log may not fold into a count.
+  assert.match(main, /for \(const name of pruned\.removed\)/);
+  assert.match(main, /mainLog\.record\("prune:removed"/);
+  assert.match(main, /mainLog\.record\("prune:kept"/, "and the refusals still say why");
+
+  const host = source("electron", "worktree-host.ts");
+  for (const refusal of ["headIsReachable", "ignoredWorkAtRisk", "holdsNoFiles", "worktreeIsDirty", "headIsOnARemote"]) {
+    assert.match(host, new RegExp(`${refusal}\\(`), `${refusal} must be called before a folder goes`);
+  }
+  // The one check that clears a refusal rather than making one. Without it a
+  // squash merged worker's tree is held for ever, which is most of them.
+  assert.match(host, /headContentIsOnDefaultBranch\(/, "a merged tree has a way to be let go of");
+  assert.equal(/fs\.rmSync\([^)]*force: true/.test(host), false, "the sweep never forces a directory away");
 });

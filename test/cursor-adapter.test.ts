@@ -1,3 +1,4 @@
+import { deskCss } from "./desk-css";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
@@ -937,7 +938,7 @@ test("Cursor Auto is labeled as Cursor Auto; Composer and Cursor Grok stay reada
 });
 
 test("Available models chips do not ellipsis-clip Cursor Grok names", () => {
-  const css = readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8");
+  const css = deskCss();
   const start = css.indexOf(".setup-models button strong");
   assert.ok(start >= 0);
   const block = css.slice(start, css.indexOf("}", start) + 1);

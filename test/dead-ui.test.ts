@@ -1,3 +1,4 @@
+import { deskCss } from "./desk-css";
 import assert from "node:assert/strict";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
@@ -60,7 +61,7 @@ test("the dead ModelMenu and BrainSlider are gone, and ContextMeter kept its hom
   assert.doesNotMatch(all, /\bModelMenu\b|\bBrainSlider\b/, "no reference to either component survives in src/");
 
   // Their styles went with them; the shared bits they leaned on did not.
-  const css = readFileSync(path.join(SRC, "styles", "app.css"), "utf8");
+  const css = deskCss();
   for (const dead of ["chat-bar-ai", "model-menu", "model-trigger", "model-pop", "model-group", "model-line", "brain-track", "brain-dots"]) {
     assert.doesNotMatch(css, new RegExp(`\\.${dead}(?![\\w-])`), `.${dead} is dead CSS`);
   }

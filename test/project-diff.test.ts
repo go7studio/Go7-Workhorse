@@ -1,3 +1,4 @@
+import { deskCss } from "./desk-css";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -335,7 +336,7 @@ test("Project Home list stats stay cheap after they are known", () => {
   const diffStat = readFileSync(path.join(ROOT, "src", "ui", "DiffStat.tsx"), "utf8");
   assert.match(diffStat, /countMotion/);
   assert.doesNotMatch(diffStat, /requestAnimationFrame\(tick\).*countMotion/);
-  const css = readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8");
+  const css = deskCss();
   assert.match(css, /\.project-overview \.edited-block\.compact,\s*\.project-overview \.edited-block\.compact\.fill\s*\{[^}]*width:\s*100%/);
   assert.match(css, /\.project-overview \.edited-block\.compact \.file-list/);
 });

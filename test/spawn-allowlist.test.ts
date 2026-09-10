@@ -1,3 +1,4 @@
+import { deskCss } from "./desk-css";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -189,7 +190,7 @@ test("the composer gear and spawn gate are wired, and new chats do not copy the 
   assert.match(composer, /All bots/);
   assert.match(composer, /setSpawnAllowlist/);
   assert.match(composer, /setCrewMode\(toggleCrewMode/);
-  const css = readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8");
+  const css = deskCss();
   assert.match(css, /\.composer-crew-gear/);
   assert.match(css, /\.composer-spawn-menu/);
   const store = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");

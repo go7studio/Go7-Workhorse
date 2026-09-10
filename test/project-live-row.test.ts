@@ -1,3 +1,4 @@
+import { deskCss } from "./desk-css";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -44,7 +45,7 @@ test("the folder wears the same peer bar and line the chat row wears", () => {
   assert.match(sidebar, /projectLiveLine\(chats, index\.linksBySession\)/, "the folder asks the one rule");
   assert.match(sidebar, /\$\{live \? " live" : ""\}/, "the folder carries a live class");
   assert.match(sidebar, /live && !open \? <span className="row-meta peer">\{live\.label\}<\/span>/, "the line shows only while closed");
-  const css = read("src/styles/app.css");
+  const css = deskCss();
   assert.match(css, /\.project-folder\.live \.project-head \{\s*box-shadow: inset 3px 0 0 var\(--peer\);/, "same inset bar as .chat-row.peer-link");
   assert.match(css, /\.project-head \.row-meta\.peer \{\s*color: var\(--peer\);/, "same peer colour on the line");
 });

@@ -1,0 +1,678 @@
+
+.settings .field,
+.add-bot .field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0 0 14px;
+}
+
+.settings .field > span,
+.add-bot .field > span {
+  font-size: var(--text-12);
+  color: var(--text-secondary);
+}
+
+.settings .field input,
+.settings .field select,
+.add-bot .field input,
+.add-bot .field select {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-10);
+  background: var(--bg);
+  outline: none;
+}
+
+.add-bot .field select,
+.settings .field select {
+  appearance: none;
+  padding-right: 32px;
+}
+
+.settings .field input:focus,
+.settings .field select:focus,
+.add-bot .field input:focus,
+.add-bot .field select:focus {
+  border-color: var(--accent);
+}
+
+.llm-row strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.settings.settings-full {
+  max-width: none;
+  height: 100%;
+  min-height: 0;
+  padding: 24px 32px 24px;
+  overflow: auto;
+}
+
+.settings.settings-full.usage-section {
+  overflow: hidden;
+}
+
+.settings.settings-full > p,
+.settings.settings-full .field,
+.settings.settings-full .link-block,
+.settings.settings-full .actions {
+  max-width: none;
+  width: 100%;
+}
+
+.settings.settings-full .llm-detail-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  width: auto;
+}
+
+/*
+ * Settings reads like System Settings: one toolbar, then grouped rows. A row
+ * is a label and one line of copy on the left, its control on the right, a
+ * hairline between neighbours. The window title already says Settings, so
+ * the pane does not say it again.
+ */
+.settings-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 0 0 18px;
+}
+
+.settings-bar .actions {
+  flex-wrap: wrap;
+  width: auto;
+}
+
+.settings-group {
+  margin: 0 0 14px;
+  padding: 0 16px;
+  background: var(--bg-solid);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-14);
+}
+
+.settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  min-height: 52px;
+  padding: 11px 0;
+  transition: opacity 160ms var(--ease);
+}
+
+.settings-row + .settings-row {
+  border-top: 1px solid var(--line);
+}
+
+/* Depends on a switch above it that is off. Still readable, plainly inert. */
+.settings-row.off {
+  opacity: 0.42;
+}
+
+.settings-row-copy {
+  flex: 1;
+  min-width: 0;
+}
+
+.settings-row-copy strong {
+  display: block;
+  font-size: var(--text-15);
+  font-weight: 560;
+  letter-spacing: -0.01em;
+}
+
+.settings-row-copy span {
+  display: block;
+  margin-top: 2px;
+  font-size: var(--text-11);
+  line-height: 1.45;
+  color: var(--text-tertiary);
+  text-wrap: pretty;
+}
+
+.settings-control {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 8px;
+}
+
+.settings-control > input,
+.settings-control > select {
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-10);
+  background: var(--bg);
+  font: inherit;
+  font-size: var(--text-13);
+  outline: none;
+}
+
+.settings-control > input {
+  width: 224px;
+}
+
+.settings-control > input[type="number"] {
+  width: 64px;
+  text-align: right;
+}
+
+.settings-control > select {
+  max-width: 260px;
+  appearance: none;
+  padding-right: 28px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12' fill='none' stroke='%2386868b' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3.5 4.5 6 2l2.5 2.5M3.5 7.5 6 10l2.5-2.5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 9px center;
+  background-size: 12px 12px;
+}
+
+.settings-control > input:focus,
+.settings-control > select:focus {
+  border-color: var(--accent);
+}
+
+.settings-control > input:disabled {
+  color: var(--text-tertiary);
+}
+
+.settings-control .unit {
+  font-size: var(--text-12);
+  color: var(--text-tertiary);
+}
+
+.settings-control .actions {
+  width: auto;
+}
+
+/* Routing's preview: what auto-route would hand each kind of task. */
+.settings-picks {
+  margin: 0 0 14px;
+  padding: 14px 16px 16px;
+  background: var(--bg-solid);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-14);
+}
+
+.settings-picks-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.settings-picks-head .section-label {
+  margin: 0;
+}
+
+.settings-picks-head > span {
+  font-size: var(--text-11);
+  color: var(--text-tertiary);
+}
+
+.settings-picks .usage-brains {
+  margin: 0;
+}
+
+.settings-picks .usage-brain {
+  background: var(--bg);
+}
+
+.settings-picks .llm-mark.on {
+  color: var(--text);
+}
+
+.settings-note {
+  margin: -4px 4px 14px;
+  white-space: normal;
+  line-height: 1.5;
+  text-wrap: pretty;
+}
+
+/* A group's first row can carry the group's name and its actions. */
+.settings-group-head {
+  align-items: flex-start;
+}
+
+/* Workhorse Link: six Connect buttons. Wrap rather than overflow the pane. */
+.settings-control.link-connect {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  row-gap: 6px;
+  max-width: 60%;
+}
+
+.settings-group-head .settings-control {
+  padding-top: 2px;
+}
+
+.settings-row-note {
+  display: block;
+  margin-top: 6px;
+  font-size: var(--text-11);
+  line-height: 1.45;
+  color: var(--text-secondary);
+  white-space: normal;
+}
+
+/* One line under a control, then the way to the rest of it. */
+.settings-learn {
+  color: var(--accent);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.settings-learn:hover {
+  text-decoration: underline;
+}
+
+.local-compute-add {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 12px;
+  padding: 12px 0 14px;
+  border-top: 1px solid var(--line);
+}
+
+.local-compute-add label {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  font-size: var(--text-11);
+  color: var(--text-tertiary);
+}
+
+.local-compute-add input {
+  min-width: 0;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-10);
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--text-12);
+  outline: none;
+}
+
+.local-compute-add input:focus {
+  border-color: var(--accent);
+}
+
+.local-compute-token {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.local-compute-token > span {
+  grid-column: 1 / -1;
+}
+
+.local-compute-add-actions {
+  display: flex;
+  grid-column: 1 / -1;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--text-tertiary);
+  font-size: var(--text-11);
+}
+
+.local-compute-host {
+  padding: 13px 0;
+  border-top: 1px solid var(--line);
+}
+
+.local-compute-host.off {
+  opacity: 0.58;
+}
+
+.local-compute-host-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.local-compute-host-head > div:first-child {
+  min-width: 0;
+}
+
+.local-compute-host-head strong,
+.local-compute-host-head span {
+  display: block;
+}
+
+.local-compute-host-head > div:first-child > span {
+  max-width: 560px;
+  overflow: hidden;
+  margin-top: 2px;
+  color: var(--text-tertiary);
+  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: var(--text-11);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.local-compute-grants {
+  display: grid;
+  grid-template-columns: minmax(150px, 0.42fr) minmax(0, 1fr);
+  gap: 18px;
+  margin-top: 13px;
+}
+
+.local-compute-grants b,
+.local-compute-grants > div > span:not(.agent-chips) {
+  display: block;
+  margin-bottom: 5px;
+  color: var(--text-tertiary);
+  font-size: var(--text-11);
+  font-weight: 500;
+}
+
+.local-capability {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  width: 100%;
+  gap: 2px 12px;
+  margin-top: 6px;
+  padding: 7px 9px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-10);
+  background: var(--bg);
+  color: var(--text-secondary);
+  text-align: left;
+}
+
+.local-capability.on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.local-capability.stale {
+  border-style: dashed;
+  border-color: var(--text-tertiary);
+  background: transparent;
+}
+
+.local-capability strong {
+  grid-column: 1 / -1;
+  overflow: hidden;
+  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: var(--text-11);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.local-capability span {
+  font-size: var(--text-11);
+  color: var(--text-tertiary);
+}
+
+.local-capability-family {
+  display: block;
+  margin-top: 14px;
+}
+
+@media (max-width: 720px) {
+  .local-compute-add,
+  .local-compute-grants {
+    grid-template-columns: 1fr;
+  }
+}
+
+/*
+ * Harnesses: OpenClaw and Hermes are runtimes, not vendors, so they do not
+ * get a ring. A square monogram tile keeps them apart from the vendor circles
+ * above at a glance.
+ */
+.runtime-row {
+  gap: 14px;
+}
+
+.runtime-tile {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  border: 1.5px solid var(--line);
+  border-radius: var(--radius-10);
+  background: var(--bg);
+  font-family: var(--display);
+  font-size: var(--text-12);
+  font-weight: 640;
+  letter-spacing: -0.02em;
+  color: var(--text-tertiary);
+}
+
+.runtime-tile.on {
+  border-color: var(--text);
+  color: var(--text);
+}
+
+.runtime-row .settings-row-copy strong small {
+  margin-left: 8px;
+  font-size: var(--text-11);
+  font-weight: 500;
+  color: var(--text-tertiary);
+}
+
+.agent-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 5px;
+}
+
+.agent-chip {
+  padding: 2px 7px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-6);
+  background: var(--bg);
+  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: var(--text-11);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.agent-chip.on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+/* Four flags, four chips. Each fails for its own reason. */
+.status-chips {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  max-width: 340px;
+}
+
+.status-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px 3px 7px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--line);
+  background: var(--bg);
+  font-size: var(--text-11);
+  color: var(--text-tertiary);
+  white-space: nowrap;
+}
+
+.status-chip::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  border: 1.5px solid currentColor;
+  box-sizing: border-box;
+}
+
+.status-chip.on {
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--line));
+}
+
+.status-chip.on::before {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.settings-search {
+  width: 100%;
+  margin: 0 0 12px;
+  padding: 9px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-10);
+  background: var(--bg-solid);
+  font: inherit;
+  font-size: var(--text-13);
+  outline: none;
+}
+
+.settings-search:focus {
+  border-color: var(--accent);
+}
+
+.llm-brains {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 14px;
+  width: 100%;
+  margin: 28px 0 24px;
+}
+
+.llm-brains .usage-brain {
+  width: 176px;
+  flex: 0 0 176px;
+  padding: 22px 16px 18px;
+  border-radius: var(--radius-14);
+}
+
+.llm-brain-open {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  padding: 8px 0 0;
+  text-align: center;
+}
+
+.llm-brains .llm-mark:hover {
+  background: var(--bg-hover);
+}
+
+.llm-off-bots {
+  width: 100%;
+  margin: -4px 0 20px;
+}
+
+.llm-off-bots h3 {
+  margin: 0 0 8px;
+  font-size: var(--text-12);
+  font-weight: 590;
+  color: var(--text-tertiary);
+}
+
+.llm-off-bots .settings-group {
+  margin-bottom: 0;
+}
+
+.llm-off-row {
+  min-height: 46px;
+  gap: 12px;
+  padding: 8px 0;
+}
+
+.llm-off-state {
+  flex: 0 0 auto;
+  padding: 3px 7px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  font-size: var(--text-11);
+  font-weight: 620;
+  color: var(--text-tertiary);
+}
+
+.llm-off-open {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  align-items: baseline;
+  gap: 10px;
+  padding: 4px 0;
+  text-align: left;
+}
+
+.llm-off-open strong {
+  overflow: hidden;
+  flex: 0 1 auto;
+  font-size: var(--text-13);
+  font-weight: 560;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.llm-off-open span {
+  overflow: hidden;
+  min-width: 0;
+  font-size: var(--text-11);
+  color: var(--text-tertiary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.usage-page,
+.usage-embed {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-self: stretch;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  margin-top: 0;
+}
+
+.usage-embed {
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.usage-page .usage-stretch,
+.usage-embed .usage-stretch {
+  flex: 0 0 auto;
+  min-width: 0;
+}
+
+.usage-page .usage-stretch:has(.usage-dots.flat),
+.usage-embed .usage-stretch:has(.usage-dots.flat) {
+  flex: 0 0 auto;
+  min-height: 0;
+}
+
+.usage-page .usage-dots:not(.flat),
+.usage-embed .usage-dots:not(.flat) {
+  flex: 0 0 auto;
+  min-height: 0;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+}

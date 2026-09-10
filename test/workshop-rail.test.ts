@@ -1,3 +1,4 @@
+import { deskCss } from "./desk-css";
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
@@ -303,7 +304,7 @@ test("the rail formats document values and never computes from them; it paints n
   assert.match(rail, /workshopOpenBreakout/);
   const paint = readFileSync(path.join(ROOT, "src", "ui", "workshop-paint.tsx"), "utf8");
   assert.match(paint, /ratioPercent\(/);
-  const css = readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8");
+  const css = deskCss();
   const start = css.indexOf("/* Workshop — a read-only add-on rail");
   const end = css.indexOf(".workshop-settings {", start);
   assert.ok(start >= 0 && end > start, "workshop css block present");
@@ -400,7 +401,7 @@ test("rail source exposes Manage on collapsed/expanded; empty hides the rail; sh
   const manageHits = rail.split("ManageButton").length - 1;
   assert.ok(manageHits >= 3, `expected ManageButton on collapsed + expanded (+ def), saw ${manageHits}`);
   assert.doesNotMatch(rail, /UsagePane|WatchPane|setSettingsSection\("workshop"\)/);
-  const css = readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8");
+  const css = deskCss();
   assert.match(css, /\.workshop-rail\.is-empty\s*\{[^}]*width:\s*60px/s);
   assert.match(css, /min-height:\s*56px/);
   assert.match(css, /max-height:\s*64px/);
@@ -482,7 +483,7 @@ test("ADV A–F: all-Off honesty, Remove confirm, Available name, sheet Detach h
 test("simple rows: On this desk/Available accordion, no default essays, hide same-version, URL title, Detach while Manage, rail clamp", () => {
   const block = readFileSync(path.join(ROOT, "src", "ui", "WorkshopBlock.tsx"), "utf8");
   const railSrc = readFileSync(path.join(ROOT, "src", "ui", "WorkshopRail.tsx"), "utf8");
-  const css = readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8");
+  const css = deskCss();
   const paint = readFileSync(path.join(ROOT, "src", "ui", "workshop-paint.tsx"), "utf8");
   // 1: Collapsed On this desk/Available = mark + title + one-liner (catalog summary / pack.description, clamped).
   assert.match(block, /workshop-pack-mark/);
@@ -525,7 +526,7 @@ test("simple rows: On this desk/Available accordion, no default essays, hide sam
 test("feel pass: quiet marks/headers, Refresh not between rows, Available action align, Advanced whisper", () => {
   const block = readFileSync(path.join(ROOT, "src", "ui", "WorkshopBlock.tsx"), "utf8");
   const railSrc = readFileSync(path.join(ROOT, "src", "ui", "WorkshopRail.tsx"), "utf8");
-  const css = readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8");
+  const css = deskCss();
   // On this desk expand: host · sources + actions; no default summary / provenance essay.
   assert.doesNotMatch(block, /from folder/);
   assert.doesNotMatch(block, /from catalog · this desk/);

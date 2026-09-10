@@ -1,3 +1,4 @@
+import { deskCss } from "./desk-css";
 import assert from "node:assert/strict";
 import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -40,7 +41,9 @@ function rules(css: string): { selector: string; body: string }[] {
 }
 
 function deskStyles(): { selector: string; body: string }[] {
-  return rules(`${styles("horse-status.css")}\n${styles("app.css")}`);
+  // app.css is an index of surface files now. Reading it alone would read
+  // nothing but imports, and this tripwire would pass on an empty haystack.
+  return rules(`${styles("horse-status.css")}\n${deskCss().replace(/\r\n/g, "\n")}`);
 }
 
 test("a chat at rest runs no animation", () => {

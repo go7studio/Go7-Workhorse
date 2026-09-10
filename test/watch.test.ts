@@ -1,3 +1,4 @@
+import { deskCss } from "./desk-css";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -390,7 +391,7 @@ test("Watch settings and send hold are wired through the desk", () => {
   assert.match(pane, /cursor: store.cursorPlan/);
   assert.match(pane, /over=\{row\.overPercent/);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "FuelRing.tsx"), "utf8"), /fuel-over/);
-  assert.match(readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8"), /\.watch-day-track i\.cursor/);
+  assert.match(deskCss(), /\.watch-day-track i\.cursor/);
   assert.match(pane, /watchDayFill/);
   assert.match(pane, /Daily bank/);
   assert.match(pane, /Desktop notification/);

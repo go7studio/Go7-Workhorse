@@ -1,3 +1,4 @@
+import { deskCss } from "./desk-css";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -760,7 +761,7 @@ test("a Cursor Grok 4.6 PONG turn books Composer in/out so Usage facts are not z
 });
 
 test("Cursor Composer billed bars and stretch cells use cursor grey, not Grok white", () => {
-  const css = readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8");
+  const css = deskCss();
   assert.match(css, /\.usage-split-track i\.cursor\s*\{[^}]*background:\s*var\(--cursor\)/);
   const pane = readFileSync(path.join(ROOT, "src", "ui", "UsagePane.tsx"), "utf8");
   assert.match(pane, /tone=\{focused\.provider\}[\s\S]*color=\{focused\.color\}/);

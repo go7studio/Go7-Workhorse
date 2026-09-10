@@ -1,3 +1,4 @@
+import { deskCss } from "./desk-css";
 import assert from "node:assert/strict";
 import test from "node:test";
 import fs from "node:fs";
@@ -83,7 +84,7 @@ test("support report contains capabilities but never credential values or prompt
 });
 
 test("settings blurbs wrap and skill paths keep the folder name from a fixture", () => {
-  const css = fs.readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8");
+  const css = deskCss();
   const mcp = css.match(/\.mcp-settings \.link-head p,\s*\.mcp-settings > \.row-meta,\s*\.skills-heading \.row-meta\s*\{[^}]+\}/)?.[0] ?? "";
   assert.match(mcp, /white-space:\s*normal/);
   assert.match(mcp, /overflow:\s*visible/);
@@ -100,7 +101,7 @@ test("settings blurbs wrap and skill paths keep the folder name from a fixture",
 });
 
 test("Add a bot Back sits on the full pane, and New project Escape closes from the document", () => {
-  const css = fs.readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8");
+  const css = deskCss();
   const addBotCss = css.match(/\.add-bot \{[^}]+\}/)?.[0] ?? "";
   assert.match(addBotCss, /max-width:\s*none/);
   assert.match(css, /\.add-bot \.project-hero \{[^}]*width:\s*100%/);

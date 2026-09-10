@@ -1,3 +1,4 @@
+import { deskCss } from "./desk-css";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -146,7 +147,7 @@ test("SessionPane follows latest on start and ignores layout scroll unpinning", 
   assert.doesNotMatch(pane, /TRANSCRIPT_FILL_MS/);
   assert.doesNotMatch(pane, /Load earlier turns/);
   assert.doesNotMatch(pane, /transcript-earlier/);
-  const css = readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8");
+  const css = deskCss();
   assert.match(css, /\.transcript \{[^}]*overflow-anchor:\s*auto/);
   assert.match(css, /\.transcript\.follow-latest \{[^}]*overflow-anchor:\s*none/);
   assert.match(pane, /addEventListener\("toggle", onToggle, true\)/);
@@ -156,7 +157,7 @@ test("SessionPane follows latest on start and ignores layout scroll unpinning", 
 });
 
 test("an open Changes dock sits above watch and goal notices", () => {
-  const css = readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8");
+  const css = deskCss();
   assert.match(css, /--notices-dock/);
   assert.match(
     css,
@@ -166,7 +167,7 @@ test("an open Changes dock sits above watch and goal notices", () => {
 });
 
 test("a user prompt wraps a long URL instead of running off the window", () => {
-  const css = readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8");
+  const css = deskCss();
   const stack = css.match(/(?:^|\n)\.turn\.user \.say-stack\s*\{[^}]*\}/);
   const say = css.match(/(?:^|\n)\.turn\.user \.say\s*\{[^}]*\}/);
   const para = css.match(/(?:^|\n)\.md p\s*\{[^}]*\}/);

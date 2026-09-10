@@ -1,0 +1,170 @@
+
+/* `.welcome p` sets the margin for every paragraph on this pane and outranks
+   a lone class, so this one named itself louder instead of naming itself
+   properly. */
+.welcome p.welcome-ver {
+  margin: 4px 0 0;
+  font-size: var(--text-13);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-tertiary);
+}
+
+.eyebrow {
+  margin: 0 0 6px;
+  font-size: var(--text-11);
+  font-weight: 590;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+
+.welcome h2,
+.picker h2 {
+  margin: 0;
+  font-family: var(--display);
+  font-size: var(--text-28);
+  font-weight: 620;
+  letter-spacing: -0.045em;
+}
+
+.welcome p,
+.picker p {
+  max-width: 420px;
+  margin: 10px 0 24px;
+  text-align: center;
+  color: var(--text-secondary);
+  line-height: 1.45;
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+}
+
+.welcome-steps {
+  display: flex;
+  width: min(320px, 100%);
+  flex-direction: column;
+  gap: 10px;
+}
+
+.welcome-harnesses {
+  width: min(460px, 100%);
+  margin: 16px 0;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-14);
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+}
+
+.welcome-harness-head,
+.welcome-harnesses li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.welcome-harnesses ul {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.welcome-harnesses li {
+  padding-top: 6px;
+  border-top: 1px solid var(--line);
+  font-size: var(--text-12);
+}
+
+.welcome-harnesses li em {
+  color: var(--text-tertiary);
+  font-style: normal;
+}
+
+.welcome-steps button {
+  width: 100%;
+  justify-content: center;
+}
+
+.provider-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(180px, 220px));
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.card {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 14px;
+  padding: 16px;
+  text-align: left;
+  background: var(--bg-solid);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-14);
+  box-shadow: var(--shadow);
+  transition: transform 180ms var(--ease), box-shadow 180ms var(--ease);
+}
+
+.card:hover {
+  transform: translateY(-1px);
+}
+
+.card .rail {
+  width: 3px;
+  height: 42px;
+  border-radius: var(--radius-6);
+  background: var(--text-tertiary);
+  flex-shrink: 0;
+}
+
+.card .rail.grok {
+  background: var(--grok);
+}
+
+.card .rail.claude {
+  background: var(--claude);
+}
+
+.card .rail.codex {
+  background: var(--codex);
+}
+
+.card .rail.custom {
+  background: var(--custom);
+}
+
+.card-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.card-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.card strong {
+  font-size: var(--text-15);
+}
+
+.card-copy > span {
+  font-size: var(--text-12);
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.chip-preview {
+  padding: 2px 7px;
+  font-size: var(--text-11);
+  color: var(--text-tertiary);
+  background: var(--bg-hover);
+  border-radius: var(--radius-pill);
+}

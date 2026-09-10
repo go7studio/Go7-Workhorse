@@ -254,21 +254,31 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-export async function askViaInbox(inbox: string, ask: PeerAsk, timeoutMs = 10 * 60 * 1000): Promise<string> {
+/** The clock and the wait, so a test can put an answer in the window this used to throw away. */
+export type InboxAskIo = { now?: () => number; sleep?: (ms: number) => Promise<void> };
+
+export async function askViaInbox(
+  inbox: string,
+  ask: PeerAsk,
+  timeoutMs = 10 * 60 * 1000,
+  io: InboxAskIo = {},
+): Promise<string> {
+  const now = io.now ?? Date.now;
+  const waitFor = io.sleep ?? sleep;
   fs.mkdirSync(inbox, { recursive: true });
   const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const reqPath = path.join(inbox, `${id}.req.json`);
   const resPath = path.join(inbox, `${id}.res.json`);
   fs.writeFileSync(reqPath, JSON.stringify({ ...ask, id }), "utf8");
-  const start = Date.now();
+  const start = now();
   try {
-    while (Date.now() - start < timeoutMs) {
+    while (now() - start < timeoutMs) {
       if (fs.existsSync(resPath)) {
         const result = JSON.parse(fs.readFileSync(resPath, "utf8")) as PeerAskResult;
         if ("error" in result && result.error) throw new Error(result.error);
         return "text" in result ? result.text : "";
       }
-      await sleep(80);
+      await waitFor(80);
     }
     // One last look. The answer can land during that final sleep, or while a
     // busy machine overruns it, and throwing then loses a reply that arrived.

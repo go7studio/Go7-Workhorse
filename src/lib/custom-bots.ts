@@ -368,3 +368,15 @@ export function customBotForSession(
   if (input.customBotId) return undefined;
   return findCustomBotByModel(bots, input.model);
 }
+
+/**
+ * The off row that is armed to delete, if any. An id that has left the list is
+ * not armed: arming Delete on a bot, enabling it, then switching it off again
+ * used to paint "Delete for good" on the first render, one click from
+ * destroying it. Derived rather than cleared in an effect, because an effect
+ * clears it after that paint has already happened.
+ */
+export function armedDeleteId(confirmDelete: string | null, bots: ReadonlyArray<{ id: string }>): string | null {
+  if (!confirmDelete) return null;
+  return bots.some((bot) => bot.id === confirmDelete) ? confirmDelete : null;
+}

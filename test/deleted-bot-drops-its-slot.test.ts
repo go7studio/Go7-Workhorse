@@ -44,6 +44,7 @@ import { clearCustomCatalogCache, cachedCustomCatalog, forgetCustomCatalogsExcep
 import { customVendorRows } from "../electron/vendor-models";
 import { normalizeSettings } from "../src/lib/settings";
 import type { AppState, CustomBot, GrokPlanUsage, Settings } from "../src/lib/types";
+import { armedDeleteId } from "../src/lib/custom-bots";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const source = (...parts: string[]) => readFileSync(path.join(ROOT, ...parts), "utf8");
@@ -653,9 +654,14 @@ test("no switched-off bots means no off-row section", () => {
 test("Delete needs two clicks and any other click disarms it", () => {
   const settings = source("src", "ui", "Settings.tsx");
   const rows = settings.slice(settings.indexOf("function OffCustomBots"), settings.indexOf("export type ClaudeAuthState"));
-  assert.match(rows, /confirmDelete === bot\.id \? \([\s\S]*Delete for good[\s\S]*setConfirmDelete\(bot\.id\)[\s\S]*Delete/);
+  // The armed id is derived from the list being drawn, so it is `armed`, not the
+  // raw held id. armedDeleteId is what makes that safe and it has its own test.
+  assert.match(rows, /armed === bot\.id \? \([\s\S]*Delete for good[\s\S]*setConfirmDelete\(bot\.id\)[\s\S]*Delete/);
+  assert.match(rows, /const armed = armedDeleteId\(confirmDelete, bots\)/);
   assert.match(rows, /document\.addEventListener\("mousedown", disarm\)/);
   assert.match(rows, /armedDelete\.current\?\.contains\(event\.target as Node\)/);
+  // Enable drops the held id, so a bot switched off again comes back unarmed.
+  assert.match(rows, /setConfirmDelete\(null\);[\s\S]{0,80}store\.setCustomBotEnabled\(bot\.id, true\)/);
 });
 
 test("opening a bot detail scrolls it into view and respects reduced motion", () => {
@@ -664,4 +670,24 @@ test("opening a bot detail scrolls it into view and respects reduced motion", ()
   assert.match(settings, /botDetail\.current\?\.scrollIntoView/);
   assert.match(settings, /window\.matchMedia\("\(prefers-reduced-motion: reduce\)"\)\.matches \? "auto" : "smooth"/);
   assert.match(settings, /panelRef=\{botDetail\}/);
+});
+
+/**
+ * The gate on PR 308 found this: arming Delete on an off bot, enabling it, then
+ * switching it off again painted "Delete for good" on the first render, so one
+ * click destroyed a bot the person had just brought back. Two things close it,
+ * and this pins both halves. Enable clears the held id, so the bot returns
+ * unarmed. The row also derives the armed id from the list it is drawing, so an
+ * id that is not on the list arms nothing even for one frame.
+ */
+test("an off row that leaves the list is not still armed to delete", () => {
+  const bots = [{ id: "bot_a" }, { id: "bot_b" }];
+
+  assert.equal(armedDeleteId("bot_a", bots), "bot_a", "an armed bot on the list is armed");
+  assert.equal(armedDeleteId("bot_a", [{ id: "bot_b" }]), null, "an armed bot that left the list arms nothing");
+  assert.equal(armedDeleteId("bot_gone", bots), null, "a deleted bot arms nothing");
+
+  // What Enable does: it drops the held id, so the bot comes back unarmed
+  // however many times it is switched off again.
+  assert.equal(armedDeleteId(null, bots), null, "no held id arms nothing");
 });

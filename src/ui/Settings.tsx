@@ -1,7 +1,7 @@
 import { primaryFolder } from "../lib/project";
 import { useEffect, useRef, useState, type RefObject } from "react";
 import { LINK_HOSTS, LINK_HOST_LABEL, linkHostConnectsByOneshot } from "../lib/workhorse-link";
-import { BOT_COLORS, customBotEnabled, customBotModels, customModelRoutingOverride, routingProfileEdit, ROUTING_ROLE_PRESETS } from "../lib/custom-bots";
+import { armedDeleteId, BOT_COLORS, customBotEnabled, customBotModels, customModelRoutingOverride, routingProfileEdit, ROUTING_ROLE_PRESETS } from "../lib/custom-bots";
 import { isGrokBotUrl } from "../lib/custom-http-identity";
 import { formatWindow, modelsFor } from "../lib/models";
 import { PROVIDERS } from "../lib/providers";
@@ -440,16 +440,17 @@ function OffCustomBots({
   const store = useStore();
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const armedDelete = useRef<HTMLButtonElement>(null);
+  const armed = armedDeleteId(confirmDelete, bots);
 
   useEffect(() => {
-    if (!confirmDelete) return;
+    if (!armed) return;
     const disarm = (event: MouseEvent) => {
       if (armedDelete.current?.contains(event.target as Node)) return;
       setConfirmDelete(null);
     };
     document.addEventListener("mousedown", disarm);
     return () => document.removeEventListener("mousedown", disarm);
-  }, [confirmDelete]);
+  }, [armed]);
 
   return (
     <section className="llm-off-bots" aria-label="Switched off bots">
@@ -463,10 +464,17 @@ function OffCustomBots({
               <span>{bot.model.trim() || customBotHost(bot.baseUrl)}</span>
             </button>
             <div className="settings-control">
-              <button className="tiny" type="button" onClick={() => store.setCustomBotEnabled(bot.id, true)}>
+              <button
+                className="tiny"
+                type="button"
+                onClick={() => {
+                  setConfirmDelete(null);
+                  store.setCustomBotEnabled(bot.id, true);
+                }}
+              >
                 Enable
               </button>
-              {confirmDelete === bot.id ? (
+              {armed === bot.id ? (
                 <button
                   ref={armedDelete}
                   className="tiny danger"

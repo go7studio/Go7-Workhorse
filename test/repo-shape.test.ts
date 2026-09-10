@@ -199,12 +199,17 @@ test("`npm test` runs every suite by name pattern", () => {
 /**
  * A ceiling shorter than the suite it guards fails on load, not on a fault.
  * Two of six pushes to main went red on Windows with whole files killed at
- * 30000ms: eval-kit, learning-memory, project-diff, session-environment. Run
- * alone those four take 2.22s, 0.55s, 1.03s and 0.60s, and the whole Windows
- * test step finishes in 47 seconds. Nothing was hanging. What catches a real
- * hang is the step's own `timeout-minutes`, so the ceiling only has to be long
- * enough that no honest file reaches it, and short enough that the runner
- * still names the test that hung instead of the step dying with no name.
+ * 30000ms: eval-kit, learning-memory, project-diff, session-environment and
+ * user-data-hygiene. Run alone those five take about two seconds or less each,
+ * and the whole Windows test step finishes in 47 seconds. Nothing was hanging,
+ * and the runner counted them `cancelled`, so `fail` stayed 0 while five files
+ * never ran.
+ *
+ * What catches a real hang is the step's own `timeout-minutes`. So the ceiling
+ * only has to be short enough that the runner still names the test that hung
+ * instead of the step dying with no name, and long enough that no honest file
+ * reaches it. A quarter of what the step allows the whole suite is that second
+ * line: below it the ceiling is measuring load rather than guarding a hang.
  */
 test("the per-test ceiling outlasts the suite and still names a hang", () => {
   const pkg = JSON.parse(readFileSync(path.join(ROOT, "package.json"), "utf8")) as {
@@ -225,8 +230,8 @@ test("the per-test ceiling outlasts the suite and still names a hang", () => {
     `--test-timeout is ${ceilingMs}ms and the step allows ${budgetMs}ms. A ceiling at or over the step budget means the step dies first and no test is ever named.`,
   );
   assert.ok(
-    ceilingMs >= 90_000,
-    `--test-timeout is ${ceilingMs}ms. The whole Windows step runs in about 47 seconds, so anything under 90000ms is a stopwatch on the runner's load rather than a guard against a hang.`,
+    ceilingMs >= budgetMs / 4,
+    `--test-timeout is ${ceilingMs}ms and the step allows the whole suite ${budgetMs}ms. Under a quarter of that, the ceiling is a stopwatch on the runner's load rather than a guard against a hang.`,
   );
 });
 

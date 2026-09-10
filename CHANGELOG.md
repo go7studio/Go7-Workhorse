@@ -8,6 +8,23 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.6.73](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.72...v0.6.73) (2026-09-10)
+
+
+### Features
+
+* **llms:** a bot you switch off leaves the grid ([#308](https://github.com/go7studio/Go7-Workhorse/issues/308)) ([ffdb948](https://github.com/go7studio/Go7-Workhorse/commit/ffdb94817e7ac8f9ffa127fd941633f632b3e4a0))
+* **routing:** Test only keeps training models off Auto ([fa63a4f](https://github.com/go7studio/Go7-Workhorse/commit/fa63a4f4443eb68f7ac34550289b6f6afe4d4df9))
+* **routing:** Test only keeps training models off Auto. ([171b069](https://github.com/go7studio/Go7-Workhorse/commit/171b069cda951401c651cf5c921f713ec572d201))
+* **ui:** a status horse wears its own bot's colour ([#315](https://github.com/go7studio/Go7-Workhorse/issues/315)) ([07cc8da](https://github.com/go7studio/Go7-Workhorse/commit/07cc8da8e1893b197aba7e61855832d872415e67))
+
+
+### Bug Fixes
+
+* **claude:** a refused desk token falls back to the CLI's own login ([#307](https://github.com/go7studio/Go7-Workhorse/issues/307)) ([e1de5af](https://github.com/go7studio/Go7-Workhorse/commit/e1de5af1c28c8ee6659c5e57df29e5d839c01a7c))
+* **claude:** the Mac Desktop key takes the rounds Chromium takes ([#313](https://github.com/go7studio/Go7-Workhorse/issues/313)) ([28a82ab](https://github.com/go7studio/Go7-Workhorse/commit/28a82abc60ebae73a4a49b11d241e384b4c4224f))
+* **link:** the peer inbox is read as often as it used to be ([#311](https://github.com/go7studio/Go7-Workhorse/issues/311)) ([daedf0f](https://github.com/go7studio/Go7-Workhorse/commit/daedf0f00ee7f85644f7a492672ef9c69c359007))
+
 ## [0.6.72](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.71...v0.6.72) (2026-09-09)
 
 

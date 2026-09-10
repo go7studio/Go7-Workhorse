@@ -656,7 +656,9 @@ export function describeRoutingMiss(
   if (notExcluded.length === 0) return `all candidates are excluded${skipped}`;
   const roleOk = notExcluded.filter((candidate) => !isGrokBotCandidate(candidate) || grokBotAllowedOnRoute(request));
   if (roleOk.length === 0) return `all candidates are excluded${skipped}`;
-  const capable = roleOk.filter((candidate) => supports(candidate.profile, required));
+  const autoOk = roleOk.filter((candidate) => candidate.profile.autoRoute !== false);
+  if (autoOk.length === 0) return `training models are not used for Auto${skipped}`;
+  const capable = autoOk.filter((candidate) => supports(candidate.profile, required));
   if (capable.length === 0) {
     const need = INPUT_KEYS.filter((key) => required[key]);
     return `no vendor accepts ${need.join(", ") || "the required inputs"}${skipped}`;
@@ -1079,6 +1081,7 @@ export type RoutingSkipReason =
   | "inputs"
   | "excluded"
   | "grok-bot"
+  | "test-only"
   | "context";
 
 /**
@@ -1099,6 +1102,7 @@ export function routingSkipReason(
   if (!supports(candidate.profile, required)) return "inputs";
   if (routingIdentityExcluded(candidate, request.exclude)) return "excluded";
   if (isGrokBotCandidate(candidate) && !grokBotAllowedOnRoute(request)) return "grok-bot";
+  if (candidate.profile.autoRoute === false) return "test-only";
   // A model that cannot hold the conversation is not a worse pick, it is a
   // failed send. Routing never knew the window before, so a 300k thread
   // could rank onto a 128k bot and die on arrival.
@@ -1126,6 +1130,7 @@ export function rankRoutingCandidates(
     (candidate) =>
       candidate.connected &&
       candidate.launchable !== false &&
+      candidate.profile.autoRoute !== false &&
       (settings.allowLocal || !candidate.profile.local) &&
       candidate.profile.intelligence >= minimum,
   );

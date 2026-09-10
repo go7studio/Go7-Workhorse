@@ -835,6 +835,11 @@ export type ModelRoutingProfile = {
   inputs: ModelInputCapabilities;
   /** Domains this family is notably strong in. Absent means no tilt either way. */
   strengths?: readonly TaskDomain[];
+  /**
+   * Absent or true: Auto may pick this model. False: training / test only.
+   * A person or a named call still reaches it. Orchestration does not.
+   */
+  autoRoute?: boolean;
 };
 
 export type RoutingSettings = {

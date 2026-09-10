@@ -1,7 +1,7 @@
 import { primaryFolder } from "../lib/project";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState, type RefObject } from "react";
 import { LINK_HOSTS, LINK_HOST_LABEL, linkHostConnectsByOneshot } from "../lib/workhorse-link";
-import { BOT_COLORS, customBotEnabled, customBotModels, customModelRoutingOverride, routingProfileEdit, ROUTING_ROLE_PRESETS } from "../lib/custom-bots";
+import { armedDeleteId, BOT_COLORS, customBotEnabled, customBotModels, customModelRoutingOverride, routingProfileEdit, routingRoleChange, ROUTING_ROLE_PRESETS } from "../lib/custom-bots";
 import { isGrokBotUrl } from "../lib/custom-http-identity";
 import { formatWindow, modelsFor } from "../lib/models";
 import { PROVIDERS } from "../lib/providers";
@@ -11,7 +11,7 @@ import { claudeTokenComplaint, CLAUDE_SETUP_TOKEN_COMMAND } from "../lib/claude-
 import { APP_VERSION } from "../lib/app-info";
 import { useStore } from "../lib/store";
 import { SETTINGS_THEME_CHOICES } from "../lib/theme";
-import type { AgentRuntimeId, DeskExportKind, LlmLink, PermissionMode, ProviderId, SandboxProfile, SettingsSection } from "../lib/types";
+import type { AgentRuntimeId, CustomBot, DeskExportKind, LlmLink, PermissionMode, ProviderId, SandboxProfile, SettingsSection } from "../lib/types";
 import type { AgentRuntimeStatus } from "../lib/external-catalog";
 import { BotForm } from "./BotForm";
 import { ContextMeter } from "./ContextMeter";
@@ -47,7 +47,9 @@ export function Settings() {
   const settings = store.settings;
   const section = store.settingsSection;
   const [llmFocus, setLlmFocus] = useState<LlmFocus>(null);
+  const botDetail = useRef<HTMLDivElement>(null);
   const [claudeAuth, setClaudeAuth] = useState<ClaudeAuthState>({ stage: "idle", message: "" });
+  const offCustomBots = settings.customBots.filter((bot) => !customBotEnabled(bot));
 
   /**
    * Mint a token for this desk with `claude setup-token`. Signing in the
@@ -105,6 +107,14 @@ export function Settings() {
   useEffect(() => {
     if (section === "llms") store.refreshCursorLogin();
   }, [section, store.refreshCursorLogin]);
+
+  useEffect(() => {
+    if (typeof llmFocus !== "string" || !llmFocus.startsWith("bot:")) return;
+    botDetail.current?.scrollIntoView({
+      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
+      block: "start",
+    });
+  }, [llmFocus]);
 
   const [usageTick, setUsageTick] = useState(0);
   const [usageHome, setUsageHome] = useState(0);
@@ -315,22 +325,21 @@ export function Settings() {
                 </div>
               );
             })}
-            {settings.customBots.map((bot) => {
-              const live = customBotEnabled(bot);
+            {settings.customBots.filter(customBotEnabled).map((bot) => {
               return (
                 <div
                   key={bot.id}
-                  className={`usage-brain${llmFocus === `bot:${bot.id}` ? " on" : ""}${live ? "" : " off"}`}
+                  className={`usage-brain${llmFocus === `bot:${bot.id}` ? " on" : ""}`}
                 >
                   <button
                     type="button"
-                    className={`llm-mark${live ? " on" : ""}`}
-                    style={live ? { borderColor: bot.color, color: "var(--text)" } : undefined}
-                    aria-pressed={live}
-                    aria-label={live ? `Disable ${bot.name}` : `Enable ${bot.name}`}
-                    onClick={() => store.setCustomBotEnabled(bot.id, !live)}
+                    className="llm-mark on"
+                    style={{ borderColor: bot.color, color: "var(--text)" }}
+                    aria-pressed="true"
+                    aria-label={`Disable ${bot.name}`}
+                    onClick={() => store.setCustomBotEnabled(bot.id, false)}
                   >
-                    {live ? "On" : "Off"}
+                    On
                   </button>
                   <button
                     type="button"
@@ -339,11 +348,9 @@ export function Settings() {
                   >
                     <span>{bot.name}</span>
                     <em>
-                      {live && isGrokBotUrl(bot.baseUrl) && !store.grokBotWakeStatus?.ready
+                      {isGrokBotUrl(bot.baseUrl) && !store.grokBotWakeStatus?.ready
                         ? "Finish instant chat"
-                        : live
-                          ? bot.model
-                          : "Disabled"}
+                        : bot.model}
                     </em>
                   </button>
                 </div>
@@ -358,6 +365,18 @@ export function Settings() {
             </button>
           </div>
 
+          {offCustomBots.length > 0 ? (
+            <OffCustomBots
+              bots={offCustomBots}
+              onOpen={(botId) =>
+                setLlmFocus((current) => (current === `bot:${botId}` ? null : `bot:${botId}`))
+              }
+              onGone={(botId) =>
+                setLlmFocus((current) => (current === `bot:${botId}` ? null : current))
+              }
+            />
+          ) : null}
+
           {llmFocus && !String(llmFocus).startsWith("bot:") && (
             <StockBotDetail
               id={llmFocus as Exclude<ProviderId, "custom">}
@@ -370,7 +389,12 @@ export function Settings() {
           )}
 
           {typeof llmFocus === "string" && llmFocus.startsWith("bot:") && (
-            <CustomBotDetail key={llmFocus} botId={llmFocus.slice(4)} onGone={() => setLlmFocus(null)} />
+            <CustomBotDetail
+              key={llmFocus}
+              botId={llmFocus.slice(4)}
+              onGone={() => setLlmFocus(null)}
+              panelRef={botDetail}
+            />
           )}
 
           <DeskAccessBlock />
@@ -390,6 +414,88 @@ export function Settings() {
       {section === "usage" && <UsagePane key={usageTick} homeSignal={usageHome} embedded tabs={tabs} />}
 
       {section === "watch" && <WatchPane />}
+    </section>
+  );
+}
+
+function customBotHost(baseUrl: string): string {
+  const trimmed = baseUrl.trim();
+  if (!trimmed) return "No host";
+  try {
+    return new URL(/^[a-z]+:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`).host || trimmed;
+  } catch {
+    return trimmed;
+  }
+}
+
+function OffCustomBots({
+  bots,
+  onOpen,
+  onGone,
+}: {
+  bots: CustomBot[];
+  onOpen: (botId: string) => void;
+  onGone: (botId: string) => void;
+}) {
+  const store = useStore();
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  const armedDelete = useRef<HTMLButtonElement>(null);
+  const armed = armedDeleteId(confirmDelete, bots);
+
+  useEffect(() => {
+    if (!armed) return;
+    const disarm = (event: MouseEvent) => {
+      if (armedDelete.current?.contains(event.target as Node)) return;
+      setConfirmDelete(null);
+    };
+    document.addEventListener("mousedown", disarm);
+    return () => document.removeEventListener("mousedown", disarm);
+  }, [armed]);
+
+  return (
+    <section className="llm-off-bots" aria-label="Switched off bots">
+      <h3>Switched off</h3>
+      <div className="settings-group">
+        {bots.map((bot) => (
+          <div className="settings-row llm-off-row" key={bot.id}>
+            <span className="llm-off-state">Off</span>
+            <button className="llm-off-open" type="button" onClick={() => onOpen(bot.id)}>
+              <strong>{bot.name.trim() || "Untitled"}</strong>
+              <span>{bot.model.trim() || customBotHost(bot.baseUrl)}</span>
+            </button>
+            <div className="settings-control">
+              <button
+                className="tiny"
+                type="button"
+                onClick={() => {
+                  setConfirmDelete(null);
+                  store.setCustomBotEnabled(bot.id, true);
+                }}
+              >
+                Enable
+              </button>
+              {armed === bot.id ? (
+                <button
+                  ref={armedDelete}
+                  className="tiny danger"
+                  type="button"
+                  onClick={() => {
+                    store.deleteCustomBot(bot.id);
+                    setConfirmDelete(null);
+                    onGone(bot.id);
+                  }}
+                >
+                  Delete for good
+                </button>
+              ) : (
+                <button className="tiny" type="button" onClick={() => setConfirmDelete(bot.id)}>
+                  Delete
+                </button>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
     </section>
   );
 }
@@ -570,16 +676,17 @@ function BotRoutingFields({ bot }: { bot: import("../lib/types").CustomBot }) {
   const current = routingProfileForModel("custom", bot.model, saved);
   const patch = (change: Parameters<typeof routingProfileEdit>[1]) =>
     store.updateCustomBot(bot.id, { routingProfile: routingProfileEdit(saved, change) });
-  const setRole = (role: string) =>
-    patch(role === "family" ? "family" : ROUTING_ROLE_PRESETS[role as keyof typeof ROUTING_ROLE_PRESETS]);
+  const setRole = (role: string) => patch(routingRoleChange(role));
   const rated = saved?.intelligence !== undefined;
-  const role = !rated
-    ? "family"
-    : current.intelligence >= 9
-      ? "deep"
-      : current.speed >= 5 && current.cost <= 2
-        ? "quick"
-        : "balanced";
+  const role = saved?.autoRoute === false
+    ? "test"
+    : !rated
+      ? "family"
+      : current.intelligence >= 9
+        ? "deep"
+        : current.speed >= 5 && current.cost <= 2
+          ? "quick"
+          : "balanced";
   // One tick is one key. Spreading `current.inputs` here was the last control
   // still laying its change over the resolved profile: the ratings were fixed
   // and this one was not, so ticking Docs on an unrated bot went on authoring
@@ -596,13 +703,16 @@ function BotRoutingFields({ bot }: { bot: import("../lib/types").CustomBot }) {
           <option value="quick">Quick</option>
           <option value="balanced">Balanced</option>
           <option value="deep">Deep</option>
+          <option value="test">Test only</option>
         </select>
         <label><input type="checkbox" checked={current.local} onChange={(event) => patch({ local: event.target.checked })} /> Local</label>
       </div>
       <p className="row-meta">
-        {rated
-          ? `Rated ${saved!.intelligence} of 5 · scores ${current.intelligence} of 10`
-          : `Family default · scores ${current.intelligence} of 10`}
+        {saved?.autoRoute === false
+          ? "Test only · Auto does not pick it. A person or a named call still can."
+          : rated
+            ? `Rated ${saved!.intelligence} of 5 · scores ${current.intelligence} of 10`
+            : `Family default · scores ${current.intelligence} of 10`}
       </p>
       <div className="actions">
         <label><input type="checkbox" checked={current.inputs.images} onChange={(event) => input("images", event.target.checked)} /> Images</label>
@@ -739,7 +849,8 @@ type StoredRoutingProfile = import("../lib/types").StoredRoutingProfile;
  * bot agree about what "Deep" means. An unrated model reads "family": the
  * rating beside it comes from the family table and nothing is stored.
  */
-function storedRole(stored?: StoredRoutingProfile): "family" | "quick" | "balanced" | "deep" {
+function storedRole(stored?: StoredRoutingProfile): "family" | "quick" | "balanced" | "deep" | "test" {
+  if (stored?.autoRoute === false) return "test";
   if (!stored || stored.intelligence === undefined) return "family";
   for (const [role, values] of Object.entries(ROUTING_ROLE_PRESETS)) {
     if (stored.intelligence === values.intelligence && stored.speed === values.speed && stored.cost === values.cost) {
@@ -836,10 +947,7 @@ function OfferedModels({ bot }: { bot: import("../lib/types").CustomBot }) {
 
   const setRole = (id: string, role: string) => {
     const next = { ...(bot.routingProfiles ?? {}) };
-    const edited = routingProfileEdit(
-      bot.routingProfiles?.[id],
-      role === "family" ? "family" : ROUTING_ROLE_PRESETS[role as keyof typeof ROUTING_ROLE_PRESETS],
-    );
+    const edited = routingProfileEdit(bot.routingProfiles?.[id], routingRoleChange(role));
     if (edited) next[id] = edited;
     else delete next[id];
     store.updateCustomBot(bot.id, { routingProfiles: next });
@@ -880,8 +988,8 @@ function OfferedModels({ bot }: { bot: import("../lib/types").CustomBot }) {
         </p>
       ) : (
         <p className="row-meta">
-          {listed.length} model{listed.length === 1 ? "" : "s"} on this host. Tick the ones this bot may offer; every
-          ticked model becomes a routing candidate.
+          {listed.length} model{listed.length === 1 ? "" : "s"} on this host. Tick the ones this bot may offer. Test only
+          keeps a model off Auto; a person or a named call can still use it.
         </p>
       )}
       {catalog || !live
@@ -922,6 +1030,7 @@ function OfferedModels({ bot }: { bot: import("../lib/types").CustomBot }) {
                     <option value="quick">Quick</option>
                     <option value="balanced">Balanced</option>
                     <option value="deep">Deep</option>
+                    <option value="test">Test only</option>
                   </select>
                   {live ? (
                     <button
@@ -947,7 +1056,15 @@ function OfferedModels({ bot }: { bot: import("../lib/types").CustomBot }) {
   );
 }
 
-function CustomBotDetail({ botId, onGone }: { botId: string; onGone: () => void }) {
+function CustomBotDetail({
+  botId,
+  onGone,
+  panelRef,
+}: {
+  botId: string;
+  onGone: () => void;
+  panelRef?: RefObject<HTMLDivElement | null>;
+}) {
   const store = useStore();
   const bot = store.settings.customBots.find((item) => item.id === botId);
   const [probeNote, setProbeNote] = useState("");
@@ -955,7 +1072,7 @@ function CustomBotDetail({ botId, onGone }: { botId: string; onGone: () => void 
   if (!bot) return null;
   const live = customBotEnabled(bot);
   return (
-    <div className="link-block llm-detail bot-edit">
+    <div ref={panelRef} className="link-block llm-detail bot-edit">
       <div className="link-head">
         <strong>{bot.name.trim() || "Untitled"}</strong>
         <div className="actions llm-detail-actions">

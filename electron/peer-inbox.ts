@@ -254,21 +254,38 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-export async function askViaInbox(inbox: string, ask: PeerAsk, timeoutMs = 10 * 60 * 1000): Promise<string> {
+/** The clock and the wait, so a test can put an answer in the window this used to throw away. */
+export type InboxAskIo = { now?: () => number; sleep?: (ms: number) => Promise<void> };
+
+export async function askViaInbox(
+  inbox: string,
+  ask: PeerAsk,
+  timeoutMs = 10 * 60 * 1000,
+  io: InboxAskIo = {},
+): Promise<string> {
+  const now = io.now ?? Date.now;
+  const waitFor = io.sleep ?? sleep;
   fs.mkdirSync(inbox, { recursive: true });
   const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const reqPath = path.join(inbox, `${id}.req.json`);
   const resPath = path.join(inbox, `${id}.res.json`);
   fs.writeFileSync(reqPath, JSON.stringify({ ...ask, id }), "utf8");
-  const start = Date.now();
+  const start = now();
   try {
-    while (Date.now() - start < timeoutMs) {
+    while (now() - start < timeoutMs) {
       if (fs.existsSync(resPath)) {
         const result = JSON.parse(fs.readFileSync(resPath, "utf8")) as PeerAskResult;
         if ("error" in result && result.error) throw new Error(result.error);
         return "text" in result ? result.text : "";
       }
-      await sleep(80);
+      await waitFor(80);
+    }
+    // One last look. The answer can land during that final sleep, or while a
+    // busy machine overruns it, and throwing then loses a reply that arrived.
+    if (fs.existsSync(resPath)) {
+      const result = JSON.parse(fs.readFileSync(resPath, "utf8")) as PeerAskResult;
+      if ("error" in result && result.error) throw new Error(result.error);
+      return "text" in result ? result.text : "";
     }
     throw new Error("the other chat did not answer in time");
   } finally {
@@ -285,7 +302,29 @@ export async function askViaInbox(inbox: string, ask: PeerAsk, timeoutMs = 10 * 
   }
 }
 
-export function watchPeerInbox(inbox: string, handler: (ask: PeerAsk) => Promise<PeerAskResult>): () => void {
+/**
+ * How often the inbox is read when nothing has woken it. This is the ceiling on
+ * how long one chat waits to reach another while the bridge is down, so it is
+ * not a knob to turn for tidiness. It was raised to five seconds beside a paint
+ * fix and that broke the desk's own peer round trip on a loaded runner, on this
+ * Mac and then on CI. Measured here: an empty readdir of that directory is
+ * 0.0097ms at p50, so four a second costs 0.039ms of CPU per second, which is
+ * 3.4 seconds of CPU in a day. That is what the five seconds bought.
+ */
+export const INBOX_SCAN_MS = 250;
+
+/** A watcher the desk can drive, so a test can prove the scan answers without waiting on a clock. */
+export type InboxWatchIo = {
+  watch?: (dir: string, onChange: () => void) => { close: () => void; on: (event: "error", fn: () => void) => void };
+  /** Runs `tick` every `ms` and returns the cancel. */
+  schedule?: (tick: () => void, ms: number) => () => void;
+};
+
+export function watchPeerInbox(
+  inbox: string,
+  handler: (ask: PeerAsk) => Promise<PeerAskResult>,
+  io: InboxWatchIo = {},
+): () => void {
   fs.mkdirSync(inbox, { recursive: true });
   const seen = new Set<string>();
   const scan = () => {
@@ -315,35 +354,38 @@ export function watchPeerInbox(inbox: string, handler: (ask: PeerAsk) => Promise
       })();
     }
   };
-  // `fs.watch` is the signal here; the interval only covers a filesystem that
-  // does not deliver events. It used to run every 250ms for the life of the
-  // app, so an idle desk read this directory 345,600 times a day to find
-  // nothing. Five seconds is the safety net. A watch that throws or reports an
-  // error is the one case that still earns the fast scan.
-  const poll = (ms: number) => {
-    const timer = setInterval(scan, ms);
-    timer.unref();
-    return timer;
-  };
-  let fallback = poll(5_000);
-  let fast = false;
-  const hurry = () => {
-    if (fast) return;
-    fast = true;
-    clearInterval(fallback);
-    fallback = poll(250);
-  };
-  let watcher: fs.FSWatcher | undefined;
+  /*
+   * `fs.watch` wakes this immediately when the filesystem tells us. The scan is
+   * the floor under that, for a filesystem that does not deliver, a watch that
+   * is late, and a machine busy enough that a queued event arrives after the
+   * caller has given up. It reads a small directory and returns; see
+   * INBOX_SCAN_MS for what that costs.
+   */
+  const schedule =
+    io.schedule ??
+    ((tick: () => void, ms: number) => {
+      const timer = setInterval(tick, ms);
+      timer.unref();
+      return () => clearInterval(timer);
+    });
+  const stopScanning = schedule(scan, INBOX_SCAN_MS);
+  let watcher: { close: () => void; on: (event: "error", fn: () => void) => void } | undefined;
   try {
-    watcher = fs.watch(inbox, scan);
-    watcher.unref();
-    watcher.on("error", hurry);
+    const watch =
+      io.watch ??
+      ((dir: string, onChange: () => void) => {
+        const live = fs.watch(dir, onChange);
+        live.unref();
+        return live;
+      });
+    watcher = watch(inbox, scan);
+    watcher.on("error", scan);
   } catch {
-    hurry();
+    /* No watch on this filesystem. The scan above is the whole signal. */
   }
   scan();
   return () => {
-    clearInterval(fallback);
+    stopScanning();
     watcher?.close();
   };
 }

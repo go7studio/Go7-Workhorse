@@ -7308,6 +7308,66 @@ html.pane-dragging * {
   background: var(--bg-hover);
 }
 
+.llm-off-bots {
+  width: 100%;
+  margin: -4px 0 20px;
+}
+
+.llm-off-bots h3 {
+  margin: 0 0 8px;
+  font-size: 12px;
+  font-weight: 590;
+  color: var(--text-tertiary);
+}
+
+.llm-off-bots .settings-group {
+  margin-bottom: 0;
+}
+
+.llm-off-row {
+  min-height: 46px;
+  gap: 12px;
+  padding: 8px 0;
+}
+
+.llm-off-state {
+  flex: 0 0 auto;
+  padding: 3px 7px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 620;
+  color: var(--text-tertiary);
+}
+
+.llm-off-open {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  align-items: baseline;
+  gap: 10px;
+  padding: 4px 0;
+  text-align: left;
+}
+
+.llm-off-open strong {
+  overflow: hidden;
+  flex: 0 1 auto;
+  font-size: 13px;
+  font-weight: 560;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.llm-off-open span {
+  overflow: hidden;
+  min-width: 0;
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .usage-page,
 .usage-embed {
   display: flex;

@@ -274,6 +274,8 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
 - A named model or bot is used as named. The exception is a model that exists on
   more than one vendor (Grok 4.6 on Grok Build and on Cursor), which still ranks
   those vendors by leftover.
+- **Test only** on a custom model keeps it off Auto. A person picking it, or a
+  named call, still reaches it. Orchestration does not score it for real work.
 - Naming the vendor locks that login, and a named vendor without a model still
   ranks that vendor's models.
 - Composer high, spawn `effort`, or "on high" in the ask stays on the worker.
@@ -411,6 +413,8 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
   Environment values go to the OS-encrypted credential store.
 - **Custom bots** a pasted URL and key become a first-class bot with its own
   name and colour.
+- A bot you switch off leaves the LLM grid and sits under it with Enable and
+  Delete. The grid holds what you can call.
 - A host that answers "at capacity, try again shortly" is waited out for about
   twenty-three seconds, honouring Retry-After. Workhorse keeps no count of its
   own.

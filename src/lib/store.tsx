@@ -239,6 +239,7 @@ import {
   setLineupRowStatus,
   stampLineupUserText,
 } from "./lineup";
+import { boundLinkReply, linkLabel } from "./link-reply";
 import { applyPlanAuditorSpawn, joinAndAdmit } from "./plan-admission";
 import {
   applyCancelWorker,
@@ -6079,11 +6080,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               };
             });
             const waitForReply = spawnWaitsForReply(payload);
+            // Uncapped on purpose: `boundLinkReply` picks the board and counts
+            // the rest, so `crewCount` is what this parent has had, not what
+            // the snapshot cap happened to leave.
             const spawnCrew = parentCrewSnapshot(
               latest.sessions.some((item) => item.id === childId)
                 ? latest.sessions.map((item) => (item.id === childId ? child : item))
                 : [...latest.sessions, child],
               parent.id,
+              Number.MAX_SAFE_INTEGER,
             );
             let terminalFailure: "timed-out" | "cancelled" | "budget-exceeded" | undefined;
             const markChildFailure = (error: unknown) => {
@@ -6230,30 +6235,38 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               return finalReport;
             };
             if (!waitForReply) {
+              const startedBoard = boundLinkReply({
+                crew: spawnCrew,
+                lineup: lineupSnapshot(
+                  addLineupRow(parent.lineup ?? emptyLineup(admitted.cwd, startedAt), {
+                    childId,
+                    title: spec.title,
+                    slice: payload.description?.trim() || spec.title,
+                    folder: admitted.cwd,
+                    vendor: vendorDisplayName(spec.provider),
+                    status: "running",
+                    startedAt,
+                    ...(planStepId ? { planStepId } : {}),
+                    ...(rationale ? { rationale } : {}),
+                    ...(assignedPaths.length > 0 ? { paths: assignedPaths } : {}),
+                  }, undefined, spawnMission),
+                ),
+              });
               await replyAsk({
                 text: JSON.stringify(
                   {
                     started: true,
-                    title: spec.title,
+                    // A label, not the brief. A mission names its workers after
+                    // its objective, so this field carried the whole task text
+                    // back to the caller that had just sent it.
+                    title: linkLabel(spec.title),
                     childSessionId: childId,
                     folder: admitted.cwd,
-                    lineup: lineupSnapshot(
-                      addLineupRow(parent.lineup ?? emptyLineup(admitted.cwd, startedAt), {
-                        childId,
-                        title: spec.title,
-                        slice: payload.description?.trim() || spec.title,
-                        folder: admitted.cwd,
-                        vendor: vendorDisplayName(spec.provider),
-                        status: "running",
-                        startedAt,
-                        ...(planStepId ? { planStepId } : {}),
-                        ...(rationale ? { rationale } : {}),
-                        ...(assignedPaths.length > 0 ? { paths: assignedPaths } : {}),
-                      }, undefined, spawnMission),
-                    ),
+                    lineup: startedBoard.lineup,
                     worker: workerName,
                     reused: Boolean(priorWorker),
-                    crew: spawnCrew,
+                    crew: startedBoard.crew,
+                    crewCount: startedBoard.crewCount,
                     access: accessReceipt,
                     routingMode: routedWorkerIsRouted ? "auto" : "manual",
                     ...(routedWorkerIsRouted && routeDecision ? { routingDecision: routeDecision } : {}),
@@ -6281,13 +6294,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               return;
             }
             const finished = stateRef.current.sessions.find((item) => item.id === childId);
+            const finishedBoard = boundLinkReply({
+              crew: parentCrewSnapshot(stateRef.current.sessions, parent.id, Number.MAX_SAFE_INTEGER),
+            });
             await replyAsk({
               text: JSON.stringify(
                 {
                   completed: true,
                   childSessionId: childId,
                   worker: finished?.workerName ?? workerName,
-                  title: finished?.title ?? spec.title,
+                  title: linkLabel(finished?.title ?? spec.title),
                   provider: finished?.provider ?? spec.provider,
                   model: finished?.model ?? spec.model,
                   effort: finished?.effort ?? null,
@@ -6297,7 +6313,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                   ...(finished?.routingDecision ?? routeDecision
                     ? { routingDecision: finished?.routingDecision ?? routeDecision }
                     : {}),
-                  crew: parentCrewSnapshot(stateRef.current.sessions, parent.id),
+                  crew: finishedBoard.crew,
+                  crewCount: finishedBoard.crewCount,
                   report: fallback,
                 },
                 null,

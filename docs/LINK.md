@@ -249,6 +249,51 @@ The same loop for Claude, Codex, Grok, OpenClaw, and Hermes:
 2. New slice: `workhorse_delegate`. `fromSessionId` is that parent, never the
    worker. Stop this turn. The desk joins the report into the parent chat.
    Named worker or live chat: `workhorse_ask_chat` with that row's `id`.
+
+   The reply is a board, not an archive. `title` and `crew[].slice` are labels
+   of at most 80 characters, not the task text the caller just sent. `crew`
+   lists every running or queued worker plus the last five that finished, and
+   `crewCount` says how many workers this parent has had in all.
+   `lineup.finished` is the last five, `lineup.finishedCount` how many finished
+   in all, and each report is the first 400 characters. A field that was cut
+   says so: `reportTruncated: true`, `titleTruncated: true`.
+
+   ```json
+   {
+     "started": true,
+     "title": "Rebase onto main",
+     "childSessionId": "sess-4f21",
+     "crew": [{ "worker": "Wren", "slice": "Rebase onto main", "status": "running", "free": false }],
+     "crewCount": 812,
+     "lineup": {
+       "running": ["Wren · Rebase onto main"],
+       "finished": [
+         {
+           "title": "Marlow · Audit the merge queue",
+           "status": "completed",
+           "report": "Read every route and quoted the file …",
+           "reportTruncated": true,
+           "childSessionId": "sess-4e08"
+         }
+       ],
+       "finishedCount": 811
+     }
+   }
+   ```
+
+   The last five rows carry their own `childSessionId`, and the full report and
+   the full title stay on the worker: `workhorse_agent_status` with that id, or
+   `workhorse_read_chat` for the whole transcript. The finished workers before
+   those five are not on the reply at all, and `finishedCount` is a count, not
+   their ids, so reach them through the chat list. `workhorse_list_chats` names
+   every worker with its `id`. That list has a bound of its own, so a worker
+   that finished over 24 hours ago takes `all`, and the CLI pages a long list
+   with `--limit` and `--cursor`. Then read that row's `id` with
+   `workhorse_agent_status` or `workhorse_read_chat`.
+
+   The reply cannot carry the ids it left out. On a desk of 800 workers that
+   array runs to 20 KB, against a whole reply of 5.6 KB. The same bounds apply
+   to a `workhorse_continue_mission` reply, which is the same spawn underneath.
 3. Later, `workhorse_agent_status` with the worker or asked-chat id
    (`childSessionId` from ask or delegate). `next` is `wait`, `done`, or
    `failed`. When `done`, the report is that turn's reply, not an older
@@ -327,6 +372,8 @@ workhorse chats
 workhorse chats --parents
 workhorse chats --full
 workhorse chats --all
+workhorse chats --all --limit 100
+workhorse chats --all --limit 100 --cursor 100
 workhorse read <sessionId>
 workhorse ask --chat <sessionId> --message "Review this change" --key <idempotencyKey>
 workhorse delegate --chat <sessionId> --task "Review this change" --key <idempotencyKey>
@@ -367,6 +414,24 @@ Link exposes it only as an explicitly authorized intermediate. The artifact
 and JSON report include `faceLimitSatisfied`, `watertightSatisfied`, and
 `requiresPreparation`; the typed continuation then dispatches Blender to
 produce the required game GLB, PNG preview, and JSON report.
+
+The CLI never hands back half a document. `chats` pages on `--limit` and
+`--cursor`. Without either flag the output is the bare array it has always
+been, so a harness that reads the first row still does; with either, the rows
+come wrapped:
+
+```json
+{ "chats": [], "cursor": 0, "nextCursor": 100, "chatCount": 812 }
+```
+
+`nextCursor` is the first row this page left out, or `null` on the last page.
+A page can be trimmed below the `--limit` asked for when its rows are long, so
+read `nextCursor` rather than adding the limit to the cursor. Output past the
+64 KB host cap comes back whole as one error:
+
+```json
+{ "error": "output over 64 KB; use --parents or --limit" }
+```
 
 Without the command, the same calls are
 `"<binary>" "<workhorse-mcp.js>" link …` with the three environment variables

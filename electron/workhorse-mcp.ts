@@ -85,6 +85,7 @@ import {
   linkHandshake,
   type LinkEnvelope,
 } from "../src/lib/workhorse-link";
+import { linkCliOutput, type LinkCliPage } from "../src/lib/link-reply";
 import { assertMcpToolAllowed, inboundSessionIdFromState, isLocalMcpToolCallable, isMcpToolAdvertised, LOCAL_TOOL_CAPABILITY_REQUIREMENTS, mcpExposureProfile, profileForCaller, resolveMcpSpawnFrom } from "./mcp-exposure";
 import { effectiveLearningMode, learningCaptures } from "../src/lib/learning-policy";
 import { LocalCapabilityHostClient, LocalCapabilityHostError, parseLocalCapabilityHosts } from "./local-capability-host";
@@ -3745,7 +3746,11 @@ export async function runWorkhorseMcp(): Promise<void> {
   });
   process.stdin.on("end", () => {
     completions.stop();
-    process.exit(0);
+    // The CLI's race, on this side: a frame past what the pipe takes sits on
+    // Node's queue, and process.exit throws that queue away. An empty write is
+    // ordered behind the frames already queued, so exiting from its callback
+    // hands the host every byte of the last response.
+    process.stdout.write("", () => process.exit(0));
   });
   process.stdin.on("data", (chunk: Buffer | string) => {
     buffer = Buffer.concat([buffer, Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, "utf8")]);
@@ -3774,7 +3779,7 @@ function isMcpEntry(): boolean {
  *
  *   <helper> link capabilities
  *   <helper> link capacity [--provider <id>] [--callable]
- *   <helper> link chats [--parents] [--full] [--all]
+ *   <helper> link chats [--parents] [--full] [--all] [--limit <n>] [--cursor <n>]
  *   <helper> link read <sessionId> [--limit <n>]
  *   <helper> link ask --chat <sessionId> --message "<text>" [--trace <id>] [--key <idempotencyKey>]
  *   <helper> link delegate --chat <sessionId> --task "<text>" [--provider <id>] [--model <id>] [--effort <level>] [--permission <seat>] [--sandbox <profile>] [--accept <criterion>] [--passes <n>] [--folder <path>] [--trace <id>] [--key <idempotencyKey>]
@@ -3785,12 +3790,16 @@ function isMcpEntry(): boolean {
  *
  * `--json` is accepted and ignored: the output is always JSON. Exit 0 on a
  * result, 1 on an error, with the error as JSON on stdout.
+ *
+ * The output is never a torn document. `chats` pages on `--limit` and
+ * `--cursor`; anything past the host cap comes back as one error that names
+ * the flags which make it fit.
  */
-export function linkCliCall(argv: string[]): { name: string; args: Record<string, unknown> } | { usage: string } {
+export function linkCliCall(argv: string[]): { name: string; args: Record<string, unknown>; page?: LinkCliPage } | { usage: string } {
   const [sub, ...rest] = argv.filter((item) => item !== "--json");
   // Flags that take a value; anything else starting with -- is a switch.
   const VALUE_FLAGS = new Set([
-    "--provider", "--model", "--effort", "--route", "--chat", "--task", "--trace", "--key", "--pass", "--message", "--limit", "--passes",
+    "--provider", "--model", "--effort", "--route", "--chat", "--task", "--trace", "--key", "--pass", "--message", "--limit", "--cursor", "--passes",
     "--permission", "--sandbox",
     "--host", "--capability", "--kind", "--role", "--media-type", "--origin", "--system",
     "--max-tokens", "--temperature", "--mode", "--seed", "--max-faces",
@@ -3815,12 +3824,21 @@ export function linkCliCall(argv: string[]): { name: string; args: Record<string
   }
   const flag = (name: string): string | undefined => flags.get(name) || undefined;
   const usage =
-    "usage: link capabilities | capacity [--provider <id>] [--callable] | chats [--parents] [--full] [--all] | read <id> [--limit <n>] | ask --chat <id> --message <text> [--trace <id>] [--key <id>] | delegate --chat <id> --task <text> [--provider <id>] [--model <id>] [--effort <level>] [--permission <seat>] [--sandbox <profile>] [--accept <criterion>] [--passes <n>] [--folder <path>] [--trace <id>] [--key <id>] | status <workerId> | follow-up <workerId> <text> --chat <id> [--pass <n>] [--provider <id>] [--model <id>] [--effort <level>] [--permission <seat>] [--sandbox <profile>] [--route <tier>] [--trace <id>] [--key <id>] | grok-pending | grok-reply <id> --text <answer> | local-hosts | local-capabilities [--host <id>] | local-upload <path> --capability <id> --kind <kind> --role <role> --media-type <mime> | local-invoke <capabilityId> ['<invocation-json>'] | local-chat <prompt> | local-3d <sourceArtifactId> | local-job <jobId> | local-cancel <jobId> | local-artifact <artifactId> | local-materialize <artifactId> | local-continue <jobId> <continuationId> --chat <id> --folder <path>";
+    "usage: link capabilities | capacity [--provider <id>] [--callable] | chats [--parents] [--full] [--all] [--limit <n>] [--cursor <n>] | read <id> [--limit <n>] | ask --chat <id> --message <text> [--trace <id>] [--key <id>] | delegate --chat <id> --task <text> [--provider <id>] [--model <id>] [--effort <level>] [--permission <seat>] [--sandbox <profile>] [--accept <criterion>] [--passes <n>] [--folder <path>] [--trace <id>] [--key <id>] | status <workerId> | follow-up <workerId> <text> --chat <id> [--pass <n>] [--provider <id>] [--model <id>] [--effort <level>] [--permission <seat>] [--sandbox <profile>] [--route <tier>] [--trace <id>] [--key <id>] | grok-pending | grok-reply <id> --text <answer> | local-hosts | local-capabilities [--host <id>] | local-upload <path> --capability <id> --kind <kind> --role <role> --media-type <mime> | local-invoke <capabilityId> ['<invocation-json>'] | local-chat <prompt> | local-3d <sourceArtifactId> | local-job <jobId> | local-cancel <jobId> | local-artifact <artifactId> | local-materialize <artifactId> | local-continue <jobId> <continuationId> --chat <id> --folder <path>";
   if (sub === "capabilities") return { name: "workhorse_capabilities", args: {} };
   if (sub === "capacity") {
     return { name: "workhorse_query_capacity", args: { ...(flag("provider") ? { provider: flag("provider") } : {}), ...(flag("callable") ? { callableOnly: true } : {}) } };
   }
   if (sub === "chats") {
+    // Paging is the CLI's, not the tool's: the rows come back whole and this
+    // hands the caller the window it asked for. Without a flag the output is
+    // the bare array it has always been.
+    const chatLimit = Number(flag("limit") ?? "");
+    const chatCursor = Number(flag("cursor") ?? "");
+    const page: LinkCliPage = {
+      ...(Number.isFinite(chatLimit) && chatLimit > 0 ? { limit: chatLimit } : {}),
+      ...(Number.isFinite(chatCursor) && chatCursor > 0 ? { cursor: chatCursor } : {}),
+    };
     return {
       name: "workhorse_list_chats",
       args: {
@@ -3828,6 +3846,8 @@ export function linkCliCall(argv: string[]): { name: string; args: Record<string
         ...(flag("full") ? { full: true } : {}),
         ...(flag("all") ? { all: true } : {}),
       },
+      // Absent unless asked for, so an unpaged call is the call it always was.
+      ...(Object.keys(page).length > 0 ? { page } : {}),
     };
   }
   if (sub === "read") {
@@ -3991,22 +4011,39 @@ export function linkCliCall(argv: string[]): { name: string; args: Record<string
   return { usage };
 }
 
+/**
+ * Print one line and wait for it to leave.
+ *
+ * `process.stdout.write` to a pipe is asynchronous: the kernel takes what fits
+ * in the pipe — 65,536 bytes on macOS — and Node queues the rest. `process.exit`
+ * throws that queue away, so `workhorse chats --all` on a busy desk stopped at
+ * exactly 65,536 bytes, mid-string, and the harness got a JSON parse error
+ * instead of a list. The cut was never a cap the desk chose. The write callback
+ * fires once the bytes are handed over, so exiting from there sends all of them.
+ */
+export async function writeCliLine(text: string): Promise<void> {
+  const line = text.endsWith("\n") ? text : `${text}\n`;
+  await new Promise<void>((resolve) => {
+    process.stdout.write(line, () => resolve());
+  });
+}
+
 export async function runLinkCli(argv: string[]): Promise<number> {
   const inbox = runGrokBotInboxCli(argv);
   if (inbox) {
-    process.stdout.write(`${inbox.output}\n`);
+    await writeCliLine(inbox.output);
     return inbox.code;
   }
   const call = linkCliCall(argv);
   if ("usage" in call) {
-    process.stdout.write(`${JSON.stringify({ error: call.usage })}\n`);
+    await writeCliLine(JSON.stringify({ error: call.usage }));
     return 1;
   }
   if (typeof call.args.__localUploadPath === "string") {
     const source = path.resolve(call.args.__localUploadPath);
     const stat = fs.statSync(source);
     if (!stat.isFile() || stat.size > 64 * 1024 * 1024) {
-      process.stdout.write(`${JSON.stringify({ error: "local-upload takes one file up to 64 MiB" })}\n`);
+      await writeCliLine(JSON.stringify({ error: "local-upload takes one file up to 64 MiB" }));
       return 1;
     }
     call.args.dataBase64 = fs.readFileSync(source).toString("base64");
@@ -4016,12 +4053,13 @@ export async function runLinkCli(argv: string[]): Promise<number> {
     | { result?: { content?: Array<{ text?: string }> }; error?: { message?: string } }
     | undefined;
   if (reply?.error) {
-    process.stdout.write(`${JSON.stringify({ error: reply.error.message ?? "error" })}\n`);
+    await writeCliLine(JSON.stringify({ error: reply.error.message ?? "error" }));
     return 1;
   }
   const text = reply?.result?.content?.[0]?.text ?? "";
-  process.stdout.write(text.endsWith("\n") ? text : `${text}\n`);
-  return 0;
+  const output = linkCliOutput(text, { paged: call.name === "workhorse_list_chats", page: call.page });
+  await writeCliLine(output.text);
+  return output.oversize ? 1 : 0;
 }
 
 if (isMcpEntry()) {

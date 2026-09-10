@@ -441,9 +441,10 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
 
 ## Skills, MCP servers, Workshop, Local Compute
 
-- **Skills** three ship with the desk: `desk` for chat-to-chat control, `setup`
-  for adding bots and references, `dgx-spark` for connecting one or more NVIDIA
-  DGX Spark boxes (NVIDIA Sync is SSH; collect `/v1/models`; call Qwen).
+- **Skills** two ship with the desk: `desk` for chat-to-chat control, `setup`
+  for adding bots and references. Spark login is an optional add-on: Settings →
+  Skills → Import the `dgx-spark` folder from
+  github.com/go7studio/workshop-pack-dgx-spark (or the private skills hub).
 - Skills are also listed from Grok, Codex, Claude and Cursor homes, and can be
   pushed back to a vendor.
 - A per-turn skill radar matches task language against installed names and

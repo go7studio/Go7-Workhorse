@@ -264,6 +264,7 @@ import {
   nextCampaignPhase,
   nextMissionIteration,
   missionCapError,
+  lowerMissionCap,
   rootSpawnError,
   resolveSpawnSpec,
   missionForDeskSpawn,
@@ -748,7 +749,9 @@ export function livePassForSpawn(
 /**
  * The ceilings the person set under Mission on this chat. The desk applies
  * them itself, so a bot cannot drop the person's stop by leaving loop out of
- * the call. A ceiling the call named wins, because that is the newer answer.
+ * the call. The person's field is a ceiling, never a default: where the call
+ * named one too the lower of the two stands, dollars and tokens apart, so a
+ * call may tighten the person's stop and never loosen it.
  */
 export function withDeskMissionCaps(
   mission: MissionIteration | undefined,
@@ -758,8 +761,8 @@ export function withDeskMissionCaps(
   if (caps?.maxCostUsd === undefined && caps?.maxTokens === undefined) return mission;
   return {
     ...mission,
-    maxCostUsd: mission.maxCostUsd ?? caps.maxCostUsd,
-    maxTokens: mission.maxTokens ?? caps.maxTokens,
+    maxCostUsd: lowerMissionCap(mission.maxCostUsd, caps.maxCostUsd),
+    maxTokens: lowerMissionCap(mission.maxTokens, caps.maxTokens),
   };
 }
 

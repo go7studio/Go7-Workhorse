@@ -158,14 +158,49 @@ test("the mission sums every worker in it, including a plain sibling of a pass",
   assert.equal(stopped.ok, false, "which is enough to reach the ceiling");
 });
 
-test("the desk fills a mission's ceilings from the chat, and a ceiling the call named wins", () => {
+test("the person's field is a ceiling the call cannot lift, and may tighten under", () => {
   const fromChat = withDeskMissionCaps(mission(1), { maxCostUsd: 5, maxTokens: 200_000 });
   assert.equal(fromChat?.maxCostUsd, 5, "the person's dollar ceiling reaches the mission the desk seats");
-  assert.equal(fromChat?.maxTokens, 200_000);
+  assert.equal(fromChat?.maxTokens, 200_000, "and so does the token one");
+
   const named = withDeskMissionCaps(mission(1, { maxCostUsd: 30 }), { maxCostUsd: 5, maxTokens: 200_000 });
-  assert.equal(named?.maxCostUsd, 30, "a ceiling the call named is the newer answer");
+  assert.equal(named?.maxCostUsd, 5, "the person's 5 beats the 30 the call named, because a bot never lifts a person's stop");
   assert.equal(named?.maxTokens, 200_000, "the chat still fills the one the call left out");
+
+  const tighter = withDeskMissionCaps(mission(1, { maxCostUsd: 4, maxTokens: 900_000 }), { maxCostUsd: 5, maxTokens: 200_000 });
+  assert.equal(tighter?.maxCostUsd, 4, "a call may tighten the dollars under the person's ceiling");
+  assert.equal(tighter?.maxTokens, 200_000, "and the two are read apart, so a loose token ask still lands on the person's");
+
   assert.deepEqual(withDeskMissionCaps(mission(1), undefined), mission(1), "no chat ceiling changes nothing");
+  const alone = withDeskMissionCaps(mission(1, { maxCostUsd: 30 }), { maxTokens: 200_000 });
+  assert.equal(alone?.maxCostUsd, 30, "with no field of the person's, the number the call named stands");
+});
+
+test("a continuation raises the mission's own ceiling, never past the person's", () => {
+  const sessions = twoPasses({ maxCostUsd: 10 });
+  const usage = [spend("pass_one", 40_000, 6.25), spend("pass_two", 30_000, 4.5)];
+
+  const raised = nextMissionIteration(sessions, "parent", ["pass_two"], 2, {
+    usage,
+    raise: { maxCostUsd: 25 },
+    deskCaps: { maxCostUsd: 12 },
+  });
+  assert.equal(raised.ok, true, "$10.75 spent is still under the person's 12, so the mission goes on");
+  if (raised.ok) assert.equal(raised.mission.maxCostUsd, 12, "it runs under the person's ceiling, not the 25 the call asked for");
+
+  const refused = nextMissionIteration(sessions, "parent", ["pass_two"], 2, {
+    usage,
+    raise: { maxCostUsd: 25 },
+    deskCaps: { maxCostUsd: 10 },
+  });
+  assert.equal(refused.ok, false, "a raise cannot buy a pass past the person's ceiling");
+  if (!refused.ok) {
+    assert.match(refused.error, /^mission cap reached: \$10\.75 of \$10\.00$/, "and the stop names the person's number, not the raise");
+  }
+
+  const free = nextMissionIteration(sessions, "parent", ["pass_two"], 2, { usage, raise: { maxCostUsd: 25 } });
+  assert.equal(free.ok, true, "with no field of the person's the raise stands on its own");
+  if (free.ok) assert.equal(free.mission.maxCostUsd, 25, "at the number the call asked for");
 });
 
 test("a blank field is no ceiling, and zero cannot switch one off", () => {

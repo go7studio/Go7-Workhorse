@@ -374,6 +374,14 @@ A higher ceiling lets a mission that stopped at its cap carry on. Omit `loop`
 to keep the one the mission already has. A plain delegate with no `loop` starts
 no mission, so no cap can stop it.
 
+A cap the person set under Mission on the chat is a ceiling and never a
+default: where the call names one too the lower of the two runs the mission,
+dollars and tokens read apart, so a call may tighten the person's stop and
+never loosen it, the call's number stands where the person set no field, the
+person's number stands where the call sent none, and a raise on
+`workhorse_continue_mission` lifts the call's own number as far as the person's
+ceiling and no further, or freely where the person left that field blank.
+
 ## Execution contract
 
 A call that changes the desk carries:

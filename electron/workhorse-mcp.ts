@@ -583,6 +583,8 @@ const TOOLS = [
           properties: {
             acceptanceCriteria: { type: "array", items: { type: "string" }, description: "Concrete completion checks" },
             maxIterations: { type: "number", description: "2-8 passes; default 4" },
+            maxCostUsd: { type: "number", description: "Mission dollar ceiling. Before each new pass the desk sums what the mission spent across every worker in it. At or over the ceiling the pass does not start. A worker mid-turn is never stopped. A vendor the desk cannot price adds no dollars." },
+            maxTokens: { type: "number", description: "Mission token ceiling, summed the same way and checked the same moment. Tokens count even when the desk does not know the price." },
           },
           required: ["acceptanceCriteria"],
           additionalProperties: false,
@@ -2529,11 +2531,14 @@ async function continueMission(args: Record<string, unknown>, from?: string): Pr
     });
   // The ledger goes in, so the cap reads what the desk has recorded now. A
   // raise sent on this call is measured instead of the old ceiling, which is
-  // how a mission that stopped at its cap carries on.
+  // how a mission that stopped at its cap carries on. The person's own fields
+  // go in beside it: a raise lifts this mission's number as far as they allow.
+  const deskCaps = sessions.find((session) => session.id === parentId)?.missionCaps;
   const next = nextMissionIteration(sessions, parentId, previousWorkerIds, previousPass, {
     allowUnfinished: true,
     usage: readState().usage,
     ...(raise ? { raise } : {}),
+    ...(deskCaps ? { deskCaps } : {}),
   });
   if (!next.ok) {
     // A cap is a stop, not a broken call. It answers in the shape a caller
@@ -2544,7 +2549,7 @@ async function continueMission(args: Record<string, unknown>, from?: string): Pr
           next: "failed",
           spawned: false,
           error: next.error,
-          how: "The mission met its ceiling. Report the spend. Call again with a higher loop.maxCostUsd or loop.maxTokens to go on.",
+          how: "The mission met its ceiling. Report the spend. Call again with a higher loop.maxCostUsd or loop.maxTokens to go on, as far as any ceiling the person set under Mission on the chat.",
         },
         null,
         2,

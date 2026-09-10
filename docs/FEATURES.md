@@ -200,6 +200,12 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
   as a mission.
 - Set a cost cap or a token cap under Mission, and the desk stops the mission
   before the next pass once the crew's spend reaches it, never mid-turn.
+- Your field is a ceiling and never a default: where a call names its own cap
+  the lower of the two runs the mission, dollars and tokens read apart, so a
+  call may tighten your stop and never lift it, the call's number stands where
+  you set no field, yours stands where the call sends none, and a continuation
+  raises the call's own number only as far as your ceiling, or freely where you
+  left the field blank.
 - The crew tray shows direct workers, their model, effort and latest activity.
 - Expand it to stop a worker or the crew, preview a worker chat, queue a
   follow-up, or open the full chat. Drafts stay local while you type.

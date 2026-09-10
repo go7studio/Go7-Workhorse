@@ -2333,13 +2333,31 @@ function missionCap(value: unknown): number | undefined {
   return value;
 }
 
-/** The two ceilings a caller may set on a mission, with the raise applied. */
+/**
+ * The tighter of two ceilings, which is how a cap may be narrowed and never
+ * widened. One side missing leaves the other standing.
+ */
+export function lowerMissionCap(left: unknown, right: unknown): number | undefined {
+  const first = missionCap(left);
+  const second = missionCap(right);
+  if (first === undefined) return second;
+  if (second === undefined) return first;
+  return Math.min(first, second);
+}
+
+/**
+ * The two ceilings this pass runs under: the call's own number, with any raise
+ * this continuation asked for, held under the field the person typed on the
+ * chat. A raise lifts the call's number as far as the person's ceiling and no
+ * further; where the person left the field blank it lifts freely.
+ */
 export function missionCapsFor(
   mission: Pick<MissionIteration, "maxCostUsd" | "maxTokens">,
   raise?: MissionCaps,
+  desk?: MissionCaps,
 ): MissionCaps {
-  const maxCostUsd = missionCap(raise?.maxCostUsd) ?? missionCap(mission.maxCostUsd);
-  const maxTokens = missionCap(raise?.maxTokens) ?? missionCap(mission.maxTokens);
+  const maxCostUsd = lowerMissionCap(missionCap(raise?.maxCostUsd) ?? mission.maxCostUsd, desk?.maxCostUsd);
+  const maxTokens = lowerMissionCap(missionCap(raise?.maxTokens) ?? mission.maxTokens, desk?.maxTokens);
   return {
     ...(maxCostUsd === undefined ? {} : { maxCostUsd }),
     ...(maxTokens === undefined ? {} : { maxTokens }),
@@ -2361,8 +2379,10 @@ export function missionCapError(input: {
   mission: Pick<MissionIteration, "id" | "iteration" | "maxCostUsd" | "maxTokens">;
   usage?: UsageEvent[];
   raise?: MissionCaps;
+  /** The ceilings the person set under Mission on this chat. */
+  desk?: MissionCaps;
 }): string | undefined {
-  const caps = missionCapsFor(input.mission, input.raise);
+  const caps = missionCapsFor(input.mission, input.raise, input.desk);
   if (caps.maxCostUsd === undefined && caps.maxTokens === undefined) return undefined;
   const spend = missionSpend(input.sessions, input.parentId, input.mission, input.usage);
   if (caps.maxCostUsd !== undefined && spend.costUsd >= caps.maxCostUsd) {
@@ -2392,6 +2412,11 @@ export function nextMissionIteration(
     usage?: UsageEvent[];
     /** New ceilings this continuation asked for. A higher one resumes the mission. */
     raise?: MissionCaps;
+    /**
+     * The ceilings the person set under Mission on the parent chat. A raise is
+     * held under them, so a continuation cannot lift a cap the person set.
+     */
+    deskCaps?: MissionCaps;
   },
 ): MissionContinuationDecision {
   const ids = [...new Set(previousWorkerIds.map((id) => id.trim()).filter(Boolean))];
@@ -2436,9 +2461,17 @@ export function nextMissionIteration(
   if (!phase) return { ok: false, error: "mission campaign phase is missing or invalid" };
   // Last gate, because it is a stop before the next pass starts. The caller
   // hands the ledger in, so this reads what the desk has recorded, and a
-  // continuation that raised the ceiling is measured against the new one.
-  const caps = missionCapsFor(first, options?.raise);
-  const capped = missionCapError({ sessions, parentId, mission: first, usage: options?.usage, raise: options?.raise });
+  // continuation that raised the ceiling is measured against the new one, up
+  // to the person's ceiling, which no raise reaches past.
+  const caps = missionCapsFor(first, options?.raise, options?.deskCaps);
+  const capped = missionCapError({
+    sessions,
+    parentId,
+    mission: first,
+    usage: options?.usage,
+    raise: options?.raise,
+    desk: options?.deskCaps,
+  });
   if (capped) return { ok: false, error: capped };
   return {
     ok: true,

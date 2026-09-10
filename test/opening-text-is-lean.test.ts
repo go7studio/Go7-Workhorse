@@ -12,6 +12,14 @@
  * fixture. The second puts a ceiling on the opening text. The ceiling is only
  * safe to write because the witness sits beside it — on its own, a character
  * budget is an invitation to delete a rule.
+ *
+ * The witness alone was not enough, and the first cut of it proved that: it
+ * asked only whether the recorded new string was somewhere in the tree, so
+ * "If they ask to delete all chats not in a project, call delete_chat with
+ * scope=loose" passed as "For every chat not in a project, call delete_chat
+ * with scope=loose", which is a standing order to wipe them. Every rewording
+ * now carries a keeps note naming the condition, number, exception or named
+ * object the new sentence holds on to, and a note that says nothing fails.
  */
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -27,6 +35,7 @@ import {
   DESK_SPAWN_LAW,
   HELPER_SESSION_RULES,
   MISSION_MODE_HINT,
+  SPAWN_GATE_LAW,
   SPAWN_TURN_HINT,
   WORKER_SESSION_RULES,
   WORKHORSE_SESSION_RULES,
@@ -39,7 +48,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 type Witness = {
   beforeChars: Record<string, number>;
   before: Record<string, string[]>;
-  rewordings: { was: string; now: string }[];
+  rewordings: { was: string; now: string; keeps: string }[];
 };
 
 const witness: Witness = JSON.parse(
@@ -89,6 +98,50 @@ test("no rule sentence was lost when the opening text was split", () => {
   assert.equal(verbatim + reworded, Object.values(witness.before).reduce((sum, list) => sum + list.length, 0));
 });
 
+test("every rewording says what it keeps", () => {
+  const beforeSentences = new Set(Object.values(witness.before).flat());
+  const silent: string[] = [];
+  const orphans: string[] = [];
+  const unsupported: string[] = [];
+
+  for (const item of witness.rewordings) {
+    if (!beforeSentences.has(item.was)) orphans.push(item.was);
+    const keeps = (item.keeps ?? "").trim();
+    if (!keeps) {
+      silent.push(item.was);
+      continue;
+    }
+    // A note is a claim about the new sentence, so the new sentence has to
+    // back it: every tool and every number the note names must be in there.
+    // Without this a note reads well and proves nothing.
+    const claims = [...(keeps.match(/workhorse_[a-z_]+/g) ?? []), ...(keeps.match(/\d+/g) ?? [])];
+    for (const claim of claims) {
+      if (!item.now.includes(claim)) unsupported.push(`${item.was}\n    claims ${claim}, absent from -> ${item.now}`);
+    }
+  }
+
+  assert.deepEqual(
+    silent,
+    [],
+    `rewordings with no note of what the new sentence keeps:\n${silent.join("\n")}`,
+  );
+  assert.deepEqual(orphans, [], `rewordings for a sentence no block ever carried:\n${orphans.join("\n")}`);
+  assert.deepEqual(unsupported, [], `notes the new sentence does not back:\n${unsupported.join("\n")}`);
+});
+
+test("the loose-chat delete keeps its condition", () => {
+  // The one this whole fixture exists for. A standing order to call
+  // scope=loose, rather than a rule about what to do when the user asks for
+  // it, empties every chat outside a project on a turn that never asked.
+  for (const core of [WORKHORSE_SESSION_RULES, CUSTOM_HTTP_SESSION_RULES]) {
+    assert.match(
+      core,
+      /If they ask to delete or remove all chats not in a project \(loose chats\), call workhorse_delete_chat with scope=loose now/,
+    );
+    assert.doesNotMatch(core, /For every chat not in a project \(loose chats\), call workhorse_delete_chat/);
+  }
+});
+
 test("the five named laws survive word for word", () => {
   // The spawn law, the permission and sandbox rules, forgery rejection,
   // missions running without a click, and the vendor boundary. These are not
@@ -100,9 +153,11 @@ test("the five named laws survive word for word", () => {
 
   for (const core of [WORKHORSE_SESSION_RULES, CUSTOM_HTTP_SESSION_RULES]) {
     assert.match(core, /workhorse_request_permission only RAISES access/);
-    assert.match(core, /Never call it to lower Permission or Sandbox\./);
+    assert.match(core, /blocking a write or command you must run now\./);
+    assert.match(core, /Never call it to lower Permission \(Always → Ask\) or Sandbox \(Off → Workspace\)\./);
     assert.match(core, /Never offer to dial limits back\./);
     assert.match(core, /If a tool result starts with USER DECLINED/);
+    assert.match(core, /Do not retry and do not guess why\./);
   }
 
   assert.match(CUSTOM_HTTP_SESSION_RULES, /Never pretend to be Grok, Codex, Claude, Sol, Terra, or another bot\./);
@@ -142,15 +197,47 @@ test("the spawn law reaches a chat that can spawn, and no other", () => {
   }
 });
 
+test("a chat that never got the spawn law may not spawn", () => {
+  // The core still names workhorse_spawn_agent, and the detector below it
+  // only fires on the phrasings someone thought of. These are the ones it
+  // misses, and each of them is an ordinary way to ask for workers.
+  const missed = [
+    "hire two reviewers",
+    "please have Claude review this file",
+    "bring in someone to check the migration",
+    "get a reviewer on this",
+    "ask Grok to look at the diff",
+  ];
+  for (const text of missed) {
+    assert.equal(withSpawnHint(text), text, `${text} now reaches the detector — move it to the covered set`);
+  }
+
+  // So the line that holds is in the core itself, on every surface that can
+  // reach the tool. Widening the detector would close these five and leave
+  // the sixth phrasing open; this closes the call.
+  for (const core of [WORKHORSE_SESSION_RULES, CUSTOM_HTTP_SESSION_RULES, CURSOR_SESSION_RULES]) {
+    assert.ok(core.includes(SPAWN_GATE_LAW), "a core names workhorse_spawn_agent without the gate on it");
+  }
+  assert.match(SPAWN_GATE_LAW, /Do not call workhorse_spawn_agent on a turn that did not bring you the desk spawn law/);
+  // And it names the way out, so the chat asks instead of going quiet.
+  assert.match(SPAWN_GATE_LAW, /ask the user to say so, and wait/);
+});
+
 test("the opening text stays under its ceiling for every role", () => {
   // Ceilings, never equalities: a pinned character count is a test that breaks
   // on every honest edit. Each one sits above today's measurement with room to
   // reword, and the witness above is what stops a ceiling being met by
   // deleting a rule.
+  //
+  // The three core ceilings were 6,000 and are 6,500. The gate on this branch
+  // found rules that had been compressed until they said something else, and
+  // putting their conditions back cost characters. A size target is the one
+  // thing here that may give way: it is a number we chose, and every rule it
+  // sits over is one a chat obeys.
   const ceilings: Record<string, number> = {
-    WORKHORSE_SESSION_RULES: 6000,
-    CUSTOM_HTTP_SESSION_RULES: 6000,
-    CURSOR_SESSION_RULES: 6000,
+    WORKHORSE_SESSION_RULES: 6500,
+    CUSTOM_HTTP_SESSION_RULES: 6500,
+    CURSOR_SESSION_RULES: 6500,
     SPAWN_TURN_HINT: 4200,
     WORKER_SESSION_RULES: 900,
     AUDITOR_SESSION_RULES: 600,
@@ -188,9 +275,18 @@ test("the opening text stays under its ceiling for every role", () => {
   assert.ok(SPAWN_TURN_HINT.length > witness.beforeChars.SPAWN_TURN_HINT);
 
   // The three blocks S11 set out to shrink really did shrink, and by a lot.
-  for (const name of ["WORKHORSE_SESSION_RULES", "CUSTOM_HTTP_SESSION_RULES", "CURSOR_SESSION_RULES"]) {
+  // One floor each rather than one for all three: the custom HTTP core comes
+  // down least because it carries the desk tool roster by name, and a single
+  // shared floor would either be a lie about the other two or pressure to
+  // drop that roster again.
+  const floors: Record<string, number> = {
+    WORKHORSE_SESSION_RULES: 0.35,
+    CUSTOM_HTTP_SESSION_RULES: 0.25,
+    CURSOR_SESSION_RULES: 0.35,
+  };
+  for (const [name, floor] of Object.entries(floors)) {
     const cut = 1 - now[name].length / witness.beforeChars[name];
-    assert.ok(cut > 0.35, `${name} only came down ${Math.round(cut * 100)}%`);
+    assert.ok(cut > floor, `${name} only came down ${Math.round(cut * 100)}%`);
   }
 
   // The worst case still improves: a desk chat that does ask for workers pays

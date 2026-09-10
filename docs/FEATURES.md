@@ -194,6 +194,9 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
   Auto ranks, fan-out only when asked.
 - Either pin also hands the chat the spawn rules. An unpinned chat gets them
   the moment it is asked for workers, and opens lighter for not carrying them.
+- If the ask is phrased in a way the desk does not read as a request for
+  workers, the chat says the desk can put workers on it and waits for you,
+  rather than hiring one under no rules.
 - One assignment is one worker, or a
   named continuation on this parent for the same topic; a bare spawn still
   starts clear-headed.

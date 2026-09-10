@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
@@ -75,4 +76,98 @@ test("a sidebar horse is scaled, not zoomed", () => {
     assert.doesNotMatch(rule.body, /\bzoom\s*:/, `zoom is layout work per row: ${rule.selector}`);
   }
   assert.match(styles("horse-status.css"), /\.chat-row \.horse-status\s*\{[^}]*scale:\s*\.75/);
+});
+
+/**
+ * The same change that stopped the desk painting at rest also slowed the peer
+ * inbox from four reads a second to one every five seconds. That is the path a
+ * chat takes to another chat when the bridge is down, and five seconds was long
+ * enough to lose one: the desk's own peer round trip allows four seconds and
+ * failed under load here, then on the macOS runner for an unrelated pull
+ * request.
+ *
+ * The saving was not real. An empty readdir of that directory measures 0.0097ms
+ * at p50 on this Mac, so the old rate cost 3.4 seconds of CPU in a day. The
+ * scan is back where it was, and this proves the behaviour rather than the
+ * number: with a watcher that never fires, a request still gets answered by the
+ * scan alone.
+ */
+test("a peer ask is answered by the scan alone, even when the watch never fires", async () => {
+  const { INBOX_SCAN_MS, watchPeerInbox } = await import("../electron/peer-inbox");
+
+  const inbox = mkdtempSync(path.join(tmpdir(), "wh-inbox-scan-"));
+  try {
+    const scans: Array<{ tick: () => void; ms: number }> = [];
+    let answered: (message: string) => void = () => {};
+    const handled = new Promise<string>((resolve) => {
+      answered = resolve;
+    });
+
+    const stop = watchPeerInbox(
+      inbox,
+      async (ask) => {
+        answered(ask.message);
+        return { text: `got:${ask.message}` };
+      },
+      {
+        // This watcher never reports a change, which is the case the scan is for.
+        watch: () => ({ close: () => {}, on: () => {} }),
+        schedule: (tick, ms) => {
+          scans.push({ tick, ms });
+          return () => scans.splice(0, scans.length);
+        },
+      },
+    );
+
+    try {
+      writeFileSync(
+        path.join(inbox, "1.req.json"),
+        JSON.stringify({ fromSessionId: "a", toSessionId: "b", message: "hi" }),
+      );
+      assert.equal(scans.length, 1, "the desk scheduled its own scan rather than trusting the watch");
+      assert.equal(scans[0]!.ms, INBOX_SCAN_MS, "and scheduled it at the interval the constant names");
+      assert.ok(INBOX_SCAN_MS <= 250, `a peer ask can sit for ${INBOX_SCAN_MS}ms before anything reads it`);
+      scans[0]!.tick();
+      assert.equal(await handled, "hi", "the scan alone reached the handler");
+    } finally {
+      stop();
+    }
+  } finally {
+    rmSync(inbox, { recursive: true, force: true });
+  }
+});
+
+/**
+ * The caller polls for the answer against a deadline. It used to throw the
+ * moment that deadline passed, with no last look, so an answer written during
+ * the final sleep was discarded as a timeout. That window is microseconds wide
+ * in wall time, so the clock and the wait are injected here and the answer is
+ * written inside the sleep. Nothing in this test races.
+ */
+test("an answer that lands as the deadline passes is still an answer", async () => {
+  const { askViaInbox } = await import("../electron/peer-inbox");
+  const inbox = mkdtempSync(path.join(tmpdir(), "wh-inbox-deadline-"));
+  try {
+    // Two reads of the clock sit inside the deadline, the third is past it, so
+    // the loop runs once and exits, which is exactly when the answer lands.
+    const readings = [0, 0, 9_000];
+    const answered = await askViaInbox(
+      inbox,
+      { fromSessionId: "a", toSessionId: "b", message: "hi" },
+      1_000,
+      {
+        now: () => readings.shift() ?? 9_000,
+        sleep: async () => {
+          const request = readdirSync(inbox).find((name) => name.endsWith(".req.json"));
+          assert.ok(request, "the ask left a request behind for the desk to answer");
+          writeFileSync(path.join(inbox, request.replace(/\.req\.json$/, ".res.json")), JSON.stringify({ text: "late" }));
+        },
+      },
+    );
+
+    assert.equal(answered, "late");
+    assert.deepEqual(readdirSync(inbox), [], "and both files are cleaned up behind it");
+  } finally {
+    rmSync(inbox, { recursive: true, force: true });
+  }
 });

@@ -3831,6 +3831,10 @@ export function linkCliCall(argv: string[]): { name: string; args: Record<string
     // the bare array it has always been.
     const chatLimit = Number(flag("limit") ?? "");
     const chatCursor = Number(flag("cursor") ?? "");
+    const page: LinkCliPage = {
+      ...(Number.isFinite(chatLimit) && chatLimit > 0 ? { limit: chatLimit } : {}),
+      ...(Number.isFinite(chatCursor) && chatCursor > 0 ? { cursor: chatCursor } : {}),
+    };
     return {
       name: "workhorse_list_chats",
       args: {
@@ -3838,10 +3842,8 @@ export function linkCliCall(argv: string[]): { name: string; args: Record<string
         ...(flag("full") ? { full: true } : {}),
         ...(flag("all") ? { all: true } : {}),
       },
-      page: {
-        ...(Number.isFinite(chatLimit) && chatLimit > 0 ? { limit: chatLimit } : {}),
-        ...(Number.isFinite(chatCursor) && chatCursor > 0 ? { cursor: chatCursor } : {}),
-      },
+      // Absent unless asked for, so an unpaged call is the call it always was.
+      ...(Object.keys(page).length > 0 ? { page } : {}),
     };
   }
   if (sub === "read") {

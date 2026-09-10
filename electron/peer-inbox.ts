@@ -90,6 +90,12 @@ export type PeerAsk = {
   onlyThis?: boolean;
   scope?: string;
   wait?: boolean;
+  /**
+   * The model called workhorse_spawn_agent itself, so this spawn is held to
+   * the desk spawn law. Absent on every desk-dispatched worker — delegate, a
+   * mission pass, a plan step — which no model turn ever asked for.
+   */
+  spawnTool?: boolean;
   /** Delegate calls ask the first worker to make and report a bounded execution strategy. */
   mission?: boolean;
   /** Present only for an explicitly enabled adaptive sequential mission. */

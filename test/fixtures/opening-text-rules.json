@@ -318,674 +318,990 @@
   },
   "rewordings": [
     {
-      "was": "This chat’s title, project, sidebar subtitle, preview, permission, and sandbox are in the desk context.",
-      "now": "Obey this chat’s live desk limits before you call any tool",
-      "keeps": "the desk context as the source of this chat’s live limits, and that they bind every tool call"
-    },
-    {
       "was": "Obey those live desk limits before you call any tool — do not try a write to see if it fails.",
       "now": "Obey this chat’s live desk limits before you call any tool — do not try a write to see if it fails.",
-      "keeps": "the ban on a trial write to find out whether writes are blocked"
+      "keeps": [
+        "do not try a write to see if it fails"
+      ]
     },
     {
       "was": "Other live chats in this window show up in the sidebar.",
       "now": "The sidebar lists the other live chats",
-      "keeps": "the sidebar as the list of the other live chats"
+      "keeps": [
+        "The sidebar lists the other live chats"
+      ]
     },
     {
       "was": "Archived and deleted chats are gone from the desk — do not list, read, ask, or mention them.",
       "now": "archived and deleted chats are gone from the desk, so do not list, read, ask, or mention them.",
-      "keeps": "the exception for archived and deleted chats: not listed, read, asked, or mentioned"
+      "keeps": [
+        "archived and deleted chats are gone from the desk",
+        "do not list, read, ask, or mention them"
+      ]
     },
     {
       "was": "Each row shows a title and a subtitle (model · effort · mode) — that subtitle is not the preview.",
       "now": "A row’s sidebar subtitle (model · effort · mode) is not its preview.",
-      "keeps": "the subtitle fields model · effort · mode, and that they are not the preview"
+      "keeps": [
+        "(model · effort · mode)",
+        "is not its preview"
+      ]
     },
     {
       "was": "If the user asks what the preview says, quote this chat’s preview first; list other live chats only if they ask.",
       "now": "Quote this chat’s preview first and list other chats only if the user asks.",
-      "keeps": "the order: this chat’s preview first, other chats only when asked"
+      "keeps": [
+        "Quote this chat’s preview first",
+        "list other chats only if the user asks"
+      ]
     },
     {
       "was": "Use workhorse_list_chats to see them, workhorse_read_chat when you only need that chat’s transcript, and workhorse_ask_chat when that chat should answer or do work.",
       "now": "Reach them with workhorse_list_chats, workhorse_read_chat for a transcript, and workhorse_ask_chat when that chat should answer or do work.",
-      "keeps": "workhorse_list_chats, workhorse_read_chat and workhorse_ask_chat, each still tied to its own job"
+      "keeps": [
+        "workhorse_read_chat for a transcript",
+        "workhorse_ask_chat when that chat should answer or do work"
+      ]
     },
     {
       "was": "Always pass the visible chat title (not a guessed id).",
       "now": "Always pass the visible chat title, never a guessed id and never an invented session id.",
-      "keeps": "the visible title as the only handle, never a guessed id"
+      "keeps": [
+        "Always pass the visible chat title",
+        "never a guessed id"
+      ]
     },
     {
       "was": "Do not invent session ids.",
       "now": "never a guessed id and never an invented session id.",
-      "keeps": "the ban on an invented session id"
+      "keeps": [
+        "never an invented session id"
+      ]
     },
     {
       "was": "Talking to an existing sidebar chat is always allowed — use workhorse_ask_chat.",
       "now": "Talking to an existing sidebar chat is always allowed",
-      "keeps": "that desk talk to an existing sidebar chat is always allowed"
+      "keeps": [
+        "Talking to an existing sidebar chat is always allowed"
+      ]
     },
     {
       "was": "This chat’s Permission and Sandbox do not block desk talk.",
       "now": "this chat’s Permission and Sandbox do not block desk talk.",
-      "keeps": "that Permission and Sandbox do not block desk talk"
+      "keeps": [
+        "Permission and Sandbox do not block desk talk"
+      ]
     },
     {
       "was": "When they ask you to call, talk to, ask, or invoke another sidebar chat: workhorse_list_chats then workhorse_ask_chat with that visible title.",
       "now": "To call, talk to, ask, or invoke another sidebar chat, use workhorse_list_chats then workhorse_ask_chat with that visible title",
-      "keeps": "the order workhorse_list_chats then workhorse_ask_chat, and the visible title"
+      "keeps": [
+        "workhorse_list_chats then workhorse_ask_chat with that visible title"
+      ]
     },
     {
       "was": "Talking to an existing chat does not need Allow and is not limited by this chat’s Permission or Sandbox.",
       "now": "that does not need Allow and is not limited by this chat’s Permission or Sandbox.",
-      "keeps": "the exception: no Allow needed, and Permission and Sandbox do not limit it"
+      "keeps": [
+        "does not need Allow",
+        "not limited by this chat’s Permission or Sandbox"
+      ]
     },
     {
       "was": "Desk: workhorse_list_chats, workhorse_read_chat, workhorse_ask_chat, workhorse_spawn_agent, workhorse_await_agents, workhorse_list_bots, workhorse_list_projects, workhorse_create_project, workhorse_move_chat, workhorse_rename_chat, workhorse_rename_project, workhorse_delete_chat, workhorse_delete_project, workhorse_request_permission, workhorse_list_skills, workhorse_read_skill.",
       "now": "Desk: workhorse_list_chats, workhorse_read_chat, workhorse_ask_chat, workhorse_spawn_agent, workhorse_await_agents, workhorse_list_bots, workhorse_list_projects, workhorse_create_project, workhorse_move_chat, workhorse_rename_chat, workhorse_rename_project, workhorse_delete_chat, workhorse_delete_project, workhorse_request_permission, workhorse_list_skills, workhorse_read_skill; workhorse_list_tools names the rest.",
-      "keeps": "every desk tool by name, workhorse_list_chats through workhorse_read_skill, with workhorse_list_tools for the rest"
+      "keeps": [
+        "workhorse_list_chats, workhorse_read_chat, workhorse_ask_chat, workhorse_spawn_agent, workhorse_await_agents, workhorse_list_bots, workhorse_list_projects, workhorse_create_project, workhorse_move_chat, workhorse_rename_chat, workhorse_rename_project, workhorse_delete_chat, workhorse_delete_project, workhorse_request_permission, workhorse_list_skills, workhorse_read_skill",
+        "workhorse_list_tools names the rest"
+      ]
     },
     {
       "was": "If you are unsure what is available, call workhorse_list_tools first.",
       "now": "If you are unsure what is available, call workhorse_list_tools first; that returns every tool you can use in this Workhorse space.",
-      "keeps": "workhorse_list_tools as the call when the catalog is unknown"
+      "keeps": [
+        "If you are unsure what is available, call workhorse_list_tools first"
+      ]
     },
     {
       "was": "That returns every tool you can use in this Workhorse space.",
       "now": "that returns every tool you can use in this Workhorse space.",
-      "keeps": "that the catalog call returns every tool in this Workhorse space"
+      "keeps": [
+        "returns every tool you can use in this Workhorse space"
+      ]
     },
     {
       "was": "To run a different vendor or model inside this conversation (Codex, Grok, Terra), use workhorse_spawn_agent.",
       "now": "workhorse_spawn_agent runs a different vendor or model inside this conversation.",
-      "keeps": "workhorse_spawn_agent as the way to run another vendor or model inside this conversation"
+      "keeps": [
+        "workhorse_spawn_agent runs a different vendor or model inside this conversation"
+      ]
     },
     {
       "was": "The user can also switch This chat → Vendor (Codex to Grok 4.6, etc.); that starts a new vendor instance for this same transcript.",
       "now": "The user switches vendor for this same transcript under This chat → Vendor",
-      "keeps": "This chat → Vendor as the user’s switch, and that the transcript stays the same"
+      "keeps": [
+        "This chat → Vendor",
+        "for this same transcript"
+      ]
     },
     {
       "was": "Do not read AGENTS.md, workhorse-mcp.ts, custom-http.ts, adapters, Settings, or any Workhorse source to add a bot.",
       "now": "Do not read AGENTS.md, workhorse-mcp.ts, custom-http.ts, adapters, Settings, or any Workhorse source to add one",
-      "keeps": "the named files AGENTS.md, workhorse-mcp.ts and custom-http.ts, and the ban on reading any Workhorse source to add a bot"
+      "keeps": [
+        "AGENTS.md, workhorse-mcp.ts, custom-http.ts, adapters, Settings",
+        "any Workhorse source to add one"
+      ]
     },
     {
       "was": "Do not spawn an agent to create a bot.",
       "now": "do not spawn an agent to create one",
-      "keeps": "the ban on spawning an agent to create a bot"
+      "keeps": [
+        "do not spawn an agent to create one"
+      ]
     },
     {
       "was": "Do not invent API keys or write adapter files.",
       "now": "do not invent API keys or write adapter files.",
-      "keeps": "the ban on invented API keys and on writing adapter files"
+      "keeps": [
+        "do not invent API keys or write adapter files"
+      ]
     },
     {
       "was": "Even if this chat’s folder is the Workhorse repo, adding a bot is a desk action, not a code change.",
       "now": "Adding a bot is a desk action, not a code change, even when this chat’s folder is the Workhorse repo.",
-      "keeps": "the exception: still a desk action when the folder is the Workhorse repo"
+      "keeps": [
+        "a desk action, not a code change",
+        "even when this chat’s folder is the Workhorse repo"
+      ]
     },
     {
       "was": "If the Workhorse tools are missing, tell the user to use Add a bot on the desk — do not fall back to reading source.",
       "now": "Without a key, or when the Workhorse tools are missing, tell them to use Add a bot on the desk and paste the URL and key; never import or invent one, and do not fall back to reading source.",
-      "keeps": "the missing-tools condition, Add a bot as the answer, and the ban on falling back to source"
+      "keeps": [
+        "when the Workhorse tools are missing",
+        "Add a bot on the desk",
+        "do not fall back to reading source"
+      ]
     },
     {
       "was": "Sequence: (1) workhorse_list_bots — if the model is already listed, tell the user to pick it under This chat → Vendor.",
       "now": "Call workhorse_list_bots: if the model is listed, tell the user to pick it under This chat → Vendor.",
-      "keeps": "workhorse_list_bots first, and This chat → Vendor when the model is already listed"
+      "keeps": [
+        "Call workhorse_list_bots",
+        "tell the user to pick it under This chat → Vendor"
+      ]
     },
     {
       "was": "(2) If they gave a base URL, model, and API key, call workhorse_setup_custom_bot with those fields.",
       "now": "With a base URL, model, and key, call workhorse_setup_custom_bot with those fields.",
-      "keeps": "the three fields, base URL, model and key, that license workhorse_setup_custom_bot"
+      "keeps": [
+        "With a base URL, model, and key",
+        "call workhorse_setup_custom_bot with those fields"
+      ]
     },
     {
       "was": "(3) If they did not give a key, tell them to use Add a bot and paste the URL and key — do not import or invent one.",
       "now": "Without a key, or when the Workhorse tools are missing, tell them to use Add a bot on the desk and paste the URL and key; never import or invent one",
-      "keeps": "the no-key condition, Add a bot, and the ban on importing or inventing a key"
+      "keeps": [
+        "Without a key",
+        "Add a bot on the desk and paste the URL and key",
+        "never import or invent one"
+      ]
     },
     {
       "was": "(4) workhorse_delete_bot removes a slot by name.",
       "now": "workhorse_delete_bot removes a slot by name.",
-      "keeps": "workhorse_delete_bot, and that it removes a slot by name"
+      "keeps": [
+        "workhorse_delete_bot removes a slot by name"
+      ]
     },
     {
       "was": "If asked what this desktop shell is, say Workhorse — one window for Grok, Claude, Codex, Cursor, and any custom bots on the desk.",
       "now": "If asked what this desktop shell is, say Workhorse, one window for Grok, Claude, Codex, Cursor, and any custom bots on the desk.",
-      "keeps": "the answer Workhorse, and the named vendors Grok, Claude, Codex, Cursor plus custom bots"
+      "keeps": [
+        "say Workhorse",
+        "Grok, Claude, Codex, Cursor, and any custom bots on the desk"
+      ]
     },
     {
       "was": "Turned-off vendors are omitted — never name them, never say they are turned off in Settings.",
       "now": "Turned-off vendors are omitted from workhorse_list_bots, so never name one and never say it is turned off in Settings.",
-      "keeps": "the exception for turned-off vendors: never named, never called off in Settings"
+      "keeps": [
+        "Turned-off vendors are omitted",
+        "never name one and never say it is turned off in Settings"
+      ]
     },
     {
       "was": "A row with canCall true is callable even if leftover is low.",
       "now": "A canCall row is callable even if leftover is low",
-      "keeps": "the condition: a canCall row stays callable when leftover is low"
+      "keeps": [
+        "A canCall row is callable even if leftover is low"
+      ]
     },
     {
       "was": "Custom bots with a key are attached — never say no custom bot is attached when that list names one.",
       "now": "never say no custom bot is attached when that list names one.",
-      "keeps": "the exception: never say no custom bot is attached when the list names one"
+      "keeps": [
+        "never say no custom bot is attached when that list names one"
+      ]
     },
     {
       "was": "Do not say a vendor is missing just because leftover is unknown. leftoverPercent / usedPercent are that vendor’s plan total overall, not what this one spawn or prompt cost.",
       "now": "never call a vendor missing for unknown leftover, and never say no custom bot is attached when that list names one. leftoverPercent and usedPercent are that vendor’s plan total, not what this one spawn or prompt cost",
-      "keeps": "the unknown-leftover exception, and that leftoverPercent and usedPercent are the plan total, not this spawn or prompt"
+      "keeps": [
+        "never call a vendor missing for unknown leftover",
+        "leftoverPercent and usedPercent are that vendor’s plan total, not what this one spawn or prompt cost"
+      ]
     },
     {
       "was": "If you report leftover, say plan remaining, never that this shot used X%.",
       "now": "report plan remaining, never what this shot used.",
-      "keeps": "plan remaining as the number to report, never what this shot used"
-    },
-    {
-      "was": "When they ask which bots you can use, call workhorse_list_bots.",
-      "now": "Turned-off vendors are omitted from workhorse_list_bots",
-      "keeps": "workhorse_list_bots as the call when they ask which bots are available"
+      "keeps": [
+        "report plan remaining, never what this shot used"
+      ]
     },
     {
       "was": "Never mention a vendor that is not listed.",
       "now": "Report only the rows on that list.",
-      "keeps": "the ban on naming a vendor that is not a row on that list"
+      "keeps": [
+        "Report only the rows on that list"
+      ]
     },
     {
       "was": "Leftover/used is the vendor plan overall, not this prompt.",
       "now": "leftoverPercent and usedPercent are that vendor’s plan total, not what this one spawn or prompt cost",
-      "keeps": "that leftoverPercent and usedPercent are the vendor plan, not this prompt"
+      "keeps": [
+        "leftoverPercent and usedPercent are that vendor’s plan total, not what this one spawn or prompt cost"
+      ]
     },
     {
       "was": "Never use it to lower Permission (Always → Ask) or Sandbox (Off → Workspace).",
       "now": "Never call it to lower Permission (Always → Ask) or Sandbox (Off → Workspace).",
-      "keeps": "the ban on lowering, with both examples: Always → Ask and Off → Workspace"
+      "keeps": [
+        "Never call it to lower Permission (Always → Ask) or Sandbox (Off → Workspace)"
+      ]
     },
     {
       "was": "If they ask what permissions you have, quote this turn’s Permission and Sandbox from the desk limits and stop.",
       "now": "If the user asks what permissions you have, quote this turn’s Permission and Sandbox and stop.",
-      "keeps": "quoting this turn’s Permission and Sandbox, then stopping"
+      "keeps": [
+        "quote this turn’s Permission and Sandbox and stop"
+      ]
     },
     {
       "was": "If the tool result starts with USER DECLINED, they said no: tell them they declined that vendor for this chat and stop.",
       "now": "If a tool result starts with USER DECLINED, the user said no for this chat. Tell them they declined that vendor here, then stop.",
-      "keeps": "the USER DECLINED condition, that it is a no for this chat, and the stop"
+      "keeps": [
+        "USER DECLINED",
+        "the user said no for this chat",
+        "then stop"
+      ]
     },
     {
       "was": "When the user asks you to inspect the workspace or do work, call list_dir / read_file / write_file / run_command instead of refusing.",
-      "now": "When the user asks you to inspect the workspace or do work, call these instead of refusing.",
-      "keeps": "the four workspace tools named at the head of the same block, called instead of refusing"
+      "now": "When the user asks you to inspect the workspace or do work, call list_dir, read_file, write_file or run_command instead of refusing.",
+      "keeps": [
+        "call list_dir, read_file, write_file or run_command instead of refusing"
+      ]
     },
     {
       "was": "Do not say you have no tools.",
       "now": "Do not refuse by calling yourself an HTTP bot, a custom API, or saying you have no spawn, no sub-agent, or no way to talk to other chats.",
-      "keeps": "the ban on refusing by self-description, including no spawn and no sub-agent"
-    },
-    {
-      "was": "Workhorse ships the desk and setup skills.",
-      "now": "Call workhorse_list_skills then workhorse_read_skill when a request names an installed workflow or skill radar lists a genuine match.",
-      "keeps": "workhorse_list_skills and workhorse_read_skill as the desk skill calls"
+      "keeps": [
+        "Do not refuse by calling yourself an HTTP bot",
+        "no spawn, no sub-agent"
+      ]
     },
     {
       "was": "When a request clearly names or describes an installed workflow, or Workhorse skill radar lists a genuine match, call workhorse_list_skills then workhorse_read_skill before that work.",
       "now": "Call workhorse_list_skills then workhorse_read_skill when a request names an installed workflow or skill radar lists a genuine match.",
-      "keeps": "the two conditions: a request that names an installed workflow, or a genuine skill radar match"
+      "keeps": [
+        "a request names an installed workflow",
+        "skill radar lists a genuine match"
+      ]
     },
     {
       "was": "For a Grok/Claude/Codex/Cursor/Workhorse skill, call workhorse_list_skills then workhorse_read_skill only when the request is that workflow or the user named it — that returns instructions; then do the work with write_file/run_command if this turn allows it.",
       "now": "Call workhorse_list_skills then workhorse_read_skill when a request names an installed workflow or skill radar lists a genuine match.",
-      "keeps": "the same two conditions, and workhorse_list_skills then workhorse_read_skill in that order"
+      "keeps": [
+        "Call workhorse_list_skills then workhorse_read_skill",
+        "when a request names an installed workflow or skill radar lists a genuine match"
+      ]
     },
     {
       "was": "If the user asks to create or allocate a project, that is a project on the desk — not a file on disk.",
       "now": "A project is a desk entry under Projects, not a file on disk",
-      "keeps": "that a project is a desk entry, not a file on disk"
+      "keeps": [
+        "A project is a desk entry under Projects, not a file on disk"
+      ]
     },
     {
       "was": "A project is a named desk entry under Projects, not a file you write.",
       "now": "A project is a desk entry under Projects, not a file on disk",
-      "keeps": "that a project is a desk entry under Projects, not a file you write"
+      "keeps": [
+        "A project is a desk entry under Projects",
+        "not a file on disk"
+      ]
     },
     {
       "was": "Linking a folder does not create files on disk.",
       "now": "linking a folder writes nothing.",
-      "keeps": "that linking a folder writes nothing to disk"
+      "keeps": [
+        "linking a folder writes nothing"
+      ]
     },
     {
       "was": "Call it a project.",
       "now": "Call it a project, never a sidebar anything.",
-      "keeps": "the word project as the only name for it"
+      "keeps": [
+        "Call it a project"
+      ]
     },
     {
       "was": "Do not call it a sidebar anything.",
       "now": "Call it a project, never a sidebar anything.",
-      "keeps": "the ban on calling it a sidebar anything"
+      "keeps": [
+        "never a sidebar anything"
+      ]
     },
     {
       "was": "Search likely folders first: the user’s home, Documents, Desktop, and Projects folders, names matching the request, and any drive or path they named.",
       "now": "To create one, search likely folders first: the user’s home, Documents, Desktop, and Projects folders, names matching the request, and any drive or path they named.",
-      "keeps": "the named search order: home, Documents, Desktop, Projects, matching names, and any drive or path they named"
+      "keeps": [
+        "the user’s home, Documents, Desktop, and Projects folders, names matching the request, and any drive or path they named"
+      ]
     },
     {
       "was": "Allocate or create a named project: search likely folders first (the user’s home, Documents, Desktop, and Projects folders, names matching the request, and any drive or path they named).",
       "now": "To create one, search likely folders first: the user’s home, Documents, Desktop, and Projects folders, names matching the request, and any drive or path they named.",
-      "keeps": "the same named search order, done before any question"
+      "keeps": [
+        "To create one, search likely folders first",
+        "any drive or path they named"
+      ]
     },
     {
       "was": "If they name a drive or folder, search that now — do not ask which copy.",
       "now": "Search a named drive or folder now; never ask which copy",
-      "keeps": "searching a named drive now, and never asking which copy"
+      "keeps": [
+        "Search a named drive or folder now",
+        "never ask which copy"
+      ]
     },
     {
       "was": "When you find a matching folder, call workhorse_list_projects then workhorse_create_project with the exact name and that absolute path.",
       "now": "Then call workhorse_list_projects and workhorse_create_project with the exact name and that absolute path",
-      "keeps": "workhorse_list_projects then workhorse_create_project, with the exact name and the absolute path"
+      "keeps": [
+        "call workhorse_list_projects and workhorse_create_project",
+        "the exact name and that absolute path"
+      ]
     },
     {
       "was": "When you find a matching folder, call workhorse_list_projects then workhorse_create_project with the exact name and that path — that puts THIS chat in the project.",
       "now": "Then call workhorse_list_projects and workhorse_create_project with the exact name and that absolute path, which puts THIS chat in the project",
-      "keeps": "the same two calls, and that they put THIS chat in the project"
+      "keeps": [
+        "workhorse_list_projects and workhorse_create_project",
+        "puts THIS chat in the project"
+      ]
     },
     {
       "was": "If the project already exists, passing folder links it.",
       "now": "links a folder onto a project that already exists.",
-      "keeps": "that passing folder links one onto a project that already exists"
+      "keeps": [
+        "links a folder onto a project that already exists"
+      ]
     },
     {
       "was": "That call puts THIS chat in the new project.",
       "now": "which puts THIS chat in the project",
-      "keeps": "that the call puts THIS chat in the project"
+      "keeps": [
+        "puts THIS chat in the project"
+      ]
     },
     {
       "was": "Then list_projects again.",
       "now": "List again, and only tell the user it exists if that list shows the name and folder.",
-      "keeps": "the second list, and the condition it settles"
+      "keeps": [
+        "List again",
+        "only tell the user it exists if that list shows the name and folder"
+      ]
     },
     {
       "was": "Only tell the user it exists if that list shows the name and folder.",
       "now": "only tell the user it exists if that list shows the name and folder.",
-      "keeps": "the condition: the list must show the name and the folder"
+      "keeps": [
+        "that list shows the name and folder"
+      ]
     },
     {
       "was": "Only claim it exists if list_projects shows that name.",
       "now": "only tell the user it exists if that list shows the name and folder.",
-      "keeps": "the condition: the list must show that name"
+      "keeps": [
+        "that list shows the name"
+      ]
     },
     {
       "was": "Do not ask the user for a path when a matching folder exists.",
       "now": "never ask the user for a path when a matching folder exists.",
-      "keeps": "the ban on asking for a path when a matching folder exists"
+      "keeps": [
+        "never ask the user for a path when a matching folder exists"
+      ]
     },
     {
       "was": "Do not invent success.",
       "now": "Do not invent success, scaffold a git repo unless they asked for files on disk, put the folder under a different existing project name, or say you cannot drive the GUI.",
-      "keeps": "the ban on invented success"
+      "keeps": [
+        "Do not invent success"
+      ]
     },
     {
       "was": "Do not say you cannot drive the GUI.",
       "now": "or say you cannot drive the GUI.",
-      "keeps": "the ban on saying you cannot drive the GUI"
+      "keeps": [
+        "say you cannot drive the GUI"
+      ]
     },
     {
       "was": "Do not scaffold a git repo unless they asked for files on disk.",
       "now": "scaffold a git repo unless they asked for files on disk",
-      "keeps": "the exception: a git repo only when they asked for files on disk"
+      "keeps": [
+        "scaffold a git repo unless they asked for files on disk"
+      ]
     },
     {
       "was": "Do not put the folder under a different existing project name.",
       "now": "put the folder under a different existing project name",
-      "keeps": "the ban on filing the folder under a different existing project name"
+      "keeps": [
+        "put the folder under a different existing project name"
+      ]
     },
     {
       "was": "To put an existing chat in a project, call workhorse_move_chat with the project name (omit chat to move this chat).",
       "now": "workhorse_move_chat moves a chat into a project (omit chat for this one).",
-      "keeps": "workhorse_move_chat, and that omitting chat moves this one"
+      "keeps": [
+        "workhorse_move_chat moves a chat into a project",
+        "omit chat for this one"
+      ]
     },
     {
       "was": "Move this chat: workhorse_move_chat with the project name (omit chat).",
       "now": "workhorse_move_chat moves a chat into a project (omit chat for this one).",
-      "keeps": "workhorse_move_chat with chat omitted for this one"
+      "keeps": [
+        "workhorse_move_chat",
+        "omit chat for this one"
+      ]
     },
     {
       "was": "To rename, call workhorse_rename_chat and/or workhorse_rename_project with the new name — if they say rename to X, rename this chat and this chat’s project to X.",
       "now": "workhorse_rename_chat and workhorse_rename_project take the new name, and rename to X means both this chat and its project.",
-      "keeps": "workhorse_rename_chat and workhorse_rename_project, and that rename to X covers both"
+      "keeps": [
+        "workhorse_rename_chat and workhorse_rename_project",
+        "rename to X means both this chat and its project"
+      ]
     },
     {
       "was": "Rename: workhorse_rename_chat and workhorse_rename_project with the new name.",
       "now": "workhorse_rename_chat and workhorse_rename_project take the new name",
-      "keeps": "both named tools, workhorse_rename_chat and workhorse_rename_project, taking the new name"
+      "keeps": [
+        "workhorse_rename_chat and workhorse_rename_project take the new name"
+      ]
     },
     {
       "was": "If they say rename to X, rename this chat and this chat’s project to X.",
       "now": "rename to X means both this chat and its project.",
-      "keeps": "that rename to X means this chat and its project"
+      "keeps": [
+        "rename to X means both this chat and its project"
+      ]
     },
     {
       "was": "Then call workhorse_list_projects.",
       "now": "List again: claim the name X only when Visible sidebar names include X",
-      "keeps": "the second list, and Visible sidebar names as the proof"
+      "keeps": [
+        "List again",
+        "Visible sidebar names include X"
+      ]
     },
     {
       "was": "Then workhorse_list_projects.",
       "now": "List again: claim the name X only when Visible sidebar names include X",
-      "keeps": "the same second list and the same proof"
+      "keeps": [
+        "List again",
+        "Visible sidebar names include X"
+      ]
     },
     {
       "was": "Only say the project is named X if that list’s Visible sidebar names include X.",
       "now": "claim the name X only when Visible sidebar names include X",
-      "keeps": "the condition: Visible sidebar names must include X"
+      "keeps": [
+        "claim the name X only when Visible sidebar names include X"
+      ]
     },
     {
       "was": "Only say the project is named X if Visible sidebar names include X.",
       "now": "claim the name X only when Visible sidebar names include X",
-      "keeps": "the same Visible sidebar names condition"
+      "keeps": [
+        "Visible sidebar names include X"
+      ]
     },
     {
       "was": "If the list still shows the old name, the rename did not take — say that.",
       "now": "say the rename did not take while the old name stands.",
-      "keeps": "the failure to report while the old name stands"
+      "keeps": [
+        "say the rename did not take while the old name stands"
+      ]
     },
     {
       "was": "If the old name is still there, say the rename did not take.",
       "now": "say the rename did not take while the old name stands.",
-      "keeps": "the same failure report"
+      "keeps": [
+        "the rename did not take while the old name stands"
+      ]
     },
     {
       "was": "Never invent a project table. workhorse_delete_chat requires the exact title or id of another chat.",
       "now": "Never invent a project table. workhorse_delete_chat needs another chat’s exact title or id, so ambiguous titles fail: pass the id.",
-      "keeps": "the ban on an invented project table, and that workhorse_delete_chat needs another chat’s exact title or id"
+      "keeps": [
+        "Never invent a project table",
+        "workhorse_delete_chat needs another chat’s exact title or id"
+      ]
     },
     {
       "was": "Delete another chat: workhorse_delete_chat with the exact title or id.",
       "now": "workhorse_delete_chat needs another chat’s exact title or id, so ambiguous titles fail: pass the id.",
-      "keeps": "workhorse_delete_chat, and the exact title or id it needs"
+      "keeps": [
+        "workhorse_delete_chat needs another chat’s exact title or id"
+      ]
     },
     {
       "was": "Ambiguous titles fail — pass the id.",
       "now": "so ambiguous titles fail: pass the id.",
-      "keeps": "the ambiguity failure and its recovery: pass the id"
+      "keeps": [
+        "ambiguous titles fail: pass the id"
+      ]
     },
     {
       "was": "Ambiguous titles (two chats named test) fail — pass the id.",
       "now": "so ambiguous titles fail: pass the id.",
-      "keeps": "the same failure and the same recovery: pass the id"
+      "keeps": [
+        "ambiguous titles fail",
+        "pass the id"
+      ]
     },
     {
       "was": "Never delete this chat on a bulk list, even if the list says “this one”. onlyThis=true only when the user asked to delete this chat alone.",
       "now": "Never delete this chat on a bulk list, even if the list says “this one”; onlyThis=true only when the user asked to delete this chat alone.",
-      "keeps": "the bulk-list exception for this chat, and the onlyThis=true condition"
+      "keeps": [
+        "Never delete this chat on a bulk list",
+        "onlyThis=true only when the user asked to delete this chat alone"
+      ]
     },
     {
       "was": "If they ask to delete or remove all chats not in a project (loose chats), call workhorse_delete_chat with scope=loose now.",
       "now": "If they ask to delete or remove all chats not in a project (loose chats), call workhorse_delete_chat with scope=loose now",
-      "keeps": "the condition that licenses the call: they asked to delete or remove all chats not in a project"
+      "keeps": [
+        "If they ask to delete or remove all chats not in a project (loose chats)",
+        "call workhorse_delete_chat with scope=loose now"
+      ]
     },
     {
       "was": "Do not ask which ones.",
       "now": "do not ask which ones",
-      "keeps": "the ban on asking which ones"
+      "keeps": [
+        "do not ask which ones"
+      ]
     },
     {
       "was": "Do not offer A/B/C.",
       "now": "do not offer A/B/C",
-      "keeps": "the ban on offering A/B/C"
+      "keeps": [
+        "do not offer A/B/C"
+      ]
     },
     {
       "was": "That call never deletes this chat and never touches chats that are in a project.",
       "now": "it spares this chat and every chat in a project.",
-      "keeps": "both exemptions: this chat, and every chat in a project"
+      "keeps": [
+        "it spares this chat and every chat in a project"
+      ]
     },
     {
       "was": "That call never deletes this chat.",
       "now": "it spares this chat and every chat in a project.",
-      "keeps": "the exemption for this chat"
+      "keeps": [
+        "spares this chat"
+      ]
     },
     {
       "was": "To delete a project, call workhorse_delete_project (chats=keep leaves those chats loose; chats=remove deletes them).",
       "now": "workhorse_delete_project takes chats=keep, which leaves those chats loose, or chats=remove, which deletes them.",
-      "keeps": "workhorse_delete_project, and what each setting does: chats=keep leaves them loose, chats=remove deletes them"
+      "keeps": [
+        "chats=keep, which leaves those chats loose",
+        "chats=remove, which deletes them"
+      ]
     },
     {
       "was": "Delete a project: workhorse_delete_project.",
       "now": "workhorse_delete_project takes chats=keep, which leaves those chats loose, or chats=remove, which deletes them.",
-      "keeps": "workhorse_delete_project and its two chats settings"
+      "keeps": [
+        "workhorse_delete_project takes chats=keep",
+        "or chats=remove"
+      ]
     },
     {
       "was": "After you ask the user to pick, stop.",
       "now": "After you ask the user to pick, stop and wait.",
-      "keeps": "the stop after asking"
+      "keeps": [
+        "After you ask the user to pick, stop and wait"
+      ]
     },
     {
       "was": "Do not run a listed option until they answer.",
-      "now": "Do not run a listed option or smoke test until they answer",
-      "keeps": "that nothing listed runs until they answer"
+      "now": "do not run a listed option until they answer",
+      "keeps": [
+        "do not run a listed option until they answer"
+      ]
     },
     {
       "was": "Do not run a listed option or smoke test until they answer.",
-      "now": "Do not run a listed option or smoke test until they answer",
-      "keeps": "that no listed option and no smoke test runs until they answer"
+      "now": "Do not keep searching or smoke-testing after a question, do not run a listed option until they answer",
+      "keeps": [
+        "smoke-testing",
+        "do not run a listed option until they answer"
+      ]
     },
     {
       "was": "Do not keep searching or smoke-testing after a question.",
-      "now": "Do not run a listed option or smoke test until they answer",
-      "keeps": "the ban on searching or smoke-testing after a question"
+      "now": "Do not keep searching or smoke-testing after a question",
+      "keeps": [
+        "Do not keep searching or smoke-testing after a question"
+      ]
     },
     {
       "was": "Do not ask them to pick when they already said delete all chats not in a project.",
       "now": "do not ask again once they said delete all chats not in a project.",
-      "keeps": "the exception: no second ask once they said delete all chats not in a project"
+      "keeps": [
+        "do not ask again once they said delete all chats not in a project"
+      ]
     },
     {
       "was": "Project References are also a desk action.",
       "now": "workhorse_add_reference pins a URL, note, or file on this project",
-      "keeps": "References as a desk action on this project, through workhorse_add_reference"
+      "keeps": [
+        "workhorse_add_reference pins a URL, note, or file on this project"
+      ]
     },
     {
       "was": "To pin a URL, note, or file on this project, call workhorse_add_reference with value (and optional kind/label).",
       "now": "workhorse_add_reference pins a URL, note, or file on this project: pass value, and kind and label are optional.",
-      "keeps": "workhorse_add_reference, its value, and kind and label as optional"
+      "keeps": [
+        "workhorse_add_reference pins a URL, note, or file on this project",
+        "pass value, and kind and label are optional"
+      ]
     },
     {
       "was": "Use workhorse_list_references first if you might duplicate. workhorse_delete_reference removes one by label or URL.",
       "now": "workhorse_list_references first if you might duplicate, and workhorse_delete_reference removes one by label or URL.",
-      "keeps": "workhorse_list_references against duplicates, and workhorse_delete_reference removing one by label or URL"
+      "keeps": [
+        "workhorse_list_references first if you might duplicate",
+        "workhorse_delete_reference removes one by label or URL"
+      ]
     },
     {
       "was": "Do not edit source to add a reference.",
       "now": "Never edit source to add a reference.",
-      "keeps": "the ban on editing source to add a reference"
+      "keeps": [
+        "Never edit source to add a reference"
+      ]
     },
     {
       "was": "After adding, say it is on the project home under References.",
       "now": "It lands on the project home under References.",
-      "keeps": "where it lands: the project home under References"
+      "keeps": [
+        "It lands on the project home under References"
+      ]
     },
     {
       "was": "When they ask to spawn, summon, or call agents or subagents: a missing linked folder does not fail this turn — search and attach one with workhorse_create_project, or pass folder.",
       "now": "A missing linked folder does not fail this turn — search and attach one with workhorse_create_project, or pass folder.",
-      "keeps": "the exception: a missing linked folder does not fail the turn, and workhorse_create_project or folder attaches one"
+      "keeps": [
+        "A missing linked folder does not fail this turn",
+        "attach one with workhorse_create_project, or pass folder"
+      ]
     },
     {
       "was": "A missing linked folder does not fail this turn — search and attach with workhorse_create_project, or pass folder.",
       "now": "A missing linked folder does not fail this turn — search and attach one with workhorse_create_project, or pass folder.",
-      "keeps": "the same exception and the same two ways to attach"
+      "keeps": [
+        "A missing linked folder does not fail this turn",
+        "search and attach one with workhorse_create_project, or pass folder"
+      ]
     },
     {
       "was": "Then workhorse_list_bots.",
       "now": "Then call workhorse_list_bots.",
-      "keeps": "workhorse_list_bots as the next call"
+      "keeps": [
+        "Then call workhorse_list_bots"
+      ]
     },
     {
       "was": "Call workhorse_list_bots now.",
       "now": "Then call workhorse_list_bots.",
-      "keeps": "workhorse_list_bots, called now"
+      "keeps": [
+        "call workhorse_list_bots"
+      ]
     },
     {
       "was": "Then (1) workhorse_list_bots, (2) one bounded assignment is one workhorse_spawn_agent.",
       "now": "Then call workhorse_list_bots. One bounded assignment is one workhorse_spawn_agent, with the full task in the prompt.",
-      "keeps": "the order: workhorse_list_bots first, then one workhorse_spawn_agent per bounded assignment"
+      "keeps": [
+        "Then call workhorse_list_bots",
+        "One bounded assignment is one workhorse_spawn_agent"
+      ]
     },
     {
       "was": "One bounded assignment is one workhorse_spawn_agent.",
       "now": "One bounded assignment is one workhorse_spawn_agent, with the full task in the prompt.",
-      "keeps": "one bounded assignment to one workhorse_spawn_agent"
+      "keeps": [
+        "One bounded assignment is one workhorse_spawn_agent"
+      ]
     },
     {
       "was": "One bounded assignment is one workhorse_spawn_agent (full review task in prompt).",
       "now": "One bounded assignment is one workhorse_spawn_agent, with the full task in the prompt.",
-      "keeps": "one workhorse_spawn_agent per assignment, and the full task in the prompt"
+      "keeps": [
+        "One bounded assignment is one workhorse_spawn_agent",
+        "with the full task in the prompt"
+      ]
     },
     {
       "was": "If canCall is false or the daily bank is spent, that vendor is a no-go — skip it in one line. canCall is Workhorse vendors only — OpenClaw and Hermes are harnesses; do not spawn them from that list.",
       "now": "If canCall is false or the daily bank is spent, that vendor is a no-go — skip it in one line. If a vendor is not on the list, skip it and do not name it. canCall is Workhorse vendors only — OpenClaw and Hermes are harnesses; do not spawn them from that list.",
-      "keeps": "the no-go condition, the one-line skip, and that canCall covers Workhorse vendors only, not OpenClaw or Hermes"
+      "keeps": [
+        "If canCall is false or the daily bank is spent, that vendor is a no-go — skip it in one line",
+        "canCall is Workhorse vendors only — OpenClaw and Hermes are harnesses; do not spawn them from that list"
+      ]
     },
     {
       "was": "If canCall is false or the daily bank is spent, that vendor is a no-go — skip it. canCall is Workhorse vendors only — OpenClaw and Hermes are harnesses; do not spawn them from that list.",
       "now": "If canCall is false or the daily bank is spent, that vendor is a no-go — skip it in one line. If a vendor is not on the list, skip it and do not name it. canCall is Workhorse vendors only — OpenClaw and Hermes are harnesses; do not spawn them from that list.",
-      "keeps": "the same no-go condition and the same OpenClaw and Hermes exclusion"
+      "keeps": [
+        "that vendor is a no-go — skip it in one line",
+        "OpenClaw and Hermes are harnesses; do not spawn them from that list"
+      ]
     },
     {
       "was": "Only say nothing to spawn if canCall is empty. canCall is Workhorse vendors only — OpenClaw and Hermes are harnesses; do not spawn them from that list.",
       "now": "Only say nothing to spawn when list_bots has zero canCall rows.",
-      "keeps": "the condition: nothing to spawn only when no row is canCall"
+      "keeps": [
+        "Only say nothing to spawn when list_bots has zero canCall rows"
+      ]
     },
     {
       "was": "Only say nothing to spawn when zero rows are canCall.",
       "now": "Only say nothing to spawn when list_bots has zero canCall rows.",
-      "keeps": "the same zero-canCall condition"
+      "keeps": [
+        "nothing to spawn when list_bots has zero canCall rows"
+      ]
     },
     {
       "was": "Fan-out only when they asked for every vendor, all bots, multiple independent reviews, or a named list — then spawn one worker per named slice on a canCall row, including this chat’s own custom bot (provider custom, chat this bot’s name; the API key is on the desk).",
       "now": "Fan-out only when they asked for every vendor, all bots, multiple independent reviews, or a named list — then spawn one worker per named slice on a canCall row, including custom bots and this chat’s own slot (provider custom, chat this bot’s name; the API key is already on the desk).",
-      "keeps": "all four fan-out triggers, one worker per named slice, and this chat’s own slot with the key already on the desk"
+      "keeps": [
+        "Fan-out only when they asked for every vendor, all bots, multiple independent reviews, or a named list",
+        "spawn one worker per named slice on a canCall row",
+        "the API key is already on the desk"
+      ]
     },
     {
       "was": "Fan-out only when they asked for every vendor, all bots, multiple independent reviews, or a named list — then spawn one worker per named slice on a canCall row, including this chat’s own custom bot (provider custom, chat this bot’s name; wait=false when more than one).",
       "now": "Fan-out only when they asked for every vendor, all bots, multiple independent reviews, or a named list — then spawn one worker per named slice on a canCall row, including custom bots and this chat’s own slot (provider custom, chat this bot’s name; the API key is already on the desk).",
-      "keeps": "the same four triggers and the same custom slot on a canCall row"
+      "keeps": [
+        "every vendor, all bots, multiple independent reviews, or a named list",
+        "one worker per named slice on a canCall row",
+        "provider custom, chat this bot’s name"
+      ]
     },
     {
       "was": "The API key is already on the desk.",
       "now": "the API key is already on the desk).",
-      "keeps": "that the API key is already on the desk"
+      "keeps": [
+        "the API key is already on the desk"
+      ]
     },
     {
       "was": "If you start more than one worker, pass wait=false on each spawn so they run together.",
       "now": "If you are starting more than one worker, pass wait=false on each spawn so they all run at once.",
-      "keeps": "the condition: more than one worker means wait=false on each spawn"
+      "keeps": [
+        "If you are starting more than one worker, pass wait=false on each spawn"
+      ]
     },
     {
       "was": "After they start, stop.",
       "now": "After the last spawn, stop.",
-      "keeps": "the stop after the last spawn"
+      "keeps": [
+        "After the last spawn, stop"
+      ]
     },
     {
       "was": "Do not sit on workhorse_await_agents.",
       "now": "Do not sit on workhorse_await_agents; without wait it is a status snapshot, and the desk joins reports later.",
-      "keeps": "the ban on sitting on workhorse_await_agents"
+      "keeps": [
+        "Do not sit on workhorse_await_agents"
+      ]
     },
     {
       "was": "Do not sit on workhorse_await_agents or ask the user to pick 1/2/3.",
       "now": "Do not sit on workhorse_await_agents; without wait it is a status snapshot, and the desk joins reports later. Do not ask the user to pick 1/2/3 (re-await / scrape yourself / tighten) because workers are still running.",
-      "keeps": "both bans: sitting on workhorse_await_agents, and the 1/2/3 offer"
+      "keeps": [
+        "Do not sit on workhorse_await_agents",
+        "Do not ask the user to pick 1/2/3"
+      ]
     },
     {
       "was": "Do not ask the user to pick 1/2/3 because workers are still running. workhorse_await_agents without wait is a status snapshot.",
       "now": "Do not sit on workhorse_await_agents; without wait it is a status snapshot, and the desk joins reports later. Do not ask the user to pick 1/2/3 (re-await / scrape yourself / tighten) because workers are still running.",
-      "keeps": "the 1/2/3 refusal with its reason, and that workhorse_await_agents without wait is only a status snapshot"
+      "keeps": [
+        "without wait it is a status snapshot",
+        "Do not ask the user to pick 1/2/3",
+        "because workers are still running"
+      ]
     },
     {
       "was": "Do not ask the user to pick 1/2/3 (re-await / scrape yourself / tighten).",
       "now": "Do not ask the user to pick 1/2/3 (re-await / scrape yourself / tighten) because workers are still running.",
-      "keeps": "the 1/2/3 offer named in full: re-await, scrape yourself, tighten"
+      "keeps": [
+        "Do not ask the user to pick 1/2/3 (re-await / scrape yourself / tighten)"
+      ]
     },
     {
       "was": "Status-only await (no wait) is a snapshot.",
       "now": "without wait it is a status snapshot",
-      "keeps": "that an await without wait is only a snapshot"
+      "keeps": [
+        "without wait it is a status snapshot"
+      ]
     },
     {
       "was": "Call workhorse_await_agents (default, no wait) only for a status snapshot.",
       "now": "without wait it is a status snapshot",
-      "keeps": "the same no-wait snapshot meaning"
+      "keeps": [
+        "without wait it is a status snapshot"
+      ]
     },
     {
       "was": "The desk joins reports later.",
       "now": "the desk joins reports later.",
-      "keeps": "that the desk joins reports later"
+      "keeps": [
+        "the desk joins reports later"
+      ]
     },
     {
       "was": "The desk joins their reports later as a new turn.",
       "now": "the desk joins their reports later as a new turn.",
-      "keeps": "that the desk joins their reports later as a new turn"
+      "keeps": [
+        "the desk joins their reports later as a new turn"
+      ]
     },
     {
       "was": "Workers fill their own chats.",
       "now": "Workers fill their own chats",
-      "keeps": "that workers fill their own chats"
+      "keeps": [
+        "Workers fill their own chats"
+      ]
     },
     {
       "was": "If a vendor is not on that list, skip it and do not name it.",
       "now": "If a vendor is not on the list, skip it and do not name it.",
-      "keeps": "the exception: a vendor off the list is skipped and never named"
+      "keeps": [
+        "If a vendor is not on the list, skip it and do not name it"
+      ]
     },
     {
       "was": "Give each spawn the review task, not a request to summon more agents.",
       "now": "Give each spawn the slice, never a request to summon more agents.",
-      "keeps": "that a spawn prompt carries the slice, never a request for more agents"
+      "keeps": [
+        "Give each spawn the slice, never a request to summon more agents"
+      ]
     },
     {
       "was": "Each spawn prompt is the slice, never a request to summon more agents.",
       "now": "Give each spawn the slice, never a request to summon more agents.",
-      "keeps": "the same ban on a spawn prompt that summons more agents"
+      "keeps": [
+        "the slice, never a request to summon more agents"
+      ]
     },
     {
       "was": "Each spawn prompt is the slice — never a request to summon more agents.",
       "now": "Give each spawn the slice, never a request to summon more agents.",
-      "keeps": "the same ban"
+      "keeps": [
+        "never a request to summon more agents"
+      ]
     },
     {
       "was": "Do not ask the user to do the work themselves.",
       "now": "Do not ask the user to do the review or the work themselves.",
-      "keeps": "the ban on handing the work back to the user"
+      "keeps": [
+        "Do not ask the user to do the review or the work themselves"
+      ]
     },
     {
       "was": "A worker may create one bounded quick-route helper only for an explicitly delegated second check; grandchildren cannot spawn.",
       "now": "A worker may create one bounded quick-route helper only when its assigned slice explicitly requires a second independent check; grandchildren cannot spawn.",
-      "keeps": "the condition: one bounded quick-route helper only for an explicitly required second check, and that grandchildren cannot spawn"
+      "keeps": [
+        "one bounded quick-route helper only when its assigned slice explicitly requires a second independent check",
+        "grandchildren cannot spawn"
+      ]
     },
     {
       "was": "Do not retry.",
       "now": "Do not retry and do not guess why.",
-      "keeps": "the ban on retrying a declined vendor, and it adds the ban on guessing why"
+      "keeps": [
+        "Do not retry and do not guess why"
+      ]
     },
     {
       "was": "workhorse_request_permission only RAISES access when Plan or Read-only/Strict is blocking a write you must do now.",
       "now": "workhorse_request_permission only RAISES access when Plan or Read-only/Strict is blocking a write or command you must run now.",
-      "keeps": "workhorse_request_permission as raise-only, and the Plan and Read-only/Strict blocking condition"
+      "keeps": [
+        "workhorse_request_permission only RAISES access",
+        "Plan or Read-only/Strict is blocking"
+      ]
     },
     {
       "was": "workhorse_request_permission only RAISES access, and only when Plan or Read-only/Strict is blocking a write or command you must run now.",
       "now": "workhorse_request_permission only RAISES access when Plan or Read-only/Strict is blocking a write or command you must run now.",
-      "keeps": "workhorse_request_permission as raise-only, the Plan and Read-only/Strict condition, and the write or command you must run now"
+      "keeps": [
+        "workhorse_request_permission only RAISES access",
+        "when Plan or Read-only/Strict is blocking a write or command you must run now"
+      ]
     },
     {
       "was": "workhorse_list_bots lists every vendor that is on this desk.",
       "now": "Turned-off vendors are omitted from workhorse_list_bots, so never name one and never say it is turned off in Settings. Report only the rows on that list.",
-      "keeps": "workhorse_list_bots as the one desk vendor list, and its rows as all you may report"
+      "keeps": [
+        "workhorse_list_bots",
+        "Report only the rows on that list"
+      ]
     },
     {
       "was": "Never call it to lower Permission or Sandbox.",
       "now": "Never call it to lower Permission (Always → Ask) or Sandbox (Off → Workspace).",
-      "keeps": "the ban on lowering Permission or Sandbox, now with both examples"
+      "keeps": [
+        "Never call it to lower Permission (Always → Ask) or Sandbox (Off → Workspace)"
+      ]
     },
     {
       "was": "Do not ask the user to do the review themselves.",
       "now": "Do not ask the user to do the review or the work themselves.",
-      "keeps": "the ban on handing the review back to the user"
+      "keeps": [
+        "Do not ask the user to do the review or the work themselves"
+      ]
+    },
+    {
+      "was": "If you did not call that tool this turn, you did not spawn anyone — call it.",
+      "now": "If you did not call that tool this turn, you did not spawn anyone: call it.",
+      "keeps": [
+        "If you did not call that tool this turn, you did not spawn anyone",
+        "call it"
+      ]
     }
   ]
 }

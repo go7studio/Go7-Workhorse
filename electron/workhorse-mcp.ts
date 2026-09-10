@@ -53,6 +53,7 @@ import {
   MISSION_CAP_PREFIX,
   resolveWorkerIsolation,
   shouldSpawnInsteadOfAsk,
+  spawnTurnOf,
   SPAWN_ONLY_PROMPT_ERROR,
   withFollowThrough,
   listedChatFollowThrough,
@@ -2081,6 +2082,9 @@ type SpawnCaller = {
   hidden?: boolean;
   projectId?: string | null;
   crewModes?: string[];
+  /** Read only for the turn a spawn was called on. See spawnTurnOf. */
+  messages?: Array<{ id?: string; role?: string; text?: string }>;
+  queue?: Array<{ userMessageId?: string }>;
   lineup?: { mission?: MissionIteration; rows?: Array<{ childId?: string; status?: string }> };
   agentRun?: { mission?: MissionIteration; paths?: string[]; tokenBudget?: number; usedTokens?: number };
   environment?: SessionEnvironment;
@@ -2248,6 +2252,12 @@ async function spawnAgent(
     exclude?: string[];
     files?: string[];
     traceId?: string;
+    /**
+     * The model called workhorse_spawn_agent itself. Only that call is held to
+     * the desk spawn law; delegate, a mission pass and a plan step reach this
+     * same function and are the desk's own dispatch.
+     */
+    spawnTool?: boolean;
   },
   from?: string,
 ): Promise<string> {
@@ -2356,6 +2366,7 @@ async function spawnAgent(
         folder: spawnInput.folder,
         prompt: spawnInput.prompt,
         allowNested: isNested,
+        turn: input.spawnTool ? spawnTurnOf(caller) : undefined,
         folderExists: (value) => {
           try {
             return fs.existsSync(value) && fs.statSync(value).isDirectory();
@@ -2391,6 +2402,7 @@ async function spawnAgent(
     handoff: spawnInput.handoff,
     folder: admitted.cwd,
     wait: spawnInput.wait,
+    spawnTool: spawnInput.spawnTool,
     mission: spawnInput.mission,
     missionIteration: spawnInput.missionIteration,
     missionContinuation: spawnInput.missionContinuation,
@@ -3340,6 +3352,11 @@ async function callDeskTool(name: string, args: Record<string, unknown>, from?: 
         traceId: typeof args.traceId === "string" ? args.traceId : undefined,
         loop: args.loop,
         missionIteration: args.missionIteration,
+        // This is the one entry a model reaches by deciding to hire someone,
+        // so this is the one entry the desk spawn law is checked on. Not Link:
+        // an external harness never opens with a desk core and never had the
+        // law to lose, so holding it to one would only break delegation.
+        spawnTool: !isLinkProfile(),
       },
       typeof args.fromSessionId === "string" ? args.fromSessionId : from,
     );

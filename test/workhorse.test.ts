@@ -9965,10 +9965,25 @@ test("desk-enforced orchestrator vs worker lineup", async () => {
           },
         ],
         sessions: [
-          { id: "sess_orch", title: "Main", provider: "custom", projectId: "proj_ships" },
+          // Each orchestrator carries the turn it was asked on: a spawn the
+          // desk law never reached is refused before the folder is looked at,
+          // so a chat that did ask is what proves the folder rule still fires.
+          {
+            id: "sess_orch",
+            title: "Main",
+            provider: "custom",
+            projectId: "proj_ships",
+            messages: [{ id: "m_orch", role: "user", text: "Spawn a worker on the src tree." }],
+          },
           { id: "sess_worker", title: "src tree review", provider: "custom", parentId: "sess_orch", hidden: true, projectId: "proj_ships" },
           { id: "sess_helper", title: "nested check", provider: "custom", parentId: "sess_worker", hidden: true, projectId: "proj_ships" },
-          { id: "sess_loose", title: "Loose", provider: "custom", projectId: null },
+          {
+            id: "sess_loose",
+            title: "Loose",
+            provider: "custom",
+            projectId: null,
+            messages: [{ id: "m_loose", role: "user", text: "Spawn a worker to read project.godot." }],
+          },
         ],
       }),
     );

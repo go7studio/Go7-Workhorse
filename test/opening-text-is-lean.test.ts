@@ -18,8 +18,16 @@
  * "If they ask to delete all chats not in a project, call delete_chat with
  * scope=loose" passed as "For every chat not in a project, call delete_chat
  * with scope=loose", which is a standing order to wipe them. Every rewording
- * now carries a keeps note naming the condition, number, exception or named
- * object the new sentence holds on to, and a note that says nothing fails.
+ * now carries a keeps note, and a rewording with no note fails.
+ *
+ * The second cut of the note was prose, and prose could say anything. "Keeps
+ * the ban on searching or smoke-testing after a question" read as a true note
+ * beside a replacement with no searching left in it. A note is now spans
+ * quoted out of the replacement, word for word, so it can only name a fact the
+ * new sentence really carries. What a span still cannot settle is whether it
+ * is the RIGHT fact — a reviewer decides whether those spans are the ones that
+ * made the old rule safe, and writing them down is what makes that a minute's
+ * work rather than a re-read of the whole file.
  */
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -27,6 +35,8 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { admitSpawn } from "../src/lib/subagents";
+import type { CrewMode } from "../src/lib/types";
 import {
   AUDITOR_SESSION_RULES,
   CURSOR_SESSION_RULES,
@@ -36,11 +46,14 @@ import {
   HELPER_SESSION_RULES,
   MISSION_MODE_HINT,
   SPAWN_GATE_LAW,
+  SPAWN_LAW_MISSING_ERROR,
   SPAWN_TURN_HINT,
   WORKER_SESSION_RULES,
   WORKHORSE_SESSION_RULES,
+  turnCarriesSpawnLaw,
   withCrewModeHint,
   withSpawnHint,
+  type DeskRole,
 } from "../src/lib/workhorse-rules";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -48,8 +61,15 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 type Witness = {
   beforeChars: Record<string, number>;
   before: Record<string, string[]>;
-  rewordings: { was: string; now: string; keeps: string }[];
+  /** `keeps` is one or more spans quoted verbatim out of `now`. */
+  rewordings: { was: string; now: string; keeps: string[] }[];
 };
+
+/**
+ * Short enough for "call it" and "pass the id", long enough that a note cannot
+ * be built out of "the" and "a" and still look like it named something.
+ */
+const MIN_SPAN = 6;
 
 const witness: Witness = JSON.parse(
   readFileSync(path.join(ROOT, "test", "fixtures", "opening-text-rules.json"), "utf8"),
@@ -98,26 +118,36 @@ test("no rule sentence was lost when the opening text was split", () => {
   assert.equal(verbatim + reworded, Object.values(witness.before).reduce((sum, list) => sum + list.length, 0));
 });
 
-test("every rewording says what it keeps", () => {
+test("every keep-note is quoted out of the new sentence", () => {
   const beforeSentences = new Set(Object.values(witness.before).flat());
   const silent: string[] = [];
   const orphans: string[] = [];
-  const unsupported: string[] = [];
+  const unquoted: string[] = [];
+  const padded: string[] = [];
 
   for (const item of witness.rewordings) {
     if (!beforeSentences.has(item.was)) orphans.push(item.was);
-    const keeps = (item.keeps ?? "").trim();
-    if (!keeps) {
+    const spans = Array.isArray(item.keeps) ? item.keeps : [];
+    if (spans.length === 0) {
       silent.push(item.was);
       continue;
     }
-    // A note is a claim about the new sentence, so the new sentence has to
-    // back it: every tool and every number the note names must be in there.
-    // Without this a note reads well and proves nothing.
-    const claims = [...(keeps.match(/workhorse_[a-z_]+/g) ?? []), ...(keeps.match(/\d+/g) ?? [])];
-    for (const claim of claims) {
-      if (!item.now.includes(claim)) unsupported.push(`${item.was}\n    claims ${claim}, absent from -> ${item.now}`);
-    }
+    spans.forEach((span, index) => {
+      // A span is a quotation, so it carries its own punctuation and spacing.
+      if (typeof span !== "string" || span.trim() !== span || span.length < MIN_SPAN) {
+        padded.push(`${item.was}\n    not a quotable phrase -> ${JSON.stringify(span)}`);
+        return;
+      }
+      // The whole point: a note can only name what the replacement says.
+      if (!item.now.includes(span)) {
+        unquoted.push(`${item.was}\n    quotes ${JSON.stringify(span)}, absent from -> ${item.now}`);
+      }
+      // One fact written twice, or a phrase sitting inside a longer one, is
+      // how a thin note starts to look thorough.
+      if (spans.some((other, at) => at !== index && other.includes(span))) {
+        padded.push(`${item.was}\n    span repeats another -> ${JSON.stringify(span)}`);
+      }
+    });
   }
 
   assert.deepEqual(
@@ -126,7 +156,8 @@ test("every rewording says what it keeps", () => {
     `rewordings with no note of what the new sentence keeps:\n${silent.join("\n")}`,
   );
   assert.deepEqual(orphans, [], `rewordings for a sentence no block ever carried:\n${orphans.join("\n")}`);
-  assert.deepEqual(unsupported, [], `notes the new sentence does not back:\n${unsupported.join("\n")}`);
+  assert.deepEqual(unquoted, [], `keep-notes quoting text the new sentence does not have:\n${unquoted.join("\n")}`);
+  assert.deepEqual(padded, [], `keep-notes padded with sub-spans or scraps:\n${padded.join("\n")}`);
 });
 
 test("the loose-chat delete keeps its condition", () => {
@@ -197,7 +228,7 @@ test("the spawn law reaches a chat that can spawn, and no other", () => {
   }
 });
 
-test("a chat that never got the spawn law may not spawn", () => {
+test("a chat that never got the spawn law is refused at the door", () => {
   // The core still names workhorse_spawn_agent, and the detector below it
   // only fires on the phrasings someone thought of. These are the ones it
   // misses, and each of them is an ordinary way to ask for workers.
@@ -212,15 +243,95 @@ test("a chat that never got the spawn law may not spawn", () => {
     assert.equal(withSpawnHint(text), text, `${text} now reaches the detector — move it to the covered set`);
   }
 
-  // So the line that holds is in the core itself, on every surface that can
-  // reach the tool. Widening the detector would close these five and leave
-  // the sixth phrasing open; this closes the call.
+  // Asking the model not to make the call was the first cut of this and it
+  // could not work: a model cannot see which system text it did not receive.
+  // The desk refuses instead. Widening the detector would close these five
+  // phrasings and leave the sixth open; this closes the call.
+  const spawn = (turn: { text: string; crewModes?: string[] }) =>
+    admitSpawn({ parent: { parentId: null }, prompt: "review the auth diff", folder: "/proj", turn });
+
+  const refused = spawn({ text: "hire two reviewers" });
+  assert.equal(refused.ok, false);
+  assert.equal(refused.ok === false && refused.error, SPAWN_LAW_MISSING_ERROR);
+  // The refusal is the chat's next line, so it has to say what to do next.
+  assert.match(SPAWN_LAW_MISSING_ERROR, /say the desk can put workers on this and ask the user to confirm/);
+
+  // And the cases it must not break: either pin, and a turn that asked.
+  assert.equal(spawn({ text: "review this", crewModes: ["orchestrate"] }).ok, true);
+  assert.equal(spawn({ text: "review this", crewModes: ["mission"] }).ok, true);
+  assert.equal(spawn({ text: "review this", crewModes: ["orchestrate", "mission"] }).ok, true);
+  assert.equal(spawn({ text: "Spawn two agents to review this." }).ok, true);
+
+  // A worker never receives the law and still has its one helper, so the
+  // refusal is not what turns a nested spawn away.
+  const helper = admitSpawn({
+    parent: { parentId: "root", hidden: true },
+    prompt: "check the migration independently",
+    folder: "/proj",
+    allowNested: true,
+    turn: { text: "ROLE: worker\nFOLDER: /proj\n\ndo the slice" },
+  });
+  assert.equal(helper.ok, true);
+
+  // The gate line is the announcement, on every surface that holds the tool.
   for (const core of [WORKHORSE_SESSION_RULES, CUSTOM_HTTP_SESSION_RULES, CURSOR_SESSION_RULES]) {
     assert.ok(core.includes(SPAWN_GATE_LAW), "a core names workhorse_spawn_agent without the gate on it");
   }
-  assert.match(SPAWN_GATE_LAW, /Do not call workhorse_spawn_agent on a turn that did not bring you the desk spawn law/);
-  // And it names the way out, so the chat asks instead of going quiet.
-  assert.match(SPAWN_GATE_LAW, /ask the user to say so, and wait/);
+  assert.match(SPAWN_GATE_LAW, /The desk refuses workhorse_spawn_agent on a turn that did not bring you the desk spawn law/);
+  assert.match(SPAWN_GATE_LAW, /say the desk can put workers on this and ask the user to confirm/);
+  // And no core may order the call the desk refuses. That sentence rode the
+  // custom HTTP core one line under the gate; it belongs with the spawn law,
+  // which reaches only a turn that may spawn.
+  for (const core of [WORKHORSE_SESSION_RULES, CUSTOM_HTTP_SESSION_RULES, CURSOR_SESSION_RULES]) {
+    assert.doesNotMatch(core, /you did not spawn anyone/);
+  }
+  assert.match(DESK_SPAWN_LAW, /If you did not call that tool this turn, you did not spawn anyone: call it\./);
+});
+
+test("one predicate decides who gets the law and who may spawn", () => {
+  // The injector and the refusal read the same function. Two of these
+  // disagreeing means a chat is handed the law and then turned away, or
+  // spawns having never seen it.
+  const cases: Array<{ text: string; crewMode?: CrewMode[]; role?: DeskRole; carried: boolean }> = [
+    { text: "Read the config and tell me what it sets.", carried: false },
+    { text: "hire two reviewers", carried: false },
+    { text: "Spawn two agents to review this.", carried: true },
+    { text: "Read the config.", crewMode: ["orchestrate"], carried: true },
+    { text: "Read the config.", crewMode: ["mission"], carried: true },
+    { text: "Spawn two agents to review this.", role: "worker", carried: false },
+    { text: "Read the config.", crewMode: ["orchestrate"], role: "helper", carried: false },
+  ];
+  for (const item of cases) {
+    assert.equal(
+      turnCarriesSpawnLaw({ text: item.text, crewMode: item.crewMode, role: item.role }),
+      item.carried,
+      `turnCarriesSpawnLaw disagrees about: ${item.text}`,
+    );
+    const injected =
+      withSpawnHint(item.text, item.role).includes(DESK_SPAWN_LAW) ||
+      withCrewModeHint(item.text, item.crewMode, item.role).includes(DESK_SPAWN_LAW);
+    assert.equal(injected, item.carried, `the injectors disagree about: ${item.text}`);
+  }
+});
+
+test("both spawn doors hand the turn to the refusal", () => {
+  // A door that forgets the turn admits everybody, quietly. Only the tool a
+  // model calls itself is held to the law: workhorse_delegate, a mission pass
+  // and a plan step reach the same code and are the desk's own dispatch.
+  const store = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
+  const block = store.match(/const admitted = admitSpawn\(\{[\s\S]*?\n\s*\}\);/);
+  assert.ok(block, "the store still admits spawns through admitSpawn");
+  assert.match(block![0], /turn: payload\.spawnTool \? spawnTurnOf\(caller\) : undefined,/);
+  assert.match(store, /if \(!admitted\.ok\) \{\s*\n\s*await replyAsk\(\{ error: admitted\.error \}\);/);
+
+  const mcp = readFileSync(path.join(ROOT, "electron", "workhorse-mcp.ts"), "utf8");
+  assert.match(mcp, /turn: input\.spawnTool \? spawnTurnOf\(caller\) : undefined,/);
+  assert.match(mcp, /if \(!admitted\.ok\) throw new Error\(admitted\.error\);/);
+  // Set on the spawn tool and nowhere else, and never for a Link harness,
+  // which never opened with a desk core and never had the law to lose.
+  assert.equal((mcp.match(/^\s*spawnTool: !isLinkProfile\(\),$/gm) ?? []).length, 1);
+  // One place it is set, one hand-off to the bridge, and nothing else.
+  assert.equal((mcp.match(/^\s*spawnTool: /gm) ?? []).length, 2);
 });
 
 test("the opening text stays under its ceiling for every role", () => {

@@ -299,6 +299,7 @@ import {
   constrainRouteCandidatesForSpawn,
   spawnContinuationHowToUse,
   spawnExclusions,
+  spawnTurnOf,
   spawnWaitsForReply,
   withSubagentStatus,
   withFinishedTurnSubagentStatus,
@@ -5706,6 +5707,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               folder: typeof payload.folder === "string" ? payload.folder : undefined,
               prompt: payload.message,
               allowNested: isNested,
+              // Only a model that called workhorse_spawn_agent itself is held
+              // to the spawn law. workhorse_delegate, a mission pass and a plan
+              // step all land here too, and the desk asked for those.
+              turn: payload.spawnTool ? spawnTurnOf(caller) : undefined,
               // The MCP door has always checked this. Without it here, the store
               // admitted a spawn onto a folder that is no longer on disk and the
               // worker died on its cwd instead of being turned away.

@@ -1,0 +1,926 @@
+
+/* On is a word. This wore an 8px stroke on a circle, which is the shape a
+   leftover ring uses, so a bot with no meter still read as metered and a
+   full ring said nothing about spend. The box keeps its size so no card
+   moves; only the ring is gone. */
+.llm-mark {
+  display: grid;
+  place-items: center;
+  width: 88px;
+  height: 88px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-14);
+  font-family: var(--display);
+  font-size: var(--text-15);
+  font-weight: 620;
+  letter-spacing: -0.03em;
+  color: var(--text-tertiary);
+}
+
+.llm-mark.grok.on {
+  border-color: var(--grok);
+  color: var(--text);
+}
+
+.llm-mark.claude.on {
+  border-color: var(--claude);
+  color: var(--text);
+}
+
+.llm-mark.codex.on {
+  border-color: var(--codex);
+  color: var(--text);
+}
+
+.llm-mark.cursor.on {
+  border-color: var(--cursor);
+  color: var(--text);
+}
+
+/* Add a bot is a mark, not a meter reading, so it keeps its circle. */
+.llm-mark.plus {
+  border-style: dashed;
+  border-width: 2px;
+  border-radius: 50%;
+  font-size: var(--text-28);
+  font-weight: 400;
+  color: var(--text-secondary);
+}
+
+.llm-detail {
+  margin-top: 0;
+}
+
+.llm-detail.bot-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.llm-detail.bot-edit .add-bot-preview,
+.llm-detail.bot-edit .add-bot-form {
+  max-width: 640px;
+}
+
+.llm-detail.bot-edit .row-meta,
+.llm-detail.bot-edit .add-bot-actions {
+  margin: 0;
+}
+
+.grok-bot-wake {
+  width: 100%;
+  max-width: 640px;
+  padding: 16px;
+  background: color-mix(in srgb, var(--bg-solid) 82%, var(--accent) 2%);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-14);
+  text-align: left;
+}
+
+.grok-bot-wake-head,
+.grok-bot-wake-done,
+.grok-bot-wake-connect {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.grok-bot-wake-head > div {
+  min-width: 0;
+}
+
+.grok-bot-wake-head .tiny {
+  flex: none;
+  white-space: nowrap;
+}
+
+.grok-bot-wake-head strong,
+.grok-bot-wake-head span {
+  display: block;
+}
+
+.grok-bot-wake-head strong {
+  font-size: var(--text-15);
+  font-weight: 620;
+}
+
+.grok-bot-wake-head > div > span {
+  margin-top: 3px;
+  font-size: var(--text-12);
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+
+.grok-bot-wake-state {
+  display: inline-flex !important;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  padding: 5px 8px;
+  font-size: var(--text-11);
+  color: var(--text-secondary);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+}
+
+.grok-bot-wake-state i {
+  width: 7px;
+  height: 7px;
+  background: var(--text-tertiary);
+  border-radius: 50%;
+}
+
+.grok-bot-wake.ready .grok-bot-wake-state i {
+  background: #30d158;
+}
+
+.grok-bot-wake-help {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.grok-bot-wake-help summary {
+  width: fit-content;
+  font-size: var(--text-12);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.grok-bot-wake-help p,
+.grok-bot-wake-done p {
+  margin: 8px 0 0;
+  font-size: var(--text-12);
+  line-height: 1.5;
+  color: var(--text-secondary);
+  text-align: left;
+  text-wrap: pretty;
+}
+
+.grok-bot-wake-help p strong {
+  color: var(--text);
+  font-weight: 560;
+}
+
+.grok-bot-wake-guide {
+  display: inline-block;
+  margin-top: 8px;
+  font-size: var(--text-12);
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.grok-bot-wake-guide:hover {
+  text-decoration: underline;
+}
+
+.grok-bot-wake-help .grok-bot-wake-stale {
+  margin-top: 10px;
+  font-size: var(--text-11);
+  color: var(--text-tertiary);
+}
+
+.grok-bot-wake-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr);
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.grok-bot-wake .grok-bot-wake-fields .field {
+  margin: 0;
+}
+
+.grok-bot-wake-connect {
+  align-items: flex-end;
+  margin-top: 14px;
+}
+
+.grok-bot-wake-connect .row-meta {
+  margin: 0;
+  text-align: left;
+}
+
+.grok-bot-wake-done {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.grok-bot-wake-done p {
+  margin: 0;
+}
+
+@media (max-width: 900px) {
+  .grok-bot-wake-fields {
+    grid-template-columns: 1fr;
+  }
+}
+
+.mass-send {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 640px;
+}
+
+.mass-send .section-label {
+  margin: 8px 0 0;
+}
+
+.mcp-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 760px;
+}
+
+.mcp-settings .link-head p,
+.mcp-settings > .row-meta,
+.skills-heading .row-meta {
+  margin: 3px 0 0;
+  max-width: none;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: unset;
+  text-align: left;
+}
+
+.mcp-server-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.mcp-server-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 14px;
+  border-radius: var(--radius-14);
+  background: var(--bg-hover);
+}
+
+.mcp-server-row strong,
+.mcp-server-row .row-meta {
+  display: block;
+}
+
+.mcp-server-row .row-meta {
+  margin-top: 3px;
+}
+
+.mcp-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.mcp-form-grid label,
+.mcp-scope {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.mcp-form-grid label > span,
+.mcp-scope legend {
+  font-size: var(--text-12);
+  font-weight: 560;
+  color: var(--text-secondary);
+}
+
+.mcp-form-grid input,
+.mcp-form-grid textarea {
+  box-sizing: border-box;
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-10);
+  padding: 9px 10px;
+  background: var(--bg);
+  resize: vertical;
+}
+
+.mcp-wide-field {
+  grid-column: 1 / -1;
+}
+
+.mcp-scope {
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-14);
+}
+
+.mcp-check-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 14px;
+}
+
+.mcp-settings .check-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-size: var(--text-13);
+}
+
+.mcp-settings .check-row span {
+  overflow-wrap: anywhere;
+}
+
+.settings-section-divider {
+  height: 1px;
+  margin: 22px 0;
+  background: var(--line);
+}
+
+.skills-heading {
+  margin-bottom: 12px;
+}
+
+.skills-list,
+.pack-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.skill-row,
+.pack-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 14px;
+  border-radius: var(--radius-14);
+  background: var(--bg-hover);
+}
+
+.skill-open {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  padding: 0;
+  text-align: left;
+  background: transparent;
+  color: inherit;
+}
+
+.skill-open:hover strong {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.skill-row-side,
+.pack-row-side {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.skill-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 720px;
+}
+
+.skill-detail-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.skill-detail-head strong {
+  display: block;
+  font-size: var(--text-20);
+  font-weight: 620;
+  letter-spacing: -0.03em;
+}
+
+.skill-detail-lead {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+.skill-detail-body {
+  padding: 14px 16px;
+  border-radius: var(--radius-14);
+  background: var(--bg-hover);
+}
+
+.skill-row strong,
+.pack-row strong {
+  display: block;
+  font-size: var(--text-13);
+  font-weight: 560;
+}
+
+.skill-row em,
+.pack-row em {
+  display: block;
+  margin-top: 2px;
+  font-style: normal;
+  font-size: var(--text-12);
+  color: var(--text-secondary);
+}
+
+.skill-row .row-meta,
+.pack-row .row-meta {
+  margin-top: 4px;
+  white-space: normal;
+  overflow: visible;
+  overflow-wrap: anywhere;
+  text-overflow: unset;
+}
+
+.skill-origin {
+  flex: 0 0 auto;
+  padding: 3px 8px;
+  border-radius: var(--radius-pill);
+  font-size: var(--text-11);
+  font-weight: 560;
+  color: var(--text);
+  background: color-mix(in srgb, var(--text-tertiary) 18%, transparent);
+}
+
+.skill-origin.grok {
+  background: color-mix(in srgb, var(--grok) 22%, transparent);
+}
+
+.skill-origin.codex {
+  background: color-mix(in srgb, var(--codex) 22%, transparent);
+}
+
+.skill-origin.claude {
+  background: color-mix(in srgb, var(--claude) 22%, transparent);
+}
+
+.skill-origin.cursor {
+  background: color-mix(in srgb, var(--cursor) 22%, transparent);
+}
+
+.skill-origin.workhorse {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+.skill-push {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.llm-brains .usage-brain.off {
+  opacity: 0.62;
+}
+
+.add-bot {
+  max-width: none;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  padding: 24px 32px 24px;
+  gap: 20px;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.add-bot .project-hero {
+  width: 100%;
+  max-width: none;
+  flex: 0 0 auto;
+}
+
+.add-bot .project-hero .link-head {
+  width: 100%;
+}
+
+.add-bot .project-hero .lede {
+  max-width: 520px;
+}
+
+.add-bot > :not(.project-hero) {
+  max-width: 720px;
+  width: 100%;
+}
+
+.add-bot-catalog {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.add-bot-choice {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  min-height: 196px;
+  padding: 20px 18px 18px;
+  text-align: left;
+  background: var(--bg-solid);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-14);
+  color: var(--text);
+}
+
+.add-bot-choice:hover {
+  background: var(--bg-hover);
+}
+
+.add-bot-choice .llm-mark {
+  width: 72px;
+  height: 72px;
+  border-width: 6px;
+  font-size: var(--text-15);
+}
+
+.add-bot-choice .llm-mark.plus {
+  border-width: 2px;
+  font-size: var(--text-28);
+}
+
+.add-bot-choice strong {
+  font-size: var(--text-17);
+  font-weight: 620;
+  letter-spacing: -0.03em;
+}
+
+.add-bot-choice span:last-child {
+  font-size: var(--text-13);
+  line-height: 1.4;
+  color: var(--text-secondary);
+}
+
+.add-bot-hint {
+  margin: 0;
+}
+
+.add-bot-preview {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 16px 18px;
+  background: var(--bg-solid);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-14);
+}
+
+.add-bot-preview .llm-mark {
+  width: 72px;
+  height: 72px;
+  border-width: 6px;
+  flex: none;
+}
+
+.add-bot-preview strong {
+  display: block;
+  font-size: var(--text-17);
+  font-weight: 620;
+  letter-spacing: -0.03em;
+}
+
+.add-bot-preview em {
+  display: block;
+  margin-top: 4px;
+  font-style: normal;
+  font-size: var(--text-13);
+  color: var(--text-tertiary);
+}
+
+.add-bot-form {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px 16px;
+}
+
+.add-bot-form .field.wide,
+.add-bot-form .field:nth-child(n + 4) {
+  grid-column: 1 / -1;
+}
+
+.bot-swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 4px 0 2px;
+}
+
+.bot-swatch {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+}
+
+.bot-swatch.on {
+  outline: 2px solid var(--text);
+  outline-offset: 3px;
+}
+
+.bot-swatch.wheel-toggle {
+  position: relative;
+  background: conic-gradient(
+    from 90deg,
+    #ff375f,
+    #ff9f0a,
+    #ffd60a,
+    #30d158,
+    #64d2ff,
+    #0071e3,
+    #bf5af2,
+    #ff375f
+  );
+}
+
+.bot-swatch.wheel-toggle i {
+  position: absolute;
+  inset: 6px;
+  border-radius: 50%;
+  background: var(--bg-solid);
+}
+
+.bot-wheel-field {
+  grid-column: 1 / -1;
+}
+
+.color-wheel {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 20px 28px;
+  padding: 6px 0 2px;
+}
+
+.color-wheel-disk {
+  position: relative;
+  width: 168px;
+  height: 168px;
+  flex: none;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle closest-side, #fff, transparent 72%),
+    conic-gradient(from 0deg, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.color-wheel-disk::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: #000;
+  opacity: calc(1 - var(--wheel-value, 1));
+  pointer-events: none;
+}
+
+.color-wheel-thumb {
+  position: absolute;
+  z-index: var(--z-raised);
+  width: 16px;
+  height: 16px;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.28);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+.color-wheel-side {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 160px;
+  flex: 1;
+}
+
+.color-wheel-side input[type="range"] {
+  width: 100%;
+  accent-color: var(--text);
+}
+
+.add-bot-actions {
+  margin-top: 4px;
+}
+
+.add-bot .row-meta {
+  margin: 0;
+  text-align: left;
+}
+
+.add-bot .vendor-setup-help {
+  max-width: 560px;
+  white-space: normal;
+  line-height: 1.45;
+}
+
+@media (max-width: 720px) {
+  .add-bot-catalog,
+  .add-bot-form,
+  .grok-bot-wake-fields {
+    grid-template-columns: 1fr;
+  }
+
+  .grok-bot-wake-done,
+  .grok-bot-wake-connect {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .add-bot-form .field:nth-child(n + 3) {
+    grid-column: auto;
+  }
+}
+
+@keyframes fuel-in {
+  from {
+    opacity: 0;
+    transform: scale(0.86);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.fuel-ring {
+  position: relative;
+  display: grid;
+  place-items: center;
+  animation: fuel-in 640ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fuel-ring {
+    animation: none;
+  }
+}
+
+.fuel-ring svg {
+  position: absolute;
+  inset: 0;
+}
+
+.fuel-ring .fuel-track,
+.fuel-ring .fuel-fill {
+  fill: none;
+}
+
+.fuel-ring .fuel-track {
+  stroke: rgba(127, 127, 127, 0.22);
+}
+
+.fuel-ring .fuel-fill {
+  stroke: var(--fuel, var(--grok));
+  stroke-linecap: butt;
+  filter: blur(0.4px) drop-shadow(0 0 6px color-mix(in srgb, var(--fuel, var(--grok)) 45%, transparent));
+}
+
+.fuel-ring .fuel-over {
+  fill: none;
+  stroke: var(--danger);
+  stroke-linecap: round;
+  filter: drop-shadow(0 0 7px color-mix(in srgb, var(--danger) 60%, transparent));
+}
+
+.fuel-ring.claude {
+  --fuel: var(--claude);
+}
+
+.fuel-ring.codex {
+  --fuel: var(--codex);
+}
+
+.fuel-ring.cursor {
+  --fuel: var(--cursor);
+}
+
+.fuel-ring.custom {
+  --fuel: var(--custom);
+}
+
+.fuel-ring strong {
+  position: relative;
+  font-family: var(--display);
+  font-size: var(--text-15);
+  font-weight: 620;
+  letter-spacing: -0.03em;
+}
+
+.fuel-ring[style*="104px"] strong,
+.fuel-ring[style*="120px"] strong,
+.fuel-ring[style*="148px"] strong {
+  font-size: var(--text-20);
+  letter-spacing: -0.03em;
+}
+
+.usage-plan {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 24px;
+  margin: 4px auto 16px;
+  max-width: 560px;
+  padding: 16px 18px;
+  background: var(--bg-solid);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-14);
+}
+
+.usage-plan-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.usage-plan-copy p {
+  margin: 0;
+  max-width: 360px;
+  font-size: var(--text-15);
+  line-height: 22px;
+  letter-spacing: -0.01em;
+  color: var(--text-secondary);
+}
+
+.usage-limits {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: min(560px, 100%);
+  margin: 4px auto 16px;
+  padding: 16px 18px;
+  background: var(--bg-solid);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-14);
+}
+
+.usage-limits-head {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.usage-limits-head .context-meter-wrap {
+  display: flex;
+  align-items: center;
+}
+
+.usage-limits-head .context-meter.quiet {
+  padding: 0;
+}
+
+.usage-limits-windows,
+.usage-limits-foot {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: 100%;
+  margin: 0;
+}
+
+.usage-limit.unlimited .usage-split-track i {
+  opacity: 0.28;
+}
+
+.usage-limit-note {
+  display: block;
+  width: 100%;
+  margin: 0;
+  font-size: var(--text-13);
+  line-height: 18px;
+  color: var(--text-tertiary);
+  text-align: center;
+}
+
+.bot-context-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.bot-context-row .row-meta {
+  margin: 0;
+  flex: 1;
+  min-width: 160px;
+}

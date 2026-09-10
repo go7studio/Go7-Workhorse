@@ -1,3 +1,4 @@
+import { deskCss } from "./desk-css";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -35,7 +36,7 @@ test("Usage and Settings context meters are catalog size, not a live chat", () =
   assert.doesNotMatch(usage, /matchProvider=\{focused.provider\}/);
   assert.match(usage, /usage-limits-windows/);
   assert.match(usage, /usage-limits-foot/);
-  const css = readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8");
+  const css = deskCss();
   assert.match(css, /\.usage-limits-windows,\s*\.usage-limits-foot\s*\{[^}]*justify-content:\s*center/);
   assert.match(css, /\.usage-limit-note\s*\{[^}]*text-align:\s*center/);
   assert.match(css, /\.usage-limit-note\s*\{[^}]*width:\s*100%/);

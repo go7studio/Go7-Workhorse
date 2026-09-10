@@ -1,3 +1,4 @@
+import { deskCss } from "./desk-css";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -280,7 +281,7 @@ test("update check is wired through main, preload, and the sidebar action", () =
   assert.match(sidebar, /useStoreSelector\(selectSidebarUpdateStore, sameSidebarUpdateStore\)/);
   const sidebarStore = sidebar.slice(sidebar.indexOf("type SidebarStore"), sidebar.indexOf("type SidebarUpdateStore"));
   assert.doesNotMatch(sidebarStore, /appUpdate/);
-  const styles = readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8");
+  const styles = deskCss();
   assert.match(styles, /grid-template-columns: minmax\(0, 1fr\) auto/);
   assert.match(styles, /\.sidebar-update:hover \.sidebar-update-copy/);
   const brand = sidebar.slice(sidebar.indexOf('<div className="brand">'), dock);

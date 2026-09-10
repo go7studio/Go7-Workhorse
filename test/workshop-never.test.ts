@@ -1,3 +1,4 @@
+import { deskCss } from "./desk-css";
 import assert from "node:assert/strict";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
@@ -115,7 +116,7 @@ test("no pack code runs: the renderer paints a closed vocabulary and computes no
   assert.match(contract, /needs a newer Workhorse/);
   assert.match(contract, /FORBIDDEN_SEGMENT/);
   // Hairlines take the theme: no undefined --hairline token, no colour literal, in the workshop CSS.
-  const css = read("src/styles/app.css");
+  const css = deskCss();
   const start = css.indexOf("/* Workshop — a read-only add-on rail");
   const end = css.indexOf(".workshop-settings {", start);
   assert.ok(start >= 0 && end > start, "workshop css block present");

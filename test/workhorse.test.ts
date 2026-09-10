@@ -1,3 +1,4 @@
+import { deskCss } from "./desk-css";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -891,7 +892,7 @@ test("rewindToUserMessage keeps earlier turns and drops everything after the edi
   assert.match(turn, /resendFrom/);
   const meter = readFileSync(path.join(ROOT, "src", "ui", "ContextMeter.tsx"), "utf8");
   assert.match(meter, /context-pop/);
-  const css = readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8");
+  const css = deskCss();
   assert.match(css, /\.context-pop\s*\{[\s\S]*position:\s*fixed/);
 });
 
@@ -959,7 +960,7 @@ test("sidebar last-talked clock follows the parent report-back, not the original
   assert.match(stamp, /formatLastTalked/);
   assert.match(stamp, /setInterval/);
   assert.match(stamp, /<time/);
-  const css = readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8");
+  const css = deskCss();
   assert.match(css, /\.row-talked\s*\{/);
   assert.match(css, /\.turn-stamp\s*\{/);
   assert.match(css, /\.work-pop > summary \.turn-stamp/);
@@ -1315,7 +1316,7 @@ test("Workhorse chat tools read as talking to another chat", () => {
   assert.equal(permissionActionLabel("`Get-ChildItem D:\\SteamLibrary`"), "run a command");
   const grokAgent = readFileSync(path.join(ROOT, "electron", "grok-agent.ts"), "utf8");
   assert.match(grokAgent, /prettyToolTitle\(title\)/);
-  const permissionCss = readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8");
+  const permissionCss = deskCss();
   assert.match(permissionCss, /permission-card strong[\s\S]*-webkit-line-clamp:\s*3/);
   assert.match(permissionCss, /\.permission-card \{[\s\S]*max-height:\s*min\(/);
   assert.equal(
@@ -1331,7 +1332,7 @@ test("Workhorse chat tools read as talking to another chat", () => {
     "Walk Test · ping",
   );
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "PermissionBar.tsx"), "utf8"), /permissionActionLabel/);
-  assert.match(readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8"), /permission-detail/);
+  assert.match(deskCss(), /permission-detail/);
   assert.equal(prettyToolStatus("updated"), "working");
   assert.equal(describePeerTool("workhorse_workhorse_ask_chat", "Test")?.title, "Asking Test");
   assert.equal(describePeerTool("Asking Test", "")?.kind, "ask");
@@ -2379,7 +2380,7 @@ test("chat markdown turns status dumps into facts and renders inline marks", () 
   const pane = readFileSync(path.join(ROOT, "src", "ui", "SessionPane.tsx"), "utf8");
   assert.match(pane, /MessageBody/);
   assert.doesNotMatch(pane, /Grok · /);
-  assert.match(readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8"), /\.turn\.user \.say/);
+  assert.match(deskCss(), /\.turn\.user \.say/);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "MessageBody.tsx"), "utf8"), /part\.type === "em"/);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "MessageBody.tsx"), "utf8"), /parseInline\(row\.value\)/);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "SessionPane.tsx"), "utf8"), /followBottom/);
@@ -2458,7 +2459,7 @@ test("chat markdown turns status dumps into facts and renders inline marks", () 
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "ImageZoom.tsx"), "utf8"), /image-zoom/);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "ImageZoom.tsx"), "utf8"), /originFromClick/);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "ImageZoom.tsx"), "utf8"), /transformOrigin/);
-  assert.match(readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8"), /\.image-zoom/);
+  assert.match(deskCss(), /\.image-zoom/);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "SessionPane.tsx"), "utf8"), /vendorSessionId/);
   const mainSrc = readFileSync(path.join(ROOT, "electron", "main.ts"), "utf8");
   assert.match(mainSrc, /displaySrcForHref/);
@@ -2698,7 +2699,7 @@ test("chat markdown keeps loose numbered lists as one incrementing sequence", ()
   const body = readFileSync(path.join(ROOT, "src", "ui", "MessageBody.tsx"), "utf8");
   assert.match(body, /block\.type === "ol"/);
   assert.doesNotMatch(body, /\$\{itemIndex \+ 1\}\./);
-  const css = readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8");
+  const css = deskCss();
   assert.doesNotMatch(css, /\.md ol\s*\{[^}]*list-style:\s*none/);
 });
 
@@ -2869,7 +2870,7 @@ test("session bridge lists, finds, and reads chats for peer tools", async () => 
   assert.match(userTurn, /<\/div>\s*<TurnActions/);
   assert.doesNotMatch(readFileSync(path.join(ROOT, "src", "ui", "TurnActions.tsx"), "utf8"), /export function copyText/);
   assert.match(readFileSync(path.join(ROOT, "src", "lib", "copy-text.ts"), "utf8"), /export function copyText/);
-  assert.match(readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8"), /\.turn\.user\.peer \.say/);
+  assert.match(deskCss(), /\.turn\.user\.peer \.say/);
 
   const inboxRoot = path.join(ROOT, "dist-electron", ".peer-test");
   try {
@@ -3445,7 +3446,7 @@ test("composer field grows to half the session pane then collapses", () => {
   fitComposerField(short, "hi", 800);
   assert.equal(short.style.height, "48px");
   const composer = readFileSync(path.join(ROOT, "src", "ui", "Composer.tsx"), "utf8");
-  const css = readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8");
+  const css = deskCss();
   const pane = readFileSync(path.join(ROOT, "src", "ui", "SessionPane.tsx"), "utf8");
   assert.match(composer, /data-composer-field/);
   assert.match(composer, /fitComposerField/);
@@ -3517,8 +3518,8 @@ test("session setup is a compact right-side model and access inspector", () => {
   );
   assert.match(setup, /Accept edits/);
   assert.doesNotMatch(setup, /Choose the brain|Approval behavior and file containment|When should Workhorse pause/);
-  assert.match(readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8"), /setup-slider-thumb/);
-  const setupCss = readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8");
+  assert.match(deskCss(), /setup-slider-thumb/);
+  const setupCss = deskCss();
   assert.match(setupCss, /container-name:\s*session/);
   assert.match(setupCss, /width:\s*min\(720px/);
   assert.match(setupCss, /setup-top-grid/);
@@ -4827,7 +4828,7 @@ test("project home lists edited files from write tools, not Choose a brain", () 
   assert.match(viewer, /showDiffStat/);
   assert.match(viewer, /diff\.added > 0 \|\| diff\.deleted > 0/);
   assert.doesNotMatch(viewer, />Close</);
-  const homeCss = readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8");
+  const homeCss = deskCss();
   assert.match(homeCss, /\.file-viewer/);
   assert.match(homeCss, /\.file-close-x/);
   assert.match(homeCss, /\.project-home-shell/);
@@ -4843,10 +4844,10 @@ test("project home lists edited files from write tools, not Choose a brain", () 
   assert.match(diffStat, /COUNT_MS/);
   assert.match(pane, /const fileRoots = roots/);
   assert.match(pane, /fileRootKey/);
-  assert.match(readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8"), /\.diff-line\.add/);
-  assert.match(readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8"), /\.session-file/);
-  assert.match(readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8"), /\.session\.has-file/);
-  const css = readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8");
+  assert.match(deskCss(), /\.diff-line\.add/);
+  assert.match(deskCss(), /\.session-file/);
+  assert.match(deskCss(), /\.session\.has-file/);
+  const css = deskCss();
   const sessionEdits = css.match(/\.session-edits\s*\{[^}]+\}/)?.[0] ?? "";
   const composerWrap = css.match(/\.composer-wrap\s*\{[^}]+\}/)?.[0] ?? "";
   assert.match(sessionEdits, /padding:\s*0 22px;/);
@@ -5203,7 +5204,7 @@ test("empty chats stay drafts until the first send names them", () => {
   assert.match(composer, /fitComposerField/);
   assert.match(composer, /composer-tools/);
   assert.match(
-    readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8"),
+    deskCss(),
     /textarea:placeholder-shown \{[\s\S]*text-overflow: ellipsis/,
   );
   assert.match(readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8"), /steer: true/);
@@ -5230,15 +5231,15 @@ test("sidebar nests project chats in folders; top New chat stays loose", async (
   const sidebar = readFileSync(path.join(ROOT, "src", "ui", "Sidebar.tsx"), "utf8");
   assert.match(sidebar, /brand-mark/);
   assert.doesNotMatch(sidebar, /brand-mark-btn on/);
-  assert.match(readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8"), /\.brand-mark-btn:active/);
-  assert.doesNotMatch(readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8"), /\.brand-mark-btn\.on/);
+  assert.match(deskCss(), /\.brand-mark-btn:active/);
+  assert.doesNotMatch(deskCss(), /\.brand-mark-btn\.on/);
   assert.match(sidebar, /go7-workhorse-transparent/);
   assert.match(sidebar, /APP_VERSION/);
   assert.match(sidebar, /SettingsPulse/);
   assert.match(sidebar, /deskPulseLines/);
   assert.match(sidebar, /visibleUsageEvents/);
   assert.doesNotMatch(sidebar, /profile, LLMs, watch/);
-  assert.match(readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8"), /settings-pulse/);
+  assert.match(deskCss(), /settings-pulse/);
   const pulse = deskPulseLines({
     usage: [
       {
@@ -5268,7 +5269,7 @@ test("sidebar nests project chats in folders; top New chat stays loose", async (
   assert.doesNotMatch(welcome, /Type \/ for commands/);
   assert.doesNotMatch(welcome, /—/);
   assert.match(readFileSync(path.join(ROOT, "src", "lib", "app-info.ts"), "utf8"), /package\.json/);
-  const css = readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8");
+  const css = deskCss();
   const pane = readFileSync(path.join(ROOT, "src", "ui", "SessionPane.tsx"), "utf8");
   assert.match(sidebar, /function ProjectFolder/);
   assert.match(sidebar, /className=\{`project-folder/);
@@ -5763,7 +5764,7 @@ test("stretchBuckets follows today week month and all", () => {
 test("UsagePane ships the Figma fuel-ring overview, not the old token line", async () => {
   const pane = readFileSync(path.join(ROOT, "src", "ui", "UsagePane.tsx"), "utf8");
   const settings = readFileSync(path.join(ROOT, "src", "ui", "Settings.tsx"), "utf8");
-  const css = readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8");
+  const css = deskCss();
   assert.match(settings, /UsagePane key=\{usageTick\}/);
   assert.match(settings, /id === "usage"/);
   assert.match(settings, /section !== "usage"\) setUsageTick/);
@@ -6131,7 +6132,7 @@ test("Profile horse fills with colors of bots you have used", () => {
   );
   assert.equal(desk[0].color, "var(--grok)");
 
-  const css = readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8");
+  const css = deskCss();
   const settings = readFileSync(path.join(ROOT, "src", "ui", "Settings.tsx"), "utf8");
   const horse = readFileSync(path.join(ROOT, "src", "ui", "ProfileHorse.tsx"), "utf8");
   assert.match(settings, /ProfileHorse/);
@@ -6607,7 +6608,7 @@ test("transcript groups tools and thoughts above the final reply", () => {
   assert.match(pane, /followLatestClass/);
   assert.doesNotMatch(pane, /CHAT_LOOKS/);
   assert.doesNotMatch(pane, /chat-look-/);
-  const css = readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8");
+  const css = deskCss();
   assert.match(css, /\.turn-who \{[^}]*font-size:\s*var\(--text-15\)/);
   assert.match(css, /@keyframes work-open/);
   assert.match(css, /\.work-body \{[^}]*animation:\s*work-open/);
@@ -6628,8 +6629,8 @@ test("transcript groups tools and thoughts above the final reply", () => {
   assert.doesNotMatch(pane, /block\.subagents\.length \? store\.sessions/);
   assert.doesNotMatch(pane, /requestIdleCallback/);
   assert.doesNotMatch(pane, /requestAnimationFrame\(tick\)/);
-  assert.match(readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8"), /\.transcript-stack/);
-  assert.match(readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8"), /justify-content: flex-end/);
+  assert.match(deskCss(), /\.transcript-stack/);
+  assert.match(deskCss(), /justify-content: flex-end/);
   assert.equal(TRANSCRIPT_FIRST_PAINT, 10);
   assert.equal(TRANSCRIPT_PAINT_CHUNK, 10);
   assert.equal(TRANSCRIPT_LOOKAHEAD, 5);
@@ -6641,7 +6642,7 @@ test("transcript groups tools and thoughts above the final reply", () => {
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "SessionPane.tsx"), "utf8"), /isDeskNotice/);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "SessionPane.tsx"), "utf8"), /LINEUP_FINISHED_NOTICE/);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "SessionPane.tsx"), "utf8"), /crew-done/);
-  assert.match(readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8"), /\.crew-done-card/);
+  assert.match(deskCss(), /\.crew-done-card/);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "SessionPane.tsx"), "utf8"), /peelPlanningPreamble\(assistantText, live\)/);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "SessionPane.tsx"), "utf8"), /unsquashSentences\(peeled\.body\)/);
   assert.doesNotMatch(
@@ -6654,7 +6655,7 @@ test("transcript groups tools and thoughts above the final reply", () => {
   );
   assert.match(pane, /peer-live/);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "ChatRow.tsx"), "utf8"), /peer-link/);
-  assert.match(readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8"), /\.peer-work/);
+  assert.match(deskCss(), /\.peer-work/);
   assert.equal(toolIsFinished("completed"), true);
   assert.equal(toolIsFinished("in_progress"), false);
   assert.match(pane, /lastReplyIndex/);
@@ -6742,7 +6743,7 @@ test("transcript groups tools and thoughts above the final reply", () => {
   assert.match(popout, /subagentTurns/);
   assert.match(popout, /subagent-thread-slot/);
   assert.match(popout, /aria-expanded=\{open\}/);
-  const workCss = readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8");
+  const workCss = deskCss();
   assert.match(workCss, /\.subagent-open/);
   assert.match(workCss, /\.subagent-thread-slot\s*\{[^}]*grid-template-rows:\s*0fr/);
   assert.match(workCss, /\.subagent-preview\.open \.subagent-thread-slot\s*\{[^}]*grid-template-rows:\s*1fr/);
@@ -6754,7 +6755,7 @@ test("transcript groups tools and thoughts above the final reply", () => {
   assert.doesNotMatch(pane, /AgentThreadPane/);
   assert.doesNotMatch(pane, /has-thread/);
   assert.match(
-    readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8"),
+    deskCss(),
     /\.crew-twist[\s\S]*z-index:\s*var\(--z-raised\)/,
   );
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "ContextMeter.tsx"), "utf8"), /session: sessionProp/);
@@ -7099,7 +7100,7 @@ test("Workhorse /goal and pulled skills join the Codex slash palette", () => {
   assert.equal(splitGoalCommand("/plan"), null);
   assert.equal(splitGoalCommand("please /goal later"), null);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "UserTurn.tsx"), "utf8"), /chat-command/);
-  assert.match(readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8"), /\.chat-command/);
+  assert.match(deskCss(), /\.chat-command/);
   assert.match(readFileSync(path.join(ROOT, "src", "styles", "tokens.css"), "utf8"), /--command:/);
   assert.equal(matchCommand("/skills", extras("codex"))?.run, "vendor");
   assert.equal(matchCommand("/review", extras("codex"))?.run, "vendor");
@@ -7240,7 +7241,7 @@ test("Goal state set pause resume clear maps to display actions", () => {
   assert.match(bar, /Clear/);
   assert.match(bar, /goalCommandForAction/);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "SessionPane.tsx"), "utf8"), /GoalBar/);
-  assert.match(readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8"), /\.goal-bar/);
+  assert.match(deskCss(), /\.goal-bar/);
   const haltStore = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
   assert.match(haltStore, /planHaltForward\(/);
   assert.match(haltStore, /prepareVendorSend\(/);
@@ -9468,7 +9469,7 @@ test("composer + pins Orchestrate and Mission and those modes inject the bible",
   assert.match(readFileSync(path.join(ROOT, "electron", "preload.ts"), "utf8"), /pickAttach/);
   assert.match(composer, /composer-crew-chip/);
   assert.match(composer, /setCrewMode\(toggleCrewMode/);
-  const css = readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8");
+  const css = deskCss();
   assert.match(css, /\.composer-plus-menu/);
   assert.match(css, /\.plus-icon\.orchestrate/);
   assert.match(css, /\.plus-icon\.mission/);
@@ -9940,9 +9941,9 @@ test("desk-enforced orchestrator vs worker lineup", async () => {
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "Sidebar.tsx"), "utf8"), /openCrew/);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "Sidebar.tsx"), "utf8"), /workersOpen=\{Boolean\(openCrew/);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "Sidebar.tsx"), "utf8"), /crew-slot/);
-  assert.match(readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8"), /\.crew-slot\s*\{[^}]*grid-template-rows:\s*0fr/);
+  assert.match(deskCss(), /\.crew-slot\s*\{[^}]*grid-template-rows:\s*0fr/);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "Sidebar.tsx"), "utf8"), /chats\.length > PROJECT_CHAT_LIMIT && hidden > 0/);
-  assert.match(readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8"), /currentColor 70%/);
+  assert.match(deskCss(), /currentColor 70%/);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "ChatRow.tsx"), "utf8"), /crew-twist/);
 
   const stateDir = path.join(ROOT, "dist-electron", ".orch-test");
@@ -10612,7 +10613,7 @@ test("side panes clamp and persist so you can drag them to size", () => {
   assert.match(handle, /pane-dragging/);
   assert.match(handle, /onDoubleClick/);
 
-  const css = readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8");
+  const css = deskCss();
   assert.match(css, /\.split-handle/);
   assert.match(css, /cursor: col-resize/);
   assert.match(css, /html\.pane-dragging/);

@@ -1,3 +1,4 @@
+import { deskCss } from "./desk-css";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -51,7 +52,7 @@ test("the ring and the line under it count the same way", () => {
 });
 
 test("On is a word, not a ring", () => {
-  const css = source("src", "styles", "app.css");
+  const css = deskCss();
   const mark = css.slice(css.indexOf(".llm-mark {"), css.indexOf(".llm-mark.grok.on"));
   assert.doesNotMatch(mark, /border-radius:\s*50%/, "a circle with a stroke is the shape a leftover ring uses");
   assert.match(mark, /border-radius:\s*var\(--radius-14\)/);
@@ -62,7 +63,7 @@ test("On is a word, not a ring", () => {
 
 test("the composer chip ellipsises instead of clipping", () => {
   assert.match(source("src", "ui", "Composer.tsx"), /className="crew-chip-name"/);
-  const css = source("src", "styles", "app.css");
+  const css = deskCss();
   assert.match(css, /\.composer-crew-chip \.crew-chip-name \{[^}]*text-overflow:\s*ellipsis/);
   assert.match(css, /\.composer-crew-chip \{[^}]*min-width:\s*72px/);
   assert.doesNotMatch(
@@ -73,7 +74,7 @@ test("the composer chip ellipsises instead of clipping", () => {
 });
 
 test("a project row shows its buttons on hover or selection, not at rest", () => {
-  const css = source("src", "styles", "app.css");
+  const css = deskCss();
   const rest = css.slice(css.indexOf(".project-new,\n.project-info {"));
   assert.match(rest.slice(0, 400), /opacity:\s*0/);
   assert.match(css, /\.project-head:hover \.project-new/);

@@ -1,3 +1,4 @@
+import { deskCss } from "./desk-css";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -64,7 +65,7 @@ test("/providers names the vendor and model sheet", () => {
 });
 
 test("the model chip is wide enough for Cursor Grok 4.6 · Medium · Ask", () => {
-  const css = read("src/styles/app.css");
+  const css = deskCss();
   const trigger = css.match(/\.setup-trigger \{([^}]+)\}/)?.[1] ?? "";
   const max = Number(trigger.match(/max-width:\s*(\d+)px/)?.[1]);
   assert.ok(max >= 272 && max <= 360, `compact chip max-width, got ${max}`);

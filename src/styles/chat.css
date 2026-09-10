@@ -1,0 +1,416 @@
+
+.session.has-thread,
+.session.has-file {
+  flex-direction: row;
+  align-items: stretch;
+}
+
+.session-col {
+  position: relative;
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  container-type: size;
+  container-name: session;
+  --notices-dock: 0px;
+}
+
+.session-notices {
+  flex-shrink: 0;
+  min-width: 0;
+}
+
+.agent-thread {
+  position: relative;
+  flex: 0 0 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-sidebar);
+  border-left: 1px solid var(--line);
+}
+
+.agent-thread-head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 14px 14px 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+.agent-thread-tools {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.agent-thread-who {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+}
+
+.agent-thread-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.agent-thread-who strong {
+  font-size: var(--text-13);
+  font-weight: 590;
+  line-height: 1;
+}
+
+.agent-thread-who em {
+  display: block;
+  margin-left: 14px;
+  font-style: normal;
+  font-size: var(--text-11);
+  color: var(--text-tertiary);
+}
+
+.agent-thread-tabs {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 4px;
+  padding: 8px 12px 0;
+  overflow-x: auto;
+}
+
+.agent-thread-tabs button {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  font-size: var(--text-12);
+  color: var(--text-secondary);
+  border-radius: var(--radius-pill);
+  background: var(--bg-hover);
+}
+
+.agent-thread-tabs button.on {
+  color: var(--text);
+  background: var(--bg-active);
+}
+
+.agent-thread-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 14px 14px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.agent-thread-wait {
+  margin: 0;
+  font-size: var(--text-13);
+  color: var(--text-tertiary);
+}
+
+.agent-thread-warn {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: var(--radius-10);
+  background: color-mix(in srgb, var(--danger, #d14) 12%, var(--bg-solid));
+  border: 1px solid color-mix(in srgb, var(--danger, #d14) 32%, var(--line));
+}
+
+.agent-thread-warn strong {
+  font-size: var(--text-12);
+  font-weight: 600;
+  color: var(--danger, #d14);
+}
+
+.agent-thread-warn span {
+  font-size: var(--text-13);
+  color: var(--text);
+}
+
+.agent-bubble {
+  max-width: 94%;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.agent-bubble.from {
+  align-self: flex-end;
+}
+
+.agent-bubble.to {
+  align-self: flex-start;
+}
+
+.agent-bubble-who {
+  font-size: var(--text-11);
+  font-weight: 590;
+  color: var(--text-tertiary);
+}
+
+.agent-bubble.from .agent-bubble-who {
+  text-align: right;
+}
+
+.agent-bubble .say,
+.agent-bubble .md {
+  margin: 0;
+  padding: 8px 11px;
+  border-radius: var(--radius-10);
+  background: var(--bg-hover);
+  font-size: var(--text-13);
+}
+
+.agent-bubble.from .say,
+.agent-bubble.from .md {
+  background: color-mix(in srgb, var(--peer) 16%, var(--bg-solid));
+}
+
+.agent-bubble.to .say,
+.agent-bubble.to .md {
+  background: var(--bg-solid);
+  border: 1px solid var(--line);
+}
+
+.agent-thread.compact-thread .agent-thread-head {
+  padding: 10px 12px 8px;
+}
+
+.agent-thread.compact-thread .agent-thread-scroll {
+  padding: 10px 12px 14px;
+  gap: 10px;
+}
+
+.agent-thread.compact-thread .turn {
+  gap: 4px;
+}
+
+.agent-thread.compact-thread .turn-who {
+  font-size: var(--text-11);
+}
+
+.agent-thread.compact-thread .say,
+.agent-thread.compact-thread .md {
+  font-size: var(--text-13);
+}
+
+.agent-thread.compact-thread .work-pop > summary {
+  font-size: var(--text-11);
+}
+
+.agent-thread.compact-thread .tool-line {
+  font-size: var(--text-11);
+}
+
+.agent-thread.compact-thread .turn.user .say {
+  padding: 8px 10px;
+  font-size: var(--text-13);
+}
+
+.agent-thread.compact-thread.overlay {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  bottom: 12px;
+  z-index: var(--z-sticky);
+  width: min(440px, calc(100% - 20px));
+  border: 1px solid var(--line);
+  border-radius: var(--radius-14);
+  box-shadow: var(--shadow);
+}
+
+.context-meter-wrap.compact .context-ring {
+  width: 24px;
+  height: 24px;
+}
+
+.context-meter-wrap.compact .context-copy {
+  gap: 0;
+}
+
+.context-meter-wrap.compact .context-copy strong {
+  font-size: var(--text-11);
+}
+
+.context-meter-wrap.compact .context-copy em {
+  font-size: var(--text-11);
+}
+
+.peer-open {
+  align-self: flex-start;
+  margin-top: 4px;
+  padding: 3px 8px;
+  font-size: var(--text-11);
+  color: var(--peer);
+  border-radius: var(--radius-pill);
+}
+
+.peer-open:hover {
+  background: color-mix(in srgb, var(--peer) 14%, transparent);
+}
+
+.welcome,
+.picker {
+  align-items: center;
+  justify-content: center;
+  padding: 48px 32px 72px;
+  animation: rise 420ms var(--ease);
+}
+
+.welcome-mark {
+  width: 72px;
+  height: 72px;
+  margin: 0 0 10px;
+  object-fit: contain;
+}
+
+.profile-horse-wrap {
+  position: relative;
+  width: 128px;
+  margin: 4px auto 18px;
+  outline: none;
+}
+
+.profile-horse {
+  width: 128px;
+  height: 128px;
+  margin: 0;
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+  background: #08081f;
+  -webkit-mask-image: var(--horse-mark);
+  mask-image: var(--horse-mark);
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  mask-position: center;
+  -webkit-mask-size: contain;
+  mask-size: contain;
+  mask-mode: alpha;
+  -webkit-mask-source-type: alpha;
+}
+
+.profile-horse-blob {
+  position: absolute;
+  width: var(--blob-size, 14%);
+  height: var(--blob-size, 14%);
+  border-radius: 42% 58% 52% 48% / 48% 42% 58% 52%;
+  filter: blur(3px);
+  will-change: transform, border-radius;
+  animation: horse-drift 6s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite;
+}
+
+@keyframes horse-drift {
+  0%,
+  100% {
+    border-radius: 42% 58% 52% 48% / 48% 42% 58% 52%;
+    transform: translate(-50%, -50%) translate(0, 0) rotate(0deg) scale(1);
+  }
+  22% {
+    border-radius: 68% 32% 58% 42% / 36% 64% 40% 60%;
+    transform: translate(-50%, -50%) translate(var(--drift-x, 6%), var(--drift-y, 5%)) rotate(4.5deg) scale(1.055);
+  }
+  48% {
+    border-radius: 32% 68% 38% 62% / 62% 38% 58% 42%;
+    transform: translate(-50%, -50%) translate(calc(var(--drift-x, 6%) * -1.05), calc(var(--drift-y, 5%) * 0.55))
+      rotate(-4deg) scale(0.945);
+  }
+  73% {
+    border-radius: 58% 42% 32% 68% / 48% 52% 68% 32%;
+    transform: translate(-50%, -50%) translate(calc(var(--drift-x, 6%) * 0.4), calc(var(--drift-y, 5%) * -1.15))
+      rotate(3deg) scale(1.03);
+  }
+}
+
+.profile-horse-tip {
+  position: absolute;
+  left: 50%;
+  top: calc(100% + 8px);
+  z-index: var(--z-raised);
+  width: 220px;
+  padding: 10px 12px;
+  background: var(--bg-solid);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-10);
+  box-shadow: var(--shadow);
+  transform: translateX(-50%) translateY(4px);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 160ms var(--ease), transform 160ms var(--ease);
+}
+
+.profile-horse-wrap:hover .profile-horse-tip,
+.profile-horse-wrap:focus-within .profile-horse-tip {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+.profile-horse-tip strong {
+  display: block;
+  font-size: var(--text-13);
+  font-weight: 620;
+}
+
+.profile-horse-tip > span {
+  display: block;
+  margin-top: 3px;
+  font-size: var(--text-12);
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.profile-horse-tip ul {
+  margin: 8px 0 0;
+  padding: 8px 0 0;
+  border-top: 1px solid var(--line);
+  list-style: none;
+}
+
+.profile-horse-tip li {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 6px;
+  font-size: var(--text-12);
+}
+
+.profile-horse-tip li span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.profile-horse-tip .dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-tertiary);
+}
+
+.profile-horse-tip em {
+  font-style: normal;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.profile-horse-tip small {
+  display: block;
+  font-size: var(--text-11);
+  color: var(--text-tertiary);
+}

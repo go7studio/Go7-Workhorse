@@ -1,3 +1,4 @@
+import { deskCss } from "./desk-css";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -425,7 +426,7 @@ test("Settings draws one bar on every tab and no second title", () => {
   assert.match(settingsUi, /className="settings-bar"/);
   assert.match(usage, /className="settings-bar"/);
   assert.doesNotMatch(settingsUi, /<h2>Settings<\/h2>/);
-  const css = readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8");
+  const css = deskCss();
   assert.match(css, /^\.switch \{/m);
   assert.doesNotMatch(css, /\.watch-toggle/);
 });

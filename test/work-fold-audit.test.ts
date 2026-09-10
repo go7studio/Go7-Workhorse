@@ -1,3 +1,4 @@
+import { deskCss } from "./desk-css";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -49,7 +50,7 @@ test("failed tool and crew-done copy use danger, not tertiary gray", () => {
   assert.equal(crewDoneKind("Allowed once"), null);
   const pane = read("src/ui/SessionPane.tsx");
   const popout = read("src/ui/WorkPopout.tsx");
-  const css = read("src/styles/app.css");
+  const css = deskCss();
   assert.match(pane, /crew-done\$\{crew === "bad" \? " failed" : ""\}/);
   assert.match(popout, /tool-status\$\{failed \? " failed" : ""\}/);
   assert.match(css, /\.tool-status\.failed\s*\{[^}]*var\(--danger\)/);
@@ -65,7 +66,7 @@ test("failed tool and crew-done copy use danger, not tertiary gray", () => {
 });
 
 test("subagent names keep a real min-width and wrap instead of shrinking to an ellipsis", () => {
-  const css = read("src/styles/app.css");
+  const css = deskCss();
   const name = css.slice(css.search(/^\.tool-name \{/m), css.search(/^\.tool-status \{/m));
   assert.match(name, /min-width:\s*8ch/);
   assert.match(name, /max-width:\s*28ch/);
@@ -79,7 +80,7 @@ test("subagent names keep a real min-width and wrap instead of shrinking to an e
 });
 
 test("a closed nested worker fold does not keep padding that leaks the peer bubble", () => {
-  const css = read("src/styles/app.css");
+  const css = deskCss();
   const slot = cssBlock(css, ".subagent-thread-slot");
   assert.match(slot, /grid-template-rows:\s*0fr/);
   assert.match(slot, /overflow:\s*hidden/);
@@ -159,7 +160,7 @@ test("nested worker fold starts closed; .open is only the toggle class on the pr
 });
 
 test("wide markdown tables can exceed the wrap so overflow-x actually scrolls", () => {
-  const css = read("src/styles/app.css");
+  const css = deskCss();
   const wrap = css.slice(css.search(/^\.md-table-wrap \{/m), css.search(/^\.md-table \{/m));
   assert.match(wrap, /overflow-x:\s*auto/);
   assert.match(wrap, /max-width:\s*100%/);
@@ -170,7 +171,7 @@ test("wide markdown tables can exceed the wrap so overflow-x actually scrolls", 
 
 test("an open Changes chip pads the transcript so it stays off the last markdown", () => {
   const pane = read("src/ui/SessionPane.tsx");
-  const css = read("src/styles/app.css");
+  const css = deskCss();
   assert.match(pane, /editsBarOpen \? " has-changes"/);
   const transcript = css.slice(css.search(/^\.transcript \{/m), css.search(/^\.transcript\.follow-latest \{/m));
   assert.match(transcript, /padding:\s*28px 22px 20px/);

@@ -158,6 +158,54 @@ function headIsReachable(repo: string, target: string): boolean {
   return refs.out.length > 0;
 }
 
+/**
+ * Anything `git status` can see, staged or not, tracked or not.
+ *
+ * `git worktree remove` refuses a dirty tree on its own, and its refusal is
+ * still the last word. This runs first so the sweep can say what it found —
+ * "it holds uncommitted changes" is a reason a person can act on, and
+ * git's own line is written for somebody at a terminal.
+ */
+function worktreeIsDirty(target: string): { held: string; paths: string[]; unknown: boolean } {
+  const status = gitSync(["-C", target, "status", "--porcelain"]);
+  if (!status.ok) return { held: "", paths: [], unknown: true };
+  const rows = status.out.split("\n").map((row) => row.trimEnd()).filter(Boolean);
+  if (rows.length === 0) return { held: "", paths: [], unknown: false };
+  const untracked = rows.filter((row) => row.startsWith("??"));
+  const held =
+    untracked.length === rows.length
+      ? "untracked files"
+      : untracked.length > 0
+        ? "uncommitted changes and untracked files"
+        : "uncommitted changes";
+  // The status field, then the path. Not a fixed offset: `gitSync` trims its
+  // output, so the leading space of a worktree-only change is already gone from
+  // the first row and every column after it has moved.
+  const paths = rows.map((row) => row.replace(/^\S+\s+/, "").trim() || row).filter(Boolean);
+  return { held, paths, unknown: false };
+}
+
+/**
+ * Is this tree's work on a remote?
+ *
+ * `headIsReachable` above asks whether any ref can reach the commit, which a
+ * local branch satisfies. That is enough to stop garbage collection and not
+ * enough to survive the disk it is on. A worker's commits live in one clone; if
+ * no remote branch contains them, removing the tree is the last copy going.
+ *
+ * A repository with no remote configured, or one whose remote has been deleted,
+ * answers the same way: nothing on a remote contains this, so the tree stays.
+ * That keeps more trees than a cleverer rule would, and a kept tree costs disk
+ * where a wrong one costs an afternoon.
+ */
+function headIsOnARemote(target: string): { pushed: boolean; unknown: boolean } {
+  const head = gitSync(["-C", target, "rev-parse", "HEAD"]);
+  if (!head.ok || !head.out) return { pushed: false, unknown: true };
+  const remotes = gitSync(["-C", target, "branch", "-r", "--contains", head.out]);
+  if (!remotes.ok) return { pushed: false, unknown: true };
+  return { pushed: remotes.out.length > 0, unknown: false };
+}
+
 /** The repository a managed worktree belongs to, or null when Git disowns the directory. */
 function owningRepo(target: string): string | null {
   const common = gitSync(["-C", target, "rev-parse", "--git-common-dir"]);
@@ -264,12 +312,38 @@ function holdsNoFiles(target: string): boolean {
  * art is untracked, exists in no commit, and no diff would carry it. Removing the
  * directory ourselves with `fs.rmSync` destroyed that work and left a stale
  * registration behind in the owning repository.
+ *
+ * Two questions come before git's own: is the tree clean, and are its commits on
+ * a remote. Both have to answer yes. Clean is not saved — a commit sitting in
+ * one clone is one disk away from gone — and the sweep now removes folders on a
+ * clock rather than only when a chat was deleted, so the bar for taking one has
+ * to be the higher of the two.
  */
 function dropManagedWorktree(target: string): { dropped: boolean; reason: string } {
   const repo = owningRepo(target);
   if (repo) {
+    const status = worktreeIsDirty(target);
+    if (status.unknown) {
+      return { dropped: false, reason: "git could not say what it holds, so nothing can vouch for its contents" };
+    }
+    if (status.held) {
+      return {
+        dropped: false,
+        reason: `it holds ${status.held} (${namedSample(status.paths)}) — open it, save what you need, then remove it yourself`,
+      };
+    }
+    // The narrower finding first. "No ref at all" and "no remote ref" are both
+    // refusals; a person reading the log is better served by the one that says
+    // the commit is not even on a local branch.
     if (!headIsReachable(repo, target)) {
       return { dropped: false, reason: "it holds a commit no branch or tag can reach" };
+    }
+    const remote = headIsOnARemote(target);
+    if (remote.unknown) {
+      return { dropped: false, reason: "git could not say whether its commits are on a remote" };
+    }
+    if (!remote.pushed) {
+      return { dropped: false, reason: "it holds commits no remote branch has — push them, then it will go" };
     }
     const ignored = ignoredWorkAtRisk(target);
     if (ignored.unknown) {

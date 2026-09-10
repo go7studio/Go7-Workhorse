@@ -110,14 +110,16 @@ function repoWithWorktree(
   label: string,
   /** Committed in the repository before the worktree exists, so HEAD stays reachable. */
   tracked: Record<string, string> = {},
-): { root: string; repo: string; managed: string; wt: string } {
+): { root: string; repo: string; managed: string; wt: string; remote: string } {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), `workhorse-prune-${label}-`));
   const repo = path.join(root, "repo");
   const managed = path.join(root, "worktrees");
+  const remote = path.join(root, "remote.git");
   fs.mkdirSync(repo);
   fs.mkdirSync(managed);
   const git = (args: string[], cwd = repo) =>
     execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+  git(["init", "-q", "--bare", remote], root);
   git(["init", "-q", "."]);
   fs.writeFileSync(path.join(repo, "tracked.txt"), "original\n");
   for (const [name, body] of Object.entries(tracked)) {
@@ -125,9 +127,15 @@ function repoWithWorktree(
   }
   git(["add", "-A"]);
   git(["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "base"]);
+  // The base commit goes to a remote, so a tree sitting on it is saved
+  // somewhere other than this disk. Without that, every tree here would be
+  // held as unpushed and none of these tests would reach what it aims at.
+  git(["remote", "add", "origin", remote]);
+  git(["push", "-q", "origin", "HEAD:refs/heads/main"]);
+  git(["fetch", "-q", "origin"]);
   const wt = path.join(managed, "sess_gone");
   git(["worktree", "add", "--quiet", "--detach", wt]);
-  return { root, repo, managed, wt };
+  return { root, repo, managed, wt, remote };
 }
 
 test("pruneOrphanWorktrees keeps a worktree holding untracked work", () => {
@@ -153,7 +161,72 @@ test("pruneOrphanWorktrees keeps a worktree holding uncommitted edits", () => {
   const pruned = pruneOrphanWorktrees(managed, []);
 
   assert.deepEqual(pruned.removed, []);
+  assert.match(pruned.kept[0].reason, /uncommitted changes/);
+  assert.match(pruned.kept[0].reason, /tracked\.txt/, "the refusal must name what it is protecting");
   assert.equal(fs.readFileSync(path.join(wt, "tracked.txt"), "utf8"), "edited, never committed\n");
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+/*
+ * Clean is not saved.
+ *
+ * A worker commits inside its detached worktree and the tree reads clean. Git
+ * will part with it, the sweep is now allowed to ask for it on a clock rather
+ * than only when the chat was deleted, and the commit lives in exactly one
+ * clone. These three pin the higher bar: the tree goes when a remote branch
+ * holds its work, and not before.
+ */
+function commitInWorktree(wt: string, body: string): string {
+  fs.writeFileSync(path.join(wt, "tracked.txt"), body);
+  execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-aqm", "worker work"], { cwd: wt });
+  return execFileSync("git", ["rev-parse", "HEAD"], { cwd: wt, encoding: "utf8" }).trim();
+}
+
+test("pruneOrphanWorktrees keeps a clean tree whose commit no remote branch has", () => {
+  const { root, repo, managed, wt } = repoWithWorktree("unpushed");
+  const head = commitInWorktree(wt, "the worker's only commit\n");
+  // Reachable locally, so this is not the unreachable-commit refusal doing the
+  // work. A local branch stops garbage collection; it does not survive a disk.
+  execFileSync("git", ["branch", "saved", head], { cwd: repo });
+  assert.equal(execFileSync("git", ["status", "--porcelain"], { cwd: wt, encoding: "utf8" }).trim(), "");
+
+  const pruned = pruneOrphanWorktrees(managed, []);
+
+  assert.deepEqual(pruned.removed, []);
+  assert.match(pruned.kept[0].reason, /no remote branch has/);
+  assert.ok(fs.existsSync(wt));
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test("pruneOrphanWorktrees keeps a tree whose remote branch has since gone", () => {
+  const { root, repo, managed, wt, remote } = repoWithWorktree("goneremote");
+  const head = commitInWorktree(wt, "pushed once, then the branch was deleted\n");
+  execFileSync("git", ["push", "-q", "origin", `${head}:refs/heads/work`], { cwd: wt });
+  execFileSync("git", ["branch", "saved", head], { cwd: repo });
+  execFileSync("git", ["push", "-q", "origin", "--delete", "work"], { cwd: repo });
+  execFileSync("git", ["fetch", "-q", "--prune", "origin"], { cwd: repo });
+  assert.ok(fs.existsSync(remote), "the remote is still there; only the branch went");
+
+  const pruned = pruneOrphanWorktrees(managed, []);
+
+  assert.deepEqual(pruned.removed, [], "nothing on a remote holds this work any more");
+  assert.match(pruned.kept[0].reason, /no remote branch has/);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test("pruneOrphanWorktrees drops a clean tree once a remote branch holds its work", () => {
+  const { root, repo, managed, wt } = repoWithWorktree("pushed");
+  const head = commitInWorktree(wt, "committed and pushed\n");
+  execFileSync("git", ["push", "-q", "origin", `${head}:refs/heads/work`], { cwd: wt });
+  execFileSync("git", ["fetch", "-q", "origin"], { cwd: repo });
+
+  const pruned = pruneOrphanWorktrees(managed, []);
+
+  assert.deepEqual(pruned.removed, ["sess_gone"], "the work is saved somewhere other than this disk");
+  assert.deepEqual(pruned.kept, []);
+  assert.ok(!fs.existsSync(wt));
+  const listed = execFileSync("git", ["worktree", "list"], { cwd: repo, encoding: "utf8" });
+  assert.ok(!listed.includes("sess_gone"), "git must forget the worktree it removed");
   fs.rmSync(root, { recursive: true, force: true });
 });
 

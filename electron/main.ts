@@ -814,6 +814,12 @@ function runHousekeeping(sessions: readonly unknown[]) {
     "prune:run",
     `sessions=${sessions.length} keep=${keep.length} trees_before=${before.trees} removed=${pruned.removed.length} kept=${pruned.kept.length} trees_after=${after.trees} over_ceiling=${after.overTrees}`,
   );
+  // One line per folder that went, beside the line per folder that stayed. A
+  // removal is the only thing this sweep does that a person cannot undo, so it
+  // is the one thing the log may not summarise.
+  for (const name of pruned.removed) {
+    mainLog.record("prune:removed", `${name}: clean and on a remote`);
+  }
   for (const held of pruned.kept) {
     console.info(`Kept the worktree for ${held.name}: ${held.reason}.`);
     mainLog.record("prune:kept", `${held.name}: ${held.reason}`);

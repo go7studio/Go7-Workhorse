@@ -2252,12 +2252,6 @@ async function spawnAgent(
     exclude?: string[];
     files?: string[];
     traceId?: string;
-    /**
-     * The model called workhorse_spawn_agent itself. Only that call is held to
-     * the desk spawn law; delegate, a mission pass and a plan step reach this
-     * same function and are the desk's own dispatch.
-     */
-    spawnTool?: boolean;
   },
   from?: string,
 ): Promise<string> {
@@ -2366,7 +2360,12 @@ async function spawnAgent(
         folder: spawnInput.folder,
         prompt: spawnInput.prompt,
         allowNested: isNested,
-        turn: input.spawnTool ? spawnTurnOf(caller) : undefined,
+        // Every door into this function is a tool a model can call — spawn,
+        // delegate, continue_mission, local_continue, an ask that resolves to
+        // a spawn — so the turn is read here, once, for all of them. A door
+        // that had to ask to be held was a door that could forget to.
+        turn: spawnTurnOf(caller),
+        deskLoop: isLinkProfile(),
         folderExists: (value) => {
           try {
             return fs.existsSync(value) && fs.statSync(value).isDirectory();
@@ -2402,7 +2401,6 @@ async function spawnAgent(
     handoff: spawnInput.handoff,
     folder: admitted.cwd,
     wait: spawnInput.wait,
-    spawnTool: spawnInput.spawnTool,
     mission: spawnInput.mission,
     missionIteration: spawnInput.missionIteration,
     missionContinuation: spawnInput.missionContinuation,
@@ -3352,11 +3350,6 @@ async function callDeskTool(name: string, args: Record<string, unknown>, from?: 
         traceId: typeof args.traceId === "string" ? args.traceId : undefined,
         loop: args.loop,
         missionIteration: args.missionIteration,
-        // This is the one entry a model reaches by deciding to hire someone,
-        // so this is the one entry the desk spawn law is checked on. Not Link:
-        // an external harness never opens with a desk core and never had the
-        // law to lose, so holding it to one would only break delegation.
-        spawnTool: !isLinkProfile(),
       },
       typeof args.fromSessionId === "string" ? args.fromSessionId : from,
     );

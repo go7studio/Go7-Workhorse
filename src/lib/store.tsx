@@ -5707,10 +5707,18 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               folder: typeof payload.folder === "string" ? payload.folder : undefined,
               prompt: payload.message,
               allowNested: isNested,
-              // Only a model that called workhorse_spawn_agent itself is held
-              // to the spawn law. workhorse_delegate, a mission pass and a plan
-              // step all land here too, and the desk asked for those.
-              turn: payload.spawnTool ? spawnTurnOf(caller) : undefined,
+              // The same law the MCP door reads, read again on the ask that
+              // carries the spawn: every caller is held to the turn it asked
+              // on, and the only way past is the exempt set below. The store
+              // derives both itself — the turn from the caller session, the
+              // exemption from the profile on the ask — so no field on the
+              // wire can be dropped or forged into an admission.
+              turn: spawnTurnOf(caller),
+              // A Link harness never opened with a desk core, so it never had
+              // the law to lose. Nothing else is exempt: workhorse_delegate,
+              // a mission continuation and a plan step are all tools a model
+              // calls, and they are held on the turn they were called on.
+              deskLoop: exposure === "external-runtime",
               // The MCP door has always checked this. Without it here, the store
               // admitted a spawn onto a folder that is no longer on disk and the
               // worker died on its cwd instead of being turned away.

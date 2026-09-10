@@ -31,10 +31,12 @@
  */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { handleWorkhorseRpc, setWorkhorseDeskAsk } from "../electron/workhorse-mcp";
 import { admitSpawn } from "../src/lib/subagents";
 import type { CrewMode } from "../src/lib/types";
 import {
@@ -262,6 +264,33 @@ test("a chat that never got the spawn law is refused at the door", () => {
   assert.equal(spawn({ text: "review this", crewModes: ["orchestrate", "mission"] }).ok, true);
   assert.equal(spawn({ text: "Spawn two agents to review this." }).ok, true);
 
+  // A door that hands over no turn at all is refused, and that is the point of
+  // the inversion. While the law was something a door opted into, the doors
+  // that opted into nothing — delegate, an ask that resolves to a spawn, a
+  // mission continuation — were admitted without anybody deciding they should
+  // be. An absent turn carried nothing, so it is treated as nothing.
+  const forgetful = admitSpawn({ parent: { parentId: null }, prompt: "review the auth diff", folder: "/proj" });
+  assert.equal(forgetful.ok, false);
+  assert.equal(forgetful.ok === false && forgetful.error, SPAWN_LAW_MISSING_ERROR);
+
+  // The exempt set, whole: a Link harness never opened with a desk core, so it
+  // never had the law to lose, and the desk's own loops have no model turn
+  // behind them. Both say so through deskLoop, and nothing else may.
+  const harness = admitSpawn({
+    parent: { parentId: null },
+    prompt: "review the auth diff",
+    folder: "/proj",
+    deskLoop: true,
+  });
+  assert.equal(harness.ok, true);
+
+  // A mission pass and a plan step are model-callable in this tree — a chat
+  // calls workhorse_continue_mission, or delegates with a planStepId — so they
+  // are held like every other door, and a pinned chat pays nothing for it: the
+  // pin carries the law on every turn that chat takes.
+  assert.equal(spawn({ text: "Pass 2: finish the auth migration.", crewModes: ["mission"] }).ok, true);
+  assert.equal(spawn({ text: "Run step 3 of the plan.", crewModes: ["orchestrate"] }).ok, true);
+
   // A worker never receives the law and still has its one helper, so the
   // refusal is not what turns a nested spawn away.
   const helper = admitSpawn({
@@ -314,24 +343,190 @@ test("one predicate decides who gets the law and who may spawn", () => {
   }
 });
 
-test("both spawn doors hand the turn to the refusal", () => {
-  // A door that forgets the turn admits everybody, quietly. Only the tool a
-  // model calls itself is held to the law: workhorse_delegate, a mission pass
-  // and a plan step reach the same code and are the desk's own dispatch.
+test("both spawn doors read the turn for every caller", () => {
+  // Each door derives the turn itself, from the caller session, and neither
+  // takes a flag from the call that would let a tool skip the law. The old
+  // shape was the opposite — a door said "hold me" — and the doors that said
+  // nothing were the hole the third gate found.
   const store = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
   const block = store.match(/const admitted = admitSpawn\(\{[\s\S]*?\n\s*\}\);/);
   assert.ok(block, "the store still admits spawns through admitSpawn");
-  assert.match(block![0], /turn: payload\.spawnTool \? spawnTurnOf\(caller\) : undefined,/);
+  assert.match(block![0], /^\s*turn: spawnTurnOf\(caller\),$/m);
+  assert.match(block![0], /^\s*deskLoop: exposure === "external-runtime",$/m);
   assert.match(store, /if \(!admitted\.ok\) \{\s*\n\s*await replyAsk\(\{ error: admitted\.error \}\);/);
 
   const mcp = readFileSync(path.join(ROOT, "electron", "workhorse-mcp.ts"), "utf8");
-  assert.match(mcp, /turn: input\.spawnTool \? spawnTurnOf\(caller\) : undefined,/);
+  assert.match(mcp, /^\s*turn: spawnTurnOf\(caller\),$/m);
+  assert.match(mcp, /^\s*deskLoop: isLinkProfile\(\),$/m);
   assert.match(mcp, /if \(!admitted\.ok\) throw new Error\(admitted\.error\);/);
-  // Set on the spawn tool and nowhere else, and never for a Link harness,
-  // which never opened with a desk core and never had the law to lose.
-  assert.equal((mcp.match(/^\s*spawnTool: !isLinkProfile\(\),$/gm) ?? []).length, 1);
-  // One place it is set, one hand-off to the bridge, and nothing else.
-  assert.equal((mcp.match(/^\s*spawnTool: /gm) ?? []).length, 2);
+
+  // One exemption per door, and each door works it out from the profile it is
+  // running under rather than from anything the caller sent. Nothing on the
+  // wire between them decides it: a field a bridge call can drop is a field
+  // the vendor-grant retry did drop, and that retry spawned with no law read.
+  for (const source of [store, mcp]) {
+    assert.equal((source.match(/^\s*deskLoop: /gm) ?? []).length, 1);
+    assert.doesNotMatch(source, /spawnTool/);
+  }
+  assert.doesNotMatch(readFileSync(path.join(ROOT, "electron", "peer-inbox.ts"), "utf8"), /spawnTool/);
+});
+
+test("every desk tool that can reach a spawn is held to the same law", async (t) => {
+  /*
+   * The hole the third gate found, closed and kept closed. The refusal used to
+   * be reached through a flag each door set, and only the workhorse_spawn_agent
+   * doors set it — while the desk MCP profile advertises every tool to every
+   * ACP vendor, so a chat that could not spawn called workhorse_delegate and
+   * the refusal was decoration. This walks the desk's own tools/list, collects
+   * every tool that can reach spawnAgent, and proves each one arrives at the
+   * single admission that reads the turn.
+   */
+  const mcpSource = readFileSync(path.join(ROOT, "electron", "workhorse-mcp.ts"), "utf8");
+
+  // Top-level functions first, then the ones that reach a spawn. A router — a
+  // function that switches on the tool name — is not a door but the way to
+  // one, and counting it would make every tool in the file look spawn-reaching.
+  const bodies = new Map<string, string[]>();
+  let open: string | null = null;
+  for (const line of mcpSource.split("\n")) {
+    const declared = /^(?:export )?(?:async )?function ([A-Za-z0-9_]+)\s*[(<]/.exec(line);
+    if (declared) {
+      open = declared[1]!;
+      bodies.set(open, []);
+    }
+    if (open) bodies.get(open)!.push(line);
+    if (line === "}") open = null;
+  }
+  const bodyOf = (name: string) => (bodies.get(name) ?? []).join("\n");
+  const callsInto = (text: string, name: string) => new RegExp(`\\b${name}\\(`).test(text);
+  const routers = [...bodies.keys()].filter((name) => bodyOf(name).includes('if (name === "'));
+  const doors = new Set(["spawnAgent"]);
+  for (let grew = true; grew; ) {
+    grew = false;
+    for (const name of bodies.keys()) {
+      if (doors.has(name) || routers.includes(name)) continue;
+      if ([...doors].some((door) => callsInto(bodyOf(name), door))) {
+        doors.add(name);
+        grew = true;
+      }
+    }
+  }
+  assert.deepEqual([...doors].sort(), ["askChat", "continueMission", "spawnAgent"]);
+
+  const reaching = new Set<string>();
+  for (const router of routers) {
+    const body = bodyOf(router);
+    const marks = [...body.matchAll(/if \(name === "(workhorse_[a-z_]+)"\)/g)];
+    marks.forEach((mark, index) => {
+      const next = index + 1 < marks.length ? marks[index + 1]!.index : body.length;
+      const branch = body.slice(mark.index, next);
+      if ([...doors].some((door) => callsInto(branch, door))) reaching.add(mark[1]!);
+      // No handler may hand itself the exemption. The exempt set is worked out
+      // in the door, from the profile it runs under, and a tool cannot argue
+      // its way into it by passing a field.
+      assert.ok(!branch.includes("deskLoop"), `${mark[1]} tries to exempt itself from the spawn law`);
+    });
+  }
+  assert.deepEqual(
+    [...reaching].sort(),
+    [
+      "workhorse_ask_chat",
+      "workhorse_continue_mission",
+      "workhorse_delegate",
+      "workhorse_local_continue",
+      "workhorse_spawn_agent",
+    ],
+    "a tool now reaches spawnAgent that this list does not name: hold it to the law and add it here",
+  );
+
+  // The single admission every one of them arrives at.
+  assert.equal((mcpSource.match(/\badmitSpawn\(/g) ?? []).length, 1, "the MCP side admits a spawn in one place");
+  assert.equal((mcpSource.match(/^\s*turn: spawnTurnOf\(caller\),$/gm) ?? []).length, 1);
+  assert.equal((mcpSource.match(/^\s*deskLoop: isLinkProfile\(\),$/gm) ?? []).length, 1);
+
+  // And the desk really does hand all five to an orchestrator: that is what
+  // makes the law the only thing standing between a plain turn and a worker.
+  const dir = mkdtempSync(path.join(tmpdir(), "spawn-law-"));
+  const statePath = path.join(dir, "state.json");
+  const chat = (crewModes?: string[]) => ({
+    id: "orch_1",
+    title: "Desk",
+    provider: "grok",
+    projectId: "p1",
+    messages: [{ id: "m1", role: "user", text: "hire two reviewers" }],
+    ...(crewModes ? { crewModes } : {}),
+  });
+  const writeDesk = (crewModes?: string[]) =>
+    writeFileSync(
+      statePath,
+      JSON.stringify({
+        settings: {},
+        projects: [{ id: "p1", name: "Demo", folders: [{ path: dir }] }],
+        sessions: [chat(crewModes)],
+      }),
+    );
+  const previous = { profile: process.env.WORKHORSE_MCP_PROFILE, state: process.env.WORKHORSE_STATE_PATH };
+  delete process.env.WORKHORSE_MCP_PROFILE; // a Workhorse-spawned CLI: the desk profile
+  process.env.WORKHORSE_STATE_PATH = statePath;
+  const asks: string[] = [];
+  // Only a spawn counts. A tool may read the desk on its way to one — a chat
+  // list, a Link read — and those asks are not what the law is about.
+  setWorkhorseDeskAsk(async (payload) => {
+    if ((payload as { mode?: string }).mode === "spawn") asks.push((payload as { message?: string }).message ?? "");
+    return { text: JSON.stringify({ childSessionId: "worker_1" }) };
+  });
+  try {
+    writeDesk();
+    const listed = (await handleWorkhorseRpc(
+      { jsonrpc: "2.0", id: 1, method: "tools/list" },
+      { fromSessionId: "orch_1" },
+    )) as { result?: { tools?: Array<{ name: string }> } };
+    const advertised = (listed.result?.tools ?? []).map((tool) => tool.name);
+    for (const tool of reaching) {
+      // The local-host tools appear only once an authorized host advertises
+      // the capability behind them. They reach the same door when they do.
+      if (tool.startsWith("workhorse_local_")) continue;
+      assert.ok(advertised.includes(tool), `${tool} reaches a spawn and the desk hands it to an orchestrator`);
+    }
+
+    // Each door a test can reach without a finished mission pass behind it,
+    // called for real, on the turn the detector misses. workhorse_continue_
+    // mission and workhorse_local_continue want a completed pass and a local
+    // host; they reach the same spawnAgent, which is what the walk above pins.
+    const call = async (name: string, args: Record<string, unknown>) => {
+      const result = (await handleWorkhorseRpc(
+        { jsonrpc: "2.0", id: 2, method: "tools/call", params: { name, arguments: { fromSessionId: "orch_1", ...args } } },
+        { fromSessionId: "orch_1" },
+      )) as { error?: { message?: string } };
+      return result.error?.message ?? "";
+    };
+    const held: Array<[string, Record<string, unknown>]> = [
+      ["workhorse_spawn_agent", { prompt: "Review the auth diff and report.", folder: dir }],
+      ["workhorse_delegate", { task: "Review the auth diff and report.", folder: dir }],
+      ["workhorse_ask_chat", { chat: "claude", message: "Review the auth diff and report." }],
+    ];
+    for (const [name, args] of held) {
+      assert.equal(await call(name, args), SPAWN_LAW_MISSING_ERROR, `${name} spawned on a turn without the law`);
+    }
+    assert.deepEqual(asks, [], "a refused spawn still reached the desk");
+
+    // The same three calls on a pinned chat, which carries the law on every
+    // turn: the door lets them through and the desk is asked for a worker.
+    writeDesk(["orchestrate"]);
+    for (const [name, args] of held) {
+      const error = await call(name, args);
+      assert.notEqual(error, SPAWN_LAW_MISSING_ERROR, `${name} refused a pinned chat`);
+    }
+    assert.equal(asks.length, held.length, "a pinned chat's spawns did not reach the desk");
+  } finally {
+    setWorkhorseDeskAsk(null);
+    if (previous.profile === undefined) delete process.env.WORKHORSE_MCP_PROFILE;
+    else process.env.WORKHORSE_MCP_PROFILE = previous.profile;
+    if (previous.state === undefined) delete process.env.WORKHORSE_STATE_PATH;
+    else process.env.WORKHORSE_STATE_PATH = previous.state;
+    rmSync(dir, { recursive: true, force: true });
+  }
+  t.diagnostic(`spawn-reaching desk tools held: ${[...reaching].sort().join(", ")}`);
 });
 
 test("the opening text stays under its ceiling for every role", () => {

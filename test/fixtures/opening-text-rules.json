@@ -762,9 +762,9 @@
     },
     {
       "was": "Do not scaffold a git repo unless they asked for files on disk.",
-      "now": "scaffold a git repo unless they asked for files on disk",
+      "now": "Do not invent success, scaffold a git repo unless they asked for files on disk, put the folder under a different existing project name, or say you cannot drive the GUI.",
       "keeps": [
-        "scaffold a git repo unless they asked for files on disk"
+        "Do not invent success, scaffold a git repo unless they asked for files on disk"
       ]
     },
     {

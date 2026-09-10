@@ -34,7 +34,10 @@ function deskWhereAMissionFinished(dir: string, workerStatus = "budget-exceeded"
         title: "A chat that once ran a mission",
         provider: "grok",
         projectId: "project",
-        messages: [],
+        // The turn this chat is delegating on. Since S11 every door that can
+        // reach a spawn reads it, so a chat with no turn at all spawns nobody
+        // — which is the law, not this test's subject.
+        messages: [{ id: "u1", role: "user", text: "Put workers on this and report back." }],
         lineup: {
           id: "lineup_old",
           folder: linked,

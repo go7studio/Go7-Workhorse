@@ -1572,12 +1572,25 @@ export type SpawnAdmissionInput = {
   folderExists?: (path: string) => boolean;
   allowNested?: boolean;
   /**
-   * Set when a model called the spawn tool itself. Left unset when the desk
-   * dispatched the worker — workhorse_delegate, a mission pass, a plan step,
-   * an ask that resolved to a new chat — because there is no model turn there
-   * to have carried the law, and refusing those would break delegation.
+   * The turn this spawn was asked on, read off the caller session with
+   * `spawnTurnOf`. Every caller passes it. A door that forgets is refused,
+   * because a turn nobody can produce carried nothing.
    */
   turn?: SpawnTurn;
+  /**
+   * The whole exempt set, and it is short. Today it is the Link harness
+   * profile, which never opened with a desk core and so never had the law to
+   * lose; each door works that out from the profile it runs under rather than
+   * from anything the caller sent. A desk loop that ever spawns with no model
+   * turn behind it says so here, and that is the only way in.
+   *
+   * Every other caller is a door a model can reach — workhorse_delegate, an
+   * ask that resolves to a spawn, a mission continuation, a plan step — and
+   * the law is read for all of them. Opt out, never opt in: the first cut of
+   * this was a flag each door set to be held, and the doors that set nothing
+   * were the hole.
+   */
+  deskLoop?: boolean;
 };
 
 export type SpawnAdmission = { ok: true; cwd: string } | { ok: false; error: string };
@@ -1590,14 +1603,17 @@ export function admitSpawn(input: SpawnAdmissionInput): SpawnAdmission {
   // The refusal behind SPAWN_GATE_LAW. A chat whose turn never carried the
   // spawn law still holds the tool and still reads a core that names it, and
   // it cannot see which system text it did not receive, so the desk is the
-  // only thing that can turn the call away. A worker is exempt: its own rules
-  // carry the one-helper licence, and it never receives the law at all.
-  if (
-    input.turn &&
-    parentRole === "orchestrator" &&
-    !turnCarriesSpawnLaw({ text: input.turn.text, crewMode: normalizeCrewModes(input.turn.crewModes) })
-  ) {
-    return { ok: false, error: SPAWN_LAW_MISSING_ERROR };
+  // only thing that can turn the call away. A worker is exempt by role: its
+  // own rules carry the one-helper licence, and it never receives the law.
+  //
+  // Read for every caller, and an absent turn is an empty one. Held to the
+  // doors that asked to be held, this refused a model calling the spawn tool
+  // and admitted the same model calling workhorse_delegate one line later.
+  if (parentRole === "orchestrator" && !input.deskLoop) {
+    const turn = input.turn ?? { text: "" };
+    if (!turnCarriesSpawnLaw({ text: turn.text, crewMode: normalizeCrewModes(turn.crewModes) })) {
+      return { ok: false, error: SPAWN_LAW_MISSING_ERROR };
+    }
   }
   if (isSpawnOnlyPrompt(input.prompt)) return { ok: false, error: SPAWN_ONLY_PROMPT_ERROR };
   const cwd = (input.folder ?? "").trim() || (input.projectFolder ?? "").trim();

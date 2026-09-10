@@ -9571,10 +9571,14 @@ test("desk-enforced orchestrator vs worker lineup", async () => {
     ["list_dir", "workhorse_spawn_agent", "workhorse_await_agents", "workhorse_read_chat"],
   );
 
+  // Since S11 every caller is held to the turn it spawned on, so these carry
+  // the pin the folder rules were always tested under.
+  const turn = { text: "Read project.godot and say what this game is.", crewModes: ["orchestrate"] };
   const bound = admitSpawn({
     parent: { parentId: null },
     projectFolder: "D:\\Godot\\Projects\\demo-game",
     prompt: "Read project.godot and say what this game is.",
+    turn,
   });
   assert.equal(bound.ok, true);
   if (bound.ok) assert.equal(bound.cwd, "D:\\Godot\\Projects\\demo-game");
@@ -9582,6 +9586,7 @@ test("desk-enforced orchestrator vs worker lineup", async () => {
   const unbound = admitSpawn({
     parent: { parentId: null },
     prompt: "Read project.godot and say what this game is.",
+    turn,
   });
   assert.equal(unbound.ok, false);
   if (!unbound.ok) assert.equal(unbound.error, UNBOUND_SPAWN_ERROR);
@@ -9627,6 +9632,7 @@ test("desk-enforced orchestrator vs worker lineup", async () => {
     parent: { parentId: null },
     projectFolder: "D:\\Godot\\Projects\\demo-game",
     prompt: "please spawn MiniMax",
+    turn,
   });
   assert.equal(spawnOnly.ok, false);
   if (!spawnOnly.ok) assert.equal(spawnOnly.error, SPAWN_ONLY_PROMPT_ERROR);
@@ -9636,6 +9642,7 @@ test("desk-enforced orchestrator vs worker lineup", async () => {
     folder: "D:\\Godot\\Projects\\demo-game",
     prompt: "Read project.godot and say what this game is.",
     folderExists: (value) => value === "D:\\Godot\\Projects\\demo-game",
+    turn,
   });
   assert.equal(explicit.ok, true);
   if (explicit.ok) assert.equal(explicit.cwd, "D:\\Godot\\Projects\\demo-game");

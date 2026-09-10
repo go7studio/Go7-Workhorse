@@ -769,7 +769,12 @@ test("desk spawn defaults to Composer 2.5; inner task is not a worker", () => {
     ["read_file", "cursor/task"],
   );
   assert.equal(admitSpawn({ parent: { parentId: "x", hidden: true }, prompt: "do the slice", folder: "/proj" }).ok, false);
-  assert.equal(admitSpawn({ parent: { parentId: "x" }, prompt: "do the slice", folder: "/proj" }).ok, true);
+  // An ordinary chat spawns on a turn that carried the law, which since S11 is
+  // every caller's price of admission and not the spawn tool's alone.
+  assert.equal(
+    admitSpawn({ parent: { parentId: "x" }, prompt: "do the slice", folder: "/proj", turn: { text: "spawn a reviewer" } }).ok,
+    true,
+  );
   assert.equal(isCursorInnerTask({ method: "cursor/task" }), true);
   const tool = extractToolEvent({ sessionUpdate: "cursor/task", title: "Cursor task", toolCallId: "t1" });
   assert.ok(tool);

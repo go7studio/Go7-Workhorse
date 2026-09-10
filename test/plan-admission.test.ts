@@ -343,11 +343,15 @@ test("a spawn onto a folder that is gone is refused at both doors", () => {
    * that had moved admitted the worker and the worker died on its cwd — a
    * missing-binary ENOENT, not a folder that says its own name.
    */
+  // The pin is what the law asks of every caller now; the folder is what this
+  // test is about.
+  const turn = { text: "audit the store", crewModes: ["orchestrate"] };
   const gone = admitSpawn({
     parent: { projectId: "p1" },
     projectFolder: "/repo/moved-away",
     prompt: "audit the store",
     folderExists: (value) => value !== "/repo/moved-away",
+    turn,
   });
   assert.equal(gone.ok, false);
   assert.match((gone as { error: string }).error, /Folder does not exist: \/repo\/moved-away/);
@@ -360,6 +364,7 @@ test("a spawn onto a folder that is gone is refused at both doors", () => {
     folder: "/repo/here",
     prompt: "audit the store",
     folderExists: (value) => value === "/repo/here",
+    turn,
   });
   assert.equal(live.ok, true);
   assert.equal((live as { cwd: string }).cwd, "/repo/here");

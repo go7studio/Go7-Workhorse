@@ -104,13 +104,17 @@ export const TURN_IDLE_AFTER_TRAILING_MS = 800;
 export function shouldReviveIdleTurn(input: {
   status: string;
   assistantId?: string;
-  messages: ReadonlyArray<{ id: string; role?: string; kind?: string }>;
+  messages: ReadonlyArray<{ id: string; role?: string; kind?: string; workedMs?: number }>;
 }): boolean {
   if (input.status === "running" || input.status === "needs-input") return false;
   const assistantId = input.assistantId?.trim() ?? "";
   if (!assistantId) return false;
   const at = input.messages.findIndex((message) => message.id === assistantId);
   if (at < 0) return false;
+  // closeTurn stamps workedMs. Trailing thought after that is history, not a
+  // live vendor — reviving painted Working with nothing executing, then idled
+  // again, so the horse walked in and out as if the turn were cancelled.
+  if (typeof input.messages[at]?.workedMs === "number") return false;
   return !input.messages.slice(at + 1).some((message) => message.role === "user" && !message.kind);
 }
 

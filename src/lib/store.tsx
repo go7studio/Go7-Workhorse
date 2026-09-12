@@ -7687,6 +7687,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           ingestCursorLedgerRef.current();
         }
         const closeTurn = () => {
+        const idleHandle = turnIdleTimer.current[event.sessionId];
+        if (idleHandle) window.clearTimeout(idleHandle);
+        delete turnIdleTimer.current[event.sessionId];
+        delete turnIdleStopReason.current[event.sessionId];
+        delete pendingIdleClose.current[event.sessionId];
         // The run this ending is about. A vendor event names only the session,
         // and a reused worker keeps that name across slices, so the desk reads
         // the run off the child and carries it into the settle. A row that has

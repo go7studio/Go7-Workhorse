@@ -1,4 +1,5 @@
 import { memo, useEffect, useLayoutEffect, useRef, useState, type SyntheticEvent } from "react";
+import { crewTurnInFlight } from "../lib/crew-live";
 import { collapseToolText, splitToolLine, toolIsFinished } from "../lib/grok-events";
 import { unsquashSentences } from "../lib/markdown";
 import { deskInk } from "../lib/settings";
@@ -23,7 +24,7 @@ import {
   type GroupedWorkRow,
   type TranscriptBlock,
 } from "../lib/turns";
-import type { ChatMessage } from "../lib/types";
+import type { ChatMessage, Session } from "../lib/types";
 import { MessageBody } from "./MessageBody";
 import { TimeStamp } from "./TimeStamp";
 
@@ -60,9 +61,10 @@ export function crewWorkerName(
 
 function crewWorkerLive(
   marker: ChatMessage,
-  child?: { status?: string } | null,
+  child?: Pick<Session, "status" | "agentRun" | "messages"> | null,
 ): boolean {
-  return child?.status === "running" || child?.status === "needs-input" || marker.toolStatus === "running";
+  if (child && crewTurnInFlight(child)) return true;
+  return marker.toolStatus === "running";
 }
 
 function crewWorkerFailed(
@@ -336,6 +338,11 @@ function WorkRow({
     return (
       <div key={`${firstId}-${active ? "live" : "idle"}`} className="work-step" data-kind="tool">
         <ToolLine tool={only} peer={isPeerTool(only)} />
+        {active && toolIsFinished(only.toolStatus) ? (
+          <p className="tool-line live">
+            <span className="tool-name">Thinking</span>
+          </p>
+        ) : null}
       </div>
     );
   }
@@ -466,7 +473,7 @@ export const WorkPopout = memo(function WorkPopout({
   const talking = talkingToSummary(peerTools);
   const named = namedWorkSummary(otherTools, {
     live,
-    allowThinking: !talking && threads.length === 0,
+    allowThinking: !talking,
   });
   const crew = namedCrewSummary(crewWorkers, { live: live || anyChildLive });
   const summary = closedWorkSummary({ label, talking, tools: named, crew });

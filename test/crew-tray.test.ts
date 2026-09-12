@@ -25,6 +25,14 @@ test("working count includes a worker waiting for input and a running agent life
   assert.equal(crewIsLive(worker("running", { status: "running" })), true);
   assert.equal(crewIsLive(worker("agent", { agentRun: { status: "running", startedAt: 1, isolation: "shared" } })), true);
   assert.equal(crewIsLive(worker("done")), false);
+  assert.equal(crewIsLive(worker("think", {
+    status: "idle",
+    messages: [{ id: "th", role: "assistant", kind: "thought", text: "planning", createdAt: 1 }],
+  })), true);
+  assert.equal(crewActivity(worker("think", {
+    status: "idle",
+    messages: [{ id: "th", role: "assistant", kind: "thought", text: "planning", createdAt: 1 }],
+  })), "Thinking");
 });
 
 test("latest activity uses worker output, never a queued user follow-up", () => {

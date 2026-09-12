@@ -393,8 +393,9 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
 - Composer and API stay two separate pools. Grok, Claude, and Codex stay unknown
   if they omit a bill.
 - Leftover rings, billed tokens, and retained context stay distinct meters.
-- Every percentage on the Usage page is leftover, and says so. The ring and the
-  line under it count the same way, for every vendor.
+- Every percentage on the Usage page is leftover. The ring shows the percent;
+  the line under it counts the same way, for every vendor.
+- Settings → LLMs On/Off marks are circles. This stretch cells are circles.
 - Big totals read 1.66B, not 1657.5M.
 - This chat's billed total sits in white on the left of the transcript.
   Orchestrated bots combine into one grey Crew total under it, and a click opens

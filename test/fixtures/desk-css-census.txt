@@ -725,7 +725,7 @@ c85f2749e1c5  .usage-overview .usage-brains
 34546d517648  .usage-overview .usage-brain span
 1a0ae59a1f05  .usage-brain em
 a34b3fb3f3d9  .usage-brain.on
-2721fadeeb64  .llm-mark
+55c54d522c0a  .llm-mark
 1fa0377044e3  .llm-mark.grok.on
 f8713f173831  .llm-mark.claude.on
 cb79507b2e6f  .llm-mark.codex.on
@@ -903,10 +903,10 @@ f22741e982f6  .usage-dots
 5148849790f2  .usage-dot-col
 1453607e883c  .usage-dots:not(.flat) .usage-dot-col
 7ea33bc53e32  .usage-dots.dense
-6b5186fe735b  .usage-dots.dense .usage-dot
-ae481499bdaa  .usage-dot
-c71e00e838e1  .usage-dots:not(.flat) .usage-dot, .usage-dots.flat .usage-dot
-c5828dfc1d01  .usage-dots.week .usage-dot
+471c29514877  .usage-dots.dense .usage-dot
+4bc707efab99  .usage-dot
+27df1f47d085  .usage-dots:not(.flat) .usage-dot, .usage-dots.flat .usage-dot
+27df1f47d085  .usage-dots.week .usage-dot
 8de77ed0af45  .usage-dot:disabled
 71a935a60252  .usage-dots.flat .usage-dot-col
 7157236b8511  .usage-dot.l1

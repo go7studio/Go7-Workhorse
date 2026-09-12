@@ -268,7 +268,7 @@
 }
 
 .usage-dots.dense .usage-dot {
-  border-radius: var(--radius-6);
+  border-radius: 50%;
 }
 
 .usage-dot {
@@ -280,7 +280,7 @@
   min-height: 0;
   padding: 0;
   border: 0;
-  border-radius: var(--radius-6);
+  border-radius: 50%;
   overflow: hidden;
   isolation: isolate;
   background: color-mix(in srgb, var(--text) 8%, transparent);
@@ -293,15 +293,15 @@
   width: 100%;
   aspect-ratio: 1;
   height: auto;
-  border-radius: var(--radius-6);
+  border-radius: 50%;
 }
 
 .usage-dots.week .usage-dot {
   flex: none;
   width: 100%;
-  aspect-ratio: auto;
-  height: 36px;
-  border-radius: var(--radius-10);
+  aspect-ratio: 1;
+  height: auto;
+  border-radius: 50%;
 }
 
 .usage-dot:disabled {

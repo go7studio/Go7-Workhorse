@@ -1,15 +1,13 @@
 
-/* On is a word. This wore an 8px stroke on a circle, which is the shape a
-   leftover ring uses, so a bot with no meter still read as metered and a
-   full ring said nothing about spend. The box keeps its size so no card
-   moves; only the ring is gone. */
+/* On/Off is a circular mark, the same shape it had before the leftover-ring
+   look was stripped. Add a bot stays a dashed circle of its own. */
 .llm-mark {
   display: grid;
   place-items: center;
   width: 88px;
   height: 88px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-14);
+  border: 8px solid rgba(127, 127, 127, 0.22);
+  border-radius: 50%;
   font-family: var(--display);
   font-size: var(--text-15);
   font-weight: 620;

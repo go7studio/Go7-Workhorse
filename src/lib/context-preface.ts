@@ -1,4 +1,5 @@
-import type { CrewMode, LinkedReference, PermissionMode, SandboxProfile } from "./types";
+import type { CrewMode, LinkedReference, PermissionMode, SandboxProfile, SessionEnvironment } from "./types";
+import { sessionEnvironmentKind } from "./session-environment";
 import {
   AUDITOR_SESSION_RULES,
   CURSOR_SESSION_RULES,
@@ -39,6 +40,8 @@ export type PrefaceInput = {
   /** mcp = Grok/Codex/Claude with Workhorse tools. http = custom HTTP. cursor = Cursor Agent ACP. */
   surface?: "mcp" | "http" | "cursor";
   role?: DeskRole;
+  /** This chat's workspace. Subagents inherit it when isolation is omitted. */
+  environment?: SessionEnvironment;
 };
 
 /** Workspace map for this turn: cwd, extra folders, and project references. */
@@ -52,6 +55,15 @@ export function buildVendorPreface(input: PrefaceInput): string {
     lines.push(
       "- list_dir with no path lists that working directory. Relative paths are from there. If the user means the Workhorse app folder and this path is it, use this path — do not search the home folder.",
     );
+    if (sessionEnvironmentKind(input.environment) === "worktree") {
+      lines.push(
+        "- Workspace: isolated worktree. Subagents inherit this: omit isolation, or pass isolation=worktree / spawn_subagent isolation=worktree. Do not write to the project's local folder.",
+      );
+    } else {
+      lines.push(
+        "- Workspace: this chat's local folder. Subagents inherit this: omit isolation, or pass isolation=shared / spawn_subagent isolation=none. Do not create a worktree.",
+      );
+    }
   } else {
     lines.push("- No project folder is linked to this chat.");
     lines.push(

@@ -182,7 +182,7 @@ const DESK_TOOLS: { name: string; description: string; input_schema: Record<stri
           description:
             "Ignored. The desk does not stop a worker on a token ceiling. This chat's billed spend is on the meter.",
         },
-        isolation: { type: "string", description: "worktree (default) or shared" },
+        isolation: { type: "string", description: "worktree or shared. Omit to inherit this chat's workspace: isolated worktree stays a worktree, local folder stays the local folder. Nested helpers are always shared." },
         seed: {
           type: "string",
           description: "inherit (default) may reuse an idle worker. fresh starts cold with only a handoff — no parent conversation.",

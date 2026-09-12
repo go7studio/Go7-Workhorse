@@ -284,6 +284,7 @@ import {
   leasePathForWrite,
   refreshSharedFileFingerprint,
   resolveNamedWorker,
+  resolveWorkerIsolation,
   parseWorkerHandoff,
   workerStartMessages,
   reserveWorkerName,
@@ -459,6 +460,7 @@ const EMPTY: AppState = {
   watchDayMarks: {},
   usage: [],
   usageRange: "month",
+  usagePlanWindow: "weekly",
   sidebarWidth: SIDEBAR_PANE.fallback,
   threadWidth: THREAD_PANE.fallback,
   lastModel: DEFAULT_CHOICE,
@@ -474,6 +476,8 @@ export type Store = AppState & {
   selectProject: (id: string) => void;
   linkFolder: (path?: string) => Promise<void>;
   unlinkFolder: (folderId: string) => void;
+  linkSessionFolder: (path: string) => void;
+  unlinkSessionFolder: (folderId: string) => void;
   addReference: (kind: ReferenceKind, value: string, label?: string) => void;
   removeReference: (referenceId: string) => void;
   archiveProject: (id: string, archived?: boolean) => void;
@@ -570,6 +574,7 @@ export type Store = AppState & {
   openUsage: () => void;
   closeUsage: () => void;
   setUsageRange: (range: UsageRange) => void;
+  setUsagePlanWindow: (window: import("./types").UsagePlanWindow) => void;
   setSidebarWidth: (width: number) => void;
   setThreadWidth: (width: number) => void;
 
@@ -978,6 +983,9 @@ function hydrate(value: unknown, liveRunIds?: ReadonlySet<string>): AppState {
       record.usageRange === "today" || record.usageRange === "week" || record.usageRange === "all"
         ? record.usageRange
         : "month",
+    usagePlanWindow: record.usagePlanWindow === "short" || record.usagePlanWindow === "weekly"
+      ? record.usagePlanWindow
+      : "weekly",
     sidebarWidth: clampPaneWidth((record as { sidebarWidth?: unknown }).sidebarWidth, SIDEBAR_PANE),
     threadWidth: clampPaneWidth((record as { threadWidth?: unknown }).threadWidth, THREAD_PANE),
     lastModel: normalizeChoice(record.lastModel),
@@ -1665,6 +1673,34 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         project.id === current.activeProjectId
           ? { ...project, folders: project.folders.filter((folder) => folder.id !== folderId) }
           : project,
+      ),
+    }));
+  }, []);
+
+  const linkSessionFolder = useCallback((folderPath: string) => {
+    const next = folderPath.trim();
+    if (!next) return;
+    setState((current) => {
+      const sessionId = current.activeSessionId;
+      if (!sessionId) return current;
+      return {
+        ...current,
+        sessions: current.sessions.map((session) => {
+          if (session.id !== sessionId) return session;
+          if ((session.folders ?? []).some((folder) => folder.path === next)) return session;
+          return { ...session, folders: [...(session.folders ?? []), folderFromPath(next)] };
+        }),
+      };
+    });
+  }, []);
+
+  const unlinkSessionFolder = useCallback((folderId: string) => {
+    setState((current) => ({
+      ...current,
+      sessions: current.sessions.map((session) =>
+        session.id === current.activeSessionId
+          ? { ...session, folders: (session.folders ?? []).filter((folder) => folder.id !== folderId) }
+          : session,
       ),
     }));
   }, []);
@@ -5700,7 +5736,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             const requestedEffort = parseEffort(String(payload.effort ?? ""))
               ?? parseEffortFromText(lastUserMessage(caller)?.text ?? "")
               ?? parseEffortFromText(String(payload.message ?? ""));
-            const spawnIsolation = nestedPolicy.isolation ?? payload.isolation ?? "worktree";
+            const spawnIsolation = nestedPolicy.isolation ?? resolveWorkerIsolation({
+              isolation: payload.isolation,
+              nested: isNested,
+              parentEnvironment: caller.environment,
+            });
             const admitted = admitSpawn({
               parent: caller,
               projectFolder: nestedPolicy.projectFolder,
@@ -6007,6 +6047,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               environment = { kind: "worktree", path: isolated.path, gitRoot: isolated.gitRoot, head: isolated.head };
             } else {
               isolation = "shared";
+              environment = caller.environment ?? { kind: "local" };
             }
             const childCwd = sessionExecutionCwd(environment, root);
             let claimedLeases = releaseSessionLeases(pathLeasesRef.current, childId);
@@ -8372,6 +8413,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     setState((current) => ({ ...current, usageRange: range }));
   }, []);
 
+  const setUsagePlanWindow = useCallback((window: import("./types").UsagePlanWindow) => {
+    setState((current) => (current.usagePlanWindow === window ? current : { ...current, usagePlanWindow: window }));
+  }, []);
+
   const setSidebarWidth = useCallback((width: number) => {
     setState((current) => ({ ...current, sidebarWidth: clampPaneWidth(width, SIDEBAR_PANE) }));
   }, []);
@@ -8922,6 +8967,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       selectProject,
       linkFolder,
       unlinkFolder,
+      linkSessionFolder,
+      unlinkSessionFolder,
       addReference,
       removeReference,
       archiveProject,
@@ -9002,6 +9049,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       openUsage,
       closeUsage,
       setUsageRange,
+      setUsagePlanWindow,
       setSidebarWidth,
       setThreadWidth,
       setUsageBudget,
@@ -9063,6 +9111,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       selectProject,
       linkFolder,
       unlinkFolder,
+      linkSessionFolder,
+      unlinkSessionFolder,
       addReference,
       removeReference,
       archiveProject,
@@ -9141,6 +9191,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       openUsage,
       closeUsage,
       setUsageRange,
+      setUsagePlanWindow,
       setSidebarWidth,
       setThreadWidth,
       setUsageBudget,

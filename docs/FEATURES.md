@@ -19,6 +19,8 @@ When you add a feature, add it here in the same commit.
 - Stopped and failed are terminal: each plays once and holds its last pose.
 - Only working and needs-you keep moving, and a chat at rest holds still, so a
   desk of idle chats paints nothing.
+- A finished run that left a thought or empty reply is at rest. The horse walks
+  only while the chat or its agent run is actually still going.
 - Only the failed mound overlaps. Every other motion keeps the pieces separated.
 - The mascot wears its own bot's colour on every theme, so a row says which bot
   is working before you read it. That is the colour set for the bot in Settings,

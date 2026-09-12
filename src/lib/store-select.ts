@@ -30,6 +30,8 @@ export type ComposerDesk = {
   setCrewMode: Store["setCrewMode"];
   setMissionCaps: Store["setMissionCaps"];
   setSpawnAllowlist: Store["setSpawnAllowlist"];
+  linkSessionFolder: Store["linkSessionFolder"];
+  unlinkSessionFolder: Store["unlinkSessionFolder"];
 };
 
 export function selectComposerDesk(store: Store): ComposerDesk {
@@ -47,6 +49,8 @@ export function selectComposerDesk(store: Store): ComposerDesk {
     setCrewMode: store.setCrewMode,
     setMissionCaps: store.setMissionCaps,
     setSpawnAllowlist: store.setSpawnAllowlist,
+    linkSessionFolder: store.linkSessionFolder,
+    unlinkSessionFolder: store.unlinkSessionFolder,
   };
 }
 
@@ -70,7 +74,8 @@ export function sameComposerSession(left: Session | null, right: Session | null)
     left.grokCommands === right.grokCommands &&
     left.composerDraft === right.composerDraft &&
     left.composerImages === right.composerImages &&
-    (left.spawnAllowlist ?? []).join() === (right.spawnAllowlist ?? []).join()
+    (left.spawnAllowlist ?? []).join() === (right.spawnAllowlist ?? []).join() &&
+    (left.folders ?? []).map((folder) => folder.path).join("\0") === (right.folders ?? []).map((folder) => folder.path).join("\0")
   );
 }
 
@@ -89,7 +94,9 @@ export function sameComposerDesk(left: ComposerDesk, right: ComposerDesk): boole
     left.setComposerDraft === right.setComposerDraft &&
     left.setCrewMode === right.setCrewMode &&
     left.setMissionCaps === right.setMissionCaps &&
-    left.setSpawnAllowlist === right.setSpawnAllowlist
+    left.setSpawnAllowlist === right.setSpawnAllowlist &&
+    left.linkSessionFolder === right.linkSessionFolder &&
+    left.unlinkSessionFolder === right.unlinkSessionFolder
   );
 }
 
@@ -288,6 +295,8 @@ export type UsageDesk = {
   usage: Store["usage"];
   usageRange: Store["usageRange"];
   setUsageRange: Store["setUsageRange"];
+  usagePlanWindow: Store["usagePlanWindow"];
+  setUsagePlanWindow: Store["setUsagePlanWindow"];
   closeUsage: Store["closeUsage"];
   grokPlan: Store["grokPlan"];
   refreshGrokPlan: Store["refreshGrokPlan"];
@@ -309,6 +318,8 @@ export function selectUsageDesk(store: Store): UsageDesk {
     usage: store.usage,
     usageRange: store.usageRange,
     setUsageRange: store.setUsageRange,
+    usagePlanWindow: store.usagePlanWindow,
+    setUsagePlanWindow: store.setUsagePlanWindow,
     closeUsage: store.closeUsage,
     grokPlan: store.grokPlan,
     refreshGrokPlan: store.refreshGrokPlan,
@@ -332,6 +343,8 @@ export function sameUsageDesk(left: UsageDesk, right: UsageDesk): boolean {
     left.usage === right.usage &&
     left.usageRange === right.usageRange &&
     left.setUsageRange === right.setUsageRange &&
+    left.usagePlanWindow === right.usagePlanWindow &&
+    left.setUsagePlanWindow === right.setUsagePlanWindow &&
     left.closeUsage === right.closeUsage &&
     left.grokPlan === right.grokPlan &&
     left.refreshGrokPlan === right.refreshGrokPlan &&

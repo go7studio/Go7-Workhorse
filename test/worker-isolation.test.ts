@@ -29,6 +29,23 @@ test("omitted isolation for an independent writer is worktree, matching the docu
   assert.equal(explicit?.isolation, "shared");
 });
 
+test("omitted isolation follows the parent chat's workspace", () => {
+  assert.equal(resolveWorkerIsolation({
+    parentEnvironment: { kind: "local" },
+  }), "shared");
+  assert.equal(resolveWorkerIsolation({
+    parentEnvironment: { kind: "worktree", path: "/managed/parent", gitRoot: "/repo", head: "abc" },
+  }), "worktree");
+  assert.equal(resolveWorkerIsolation({
+    isolation: "worktree",
+    parentEnvironment: { kind: "local" },
+  }), "worktree");
+  assert.equal(resolveWorkerIsolation({
+    isolation: "shared",
+    parentEnvironment: { kind: "worktree", path: "/managed/parent", gitRoot: "/repo", head: "abc" },
+  }), "shared");
+});
+
 test("nested helpers stay shared even when a caller asks for a worktree", () => {
   assert.equal(resolveWorkerIsolation({ isolation: "worktree", nested: true }), "shared");
   const policy = nestedWorkerPolicy({

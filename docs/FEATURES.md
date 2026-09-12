@@ -227,7 +227,8 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
 - Cancelling one worker stops that worker only, and the wave is not called
   finished while others run.
 - **Subagents** get lifecycle records, cascading cancellation, changed-file
-  review, and worktree isolation.
+  review, and isolation that follows the parent chat's workspace: an isolated
+  worktree parent mints a worktree; a local parent keeps children in that folder.
 - The desk does not stop a worker on a token ceiling or a runtime
   limit. Billed spend for that chat and each orchestrated bot is on the left of
   the transcript.

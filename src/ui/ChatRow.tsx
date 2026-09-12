@@ -11,18 +11,19 @@ import type { Store } from "../lib/store";
 import type { ChatLink } from "../lib/tool-labels";
 import type { Project, Session, Settings } from "../lib/types";
 import { TimeStamp } from "./TimeStamp";
+import { crewTurnInFlight } from "../lib/crew-live";
 import { HorseStatus } from "./HorseStatus";
 
 export type CrewDotKind = "working" | "failed" | "stopped" | "needs-you" | "idle";
 
 /** Shared run-state mapping; the sidebar expresses each state with the mascot. */
 export function crewDotKind(
-  session: Pick<Session, "status" | "agentRun">,
+  session: Pick<Session, "status" | "agentRun"> & { messages?: Session["messages"] },
   waveRunning = false,
 ): CrewDotKind {
   const run = session.agentRun?.status;
-  if (session.status === "running" || run === "running" || waveRunning) return "working";
   if (session.status === "needs-input") return "needs-you";
+  if (crewTurnInFlight(session) || waveRunning) return "working";
   if (run === "failed") return "failed";
   if (run === "cancelled" || run === "interrupted" || run === "timed-out" || run === "budget-exceeded") return "stopped";
   return "idle";

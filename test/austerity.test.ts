@@ -127,6 +127,8 @@ test("a dead weekly gauge reads unmetered, and a live one is not hidden by the b
   // card read "53%" in the ring and "Weekly: 47%" underneath.
   assert.equal(planRingView(card("k"), { custom: { k: kimi } })?.label, "53% left");
   assert.equal(planWindowChip(kimi), "5h: 100% · Weekly: 53%");
+  assert.equal(planRingView(card("k"), { custom: { k: kimi } }, undefined, { preference: "short" })?.label, "100% left");
+  assert.equal(planRingView(card("k"), { custom: { k: kimi } }, undefined, { preference: "weekly" })?.label, "53% left");
 
   // Codex names its weekly `primary`; picking by label would have missed it
   // and moved a ring that was already right.

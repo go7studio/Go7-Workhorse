@@ -19,6 +19,7 @@ import {
   isLocalEndpoint,
   pickClaudeWindow,
   pickPlanWindow,
+  planWindowPreference,
   claudeWindowTabs,
   planTimeWindows,
   planWindowChip,
@@ -349,6 +350,8 @@ export function UsagePane({
     usage,
     usageRange,
     setUsageRange,
+    usagePlanWindow,
+    setUsagePlanWindow,
     closeUsage,
     grokPlan,
     refreshGrokPlan,
@@ -366,11 +369,13 @@ export function UsagePane({
   } = useStoreSelector(selectUsageDesk, sameUsageDesk);
   const [focus, setFocus] = useState<Focus>("overview");
   const [claudeWindow, setClaudeWindowState] = useState(
-    () => planWindowByFocus.get("overview") ?? "weekly_all",
+    () => planWindowByFocus.get("overview") ?? "",
   );
+  const planWindow = usagePlanWindow ?? "weekly";
   const setClaudeWindow = (id: string, key = String(focus)) => {
     planWindowByFocus.set(key, id);
     setClaudeWindowState(id);
+    setUsagePlanWindow(planWindowPreference(id));
   };
   useEffect(() => {
     if (homeSignal > 0) setFocus("overview");
@@ -378,11 +383,7 @@ export function UsagePane({
   useEffect(() => {
     const key = String(focus);
     const saved = planWindowByFocus.get(key);
-    if (saved) {
-      setClaudeWindowState(saved);
-      return;
-    }
-    setClaudeWindowState(focus === "claude" ? "weekly_all" : "");
+    setClaudeWindowState(saved ?? "");
   }, [focus]);
   const range = usageRange ?? "month";
   const events = visibleUsageEvents((usage ?? []).filter((event) => inRange(event, range)), settings);
@@ -448,7 +449,7 @@ export function UsagePane({
   const timeWindows = planTimeWindows(plan);
   const claudePick = pickClaudeWindow(focused?.provider === "claude" ? plan : claudePlan, claudeWindow);
   const windowPick = focused
-    ? pickPlanWindow(plan, claudeWindow, focused.provider)
+    ? pickPlanWindow(plan, claudeWindow || undefined, focused.provider, planWindow)
     : undefined;
   const claudeTabs = claudeWindowTabs(focused?.provider === "claude" ? plan : plan);
   const windowTabs =
@@ -481,11 +482,15 @@ export function UsagePane({
   // shown that way and the rest read as spend, so the same ring meant two
   // things depending on which card you opened.
   const allowanceFact = windowPick?.unlimited ? "∞" : `${Math.round(Math.max(0, 100 - selectedUsagePercent))}%`;
-  const planCopyBase = plan
+  const planCopyBase = windowPick
+    ? windowPick.unlimited
+      ? `${windowPick.label}: no cap.`
+      : windowPick.resetsAt
+        ? `${windowPick.label} · ${formatPlanReset(windowPick.resetsAt)}.`
+        : `${windowPick.label}.`
+    : plan
     ? weeklyUnlimited
-      ? windowPick && !windowPick.unlimited && windowPick.resetsAt
-        ? `${windowPick.label} limit · ${formatPlanReset(windowPick.resetsAt)}.`
-        : "5h limit."
+      ? "5h limit."
     : plan.leftPercent <= 0
       ? plan.resetsAt
         ? `Spent · ${formatReset(plan.resetsAt)}.`
@@ -542,13 +547,32 @@ export function UsagePane({
                 </button>
               ))}
             </div>
+            <div className="actions usage-ranges usage-limits-windows">
+              <button
+                className={planWindow === "short" ? "tiny active-kind" : "tiny"}
+                type="button"
+                onClick={() => setUsagePlanWindow("short")}
+              >
+                5h
+              </button>
+              <button
+                className={planWindow === "weekly" ? "tiny active-kind" : "tiny"}
+                type="button"
+                onClick={() => setUsagePlanWindow("weekly")}
+              >
+                Weekly
+              </button>
+            </div>
             <div className="usage-brains">
               {cards.map((row, index) => {
                 // A model served from this machine has no allowance to draw.
                 const local = isLocalEndpoint(
                   settings.customBots.find((bot) => `bot:${bot.id}` === row.focus)?.baseUrl,
                 );
-                const ring = planRingView(row, deskPlans, planWindowByFocus.get(String(row.focus)), { local });
+                const ring = planRingView(row, deskPlans, undefined, {
+                  local,
+                  preference: planWindow,
+                });
                 const chip = planWindowChip(leftoverForCard(row, deskPlans), { local, provider: row.provider });
                 const missing = ring
                   ? undefined

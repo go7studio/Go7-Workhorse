@@ -121,6 +121,10 @@ export type ChatImage = {
   kind?: AttachmentKind;
   text?: string;
   folder?: string;
+  /** Absolute directory this file came from when a folder was attached. */
+  folderPath?: string;
+  /** True when this row is the folder itself, not a file inside it. */
+  directory?: boolean;
   sourcePath?: string;
   size?: number;
   durationMs?: number;
@@ -590,6 +594,8 @@ export type Session = {
   securityPolicy?: SessionSecurityPolicy;
   /** Where this chat executes. Missing on older saves means the project's local folder. */
   environment?: SessionEnvironment;
+  /** Extra folders linked on this chat, besides the project's. */
+  folders?: LinkedFolder[];
   vendorSessionId?: string;
   /** Provider that owns vendorSessionId. Cleared when This-chat vendor changes. */
   vendorProvider?: ProviderId;
@@ -1001,6 +1007,8 @@ export type Settings = {
 };
 
 export type UsageRange = "today" | "week" | "month" | "all";
+/** Plan leftover window on Usage: 5h burst vs weekly allowance. */
+export type UsagePlanWindow = "short" | "weekly";
 
 export type GrokPlanProduct = {
   product: string;
@@ -1103,6 +1111,8 @@ export type AppState = {
   watchDayMarks: WatchDayMarks;
   usage: UsageEvent[];
   usageRange: UsageRange;
+  /** Which plan leftover window Usage draws: 5h or weekly. Survives restart. */
+  usagePlanWindow?: UsagePlanWindow;
   externalTasks?: { byId: Record<string, ExternalTask>; byKey: Record<string, string> };
   deskPlans?: {
     grok?: GrokPlanUsage;

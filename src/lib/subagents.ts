@@ -2573,16 +2573,22 @@ export function nextMissionIteration(
 }
 
 /**
- * Independent writers default to a worktree. Nested bounded helpers stay
- * shared. Anything not explicitly "shared" is worktree so omitted isolation
- * cannot drop two writers into one dirty checkout.
+ * Nested helpers stay shared. An explicit isolation wins. When isolation is
+ * omitted, the child follows the parent chat's workspace: an isolated
+ * worktree parent mints a worktree; a local parent stays in that folder.
+ * Without a parent, omitted isolation stays worktree so persisted runs and
+ * callers with no environment keep the old default.
  */
 export function resolveWorkerIsolation(input: {
   isolation?: string | null;
   nested?: boolean;
+  parentEnvironment?: Session["environment"];
 } = {}): "worktree" | "shared" {
   if (input.nested) return "shared";
   if (input.isolation === "shared") return "shared";
+  if (input.isolation === "worktree") return "worktree";
+  if (input.parentEnvironment?.kind === "worktree") return "worktree";
+  if (input.parentEnvironment) return "shared";
   return "worktree";
 }
 

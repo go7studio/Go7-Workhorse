@@ -293,7 +293,9 @@ export function sameComposerImages(left?: Session["composerImages"], right?: Ses
         item.id === next[index]?.id &&
         item.data === next[index]?.data &&
         item.text === next[index]?.text &&
-        item.folder === next[index]?.folder,
+        item.folder === next[index]?.folder &&
+        item.folderPath === next[index]?.folderPath &&
+        item.directory === next[index]?.directory,
     )
   );
 }
@@ -316,6 +318,41 @@ export function applyComposerDrafts<T extends { id: string; composerDraft?: stri
     return { ...session, composerDraft: draft.text, composerImages: draft.images };
   });
   return changed ? next : sessions;
+}
+
+/** Sidecar overlay wins, including `{}` after a successful send. Missing overlay falls back to the session. */
+export function composerStateForSession(
+  session: Pick<Session, "id" | "composerDraft" | "composerImages"> | null | undefined,
+  overlay?: ComposerDraftSnap,
+): { text: string; images: ChatImage[] } {
+  if (!session) return { text: "", images: [] };
+  if (overlay) {
+    return { text: overlay.text ?? "", images: overlay.images ? [...overlay.images] : [] };
+  }
+  return {
+    text: session.composerDraft ?? "",
+    images: session.composerImages ? [...session.composerImages] : [],
+  };
+}
+
+export function composerDraftsFromSessions(
+  sessions: Array<Pick<Session, "id" | "composerDraft" | "composerImages">>,
+): Record<string, ComposerDraftSnap> {
+  const drafts: Record<string, ComposerDraftSnap> = {};
+  for (const session of sessions) {
+    if (!hasComposerDraft(session)) continue;
+    drafts[session.id] = snapComposerDraft(session.composerDraft ?? "", session.composerImages);
+  }
+  return drafts;
+}
+
+/** Overlay live sidecar drafts, then drop empty chats. Used when leaving or switching chats. */
+export function withComposerDrafts(
+  sessions: Session[],
+  drafts: Record<string, ComposerDraftSnap>,
+  keepId?: string | null,
+): Session[] {
+  return dropDrafts(applyComposerDrafts(sessions, drafts), keepId);
 }
 
 export function isDraftChat(session: Pick<Session, "messages" | "archivedAt" | "composerDraft" | "composerImages">): boolean {

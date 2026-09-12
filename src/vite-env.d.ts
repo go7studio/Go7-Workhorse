@@ -118,6 +118,9 @@ type WorkhorseBridge = {
       data?: string;
       sourcePath?: string;
       size?: number;
+      folder?: string;
+      folderPath?: string;
+      directory?: boolean;
     }[]
   >;
   revealProject: (folder: string) => Promise<void>;

@@ -1123,12 +1123,12 @@ export function planRingView(
   if (chosen) {
     if (chosen.unlimited) return { value: 1, label: "∞", plan, unmetered: true };
     const left = clampLeftover(100 - chosen.usagePercent);
-    return { value: left / 100, label: `${Math.round(left)}% left`, plan };
+    return { value: left / 100, label: `${Math.round(left)}%`, plan };
   }
   const allowance = planAllowance(plan, { ...options, provider: row.provider });
   if (allowance.status === "unmetered") return { value: 1, label: "∞", plan, unmetered: true };
   if (allowance.status === "known") {
-    return { value: allowance.leftPercent / 100, label: `${Math.round(allowance.leftPercent)}% left`, plan };
+    return { value: allowance.leftPercent / 100, label: `${Math.round(allowance.leftPercent)}%`, plan };
   }
   return undefined;
 }

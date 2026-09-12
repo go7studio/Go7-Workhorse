@@ -3678,7 +3678,7 @@ test("parseGrokPlanUsage reads weekly SuperGrok pool remaining", () => {
   assert.equal(plan?.leftPercent, 83);
   assert.equal(plan?.period, "weekly");
   assert.equal(plan?.products[0]?.label, "Build");
-  assert.match(readFileSync(path.join(ROOT, "src", "ui", "UsagePane.tsx"), "utf8"), /% left/);
+  assert.match(readFileSync(path.join(ROOT, "src", "ui", "UsagePane.tsx"), "utf8"), /leftPercent/);
 
   const spent = parseGrokPlanUsage({
     config: {
@@ -3699,7 +3699,7 @@ test("parseGrokPlanUsage reads weekly SuperGrok pool remaining", () => {
   assert.equal(spent?.leftPercent, 0);
   assert.equal(
     planRingView({ focus: "grok", provider: "grok", key: "grok" }, { grok: spent })?.label,
-    "0% left",
+    "0%",
   );
 
   const spentBuildOnly = parseGrokPlanUsage({
@@ -3723,7 +3723,7 @@ test("parseGrokPlanUsage reads weekly SuperGrok pool remaining", () => {
   assert.equal(spentRemaining?.leftPercent, 0);
   assert.equal(
     planRingView({ focus: "grok", provider: "grok", key: "grok" }, { grok: spentRemaining })?.label,
-    "0% left",
+    "0%",
   );
   const spentVal = parseGrokPlanUsage({ config: { creditRemainingPercent: { val: 0 } } });
   assert.equal(spentVal?.leftPercent, 0);
@@ -5816,7 +5816,7 @@ test("UsagePane ships the Figma fuel-ring overview, not the old token line", asy
   assert.match(pane, /usage-limits/);
   assert.match(pane, /claudeWindowTabs/);
   assert.match(pane, /setClaudeWindow/);
-  assert.match(pane, /% left/);
+  assert.match(pane, /leftPercent/);
   assert.match(pane, /Unlimited/);
   assert.match(pane, /ContextMeter/);
   assert.match(pane, /referenceOnly/);
@@ -5920,7 +5920,7 @@ test("UsagePane ships the Figma fuel-ring overview, not the old token line", asy
   assert.match(css, /--stretch-cols: 7/);
   assert.match(css, /repeat\(var\(--stretch-cols\), minmax\(0, 1fr\)\)/);
   assert.match(css, /aspect-ratio: 1/);
-  assert.match(css, /\.usage-dots\.week \.usage-dot \{[\s\S]*aspect-ratio: auto[\s\S]*height: 36px/);
+  assert.match(css, /\.usage-dots\.week \.usage-dot \{[\s\S]*aspect-ratio: 1[\s\S]*border-radius: 50%/);
   assert.match(pane, /--stretch-cols/);
   assert.match(pane, /startViewTransition/);
   assert.match(pane, /view\.startViewTransition\(apply\)/);
@@ -6219,7 +6219,7 @@ test("Usage rings include every desk LLM even with no spend", () => {
   });
   assert.equal(planRingView(claudeCard, {
     claude: { usedPercent: 7, leftPercent: 93, period: "weekly", prepaidBalance: 0, products: [{ product: "weekly_all", label: "All models", usagePercent: 7 }] },
-  })?.label, "93% left");
+  })?.label, "93%");
   assert.equal(leftoverForCard({ focus: "cursor:cursor-models", provider: "cursor", key: "cursor:cursor-models" }, {}), undefined);
   const mini = leftoverForCard(cards.find((card) => card.label === "MiniMax")!, {
     custom: {
@@ -6266,11 +6266,11 @@ test("Usage rings include every desk LLM even with no spend", () => {
   assert.equal(pickClaudeWindow(claudePlan, "weekly_scoped")?.label, "Fable");
   assert.equal(
     planRingView(claudeCard, { claude: claudePlan }, "session")?.label,
-    "77% left",
+    "77%",
   );
   assert.equal(
     planRingView(claudeCard, { claude: claudePlan })?.label,
-    "93% left",
+    "93%",
   );
   assert.equal(
     planRingView(cards.find((card) => card.label === "MiniMax")!, {
@@ -6278,7 +6278,7 @@ test("Usage rings include every desk LLM even with no spend", () => {
         bot_mini: { usedPercent: 0, leftPercent: 100, period: "weekly", prepaidBalance: 0, products: [] },
       },
     })?.label,
-    "100% left",
+    "100%",
   );
   const miniWindows = {
     usedPercent: 0,

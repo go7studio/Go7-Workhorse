@@ -43,7 +43,7 @@ test("the ring and the line under it count the same way", () => {
 
   // Both leftover. The card used to read 53% in the ring and "Weekly: 47%"
   // underneath: two numbers, opposite meanings, one card.
-  assert.equal(planRingView(card, { custom: { k: plan } })?.label, "53% left");
+  assert.equal(planRingView(card, { custom: { k: plan } })?.label, "53%");
   assert.equal(planWindowChip(plan), "5h: 100% · Weekly: 53%");
 
   const pane = source("src", "ui", "UsagePane.tsx");
@@ -51,13 +51,11 @@ test("the ring and the line under it count the same way", () => {
   assert.doesNotMatch(pane, /% used/, "every percentage on this page is leftover");
 });
 
-test("On is a word, not a ring", () => {
+test("On is a circular mark", () => {
   const css = deskCss();
   const mark = css.slice(css.indexOf(".llm-mark {"), css.indexOf(".llm-mark.grok.on"));
-  assert.doesNotMatch(mark, /border-radius:\s*50%/, "a circle with a stroke is the shape a leftover ring uses");
-  assert.match(mark, /border-radius:\s*var\(--radius-14\)/);
-  assert.match(mark, /border:\s*1px/);
-  // Add a bot is a mark, not a meter reading, so it keeps its circle.
+  assert.match(mark, /border-radius:\s*50%/);
+  assert.match(mark, /border:\s*8px/);
   assert.match(css, /\.llm-mark\.plus \{[^}]*border-radius:\s*50%/);
 });
 

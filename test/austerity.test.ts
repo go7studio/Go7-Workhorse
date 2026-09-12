@@ -125,10 +125,10 @@ test("a dead weekly gauge reads unmetered, and a live one is not hidden by the b
   assert.equal(planAllowance(kimi).status, "known");
   // Ring and chip are both leftover now. The chip used to print spend, so this
   // card read "53%" in the ring and "Weekly: 47%" underneath.
-  assert.equal(planRingView(card("k"), { custom: { k: kimi } })?.label, "53% left");
+  assert.equal(planRingView(card("k"), { custom: { k: kimi } })?.label, "53%");
   assert.equal(planWindowChip(kimi), "5h: 100% · Weekly: 53%");
-  assert.equal(planRingView(card("k"), { custom: { k: kimi } }, undefined, { preference: "short" })?.label, "100% left");
-  assert.equal(planRingView(card("k"), { custom: { k: kimi } }, undefined, { preference: "weekly" })?.label, "53% left");
+  assert.equal(planRingView(card("k"), { custom: { k: kimi } }, undefined, { preference: "short" })?.label, "100%");
+  assert.equal(planRingView(card("k"), { custom: { k: kimi } }, undefined, { preference: "weekly" })?.label, "53%");
 
   // Codex names its weekly `primary`; picking by label would have missed it
   // and moved a ring that was already right.
@@ -141,7 +141,7 @@ test("a dead weekly gauge reads unmetered, and a live one is not hidden by the b
   };
   assert.equal(
     planRingView({ focus: "codex", provider: "codex", key: "codex" }, { codex })?.label,
-    "95% left",
+    "95%",
   );
 
   // Ordinary local models have no allowance. Grok Bot is the one metered local door.
@@ -153,7 +153,7 @@ test("a dead weekly gauge reads unmetered, and a live one is not hidden by the b
     planRingView(card("grok-bot"), { custom: { "grok-bot": kimi } }, undefined, {
       local: isLocalEndpoint("http://127.0.0.1:8787/v1"),
     })?.label,
-    "53% left",
+    "53%",
   );
   assert.equal(isLocalEndpoint("https://api.minimax.io/v1"), false);
   assert.equal(planAllowance(undefined, { local: true }).status, "unmetered");

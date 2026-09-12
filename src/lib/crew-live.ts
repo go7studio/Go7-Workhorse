@@ -24,20 +24,18 @@ export function lastCrewActivity(session: { messages?: ChatMessage[] }): ChatMes
 
 /**
  * A worker is still on the job through thinking, not only while a tool is
- * in flight. Status can go idle between vendor rounds; the transcript still
- * says the turn is open.
+ * in flight. Status can go idle between vendor rounds; the agent run is
+ * what says the turn is still open.
+ *
+ * Leftover thoughts, empty assistant bubbles, and stuck tool rows after a
+ * finished run are history — they must not keep the horse walking.
  */
 export function crewTurnInFlight(session: Pick<Session, "status" | "agentRun"> & { messages?: ChatMessage[] }): boolean {
   if (session.status === "running" || session.status === "needs-input") return true;
   const run = session.agentRun?.status;
+  if (!run || TERMINAL_RUN.has(run)) return false;
   if (run === "running") return true;
-  if (session.agentRun && !session.agentRun.finishedAt && run && !TERMINAL_RUN.has(run)) return true;
-  const last = lastCrewActivity(session);
-  if (!last) return false;
-  if (last.kind === "thought") return true;
-  if (last.kind === "tool" && !toolIsFinished(last.toolStatus)) return true;
-  if (last.role === "assistant" && !last.kind && !(last.text ?? "").trim()) return true;
-  return false;
+  return Boolean(session.agentRun && !session.agentRun.finishedAt);
 }
 
 export function crewActivityLine(session: Session, live = crewTurnInFlight(session)): string {

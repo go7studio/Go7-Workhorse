@@ -131,6 +131,15 @@ test("crew dots map run state onto the vendor circle", () => {
   assert.equal(crewDotKind({ status: "idle", agentRun: { status: "interrupted", startedAt: 1, isolation: "shared" } }), "stopped");
   assert.equal(crewDotKind({ status: "idle", agentRun: { status: "timed-out", startedAt: 1, isolation: "shared" } }), "stopped");
   assert.equal(crewDotKind({ status: "idle", agentRun: { status: "completed", startedAt: 1, isolation: "shared" } }), "idle");
+  assert.equal(
+    crewDotKind({
+      status: "idle",
+      agentRun: { status: "completed", startedAt: 1, finishedAt: 2, isolation: "shared" },
+      messages: [{ id: "th", role: "assistant", kind: "thought", text: "planning", createdAt: 1 }],
+    }),
+    "idle",
+    "a finished run that left a thought is at rest",
+  );
   assert.match(read("src/styles/crew-dots.css"), /\.dot\.failed/);
   assert.match(read("src/styles/crew-dots.css"), /\.dot\.stopped/);
   assert.match(read("src/styles/crew-dots.css"), /\.dot\.needs-you/);

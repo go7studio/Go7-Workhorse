@@ -39,6 +39,7 @@ import { learningInboundPath } from "../src/lib/learning-paths";
 import { peerAskTimeoutMs, watchPeerInbox, writeBridgeRecord, type PeerAsk } from "./peer-inbox";
 import { existingPeerReply } from "../src/lib/session-bridge";
 import { listDropFiles } from "./drop-files";
+import { attachDialogProperties, attachDialogTitle, windowsNeedsAttachChoice } from "./attach-pick";
 
 import { displaySrcForHref, resolveMediaProtocolFile } from "./media-src";
 import { findSourceFile, listGitChanges, readEditStatsAsync, readFileDiff, readGitHead, readSourceText, recordFileInstance } from "./project-diff";
@@ -1457,13 +1458,24 @@ app.whenReady().then(async () => {
   });
 
   ipcMain.handle("attach:pick", async () => {
+    let kind: "files" | "folder" | "mixed" = "mixed";
+    if (windowsNeedsAttachChoice(process.platform)) {
+      const choice = await dialog.showMessageBox({
+        type: "question",
+        buttons: ["Files", "Folder", "Cancel"],
+        defaultId: 0,
+        cancelId: 2,
+        noLink: true,
+        title: "Attach files or folders",
+        message: "Attach files or a folder?",
+      });
+      if (choice.response === 2) return [];
+      kind = choice.response === 1 ? "folder" : "files";
+    }
     const result = await dialog.showOpenDialog({
-      title: "Attach files or folders",
+      title: attachDialogTitle(kind),
       buttonLabel: "Attach",
-      properties:
-        process.platform === "win32"
-          ? ["openFile", "multiSelections"]
-          : ["openFile", "openDirectory", "multiSelections"],
+      properties: attachDialogProperties(process.platform, kind),
     });
     if (result.canceled) return [];
     return result.filePaths.filter((item) => typeof item === "string" && item.trim());

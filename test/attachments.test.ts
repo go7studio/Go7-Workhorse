@@ -8,6 +8,8 @@ import { buildAnthropicBody, buildOpenAiBody } from "../electron/custom-http";
 import { displaySrcForHref, resolveDisplayFile, resolveMediaProtocolFile } from "../electron/media-src";
 import {
   attachmentKind,
+  attachmentPromptBlock,
+  hasSendableAttachment,
   MAX_FILE_BYTES,
   MAX_IMAGES,
   base64DecodedBytes,
@@ -29,6 +31,8 @@ test("attachment classifier recognizes documents, audio, and video", () => {
   assert.equal(attachmentKind({ name: "interview.mp3" }), "audio");
   assert.equal(attachmentKind({ name: "demo.mov" }), "video");
   assert.equal(attachmentKind({ name: "main.ts" }), "file");
+  assert.equal(attachmentKind({ name: "hero.blend" }), "file");
+  assert.equal(attachmentKind({ name: "bundle.zip" }), "file");
 });
 
 test("spawned visual agents receive bounded workspace attachments", () => {
@@ -70,11 +74,9 @@ test("the CLI takes every file type the desk takes", () => {
   // offload into the real desk store instead of this test's temp root.
   const priorState = process.env.WORKHORSE_STATE_PATH;
   delete process.env.WORKHORSE_STATE_PATH;
-  // The desk accepts 84 extensions when you drag one onto the window. This path
-  // knew 14, from a private table beside the real one, so html, svg, every
-  // Office document, most audio and most video arrived as
-  // application/octet-stream — a blob no model could read. The two must not
-  // drift apart again, so this asks the classifier rather than a second list.
+  // The desk and the CLI share one classifier. html, svg, Office, audio and
+  // video must keep their real types; a .blend is a path-linked file, not a
+  // blob dumped into the prompt.
   const root = mkdtempSync(path.join(os.tmpdir(), "workhorse-spawn-types."));
   try {
     const cases: Array<[string, AttachmentKind, string]> = [
@@ -86,6 +88,7 @@ test("the CLI takes every file type the desk takes", () => {
       ["clip.mkv", "video", "video/x-matroska"],
       ["clip.webm", "audio", "audio/webm"],
       ["photo.bmp", "image", "image/bmp"],
+      ["hero.blend", "file", "application/x-blender"],
     ];
     for (const [name, kind, mime] of cases) {
       writeFileSync(path.join(root, name), Buffer.from("x"));
@@ -94,15 +97,41 @@ test("the CLI takes every file type the desk takes", () => {
       assert.equal(attachment?.mimeType, mime, `${name} should carry its real type`);
     }
 
-    // What the desk refuses, the CLI refuses by name, instead of passing it
-    // through as an unnamed blob.
+    writeFileSync(path.join(root, "hero.blend"), Buffer.alloc(400 * 1024));
+    const [blend] = spawnAttachments(["hero.blend"], root);
+    assert.equal(blend?.kind, "file");
+    assert.equal(blend?.data, "");
+    assert.equal(blend?.text, undefined);
+    assert.equal(blend?.sourcePath, path.join(root, "hero.blend"));
     writeFileSync(path.join(root, "bundle.zip"), Buffer.from("x"));
-    assert.throws(() => spawnAttachments(["bundle.zip"], root), /does not take \.zip files/);
+    const [zip] = spawnAttachments(["bundle.zip"], root);
+    assert.equal(zip?.kind, "file");
+    assert.equal(zip?.mimeType, "application/zip");
+    assert.equal(zip?.sourcePath, path.join(root, "bundle.zip"));
   } finally {
     if (priorState === undefined) delete process.env.WORKHORSE_STATE_PATH;
     else process.env.WORKHORSE_STATE_PATH = priorState;
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("a blend or other binary is linked by path, not dumped into the prompt", () => {
+  const blend: ChatImage = {
+    id: "b1",
+    name: "hero.blend",
+    mimeType: "application/x-blender",
+    data: "",
+    kind: "file",
+    sourcePath: "D:\\art\\hero.blend",
+    size: 12_000_000,
+  };
+  const kept = normalizeImages([blend]);
+  assert.equal(kept[0]?.sourcePath, "D:\\art\\hero.blend");
+  assert.equal(kept[0]?.text, undefined);
+  assert.equal(hasSendableAttachment(kept[0]!), true);
+  const blocks = buildAcpPrompt("use this mesh", kept);
+  assert.match(blocks[1]?.type === "text" ? blocks[1].text : "", /Linked file `hero\.blend`/);
+  assert.match(attachmentPromptBlock(kept[0]!), /D:\\art\\hero\.blend/);
 });
 
 test("attachment size is capped per family, and nothing is dropped in silence", () => {

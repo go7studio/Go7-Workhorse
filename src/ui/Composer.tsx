@@ -7,6 +7,8 @@ import {
   droppedFromPickerFile,
   filesFromClipboard,
   folderNameFromPath,
+  folderChipLabel,
+  folderPathsFromAttachments,
   groupAttachments,
   imageSrc,
   isPicture,
@@ -124,6 +126,8 @@ export const Composer = memo(function Composer({
     setCrewMode,
     setMissionCaps,
     setSpawnAllowlist,
+    linkSessionFolder,
+    unlinkSessionFolder,
     deskSkills,
   } = useStoreSelector(selectComposerDesk, sameComposerDesk);
   const ink = session ? deskInk(session, settings) : undefined;
@@ -262,9 +266,15 @@ export const Composer = memo(function Composer({
         ? droppedFromPickerFile(item, window.workhorse?.pathForFile(item) || undefined)
         : item;
       const image = dropped.attachment ?? (dropped.file ? await readChatAttachment(dropped.file, dropped.sourcePath) : null);
-      if (image) next.push(dropped.folder ? { ...image, folder: dropped.folder } : image);
+      if (!image) continue;
+      next.push({
+        ...image,
+        ...(dropped.folder ? { folder: dropped.folder } : {}),
+        ...(dropped.folderPath ? { folderPath: dropped.folderPath } : {}),
+      });
     }
     if (next.length === 0) return;
+    for (const folderPath of folderPathsFromAttachments(next)) linkSessionFolder(folderPath);
     setImages((current) => [...current, ...next].slice(0, MAX_IMAGES));
   };
 
@@ -440,26 +450,29 @@ export const Composer = memo(function Composer({
             ))}
           </ul>
         )}
-        {images.length > 0 && (
+        {(images.length > 0 || (session?.folders ?? []).length > 0) && (
           <ul className="composer-thumbs">
             {groupAttachments(images).map((group) => {
               if (group.type === "folder") {
+                const folderPath =
+                  group.files.find((item) => item.directory)?.sourcePath ||
+                  group.files.find((item) => item.folderPath)?.folderPath;
+                const linked = folderPath ? session?.folders?.find((folder) => folder.path === folderPath) : undefined;
                 return (
                   <li key={`folder:${group.name}`} className="composer-thumb file folder">
-                    <span className="composer-file" title={`${group.name} · ${group.files.length} files`}>
+                    <span className="composer-file" title={folderPath ? `${group.name} · ${folderPath}` : `${group.name} · ${folderChipLabel(group.files)}`}>
                       {group.name}
-                      <em>
-                        {group.files.length} file{group.files.length === 1 ? "" : "s"}
-                      </em>
+                      <em>{folderChipLabel(group.files)}</em>
                     </span>
                     <button
                       type="button"
                       aria-label={`Remove ${group.name}`}
-                      onClick={() =>
+                      onClick={() => {
+                        if (linked) unlinkSessionFolder(linked.id);
                         setImages((current) =>
                           current.filter((item) => (item.folder || folderNameFromPath(item.name)) !== group.name),
-                        )
-                      }
+                        );
+                      }}
                     >
                       <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
                         <path
@@ -501,6 +514,26 @@ export const Composer = memo(function Composer({
                 </li>
               );
             })}
+            {(session?.folders ?? [])
+              .filter((folder) => !folderPathsFromAttachments(images).includes(folder.path))
+              .map((folder) => (
+                <li key={`linked:${folder.id}`} className="composer-thumb file folder">
+                  <span className="composer-file" title={folder.path}>
+                    {folder.label}
+                    <em>Folder</em>
+                  </span>
+                  <button type="button" aria-label={`Remove ${folder.label}`} onClick={() => unlinkSessionFolder(folder.id)}>
+                    <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
+                      <path
+                        d="M3 3l6 6M9 3 3 9"
+                        stroke="currentColor"
+                        strokeWidth="1.8"
+                        strokeLinecap="round"
+                      />
+                    </svg>
+                  </button>
+                </li>
+              ))}
           </ul>
         )}
         <form
@@ -578,7 +611,6 @@ export const Composer = memo(function Composer({
           className="composer-file-input"
           type="file"
           multiple
-          accept="image/*,.txt,.md,.json,.csv,.ts,.tsx,.js,.jsx,.py,.go,.rs,.java,.pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.rtf,.odt,audio/*,video/*"
           onChange={(event) => {
             void addFiles([...event.target.files ?? []]);
             event.target.value = "";

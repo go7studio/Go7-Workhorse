@@ -27,6 +27,7 @@ import type { AttachmentKind, ChatImage, CustomLlm, MissionCaps, MissionIteratio
 import {
   attachmentKind,
   attachmentMime,
+  isTextFile,
   MAX_AUDIO_BYTES,
   MAX_DOCUMENT_BYTES,
   MAX_FILE_BYTES,
@@ -444,7 +445,7 @@ const TOOLS = [
         files: { type: "array", items: { type: "string" }, description: "Files to attach to the worker" },
         timeoutSeconds: { type: "number", description: "Ignored. The desk does not stop a worker on a runtime limit. The worker runs until it finishes or is cancelled." },
         tokenBudget: { type: "number", description: "Ignored. The desk does not stop a worker on a token ceiling. This chat's billed spend is on the meter." },
-        isolation: { type: "string", description: "worktree (default) or shared. Independent writers default to a worktree. Nested bounded helpers are always shared." },
+        isolation: { type: "string", description: "worktree or shared. Omit to inherit this chat's workspace: isolated worktree stays a worktree, local folder stays the local folder. Nested helpers are always shared." },
         planStepId: { type: "string", description: "Optional executable plan step id" },
         folder: { type: "string", description: "Optional absolute working folder" },
         wait: { type: "boolean", description: "Ignored on Link. Always returns the worker id promptly." },
@@ -577,7 +578,7 @@ const TOOLS = [
         effort: { type: "string", description: "Explicit user override only. Omit to keep a reused worker's thinking level; otherwise the desk derives it from task depth" },
         timeoutSeconds: { type: "number", description: "Ignored. The desk does not stop a worker on a runtime limit. The worker runs until it finishes or is cancelled." },
         tokenBudget: { type: "number", description: "Ignored. The desk does not stop a worker on a token ceiling. This chat's billed spend is on the meter." },
-        isolation: { type: "string", description: "worktree (default) or shared. Independent writers default to a worktree. Nested bounded helpers are always shared." },
+        isolation: { type: "string", description: "worktree or shared. Omit to inherit this chat's workspace: isolated worktree stays a worktree, local folder stays the local folder. Nested helpers are always shared." },
         seed: {
           type: "string",
           description: "Omit to start a new worker. inherit asks the desk to reuse any idle worker on the same bot and inherit its transcript. fresh starts cold with only a handoff — no parent conversation.",
@@ -2187,10 +2188,23 @@ export function spawnAttachments(files: string[] | undefined, cwd: string): Chat
     const stat = fs.statSync(resolved);
     if (!stat.isFile()) throw new Error(`Attachment is not a file: ${file}`);
     const name = path.basename(resolved);
-    const kind = attachmentKind({ name });
-    if (!kind) throw new Error(`Workhorse does not take ${path.extname(name) || "extensionless"} files: ${file}`);
-    const cap = ATTACHMENT_CAP[kind];
-    if (stat.size > cap) throw new Error(`Attachment is over ${describeBytes(cap)}: ${file} is ${describeBytes(stat.size)}`);
+    const kind = attachmentKind({ name }) ?? "file";
+    const textFile = kind === "file" && isTextFile({ name });
+    if (kind !== "file" || textFile) {
+      const cap = ATTACHMENT_CAP[kind];
+      if (stat.size > cap) throw new Error(`Attachment is over ${describeBytes(cap)}: ${file} is ${describeBytes(stat.size)}`);
+    }
+    if (kind === "file" && !textFile) {
+      return {
+        id: `spawn_file_${Date.now()}_${index}`,
+        name,
+        mimeType: attachmentMime({ name }, "file"),
+        data: "",
+        kind: "file",
+        sourcePath: resolved,
+        size: stat.size,
+      } satisfies ChatImage;
+    }
     const text = kind === "file" ? fs.readFileSync(resolved, "utf8") : undefined;
     /*
      * Take our own copy rather than pointing at the caller's file. A path into
@@ -2339,7 +2353,10 @@ async function spawnAgent(
     : {
         ...inheritedInput,
         tokenBudget: undefined,
-        isolation: resolveWorkerIsolation({ isolation: input.isolation }),
+        isolation: resolveWorkerIsolation({
+          isolation: input.isolation,
+          parentEnvironment: caller?.environment,
+        }),
       };
   const skillQueries = spawnInput.skills?.filter((skill) => skill.trim()) ?? [];
   const requestedSkills = skillQueries.length > 0

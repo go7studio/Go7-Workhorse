@@ -8,6 +8,31 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.6.74](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.73...v0.6.74) (2026-09-12)
+
+
+### Features
+
+* a mission can carry a cost cap and the desk honours it between passes ([#318](https://github.com/go7studio/Go7-Workhorse/issues/318)) ([63ece35](https://github.com/go7studio/Go7-Workhorse/commit/63ece3555aaf06d5135922108ec5e7454ce2977f))
+* add DGX Spark bot, collect /v1/models, ship dgx-spark skill ([#325](https://github.com/go7studio/Go7-Workhorse/issues/325)) ([7e84a31](https://github.com/go7studio/Go7-Workhorse/commit/7e84a31291178ea9cd5e076f242041e0f2feffea))
+* attach folders, inherit workspace, keep Usage 5h ([#328](https://github.com/go7studio/Go7-Workhorse/issues/328)) ([653e1a0](https://github.com/go7studio/Go7-Workhorse/commit/653e1a07dc598eaaaed27cec7cf19cd2bc8b5729))
+* **rules:** every chat opens with what it needs and nothing it does not ([#321](https://github.com/go7studio/Go7-Workhorse/issues/321)) ([a596945](https://github.com/go7studio/Go7-Workhorse/commit/a59694589dca1dfeba08560bb4cbd6c017e25b04))
+* **transcripts:** finished work leaves the hot state on a clock ([#317](https://github.com/go7studio/Go7-Workhorse/issues/317)) ([d122a24](https://github.com/go7studio/Go7-Workhorse/commit/d122a242d665b40c9a01c43ea3284a8dda83327e))
+* **ui:** one scale for the desk, and one meaning per number ([#319](https://github.com/go7studio/Go7-Workhorse/issues/319)) ([f5752ee](https://github.com/go7studio/Go7-Workhorse/commit/f5752ee8c470aee1103492a65e9fe2cef3226de1))
+* **worktrees:** a tree goes only when it holds nothing unsaved ([#320](https://github.com/go7studio/Go7-Workhorse/issues/320)) ([16f527c](https://github.com/go7studio/Go7-Workhorse/commit/16f527cc85b7bdce9bdc7325fb062235526c2dbf))
+
+
+### Bug Fixes
+
+* ASCII-only Spark collect-delivery.ps1 ([#326](https://github.com/go7studio/Go7-Workhorse/issues/326)) ([807bcd6](https://github.com/go7studio/Go7-Workhorse/commit/807bcd6bb052853dc7e11c8ac3fba250d4bf9928))
+* dgx-spark is an optional add-on, not a shipped desk skill ([#327](https://github.com/go7studio/Go7-Workhorse/issues/327)) ([c895e53](https://github.com/go7studio/Go7-Workhorse/commit/c895e53ea95eba47a5253f55d1fce64604cf3dba))
+* **link:** link replies stay small and the CLI never hands back a torn document ([#316](https://github.com/go7studio/Go7-Workhorse/issues/316)) ([cfdb584](https://github.com/go7studio/Go7-Workhorse/commit/cfdb584cef5b0443876070aeeb6c720df66c768d))
+
+
+### Performance Improvements
+
+* **link:** the Link helper reads through the desk when the desk is up ([#322](https://github.com/go7studio/Go7-Workhorse/issues/322)) ([fc63a28](https://github.com/go7studio/Go7-Workhorse/commit/fc63a2835dec2e47344959d10af997ce5e524e78))
+
 ## [0.6.73](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.72...v0.6.73) (2026-09-10)
 
 

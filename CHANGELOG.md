@@ -8,6 +8,13 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.6.75](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.74...v0.6.75) (2026-09-12)
+
+
+### Bug Fixes
+
+* idle chats must not keep walking ([#329](https://github.com/go7studio/Go7-Workhorse/issues/329)) ([53696ef](https://github.com/go7studio/Go7-Workhorse/commit/53696ef4634003d9925b9f63343c1e67a6724789))
+
 ## [0.6.74](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.73...v0.6.74) (2026-09-12)
 
 

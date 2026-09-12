@@ -115,6 +115,8 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
 - Rewind to an earlier turn.
 - While a turn runs, Enter queues the next prompt on Next. Steer interrupts and
   sends now, and the chat never says Stopped.
+- A finished turn stays finished. Trailing thought after the vendor returns does
+  not walk the horse again.
 - A long transcript opens on the latest turns and pages older windows without
   jumping.
 - A portable transcript follows a chat when its vendor changes.

@@ -166,6 +166,15 @@ test("an idle turn with the same assistant still running thinking is revived", (
     }),
     false,
   );
+  assert.equal(
+    shouldReviveIdleTurn({
+      status: "idle",
+      assistantId: "a1",
+      messages: [{ id: "u1", role: "user" }, { id: "a1", role: "assistant", workedMs: 12_000 }, { id: "t1", role: "system", kind: "thought" }],
+    }),
+    false,
+    "a closed turn must not walk again on trailing thought",
+  );
   assert.ok(TURN_IDLE_AFTER_TRAILING_MS > TURN_IDLE_AFTER_DONE_MS);
   assert.equal(keepStreamedAssistantText({ reply: "", existingText: "" }), "");
   assert.equal(keepStreamedAssistantText({ reply: "", existingText: vendorEmptyReply("grok") }), "");

@@ -1841,7 +1841,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const bot = current.settings.customBots.find((item) => item.id === botId);
       if (!bot || !customBotServes(bot, model)) return;
     }
-    if (session.provider !== provider || session.customBotId !== botId) {
+    const effort = withEffort(provider, model, session.effort);
+    const switched =
+      session.provider !== provider ||
+      session.customBotId !== botId ||
+      session.model !== model ||
+      session.effort !== effort;
+    if (switched) {
       if (session.provider === "codex") void window.workhorse?.codexCancel?.(session.id);
       else if (session.provider === "claude") void window.workhorse?.claudeCancel?.(session.id);
       else if (session.provider === "custom") void window.workhorse?.customCancel?.(session.id);
@@ -1850,15 +1856,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     setState((latest) => {
       const live = latest.sessions.find((item) => item.id === latest.activeSessionId);
       if (!live) return latest;
-      const effort = withEffort(provider, model, live.effort);
-      const next = applySessionModelChange(live, { provider, model, effort, customBotId: botId });
-      return {
+      const nextEffort = withEffort(provider, model, live.effort);
+      const next = applySessionModelChange(live, { provider, model, effort: nextEffort, customBotId: botId });
+      const nextState = {
         ...latest,
         lastModel: rememberLastModel(latest.lastModel, next),
         sessions: latest.sessions.map((item) =>
-          item.id === live.id ? { ...next, routingMode: "manual", routingDecision: undefined } : item,
+          item.id === live.id ? { ...next, routingMode: "manual" as const, routingDecision: undefined } : item,
         ),
       };
+      stateRef.current = nextState;
+      return nextState;
     });
   }, []);
 

@@ -9192,6 +9192,7 @@ test("vendor preface lists extra folders and references, not cwd", () => {
   }
   assert.match(readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8"), /applySessionModelChange/);
   assert.match(readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8"), /vendorSessionForSend/);
+  assert.match(readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8"), /session\.model !== model/);
 });
 
 test("switching This-chat vendor drops the previous vendor session", () => {
@@ -9207,7 +9208,8 @@ test("switching This-chat vendor drops the previous vendor session", () => {
     messages: [{ id: "u", role: "user", text: "test", createdAt: 1 }],
   });
   assert.ok(base);
-  const grok = applySessionModelChange(base!, {
+  const live = { ...base!, status: "running" as const, vendorSessionId: "codex-acp-1", vendorProvider: "codex" as const };
+  const grok = applySessionModelChange(live, {
     provider: "grok",
     model: "grok-4.6",
     effort: "medium",
@@ -9218,15 +9220,32 @@ test("switching This-chat vendor drops the previous vendor session", () => {
   assert.equal(grok.vendorProvider, undefined);
   assert.equal(grok.status, "idle");
   assert.equal(vendorSessionForSend(grok), undefined);
-  assert.equal(vendorSessionForSend(base!), "codex-acp-1");
+  assert.equal(vendorSessionForSend(live), "codex-acp-1");
   assert.equal(vendorSessionForSend({ provider: "grok", vendorSessionId: "codex-acp-1", vendorProvider: "codex" }), undefined);
-  const same = applySessionModelChange(base!, {
+  const same = applySessionModelChange(live, {
     provider: "codex",
     model: "gpt-5.6-terra",
     effort: "high",
     customBotId: undefined,
   });
-  assert.equal(same.vendorSessionId, "codex-acp-1");
+  assert.equal(same.vendorSessionId, undefined, "a new model must not keep talking to the previous vendor session");
+  assert.equal(same.status, "idle");
+  const effortOnly = applySessionModelChange(live, {
+    provider: "codex",
+    model: live.model,
+    effort: "high",
+    customBotId: undefined,
+  });
+  assert.equal(effortOnly.vendorSessionId, undefined, "High is a new turn; the old session would ignore it");
+  assert.equal(effortOnly.status, "idle");
+  const unchanged = applySessionModelChange(live, {
+    provider: "codex",
+    model: live.model,
+    effort: live.effort,
+    customBotId: live.customBotId,
+  });
+  assert.equal(unchanged.vendorSessionId, "codex-acp-1");
+  assert.equal(unchanged.status, "running");
   const planned = applySessionPolicyChange(base!, { mode: "plan" });
   assert.equal(planned.mode, "plan");
   assert.equal(planned.vendorSessionId, undefined);

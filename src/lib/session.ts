@@ -149,18 +149,20 @@ export function applySessionModelChange(
   session: Session,
   next: { provider: ProviderId; model: string; effort: EffortLevel | null; customBotId?: string },
 ): Session {
-  const providerChanged = session.provider !== next.provider || session.customBotId !== next.customBotId;
-  const switched = providerChanged || session.model !== next.model;
+  const providerChanged =
+    session.provider !== next.provider || (session.customBotId || undefined) !== (next.customBotId || undefined);
+  const switched =
+    providerChanged || session.model !== next.model || session.effort !== next.effort;
   return {
     ...session,
     provider: next.provider,
     model: next.model,
     effort: next.effort,
     customBotId: next.customBotId,
-    vendorSessionId: providerChanged ? undefined : session.vendorSessionId,
-    vendorProvider: providerChanged ? undefined : session.vendorProvider,
+    vendorSessionId: switched ? undefined : session.vendorSessionId,
+    vendorProvider: switched ? undefined : session.vendorProvider,
     permissionGrants: providerChanged ? undefined : session.permissionGrants,
-    status: providerChanged && (session.status === "running" || session.status === "needs-input") ? "idle" : session.status,
+    status: switched && (session.status === "running" || session.status === "needs-input") ? "idle" : session.status,
     messages: switched ? stampUnstampedMessages(session.messages, brainStamp(session)) : session.messages,
   };
 }

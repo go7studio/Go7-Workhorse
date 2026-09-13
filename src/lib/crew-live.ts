@@ -46,6 +46,18 @@ export function vendorTurnWorking(session: Pick<Session, "status" | "agentRun"> 
   return session.status !== "needs-input" && crewTurnInFlight(session);
 }
 
+/**
+ * Nested worker chip: the child session wins. A leftover completed spawn
+ * marker must not say done while the child is still thinking.
+ */
+export function crewWorkerLive(
+  marker: Pick<ChatMessage, "toolStatus">,
+  child?: Pick<Session, "status" | "agentRun" | "messages"> | null,
+): boolean {
+  if (child && crewTurnInFlight(child)) return true;
+  return marker.toolStatus === "running";
+}
+
 export function crewActivityLine(session: Session, live = crewTurnInFlight(session)): string {
   if (session.status === "needs-input") return "Needs you";
   if (session.agentRun?.status === "failed") return session.agentRun.error?.trim() || "Failed";

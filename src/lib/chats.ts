@@ -1,4 +1,5 @@
 import { uid } from "./id";
+import { crewTurnInFlight } from "./crew-live";
 import type { ChatImage, ChatMessage, QueuedPrompt, Session, SessionEnvironment } from "./types";
 import { isVendorFailureReply } from "./vendor-bridge";
 
@@ -642,9 +643,9 @@ export function lastTalkedAt(session: Pick<Session, "messages">): number | undef
   return undefined;
 }
 
-/** The vendor is working, or the chat is holding for you. Either way it is live. */
-export function isLiveChat(session: Pick<Session, "status">): boolean {
-  return session.status === "running" || session.status === "needs-input";
+/** The vendor is working, thinking, or holding for you. Either way it is live. */
+export function isLiveChat(session: Pick<Session, "status" | "agentRun"> & { messages?: Session["messages"] }): boolean {
+  return crewTurnInFlight(session);
 }
 
 /**

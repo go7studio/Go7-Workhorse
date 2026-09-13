@@ -38,6 +38,14 @@ export function crewTurnInFlight(session: Pick<Session, "status" | "agentRun"> &
   return Boolean(session.agentRun && !session.agentRun.finishedAt);
 }
 
+/**
+ * The vendor is executing a command or thinking between commands.
+ * Needs-you is live on the desk, but it is waiting, not working.
+ */
+export function vendorTurnWorking(session: Pick<Session, "status" | "agentRun"> & { messages?: ChatMessage[] }): boolean {
+  return session.status !== "needs-input" && crewTurnInFlight(session);
+}
+
 export function crewActivityLine(session: Session, live = crewTurnInFlight(session)): string {
   if (session.status === "needs-input") return "Needs you";
   if (session.agentRun?.status === "failed") return session.agentRun.error?.trim() || "Failed";

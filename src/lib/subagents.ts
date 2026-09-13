@@ -1,4 +1,5 @@
 import { isExternalAgentAddress } from "./agent-runtime";
+import { crewTurnInFlight } from "./crew-live";
 import { isGrokBotModel, isGrokBotName } from "./custom-http-identity";
 import { uid } from "./id";
 import { cursorUsageLane } from "./cursor-lane";
@@ -1130,7 +1131,7 @@ export function askedChatStatusSnapshot(
   const chip = askedFollowChip(sessions, callerId, session.id, peer);
   const failed = askedRunFailed(run?.status) || chipFailed(chip?.toolStatus);
   const waitingOnPermission = !closedByLaterUser && session.status === "needs-input";
-  const sessionLive = session.status === "running" || session.status === "needs-input";
+  const sessionLive = crewTurnInFlight(session);
   const live = !closedByLaterUser && sessionLive;
   const interrupted = !closedByLaterUser && !sessionLive && chipRunning(chip?.toolStatus);
   let next: WorkerFollowNext;

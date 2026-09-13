@@ -4,7 +4,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import { isLiveChat } from "../src/lib/chats";
-import { crewActivityLine, crewTurnInFlight, vendorTurnWorking } from "../src/lib/crew-live";
+import { crewActivityLine, crewTurnInFlight, crewWorkerLive, vendorTurnWorking } from "../src/lib/crew-live";
+import { askedChatStatusSnapshot } from "../src/lib/subagents";
 import { namedWorkSummary } from "../src/lib/turns";
 import { shouldReviveIdleTurn } from "../src/lib/vendor-bridge";
 import { crewDotKind } from "../src/ui/ChatRow";
@@ -158,5 +159,47 @@ test("the work fold, Steer, and sidebar horse all read the same live-turn helper
   assert.match(composer, /vendorTurnWorking\(session\)/);
   assert.doesNotMatch(composer, /const running = session\?\.status === "running"/);
   assert.match(row, /crewTurnInFlight\(session\)/);
-  assert.match(popout, /crewTurnInFlight\(child\)/);
+  assert.match(popout, /crewWorkerLive/);
+  assert.match(popout, /const foldLive = live \|\| anyChildLive/);
+});
+
+test("a nested worker thinking is working, not done", () => {
+  const child = {
+    status: "idle" as const,
+    agentRun: run("running"),
+    messages: [thought()],
+  };
+  const chip: Pick<ChatMessage, "toolStatus"> = { toolStatus: "completed" };
+  assert.equal(crewWorkerLive(chip, child), true, "child thinking wins over a completed spawn chip");
+  assert.equal(crewWorkerLive({ toolStatus: "running" }, null), true, "Grok native subagent still in flight");
+  assert.equal(crewWorkerLive({ toolStatus: "completed" }, null), false, "Grok native subagent that returned");
+  assert.equal(
+    crewWorkerLive(
+      { toolStatus: "completed" },
+      { status: "idle", agentRun: run("completed", { finishedAt: 2 }), messages: [thought()] },
+    ),
+    false,
+    "finished nested worker with leftover thought is done",
+  );
+});
+
+test("agent_status does not declare a thinking worker finished", () => {
+  const thinking = {
+    id: "kid",
+    parentId: "parent",
+    status: "idle" as const,
+    title: "Marlow · mesh",
+    workerName: "Marlow",
+    provider: "grok" as const,
+    model: "grok-4",
+    messages: [
+      { id: "u1", role: "user" as const, kind: "peer" as const, peerFromSessionId: "parent", text: "do the mesh", createdAt: 1 },
+      thought("th"),
+    ],
+    agentRun: run("running"),
+  };
+  const snap = askedChatStatusSnapshot(thinking, "parent", [thinking]);
+  assert.ok(snap);
+  assert.equal(snap!.status, "running");
+  assert.equal(snap!.next, "wait");
 });

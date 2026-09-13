@@ -1,5 +1,5 @@
 import { memo, useEffect, useLayoutEffect, useRef, useState, type SyntheticEvent } from "react";
-import { crewTurnInFlight } from "../lib/crew-live";
+import { crewWorkerLive } from "../lib/crew-live";
 import { collapseToolText, splitToolLine, toolIsFinished } from "../lib/grok-events";
 import { unsquashSentences } from "../lib/markdown";
 import { deskInk } from "../lib/settings";
@@ -24,7 +24,7 @@ import {
   type GroupedWorkRow,
   type TranscriptBlock,
 } from "../lib/turns";
-import type { ChatMessage, Session } from "../lib/types";
+import type { ChatMessage } from "../lib/types";
 import { MessageBody } from "./MessageBody";
 import { TimeStamp } from "./TimeStamp";
 
@@ -57,14 +57,6 @@ export function crewWorkerName(
   if (named) return named;
   const label = workerFoldLabel(marker, child);
   return label.split("·", 1)[0]?.trim() || "Subagent";
-}
-
-function crewWorkerLive(
-  marker: ChatMessage,
-  child?: Pick<Session, "status" | "agentRun" | "messages"> | null,
-): boolean {
-  if (child && crewTurnInFlight(child)) return true;
-  return marker.toolStatus === "running";
 }
 
 function crewWorkerFailed(
@@ -440,6 +432,7 @@ export const WorkPopout = memo(function WorkPopout({
   const tools = block.tools;
   const crewWorkers = useStoreSelector((store) => crewWorkersFromStore(store, threads), sameCrewWorkers);
   const anyChildLive = crewWorkers.some((worker) => worker.live) || threads.some((marker) => marker.toolStatus === "running");
+  const foldLive = live || anyChildLive;
   useEffect(() => {
     if (!live && !anyChildLive) return;
     const timer = window.setInterval(() => setNow(Date.now()), 250);
@@ -452,18 +445,18 @@ export const WorkPopout = memo(function WorkPopout({
     if (step.type === "tool" && hideSpawnTool(step.message, threads.length > 0)) return false;
     return true;
   });
-  const hasWork = hasInner || live;
+  const hasWork = hasInner || foldLive;
   const stamp = <TimeStamp at={startedAt} />;
   if (!hasWork) return stamp;
 
-  const elapsed = live
+  const elapsed = foldLive
     ? now - startedAt
     : resolveWorkedMs(
         startedAt,
         workedMs,
         [...tools, ...block.compacts, ...threads].map((message) => message.createdAt),
       );
-  const label = live
+  const label = foldLive
     ? `Working · ${formatWorked(elapsed ?? 0)}`
     : elapsed != null
     ? `Worked ${formatWorked(elapsed)}`

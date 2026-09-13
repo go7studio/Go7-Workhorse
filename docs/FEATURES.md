@@ -23,6 +23,9 @@ When you add a feature, add it here in the same commit.
   only while the chat or its agent run is actually still going.
 - A worker thinking between tools stays working — not only while a command is
   in flight. The work fold, Steer, and the sidebar horse all follow that.
+- Nested workers and Grok's own subagents stay working through thinking. The
+  fold does not say done, and agent_status does not say the run finished,
+  while the child still has work.
 - Only the failed mound overlaps. Every other motion keeps the pieces separated.
 - The mascot wears its own bot's colour on every theme, so a row says which bot
   is working before you read it. That is the colour set for the bot in Settings,

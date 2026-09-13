@@ -8,6 +8,14 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.6.77](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.76...v0.6.77) (2026-09-13)
+
+
+### Bug Fixes
+
+* a closed turn must not walk again on trailing thought ([#333](https://github.com/go7studio/Go7-Workhorse/issues/333)) ([a3a82c8](https://github.com/go7studio/Go7-Workhorse/commit/a3a82c800b6eed9ab00b4dc0f1db8947c9c1a639))
+* thinking between tools still counts as working ([#334](https://github.com/go7studio/Go7-Workhorse/issues/334)) ([24a4011](https://github.com/go7studio/Go7-Workhorse/commit/24a401155c5838926ca4699a8ad804c8031eb43b))
+
 ## [0.6.76](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.75...v0.6.76) (2026-09-12)
 
 

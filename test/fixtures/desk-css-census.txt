@@ -906,7 +906,8 @@ f22741e982f6  .usage-dots
 471c29514877  .usage-dots.dense .usage-dot
 4bc707efab99  .usage-dot
 27df1f47d085  .usage-dots:not(.flat) .usage-dot, .usage-dots.flat .usage-dot
-27df1f47d085  .usage-dots.week .usage-dot
+a6149a7b651d  .usage-dots.week .usage-dot-col
+c20aeeff8551  .usage-dots.week .usage-dot
 8de77ed0af45  .usage-dot:disabled
 71a935a60252  .usage-dots.flat .usage-dot-col
 7157236b8511  .usage-dot.l1

@@ -296,11 +296,17 @@
   border-radius: 50%;
 }
 
+.usage-dots.week .usage-dot-col {
+  align-items: center;
+}
+
 .usage-dots.week .usage-dot {
   flex: none;
-  width: 100%;
+  width: min(100%, calc(var(--space-32) * 2));
+  max-width: calc(var(--space-32) * 2);
   aspect-ratio: 1;
   height: auto;
+  margin-inline: auto;
   border-radius: 50%;
 }
 

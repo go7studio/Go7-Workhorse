@@ -5920,7 +5920,10 @@ test("UsagePane ships the Figma fuel-ring overview, not the old token line", asy
   assert.match(css, /--stretch-cols: 7/);
   assert.match(css, /repeat\(var\(--stretch-cols\), minmax\(0, 1fr\)\)/);
   assert.match(css, /aspect-ratio: 1/);
-  assert.match(css, /\.usage-dots\.week \.usage-dot \{[\s\S]*aspect-ratio: 1[\s\S]*border-radius: 50%/);
+  assert.match(
+    css,
+    /\.usage-dots\.week \.usage-dot \{[\s\S]*max-width: calc\(var\(--space-32\) \* 2\)[\s\S]*aspect-ratio: 1[\s\S]*border-radius: 50%/,
+  );
   assert.match(pane, /--stretch-cols/);
   assert.match(pane, /startViewTransition/);
   assert.match(pane, /view\.startViewTransition\(apply\)/);

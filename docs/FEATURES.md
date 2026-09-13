@@ -410,6 +410,8 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
 - Every percentage on the Usage page is leftover. The ring shows the percent;
   the line under it counts the same way, for every vendor.
 - Settings → LLMs On/Off marks are circles. This stretch cells are circles.
+- Week stretch pies sit at 64px, not the full column width, so they match
+  Today's hourly dots instead of filling the page.
 - Big totals read 1.66B, not 1657.5M.
 - This chat's billed total sits in white on the left of the transcript.
   Orchestrated bots combine into one grey Crew total under it, and a click opens

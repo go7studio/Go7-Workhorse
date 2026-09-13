@@ -395,11 +395,11 @@ export type AgentRun = {
   /** Repo-relative files this worker is allowed to change. */
   paths?: string[];
   /**
-   * The access the desk handed this worker, before any path clamp. A
-   * path-owned worker runs its vendor session at Ask so writes still reach the
-   * ownership preflight; this is what the desk answers those events with, so
-   * the person sees no modal for in-path work. It is also the mark that tells
-   * the desk's own clamp apart from a narrowing the person set by hand.
+   * The access the desk handed this worker. A path-owned worker still launches
+   * the vendor at Ask so writes reach preflight; the chat itself keeps this
+   * grant, so the chip matches the orchestrator instead of reading Ask each
+   * time. The desk answers in-path events from this grant. It is also the mark
+   * that tells the desk's own clamp apart from a narrowing the person set.
    */
   grantedAccess?: GrantedAccess;
   /** Structured review receipts parsed from the worker's terminal output. */

@@ -8,6 +8,9 @@ When you add a feature, add it here in the same commit.
 - Go7 Workhorse runs Grok, Claude, Codex, Cursor and your own API bots in one
   desktop window, each under its own login.
 - Set the bot, model and thinking effort per chat, or let the desk pick.
+- Spawned workers copy this chat's Permission and Sandbox. A path allowlist
+  still launches the vendor at Ask so writes can be preflighted; the worker
+  chip stays Always if the orchestrator is Always.
 - Chat status is a tiled Workhorse mascot, a 3-by-3 grid with the bottom-right
   pixel sliver omitted. It rests as one seamless image that separates into tiles
   when work starts.

@@ -487,3 +487,64 @@ export function writeVersionedState(
   atomicWriteJson(file, protectedState, undefined, { fsync: options.fsync ?? options.rotateBackups !== false });
   return protectedState;
 }
+
+/**
+ * One state write in flight, the newest snapshot next.
+ *
+ * `state:save` used to chain every request. The renderer asks for a save on
+ * every change and never waits for the last one, so when a save cost more than
+ * the two seconds between requests the chain grew without bound. Measured on
+ * the live desk on 2026-09-13: a chat that streamed for five minutes left a
+ * backlog that held the main loop 95% of the time for fifteen minutes after the
+ * chat ended, with the main process at 3.4 GB, every queued request holding a
+ * whole desk. Between two writes only the newest snapshot can matter, because
+ * each one is the whole desk; the ones between are never missed on disk.
+ *
+ * Every caller's promise resolves when a write that carries its state, or a
+ * newer one, has landed. Last-writer-wins ordering holds because there is never
+ * more than one writer.
+ */
+export type SaveQueue<T> = {
+  enqueue: (state: T) => Promise<void>;
+  /** Resolves once nothing is in flight or waiting. */
+  idle: () => Promise<void>;
+  /** In flight plus waiting: 0, 1 or 2, never more. */
+  depth: () => number;
+};
+
+export function createSaveQueue<T>(write: (state: T) => Promise<void>): SaveQueue<T> {
+  let inFlight: Promise<void> | null = null;
+  let waiting: { state: T; settle: Array<() => void> } | null = null;
+  const run = async (state: T, settle: Array<() => void>): Promise<void> => {
+    try {
+      await write(state);
+    } catch {
+      // The write guards its own body. A throw here must not end every save after it.
+    }
+    for (const done of settle) done();
+    if (waiting) {
+      const next = waiting;
+      waiting = null;
+      inFlight = run(next.state, next.settle);
+    } else {
+      inFlight = null;
+    }
+  };
+  return {
+    enqueue: (state) =>
+      new Promise<void>((resolve) => {
+        if (!inFlight) {
+          inFlight = run(state, [resolve]);
+        } else if (waiting) {
+          waiting.state = state;
+          waiting.settle.push(resolve);
+        } else {
+          waiting = { state, settle: [resolve] };
+        }
+      }),
+    idle: async () => {
+      while (inFlight) await inFlight;
+    },
+    depth: () => (inFlight ? 1 : 0) + (waiting ? 1 : 0),
+  };
+}

@@ -154,7 +154,7 @@ test("quit waits for the save chain, bounded, and flushes the file", () => {
     "the drain quits again, so every disposal below must be behind the guard",
   );
   assert.match(main, /void drainStateForQuit\(\)\.finally\(\(\) => app\.quit\(\)\)/);
-  assert.match(main, /await Promise\.race\(\[\s*\n\s*stateSaveChain\.catch/, "the chain is the thing being waited on");
+  assert.match(main, /await Promise\.race\(\[\s*\n\s*stateSaves\.idle\(\)/, "the queue is the thing being waited on");
   assert.match(main, /setTimeout\(resolve, QUIT_DRAIN_MS\)/, "a save that will not finish must not hold the desk open");
   assert.match(main, /await syncFileInPlace\(statePath\(\)\)/, "the last save before a quit is a hot save; nothing else will flush it");
   assert.match(main, /mainLog\.record\("shutdown", `reason=quit/);

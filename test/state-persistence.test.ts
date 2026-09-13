@@ -6,6 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   CURRENT_STATE_VERSION,
+  createSaveQueue,
   readComposerDraftFile,
   readStringMapFile,
   readVersionedState,
@@ -183,7 +184,88 @@ test("the desk save path is the async write, chained", () => {
   const main = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "electron", "main.ts"), "utf8");
   assert.match(main, /const pending = writeVersionedStateAsync\(/, "the save must not hold the main thread for the disk");
   assert.match(main, /await pending/, "and it must still be awaited, or last-writer-wins ordering is gone");
-  assert.match(main, /stateSaveChain = stateSaveChain\.then\(\(\) => writeState\(state\)\)\.catch\(/, "overlapping saves must serialize, and a rejection must not end all future saves");
+  assert.match(main, /const stateSaves = createSaveQueue<Persistable>\(\(state\) => writeState\(state\)\)/, "overlapping saves must serialize through the queue, and a rejection must not end all future saves");
+  assert.match(main, /return stateSaves\.enqueue\(state\)/, "the handler hands the snapshot to the queue and nothing else");
   assert.match(main, /setPerfCause\("state:save"\)/, "a recorded stall must name the save");
   assert.match(main, /queueMicrotask\(clearPerfCause\)/, "the tag must clear at the first await, or the instrument blames the save for every stall during the off-thread wait");
+});
+
+/*
+ * 2026-09-13, the live desk: the renderer asks for a save on every change and
+ * never waits, and once a save cost more than the gap between requests the
+ * chain grew without bound — the main loop held 95% of the time for fifteen
+ * minutes after the chat that caused it had ended, the main process at 3.4 GB.
+ */
+
+function gatedWriter() {
+  const written: number[] = [];
+  const gates: Array<{ resolve: () => void; reject: (error: Error) => void }> = [];
+  const write = (state: { n: number }) =>
+    new Promise<void>((resolve, reject) => {
+      written.push(state.n);
+      gates.push({ resolve, reject });
+    });
+  return { write, written, gates };
+}
+
+const tick = () => new Promise<void>((resolve) => setImmediate(resolve));
+
+test("one state write in flight; while it runs only the newest snapshot waits", async () => {
+  const { write, written, gates } = gatedWriter();
+  const queue = createSaveQueue(write);
+  const settled: number[] = [];
+  const first = queue.enqueue({ n: 1 }).then(() => settled.push(1));
+  const second = queue.enqueue({ n: 2 }).then(() => settled.push(2));
+  const third = queue.enqueue({ n: 3 }).then(() => settled.push(3));
+  await tick();
+  assert.deepEqual(written, [1], "the first snapshot went straight to the writer");
+  assert.equal(queue.depth(), 2, "one in flight, one waiting, however many were asked for");
+
+  gates[0]!.resolve();
+  await first;
+  await tick();
+  assert.deepEqual(written, [1, 3], "the middle snapshot is never written; the newest one is");
+  assert.deepEqual(settled, [1], "callers of a superseded snapshot wait for the write that carries theirs or newer");
+  assert.equal(queue.depth(), 1);
+
+  gates[1]!.resolve();
+  await Promise.all([second, third]);
+  assert.deepEqual(settled, [1, 2, 3]);
+  assert.equal(queue.depth(), 0);
+  await queue.idle();
+});
+
+test("a write that throws settles its callers and the next snapshot still runs", async () => {
+  const { write, written, gates } = gatedWriter();
+  const queue = createSaveQueue(write);
+  const first = queue.enqueue({ n: 1 });
+  const second = queue.enqueue({ n: 2 });
+  await tick();
+  gates[0]!.reject(new Error("disk full"));
+  await first;
+  await tick();
+  assert.deepEqual(written, [1, 2], "a rejection ends one write, not every save after it");
+  gates[1]!.resolve();
+  await second;
+  assert.equal(queue.depth(), 0);
+});
+
+test("idle waits for the last write, and answers at once on a quiet queue", async () => {
+  const { write, gates } = gatedWriter();
+  const queue = createSaveQueue(write);
+  await queue.idle();
+  void queue.enqueue({ n: 1 });
+  void queue.enqueue({ n: 2 });
+  let idle = false;
+  const waited = queue.idle().then(() => {
+    idle = true;
+  });
+  await tick();
+  assert.equal(idle, false, "idle holds while a write is in flight");
+  gates[0]!.resolve();
+  await tick();
+  assert.equal(idle, false, "and while the newest snapshot is still being written");
+  gates[1]!.resolve();
+  await waited;
+  assert.equal(queue.depth(), 0);
 });

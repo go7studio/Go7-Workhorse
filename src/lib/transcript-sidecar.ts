@@ -104,7 +104,10 @@ export function transcriptFetchPlan(input: {
  * the note the desk adds when a sidecar will not load — comes after the whole
  * restored array, because appended is where it went. That tolerance is what
  * makes the note safe to add: a stricter check would refuse the merge from then
- * on, and the chat would never get its steps back.
+ * on, and the chat would never get its steps back. A row the restored array
+ * already holds is not appended a second time: a copy of a retired chat that
+ * still carries its prose inline names rows the sidecar has, and those are the
+ * same rows, not later ones.
  *
  * `null` means the two halves do not describe one array — too few rows held, a
  * position that does not exist — and the caller must keep what it has rather
@@ -126,7 +129,9 @@ export function mergeTranscriptRows(inline: ChatMessage[], sidecar: TranscriptSi
     cursor += 1;
   }
   if (merged.some((message) => message === undefined)) return null;
-  return [...(merged as ChatMessage[]), ...inline.slice(cursor)];
+  const restored = merged as ChatMessage[];
+  const held = new Set(restored.flatMap((message) => (typeof message?.id === "string" ? [message.id] : [])));
+  return [...restored, ...inline.slice(cursor).filter((message) => typeof message?.id !== "string" || !held.has(message.id))];
 }
 
 /**

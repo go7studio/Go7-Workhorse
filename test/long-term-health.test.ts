@@ -41,7 +41,9 @@ import {
   offloadSessionTranscript,
   offloadStateTranscripts,
   readTranscriptSidecar,
+  repairRetiredSidecars,
   retentionDaysFromSettings,
+  retireSessionTranscript,
   transcriptSidecarPath,
   type TranscriptIo,
 } from "../electron/transcript-store";
@@ -382,6 +384,204 @@ test("the desk does not rewrite a sidecar it has already verified", () => {
     const after = offloadSessionTranscript(finishedWorker("sess_memo"), dir, counting) as Record<string, unknown>;
     assert.equal(writes, 2, "a vanished sidecar is rewritten, not assumed");
     assert.equal((after.messages as unknown[]).length, 2);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+/*
+ * 2026-09-13, the live desk after 0.6.74: `state:save` returns nothing, so the
+ * renderer never learns that a save retired a worker and hands the same copy
+ * back on the next save — prose inline, pointer set, still due. The same
+ * twenty-five workers were retired on every save, 300 MB of sidecars rewritten
+ * every three seconds, the main loop held 95% of the time, and every pass
+ * appended the stale inline rows to a file that already held them: 108,135
+ * duplicate rows across twenty-five files after one afternoon.
+ */
+
+function countingIo() {
+  let writes = 0;
+  const store = new Map<string, string>();
+  const io: TranscriptIo = {
+    write: (file, sidecar) => {
+      writes += 1;
+      store.set(file, JSON.stringify(sidecar));
+    },
+    read: (file) => store.get(file) ?? "",
+    exists: (file) => store.has(file),
+  };
+  return { io, store, writes: () => writes };
+}
+
+/** A finished worker a week past retention, in the shape the renderer holds it after its steps were offloaded. */
+function agedOffloadedWorker(id: string, dir: string, io: TranscriptIo) {
+  const week = 7 * 24 * 60 * 60 * 1000;
+  const aged = { ...finishedWorker(id), agentRun: { status: "completed", finishedAt: NOW - week - 1 } };
+  return offloadSessionTranscript(aged, dir, io) as Record<string, unknown>;
+}
+
+test("a save that hands back the renderer's stale copy of a retired worker writes nothing", () => {
+  const dir = scratch("transcript-retire-once");
+  try {
+    const { io, store, writes } = countingIo();
+    const held = Array.from({ length: TRANSCRIPT_OFFLOAD_PER_SAVE + 5 }, (_, index) => agedOffloadedWorker(`sess_due_${index}`, dir, io));
+    assert.equal(writes(), held.length, "the steps went out once each");
+    for (const row of held) assert.equal((row.messages as unknown[]).length, 2, "the prose stayed inline beside the pointer");
+    const wrote = writes();
+    // What the renderer sends on every save: the same objects, every time.
+    const desk = () => ({ settings: { retentionDays: 7 }, sessions: held });
+
+    const first = offloadStateTranscripts(desk(), dir, io, { now: NOW }) as { sessions: Array<Record<string, unknown>> };
+    assert.equal(writes() - wrote, TRANSCRIPT_OFFLOAD_PER_SAVE, "one save retires a bounded number");
+    const retired = (rows: Array<Record<string, unknown>>) => rows.filter((row) => (row.messages as unknown[]).length === 0);
+    assert.equal(retired(first.sessions).length, TRANSCRIPT_OFFLOAD_PER_SAVE);
+
+    // The next save carries the same stale copies. They cost nothing, and the
+    // budget goes to the five still waiting.
+    const second = offloadStateTranscripts(desk(), dir, io, { now: NOW }) as { sessions: Array<Record<string, unknown>> };
+    assert.equal(writes() - wrote, held.length, "the retired ones are not rewritten; the waiting five are");
+    assert.equal(retired(second.sessions).length, held.length);
+    for (const row of second.sessions) {
+      const sidecar = JSON.parse(store.get(row.transcriptSidecar as string) ?? "null");
+      assert.equal(sidecar.total, 4, "a sidecar holds the transcript once");
+      assert.equal(sidecar.rows.length, 4);
+      assert.equal(row.transcriptOffloaded, 4);
+      assert.equal(row.retainedReport, "the final report");
+    }
+
+    // Twenty more saves of the same copies: not a byte.
+    for (let save = 0; save < 20; save += 1) offloadStateTranscripts(desk(), dir, io, { now: NOW });
+    assert.equal(writes() - wrote, held.length, "a settled desk pays nothing");
+
+    // The retired row is built from the live copy, so a rename is kept.
+    const renamed = offloadStateTranscripts(
+      { settings: { retentionDays: 7 }, sessions: [{ ...held[0], title: "renamed since" }] },
+      dir,
+      io,
+      { now: NOW },
+    ) as { sessions: Array<Record<string, unknown>> };
+    assert.equal(renamed.sessions[0].title, "renamed since");
+    assert.equal(writes() - wrote, held.length);
+
+    // A copy carrying a row the sidecar lacks is not stale. It pays once, and
+    // the new row is in the file.
+    const late = { ...held[0], messages: [...(held[0].messages as unknown[]), { id: "m5", role: "assistant", text: "a late answer" }] };
+    const third = offloadStateTranscripts({ settings: { retentionDays: 7 }, sessions: [late] }, dir, io, { now: NOW }) as {
+      sessions: Array<Record<string, unknown>>;
+    };
+    assert.equal(writes() - wrote, held.length + 1, "a real change pays for one retirement");
+    const grown = JSON.parse(store.get(third.sessions[0].transcriptSidecar as string) ?? "null");
+    assert.deepEqual(grown.rows.map((row: { message: { id: string } }) => row.message.id), ["m1", "m2", "m3", "m4", "m5"]);
+    assert.equal(third.sessions[0].transcriptOffloaded, 5);
+
+    // The memo alone is not trusted. A sidecar gone from disk is written again
+    // when the copy still holds every row; a copy whose steps were in that file
+    // is refused instead, exactly as a retirement with a lost sidecar always was.
+    const file = held[1].transcriptSidecar as string;
+    store.delete(file);
+    const refused = offloadStateTranscripts({ settings: { retentionDays: 7 }, sessions: [held[1]] }, dir, io, { now: NOW }) as {
+      sessions: Array<Record<string, unknown>>;
+    };
+    assert.equal(writes() - wrote, held.length + 1, "a lost sidecar with the steps in it stops the retirement");
+    assert.equal((refused.sessions[0].messages as unknown[]).length, 2, "and the copy keeps what it holds");
+    const whole = { ...finishedWorker("sess_due_1"), agentRun: { status: "completed", finishedAt: NOW - 7 * 24 * 60 * 60 * 1000 - 1 } };
+    const rewritten = offloadStateTranscripts({ settings: { retentionDays: 7 }, sessions: [whole] }, dir, io, { now: NOW }) as {
+      sessions: Array<Record<string, unknown>>;
+    };
+    assert.equal(writes() - wrote, held.length + 2, "a vanished sidecar is rewritten from a whole copy, not assumed");
+    assert.equal(JSON.parse(store.get(file) ?? "null").total, 4);
+    assert.equal(rewritten.sessions[0].transcriptOffloaded, 4);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("retiring a stale copy again never grows the sidecar", () => {
+  // The memo is one process's memory. This is the write itself: handed a copy
+  // whose pointer names a sidecar already holding every row, the merge appends
+  // the inline prose after the restored array, and before this fix each
+  // retirement wrote that longer array back — 2,380 rows to 2,386 in nine
+  // seconds on the live desk, 118 unique rows in a 12,268-row file by evening.
+  const dir = scratch("transcript-no-growth");
+  try {
+    const { io, store } = countingIo();
+    const stale = agedOffloadedWorker("sess_stale", dir, io);
+    const once = retireSessionTranscript(stale, dir, io) as Record<string, unknown>;
+    assert.equal(once.transcriptOffloaded, 4);
+    // Same stale copy, retired again as a fresh process would.
+    const again = retireSessionTranscript(stale, dir, io) as Record<string, unknown>;
+    assert.equal(again.transcriptOffloaded, 4, "the second retirement holds the same four rows");
+    const sidecar = JSON.parse(store.get(again.transcriptSidecar as string) ?? "null");
+    assert.equal(sidecar.total, 4);
+    assert.deepEqual(sidecar.rows.map((row: { message: { id: string } }) => row.message.id), ["m1", "m2", "m3", "m4"]);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("the merge never appends a row the restored array already holds", () => {
+  const row = (id: string): ChatMessage => ({ id, role: "assistant", text: id, createdAt: 0 });
+  const full: TranscriptSidecar = {
+    version: 1,
+    sessionId: "s",
+    total: 3,
+    rows: [{ index: 0, message: row("a") }, { index: 1, message: row("b") }, { index: 2, message: row("c") }],
+  };
+  // A retired chat's stale copy: its prose inline, every row in the file.
+  assert.deepEqual(mergeTranscriptRows([row("a"), row("c")], full)?.map((m) => m.id), ["a", "b", "c"]);
+  // A row appended since is still a later row.
+  assert.deepEqual(mergeTranscriptRows([row("a"), row("d")], full)?.map((m) => m.id), ["a", "b", "c", "d"]);
+  assert.deepEqual(mergeTranscriptRows([], full)?.map((m) => m.id), ["a", "b", "c"]);
+});
+
+test("a sidecar bloated by re-retirement reads back once per row, and housekeeping rewrites it once", async () => {
+  const dir = scratch("transcript-repair");
+  try {
+    const { io, store, writes } = countingIo();
+    const row = (id: string): ChatMessage => ({ id, role: "assistant", text: id, createdAt: 0 });
+    // The live desk's shape, small: three rows, then the prose appended on
+    // every one of three more saves.
+    const rows = [row("a"), row("b"), row("c"), row("b"), row("c"), row("b"), row("c"), row("b"), row("c")];
+    const bloated: TranscriptSidecar = { version: 1, sessionId: "sess_bloat", total: rows.length, rows: rows.map((message, index) => ({ index, message })) };
+    const file = transcriptSidecarPath(dir, "sess_bloat");
+    store.set(file, JSON.stringify(bloated));
+
+    const read = readTranscriptSidecar(file, io);
+    assert.deepEqual(read?.rows.map((r) => r.message.id), ["a", "b", "c"], "a read never shows a row twice");
+    assert.equal(read?.total, 3);
+
+    // A partial sidecar keeps its seats even with a repeated id: the inline
+    // half is counted against them.
+    const partialFile = transcriptSidecarPath(dir, "sess_partial");
+    const partial: TranscriptSidecar = { version: 1, sessionId: "sess_partial", total: 4, rows: [{ index: 1, message: row("b") }, { index: 2, message: row("b") }] };
+    store.set(partialFile, JSON.stringify(partial));
+    assert.deepEqual(readTranscriptSidecar(partialFile, io), partial);
+
+    const sessions = [
+      { id: "sess_bloat", hidden: true, agentRun: { status: "completed" }, messages: [], transcriptSidecar: file },
+      { id: "sess_partial", hidden: true, agentRun: { status: "completed" }, messages: [row("a"), row("d")], transcriptSidecar: partialFile },
+      { id: "sess_live", hidden: false, status: "idle", messages: [row("x")] },
+    ];
+    const first = await repairRetiredSidecars(sessions, dir, io, { yieldLoop: async () => undefined });
+    assert.deepEqual({ files: first.files, rowsDropped: first.rowsDropped }, { files: 1, rowsDropped: 6 });
+    assert.ok(first.bytesAfter < first.bytesBefore);
+    assert.equal(writes(), 1, "only the bloated file is rewritten");
+    assert.equal(JSON.parse(store.get(file) ?? "null").total, 3);
+    assert.equal(store.get(partialFile), JSON.stringify(partial), "a partial sidecar is not touched");
+
+    const second = await repairRetiredSidecars(sessions, dir, io, { yieldLoop: async () => undefined });
+    assert.equal(second.files, 0, "a repaired desk pays nothing");
+    assert.equal(writes(), 1);
+
+    // Bounded per launch, like a save.
+    const many = Array.from({ length: 3 }, (_, index) => {
+      const id = `sess_many_${index}`;
+      const f = transcriptSidecarPath(dir, id);
+      store.set(f, JSON.stringify({ ...bloated, sessionId: id }));
+      return { id, hidden: true, agentRun: { status: "completed" }, messages: [], transcriptSidecar: f };
+    });
+    const bounded = await repairRetiredSidecars(many, dir, io, { limit: 2, yieldLoop: async () => undefined });
+    assert.equal(bounded.files, 2);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

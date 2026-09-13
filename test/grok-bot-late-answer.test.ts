@@ -330,8 +330,8 @@ test("the desk wires the late lane end to end", () => {
   assert.match(store, /lateAckPending/, "an appended answer is acknowledged only after a successful save");
   assert.match(
     store,
-    /if \(outcome && outcome\.written === false\) return;/,
-    "a save the queue superseded never acknowledges: nothing it was made from reached the disk",
+    /if \(!outcome \|\| !outcome\.written\) return;/,
+    "only a save that landed acknowledges: superseded, refused, failed, or unanswered saves never do",
   );
 });
 

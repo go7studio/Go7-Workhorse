@@ -500,12 +500,14 @@ export function writeVersionedState(
  * whole desk. Between two writes only the newest snapshot can matter, because
  * each one is the whole desk; the ones between are never missed on disk.
  *
- * Every caller learns whether its own snapshot was the one written. That is
- * not a courtesy: the renderer acknowledges a Grok Bot late answer on the
- * strength of "the save I made from this state landed", and a snapshot that
- * was replaced in the queue never reached the disk. A caller told `written:
- * false` waits for a save that does land; nothing it was made from is lost,
- * because the renderer still holds it.
+ * Every caller learns whether its own snapshot was the one written and the
+ * write landed. That is not a courtesy: the renderer acknowledges a Grok Bot
+ * late answer on the strength of "the save I made from this state landed",
+ * and a snapshot that was replaced in the queue never reached the disk, nor
+ * did one the writer refused or failed on. A caller told `written: false`
+ * waits for a save that does land; nothing it was made from is lost, because
+ * the renderer still holds it. The writer says whether it wrote; a writer
+ * that throws did not.
  *
  * `supersedes` decides whether a newer request may take a waiting one's place.
  * The desk uses it to keep an empty snapshot from displacing a richer one, the
@@ -525,19 +527,20 @@ export type SaveQueue<T> = {
 type SaveWaiter = { resolve: (outcome: SaveOutcome) => void; carried: boolean };
 
 export function createSaveQueue<T>(
-  write: (state: T) => Promise<void>,
+  write: (state: T) => Promise<boolean>,
   options: { supersedes?: (next: T, waiting: T) => boolean } = {},
 ): SaveQueue<T> {
   const supersedes = options.supersedes ?? (() => true);
   let inFlight: Promise<void> | null = null;
   let waiting: { state: T; waiters: SaveWaiter[] } | null = null;
   const run = async (state: T, waiters: SaveWaiter[]): Promise<void> => {
+    let landed = false;
     try {
-      await write(state);
+      landed = (await write(state)) === true;
     } catch {
       // The write guards its own body. A throw here must not end every save after it.
     }
-    for (const waiter of waiters) waiter.resolve({ written: waiter.carried });
+    for (const waiter of waiters) waiter.resolve({ written: waiter.carried && landed });
     if (waiting) {
       const next = waiting;
       waiting = null;

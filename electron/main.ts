@@ -686,7 +686,8 @@ function stateFileSize(file: string): number {
   }
 }
 
-async function writeState(state: Persistable) {
+/** True when the file now holds this snapshot; false when the save was refused or failed. */
+async function writeState(state: Persistable): Promise<boolean> {
   try {
     /*
      * The tag covers the clones and the stringify — the stretch that actually
@@ -709,7 +710,7 @@ async function writeState(state: Persistable) {
         if (prevSessions > 0 || prevUsage > 0) {
           console.error("workhorse refused to overwrite saved chats with an empty state");
           mainLog.record("state:save", `refused empty overwrite prev_sessions=${prevSessions} prev_usage=${prevUsage}`);
-          return;
+          return false;
         }
       } catch {
         // existing file unreadable — write through
@@ -761,9 +762,11 @@ async function writeState(state: Persistable) {
       rememberFolderBookmark(folder, bookmark, io);
     }
     jobEngine?.sync(state.sessions);
+    return true;
   } catch (error) {
     console.error("workhorse state save failed", error);
     mainLog.record("state:save", `failed ${faultDetail(error)}`);
+    return false;
   } finally {
     clearPerfCause();
   }
@@ -1692,7 +1695,7 @@ app.whenReady().then(async () => {
   };
 
   ipcMain.handle("state:save", (_event, state: Persistable) => {
-    if (!state || typeof state !== "object") return;
+    if (!state || typeof state !== "object") return { written: false };
     if ("settings" in state) {
       const nextSettings = normalizeSettings((state as { settings?: unknown }).settings);
       const workshopChanged = JSON.stringify(liveSettings.workshop) !== JSON.stringify(nextSettings.workshop);

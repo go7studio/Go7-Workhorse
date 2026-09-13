@@ -186,6 +186,10 @@ test("the desk save path is the async write, chained", () => {
   assert.match(main, /await pending/, "and it must still be awaited, or last-writer-wins ordering is gone");
   assert.match(main, /const stateSaves = createSaveQueue<Persistable>\(\(state\) => writeState\(state\), \{/, "overlapping saves must serialize through the queue, and a rejection must not end all future saves");
   assert.match(main, /supersedes: \(next, waiting\) => !\(emptySnapshot\(next\) && !emptySnapshot\(waiting\)\)/, "an empty snapshot must not displace a richer waiting one");
+  assert.match(main, /async function writeState\(state: Persistable\): Promise<boolean>/, "the writer says whether it wrote");
+  assert.match(main, /refused empty overwrite[^`]*`\);\s*\n\s*return false;/, "a refused save answers false, so the renderer never acknowledges on it");
+  assert.match(main, /mainLog\.record\("state:save", `failed \$\{faultDetail\(error\)\}`\);\s*\n\s*return false;/, "a failed save answers false");
+  assert.match(main, /if \(!state \|\| typeof state !== "object"\) return \{ written: false \};/, "a malformed payload is answered, never left void");
   assert.match(main, /return stateSaves\.enqueue\(state\)/, "the handler hands the snapshot to the queue and nothing else");
   assert.match(main, /setPerfCause\("state:save"\)/, "a recorded stall must name the save");
   assert.match(main, /queueMicrotask\(clearPerfCause\)/, "the tag must clear at the first await, or the instrument blames the save for every stall during the off-thread wait");
@@ -200,11 +204,11 @@ test("the desk save path is the async write, chained", () => {
 
 function gatedWriter<T>() {
   const written: T[] = [];
-  const gates: Array<{ resolve: () => void; reject: (error: Error) => void }> = [];
+  const gates: Array<{ resolve: (landed?: boolean) => void; reject: (error: Error) => void }> = [];
   const write = (state: T) =>
-    new Promise<void>((resolve, reject) => {
+    new Promise<boolean>((resolve, reject) => {
       written.push(state);
-      gates.push({ resolve, reject });
+      gates.push({ resolve: (landed = true) => resolve(landed), reject });
     });
   return { write, written, gates };
 }
@@ -284,18 +288,27 @@ test("a request made from inside a settle callback waits for the next write, nev
   await queue.idle();
 });
 
-test("a write that throws settles its callers and the next snapshot still runs", async () => {
+test("a write that throws or refuses answers written: false, and the next snapshot still runs", async () => {
+  // writeState refuses an empty snapshot over a richer file and swallows its
+  // own failures. Either way the bytes are not on disk, and the renderer must
+  // not acknowledge a late answer on the strength of that save.
   const { write, written, gates } = gatedWriter<number>();
   const queue = createSaveQueue(write);
   const first = queue.enqueue(1);
   const second = queue.enqueue(2);
+  const third = queue.enqueue(3);
   await tick();
   gates[0]!.reject(new Error("disk full"));
-  assert.equal((await first).written, true, "the writer owns its failure; the queue does not fail the caller");
+  assert.equal((await first).written, false, "a failed write did not land");
   await tick();
-  assert.deepEqual(written, [1, 2], "a rejection ends one write, not every save after it");
-  gates[1]!.resolve();
-  await second;
+  assert.deepEqual(written, [1, 3], "a rejection ends one write, not every save after it");
+  gates[1]!.resolve(false);
+  assert.equal((await third).written, false, "a refused write did not land either");
+  assert.equal((await second).written, false, "and a superseded caller is still told false");
+  const fourth = queue.enqueue(4);
+  await tick();
+  gates[2]!.resolve();
+  assert.equal((await fourth).written, true, "a write that landed says so");
   await queue.idle();
 });
 

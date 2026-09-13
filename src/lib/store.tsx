@@ -1523,10 +1523,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         })
         .then((outcome) => {
           if (!lateAckPending.current.size) return;
-          // A superseded snapshot never reached the disk: main coalesces saves
-          // under load and says so. Nothing this save was made from has landed,
-          // so the acknowledgement waits for a save that does.
-          if (outcome && outcome.written === false) return;
+          // Only a save that landed may acknowledge. Main coalesces saves under
+          // load, refuses an empty snapshot over a richer file, and swallows a
+          // failed write; each answers `written: false`, and no answer at all is
+          // no landing either. The acknowledgement waits for a save that does.
+          if (!outcome || !outcome.written) return;
           // Spent when this save carried the message — or when the chat that
           // asked is gone from the state this save was made from, so nothing
           // can ever carry it. A chat cannot reappear; an append cannot be

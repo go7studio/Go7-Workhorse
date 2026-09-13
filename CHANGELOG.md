@@ -8,6 +8,16 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.6.79](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.78...v0.6.79) (2026-09-13)
+
+
+### Bug Fixes
+
+* one state write in flight, the newest snapshot next ([#344](https://github.com/go7studio/Go7-Workhorse/issues/344)) ([796d260](https://github.com/go7studio/Go7-Workhorse/commit/796d260d5e9d6576e7cbb11870e7acbf040974c7))
+* retire a finished worker once per launch, not once per save ([#343](https://github.com/go7studio/Go7-Workhorse/issues/343)) ([30c7396](https://github.com/go7studio/Go7-Workhorse/commit/30c73962a56380675f5056ca5123dbfdd182663b))
+* spawned workers show the orchestrator seat, not Ask ([#340](https://github.com/go7studio/Go7-Workhorse/issues/340)) ([29a66a6](https://github.com/go7studio/Go7-Workhorse/commit/29a66a603c72a4fc3b46bd0a397adfaae949084a))
+* week stretch pies sit at 64px, not the column width ([#342](https://github.com/go7studio/Go7-Workhorse/issues/342)) ([d7e08d6](https://github.com/go7studio/Go7-Workhorse/commit/d7e08d6349ea86a8a51baf4c4f4036e97ea05dcd))
+
 ## [0.6.78](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.77...v0.6.78) (2026-09-13)
 
 

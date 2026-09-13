@@ -192,6 +192,7 @@ test("agent_status does not declare a thinking worker finished", () => {
     workerName: "Marlow",
     provider: "grok" as const,
     model: "grok-4",
+    effort: "high" as const,
     messages: [
       { id: "u1", role: "user" as const, kind: "peer" as const, peerFromSessionId: "parent", text: "do the mesh", createdAt: 1 },
       thought("th"),

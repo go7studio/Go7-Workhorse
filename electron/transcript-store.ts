@@ -202,6 +202,40 @@ function sidecarShape(sidecar: TranscriptSidecar): string {
 }
 
 /**
+ * Retirements this process has already made, by sidecar file.
+ *
+ * `state:save` returns nothing to the renderer, so the renderer never learns
+ * that a save retired a worker. The next save hands the same finished worker
+ * back with its prose inline and its pointer set, `isRetiredWorkerDue` says yes
+ * again, and the retirement runs again. Measured on the live desk on
+ * 2026-09-13: the same twenty-five workers retired on every save, 300 MB of
+ * sidecars rewritten every three seconds, the main loop held 95% of the time,
+ * and every pass appended the stale inline rows to a file that already held
+ * them — 108,135 duplicate rows across twenty-five files after one afternoon.
+ *
+ * The memo holds the row ids the sidecar carries and the two values the
+ * retired row is derived from, so a stale copy costs one `exists` and no
+ * bytes. A copy carrying a row the sidecar lacks is not stale: it pays the full
+ * retirement, which merges the new row in.
+ */
+const retiredSidecars = new Map<string, { ids: Set<string>; total: number; report: string | undefined }>();
+
+/** First row per id. A row without a string id is kept: nothing can vouch for it either way. */
+function withoutDuplicateRows(messages: ChatMessage[]): ChatMessage[] {
+  const seen = new Set<string>();
+  const kept: ChatMessage[] = [];
+  for (const message of messages) {
+    const id = typeof message?.id === "string" ? message.id : "";
+    if (id) {
+      if (seen.has(id)) continue;
+      seen.add(id);
+    }
+    kept.push(message);
+  }
+  return kept;
+}
+
+/**
  * Is the sidecar on disk, readable, and holding what we are about to stop
  * holding ourselves?
  *
@@ -371,6 +405,10 @@ export function retireSessionTranscript(session: unknown, userData: string, io: 
     if (!whole) return session;
     messages = whole;
   }
+  // A stale copy of a worker this desk already retired carries its prose
+  // inline beside a pointer to a sidecar holding every row. The merge appends
+  // what it cannot place, so without this each re-retirement grew the file.
+  messages = withoutDuplicateRows(messages);
 
   const file = transcriptSidecarPath(userData, sessionId);
   const sidecar: TranscriptSidecar = {
@@ -380,6 +418,7 @@ export function retireSessionTranscript(session: unknown, userData: string, io: 
     rows: messages.map((message, index) => ({ index, message })),
   };
   verifiedSidecars.delete(file);
+  retiredSidecars.delete(file);
   try {
     io.write(file, sidecar);
   } catch {
@@ -387,21 +426,60 @@ export function retireSessionTranscript(session: unknown, userData: string, io: 
   }
   if (!sidecarMatches(file, sidecar, io)) return session;
   verifiedSidecars.set(file, sidecarShape(sidecar));
+  const report = boundedFinalReport(messages);
+  retiredSidecars.set(file, {
+    ids: new Set(messages.flatMap((message) => (typeof message?.id === "string" ? [message.id] : []))),
+    total: messages.length,
+    report,
+  });
+  return retiredRow(row, file, messages.length, report);
+}
 
+/**
+ * The row a retired worker keeps: the retained fields off the live row, the
+ * run's summary, the bounded report, and the pointer. Built from the live row
+ * every time, so a title or status that moved since the retirement is kept.
+ */
+function retiredRow(row: Record<string, unknown>, file: string, total: number, report: string | undefined): Record<string, unknown> {
   const retired: Record<string, unknown> = {};
   for (const field of RETAINED_SESSION_FIELDS) {
     if (row[field] !== undefined) retired[field] = row[field];
   }
   const run = retainedAgentRun(record(row.agentRun));
-  const report = boundedFinalReport(messages);
   return {
     ...retired,
     ...(run ? { agentRun: run } : {}),
     ...(report ? { retainedReport: report } : {}),
     messages: [],
     transcriptSidecar: file,
-    transcriptOffloaded: messages.length,
+    transcriptOffloaded: total,
   };
+}
+
+/**
+ * The retired row for a worker this process already retired, or null.
+ *
+ * Null when this process never retired it, when the sidecar is gone — the next
+ * retirement rewrites it, exactly as the offload memo does — or when the copy
+ * carries a row the sidecar lacks, which is a real change and pays in full.
+ */
+function alreadyRetired(session: unknown, userData: string, io: TranscriptIo): Record<string, unknown> | null {
+  const row = record(session);
+  const sessionId = typeof row?.id === "string" ? row.id.trim() : "";
+  if (!row || !sessionId) return null;
+  const file = transcriptSidecarPath(userData, sessionId);
+  const memo = retiredSidecars.get(file);
+  if (!memo) return null;
+  if (!io.exists(file)) {
+    retiredSidecars.delete(file);
+    return null;
+  }
+  const inline = Array.isArray(row.messages) ? row.messages : [];
+  for (const message of inline) {
+    const id = record(message)?.id;
+    if (typeof id !== "string" || !memo.ids.has(id)) return null;
+  }
+  return retiredRow(row, file, memo.total, memo.report);
 }
 
 /** Move every terminal worker's step rows out. Anything unreadable is left alone. */
@@ -434,11 +512,14 @@ export function offloadStateTranscripts<T>(
   return {
     ...next,
     sessions: next.sessions.map((session) => {
-      // Retirement always pays. A worker due for it has a sidecar to write
-      // whether or not one is already there, so the budget is the only thing
-      // standing between a first launch on an aged desk and eight hundred
-      // synchronous flushes in a row.
+      // A first retirement always pays: a worker due for it has a sidecar to
+      // write whether or not one is already there, so the budget is what stands
+      // between a first launch on an aged desk and eight hundred synchronous
+      // flushes in a row. A worker this process already retired pays nothing —
+      // the renderer hands the same stale copy back on every save.
       if (isRetiredWorkerDue(session, now, retentionDays)) {
+        const memo = alreadyRetired(session, userData, io);
+        if (memo) return memo;
         if (budget <= 0) return session;
         const retired = retireSessionTranscript(session, userData, io);
         if (retired !== session) budget -= 1;
@@ -473,8 +554,83 @@ function alreadyVerified(session: unknown, userData: string, io: TranscriptIo): 
  */
 export function readTranscriptSidecar(file: string, io: TranscriptIo = diskIo): TranscriptSidecar | null {
   try {
-    return normalizeTranscriptSidecar(JSON.parse(io.read(file)));
+    return withoutDuplicateSidecarRows(normalizeTranscriptSidecar(JSON.parse(io.read(file))));
   } catch {
     return null;
   }
+}
+
+/**
+ * A retirement sidecar bloated by re-retirement, read as the transcript it was:
+ * first row per id, seats renumbered. Only a sidecar holding every row can be
+ * put right this way. A partial one keeps its seats, because the inline half is
+ * counted against them, and comes back exactly as it is.
+ */
+export function withoutDuplicateSidecarRows(sidecar: TranscriptSidecar | null): TranscriptSidecar | null {
+  if (!sidecar || sidecar.rows.length !== sidecar.total) return sidecar;
+  const ordered = [...sidecar.rows].sort((left, right) => left.index - right.index);
+  const messages = withoutDuplicateRows(ordered.map((row) => row.message));
+  if (messages.length === sidecar.rows.length) return sidecar;
+  return { ...sidecar, total: messages.length, rows: messages.map((message, index) => ({ index, message })) };
+}
+
+/** How many bloated sidecars one launch repairs. The same bound as a save's writes, for the same reason. */
+export const TRANSCRIPT_REPAIR_PER_LAUNCH = TRANSCRIPT_OFFLOAD_PER_SAVE;
+
+export type TranscriptRepair = { files: number; rowsDropped: number; bytesBefore: number; bytesAfter: number };
+
+/**
+ * Rewrite the sidecars an earlier build bloated, a bounded batch per launch.
+ *
+ * Only retired rows are candidates — a pointer and no inline rows — because
+ * only retirement rewrote a full sidecar with the merge's appended tail. Each
+ * candidate is read, and rewritten only when reading it back dropped rows; a
+ * file that reads back as it is costs one parse and nothing else. The loop is
+ * yielded between files, so a launch with twenty-five of these to put right
+ * still answers the window between them.
+ */
+export async function repairRetiredSidecars(
+  sessions: readonly unknown[],
+  userData: string,
+  io: TranscriptIo = diskIo,
+  opts: { limit?: number; yieldLoop?: () => Promise<void> } = {},
+): Promise<TranscriptRepair> {
+  const limit = opts.limit ?? TRANSCRIPT_REPAIR_PER_LAUNCH;
+  const yieldLoop = opts.yieldLoop ?? (() => new Promise<void>((resolve) => setImmediate(resolve)));
+  const result: TranscriptRepair = { files: 0, rowsDropped: 0, bytesBefore: 0, bytesAfter: 0 };
+  if (!userData.trim()) return result;
+  for (const session of sessions) {
+    if (result.files >= limit) break;
+    const row = record(session);
+    const sessionId = typeof row?.id === "string" ? row.id.trim() : "";
+    if (!row || !sessionId || !isTerminalWorker(row)) continue;
+    const pointer = typeof row.transcriptSidecar === "string" && row.transcriptSidecar.trim().length > 0;
+    if (!pointer || !Array.isArray(row.messages) || row.messages.length !== 0) continue;
+    const file = transcriptSidecarPath(userData, sessionId);
+    if (!io.exists(file)) continue;
+    let text: string;
+    let parsed: TranscriptSidecar | null;
+    try {
+      text = io.read(file);
+      parsed = normalizeTranscriptSidecar(JSON.parse(text));
+    } catch {
+      continue;
+    }
+    if (!parsed || parsed.sessionId !== sessionId) continue;
+    const clean = withoutDuplicateSidecarRows(parsed);
+    if (!clean || clean === parsed) continue;
+    try {
+      io.write(file, clean);
+    } catch {
+      continue;
+    }
+    if (!sidecarMatches(file, clean, io)) continue;
+    verifiedSidecars.set(file, sidecarShape(clean));
+    result.files += 1;
+    result.rowsDropped += parsed.rows.length - clean.rows.length;
+    result.bytesBefore += text.length;
+    result.bytesAfter += JSON.stringify(clean).length;
+    await yieldLoop();
+  }
+  return result;
 }

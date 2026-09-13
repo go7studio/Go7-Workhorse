@@ -86,7 +86,7 @@ import {
   stopTrackedProcessGroups,
 } from "./process-registry";
 import { clearPerfCause, setPerfCause, stallThresholdMs, startPerfHeartbeat } from "./perf-heartbeat";
-import { offloadStateTranscripts, readTranscriptSidecar, transcriptSidecarPath } from "./transcript-store";
+import { offloadStateTranscripts, readTranscriptSidecar, repairRetiredSidecars, transcriptSidecarPath } from "./transcript-store";
 import { applyComposerDrafts, type ComposerDraftSnap } from "../src/lib/chats";
 import { dueByInterval, readComposerDraftFile, readStringMapFile, readVersionedState, sameJsonValue, STATE_BACKUP_INTERVAL_MS, STATE_FSYNC_INTERVAL_MS, syncFileInPlace, worktreeKeepSet, worktreePruneDecision, writeComposerDraftFile, writeStringMapFile, writeVersionedState, writeVersionedStateAsync } from "./state-persistence";
 import { workhorseUserDataOverride, workhorseVolatileCredentials } from "../src/lib/user-data";
@@ -788,6 +788,17 @@ function scheduleHousekeeping(sessions: readonly unknown[]) {
     } catch (error) {
       mainLog.record("housekeeping", `failed ${faultDetail(error)}`);
     }
+    // Sidecars an earlier build bloated by retiring the same worker on every
+    // save. Bounded, yielded between files, and logged only when it did work.
+    void repairRetiredSidecars(sessions, app.getPath("userData"))
+      .then((repair) => {
+        if (repair.files === 0) return;
+        mainLog.record(
+          "transcripts:repair",
+          `files=${repair.files} rows_dropped=${repair.rowsDropped} mb_before=${(repair.bytesBefore / 1048576).toFixed(1)} mb_after=${(repair.bytesAfter / 1048576).toFixed(1)}`,
+        );
+      })
+      .catch((error) => mainLog.record("transcripts:repair", `failed ${faultDetail(error)}`));
   }, HOUSEKEEPING_DELAY_MS);
   timer.unref?.();
 }

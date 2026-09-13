@@ -171,7 +171,7 @@ import {
   stripOutputFromThought,
   wrapMarkdown,
 } from "../src/lib/markdown";
-import { applyPermissionAnswer, autoAllowPermission, classifyPermissionTool, classifyElevation, deskClampNote, describeElevation, elevationForBlock, enqueuePermission, grantedPolicyAnswer, inboundAccess, isQuietDeskTool, lineageGrant, looksLikeDelegationTool, looksLikeSearchOnly, looksLikeShellTool, looksLikeWriteTool, parseElevationInput, pathOwnerMode, permissionGrantKey, permissionPolicyAnswer, permissionResumeStatus, promptOwner, workerAccess, workerGrant, workerTightening } from "../src/lib/permissions";
+import { applyPermissionAnswer, autoAllowPermission, classifyPermissionTool, classifyElevation, deskClampNote, describeElevation, elevationForBlock, enqueuePermission, grantedPolicyAnswer, inboundAccess, isQuietDeskTool, lineageGrant, looksLikeDelegationTool, looksLikeSearchOnly, looksLikeShellTool, looksLikeWriteTool, parseElevationInput, pathOwnerMode, permissionGrantKey, permissionPolicyAnswer, permissionResumeStatus, promptOwner, vendorLaunchMode, workerAccess, workerGrant, workerTightening } from "../src/lib/permissions";
 import { detectClaudeAccessDefaults, detectCursorAccessDefaults, detectGrokAccessDefaults } from "../electron/vendor-access";
 import { normalizePermissionGrants } from "../src/lib/permission-grants";
 import { appendUserMessage, applyComposerDrafts, applyDeleteDeskChat, applyDeleteLooseDeskChats, applyRenameDeskChat, archiveChat, autoRenameChat, canPlaceInProject, deleteChat, deleteChatGuard, deleteWorkerChats, dropDrafts, dropQueuedPrompt, enqueuePrompt, findListedChat, forkChat, omitQueuedUserMessages, forkTitle, formatLastTalked, hasComposerDraft, hiddenProjectChatCount, isDraftChat, isLooseDeleteScope, lastProjectChat, lastTalkedAt, lastUserMessage, listedChats, defaultInboundParentId, messagesThrough, moveChat, openDraft, activeProjectChat, pinnedCollapsedChat, PROJECT_CHAT_LIMIT, renameChat, resolveListedChat, rewindToUserMessage, shiftQueuedPrompt, visibleProjectChats, workersFoldOpen } from "../src/lib/chats";
@@ -10894,12 +10894,13 @@ test("hydrate strips gated-era campaign rows and lets their parents run", () => 
   assert.doesNotMatch(source, /clearCampaignPhase/, "nothing grants campaign clearance");
 });
 
-test("a path-owned worker launches at Ask and the desk answers its in-path writes", () => {
+test("a path-owned worker copies the orchestrator seat; only the vendor launch is Ask", () => {
   const desk: DeskAccess = { mode: "always-approve", sandbox: "off" };
-  // Dial one: the vendor session. Always would launch approval_policy="never"
-  // and no write event would reach the ownership preflight, so a path-owned
-  // worker is clamped to Ask however permissive the desk is.
-  assert.deepEqual(workerAccess({ inherited: desk, owned: true }), { mode: "ask", sandbox: "off" });
+  // The worker chip copies Always. Ask is only the vendor launch so write
+  // events still reach path preflight — putting Ask on session.mode is what
+  // made a free parent look like it seated children at Ask each time.
+  assert.deepEqual(workerAccess({ inherited: desk, owned: true }), desk);
+  assert.equal(vendorLaunchMode({ mode: "always-approve", hidden: true, agentRun: { paths: ["src/app.ts"] } }), "ask");
   assert.deepEqual(workerAccess({ inherited: desk, owned: false, readOnly: true }), {
     mode: "always-approve",
     sandbox: "read-only",
@@ -10909,10 +10910,10 @@ test("a path-owned worker launches at Ask and the desk answers its in-path write
   assert.equal(pathOwnerMode("accept-edits"), "ask");
   assert.equal(pathOwnerMode("plan"), "plan");
   assert.equal(pathOwnerMode("ask"), "ask");
-  // A clamped worker still prompts on its own Permission. That is what keeps
-  // the preflight in play.
+  // The vendor launch is still Ask, so write events reach preflight.
   const owned = workerAccess({ inherited: desk, owned: true });
-  assert.equal(permissionPolicyAnswer({ ...owned, tool: "Write", detail: "src/app.ts", path: "src/app.ts" }), null);
+  const launch = { ...owned, mode: vendorLaunchMode({ mode: owned.mode, hidden: true, agentRun: { paths: ["src/app.ts"] } }) };
+  assert.equal(permissionPolicyAnswer({ ...launch, tool: "Write", detail: "src/app.ts", path: "src/app.ts" }), null);
   // Dial two: the carried grant answers that same write with no modal.
   const grant = workerGrant({ inherited: desk });
   assert.deepEqual(grant, desk);

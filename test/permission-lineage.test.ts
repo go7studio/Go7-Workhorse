@@ -61,7 +61,7 @@ function helperUnder(root: LineageChat, granted?: DeskAccess): LineageChat {
   };
 }
 
-/** A path-owned worker: clamped to Ask so its writes still reach the preflight. */
+/** A path-owned worker: vendor launches at Ask; the chip copies the parent. */
 function pathWorkerUnder(root: LineageChat, granted?: DeskAccess): LineageChat {
   return {
     id: "worker",

@@ -17,6 +17,7 @@ import {
   requestedWorkerAccess,
   sandboxSourceNote,
   spawnAccessLogDetail,
+  vendorLaunchMode,
   workerAccess,
   workerGrant,
   workerTightening,
@@ -181,16 +182,21 @@ test("a nested helper copies the parent seat; the call cannot clamp it", () => {
   assert.equal(releasedHelper({ role: "worker" }), false);
 });
 
-test("a path-owned worker still launches at Ask so ownership can be preflighted", () => {
+test("a path-owned worker still shows the orchestrator seat, and only the vendor launch is Ask", () => {
   const spawned = spawnSeat({
     caller: DESK_DEFAULT,
     desk: DESK_DEFAULT,
     call: { permission: "always-approve", sandbox: "off" },
     owned: true,
   });
-  assert.equal(spawned.seat.mode, "ask", "the preflight still gets to read the writes");
+  assert.equal(spawned.seat.mode, "always-approve", "the worker chip copies the parent, not Ask each time");
   assert.equal(spawned.seat.sandbox, "off");
-  assert.equal(spawned.granted.mode, "always-approve", "and the desk answers those writes from this");
+  assert.equal(spawned.granted.mode, "always-approve", "the desk answers in-path writes from this grant");
+  assert.equal(
+    vendorLaunchMode({ mode: spawned.seat.mode, hidden: true, agentRun: { paths: ["src/app.ts"] } }),
+    "ask",
+    "the vendor still emits write events so path ownership can be preflighted",
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -346,6 +352,7 @@ test("the store seats a worker from the parent, not from the call", () => {
     "the call cannot name a seat",
   );
   assert.match(store, /inherited: callAccess\.granted,\n\s*owned: assignedPaths\.length > 0,/);
+  assert.match(store, /mode: vendorLaunchMode\(session\)/, "Ask is vendor launch only, not the worker chip");
   assert.doesNotMatch(store, /readOnly: nestedPolicy\.readOnly && !helperReleased/);
   assert.match(store, /grantedAccess: \{ \.\.\.workerGrant\(\{ inherited: callAccess\.granted, prior: priorWorker \}\), source: callAccess\.source \}/);
   // The guard, not the sentence: a hidden owner must reach sandboxSourceNote

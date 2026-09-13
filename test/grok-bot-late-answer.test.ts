@@ -328,6 +328,11 @@ test("the desk wires the late lane end to end", () => {
   assert.match(store, /msg_late_\$\{answer\.reqId\}/, "delivery is idempotent by request id");
   assert.match(store, /lateGrokBotAnswers/, "the renderer pulls on ready");
   assert.match(store, /lateAckPending/, "an appended answer is acknowledged only after a successful save");
+  assert.match(
+    store,
+    /if \(!outcome \|\| !outcome\.written\) return;/,
+    "only a save that landed acknowledges: superseded, refused, failed, or unanswered saves never do",
+  );
 });
 
 test("a shim on its install's own port still arms the late-answer lane", () => {

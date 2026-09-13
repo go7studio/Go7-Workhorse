@@ -6,6 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   CURRENT_STATE_VERSION,
+  createSaveQueue,
   readComposerDraftFile,
   readStringMapFile,
   readVersionedState,
@@ -183,7 +184,149 @@ test("the desk save path is the async write, chained", () => {
   const main = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "electron", "main.ts"), "utf8");
   assert.match(main, /const pending = writeVersionedStateAsync\(/, "the save must not hold the main thread for the disk");
   assert.match(main, /await pending/, "and it must still be awaited, or last-writer-wins ordering is gone");
-  assert.match(main, /stateSaveChain = stateSaveChain\.then\(\(\) => writeState\(state\)\)\.catch\(/, "overlapping saves must serialize, and a rejection must not end all future saves");
+  assert.match(main, /const stateSaves = createSaveQueue<Persistable>\(\(state\) => writeState\(state\), \{/, "overlapping saves must serialize through the queue, and a rejection must not end all future saves");
+  assert.match(main, /supersedes: \(next, waiting\) => !\(emptySnapshot\(next\) && !emptySnapshot\(waiting\)\)/, "an empty snapshot must not displace a richer waiting one");
+  assert.match(main, /async function writeState\(state: Persistable\): Promise<boolean>/, "the writer says whether it wrote");
+  assert.match(main, /refused empty overwrite[^`]*`\);\s*\n\s*return false;/, "a refused save answers false, so the renderer never acknowledges on it");
+  assert.match(main, /mainLog\.record\("state:save", `failed \$\{faultDetail\(error\)\}`\);\s*\n\s*return false;/, "a failed save answers false");
+  assert.match(main, /if \(!state \|\| typeof state !== "object"\) return \{ written: false \};/, "a malformed payload is answered, never left void");
+  assert.match(main, /return stateSaves\.enqueue\(state\)/, "the handler hands the snapshot to the queue and nothing else");
   assert.match(main, /setPerfCause\("state:save"\)/, "a recorded stall must name the save");
   assert.match(main, /queueMicrotask\(clearPerfCause\)/, "the tag must clear at the first await, or the instrument blames the save for every stall during the off-thread wait");
+});
+
+/*
+ * 2026-09-13, the live desk: the renderer asks for a save on every change and
+ * never waits, and once a save cost more than the gap between requests the
+ * chain grew without bound — the main loop held 95% of the time for fifteen
+ * minutes after the chat that caused it had ended, the main process at 3.4 GB.
+ */
+
+function gatedWriter<T>() {
+  const written: T[] = [];
+  const gates: Array<{ resolve: (landed?: boolean) => void; reject: (error: Error) => void }> = [];
+  const write = (state: T) =>
+    new Promise<boolean>((resolve, reject) => {
+      written.push(state);
+      gates.push({ resolve: (landed = true) => resolve(landed), reject });
+    });
+  return { write, written, gates };
+}
+
+const tick = () => new Promise<void>((resolve) => setImmediate(resolve));
+
+test("one state write in flight; while it runs only the newest snapshot waits, and a superseded caller is told", async () => {
+  const { write, written, gates } = gatedWriter<number>();
+  const queue = createSaveQueue(write);
+  const outcomes: Record<number, boolean> = {};
+  const first = queue.enqueue(1).then((outcome) => { outcomes[1] = outcome.written; });
+  const second = queue.enqueue(2).then((outcome) => { outcomes[2] = outcome.written; });
+  const third = queue.enqueue(3).then((outcome) => { outcomes[3] = outcome.written; });
+  await tick();
+  assert.deepEqual(written, [1], "the first snapshot went straight to the writer");
+
+  gates[0]!.resolve();
+  await first;
+  await tick();
+  assert.deepEqual(written, [1, 3], "the middle snapshot is never written; the newest one is");
+  assert.deepEqual(outcomes, { 1: true }, "callers of a superseded snapshot wait for the write that replaced it");
+
+  gates[1]!.resolve();
+  await Promise.all([second, third]);
+  // The renderer acknowledges a late answer on "the save made from this state
+  // landed". A superseded snapshot did not land, and its caller must know.
+  assert.deepEqual(outcomes, { 1: true, 2: false, 3: true });
+  await queue.idle();
+});
+
+test("an empty snapshot never takes a richer one's place, and its caller is told", async () => {
+  type Snap = { n: number; rich: boolean };
+  const { write, written, gates } = gatedWriter<Snap>();
+  const queue = createSaveQueue(write, { supersedes: (next, waiting) => !(!next.rich && waiting.rich) });
+  const outcomes: number[] = [];
+  const first = queue.enqueue({ n: 1, rich: true });
+  const second = queue.enqueue({ n: 2, rich: true }).then((outcome) => { outcomes.push(outcome.written ? 2 : -2); });
+  const empty = queue.enqueue({ n: 3, rich: false }).then((outcome) => { outcomes.push(outcome.written ? 3 : -3); });
+  await tick();
+  gates[0]!.resolve();
+  await first;
+  await tick();
+  assert.deepEqual(written.map((snap) => snap.n), [1, 2], "the rich snapshot is the one written; the empty one is dropped");
+  gates[1]!.resolve();
+  await Promise.all([second, empty]);
+  assert.deepEqual(outcomes.sort(), [-3, 2], "the dropped caller is told its snapshot did not land");
+
+  // The other way round a richer snapshot still replaces an empty one.
+  const emptyFirst = queue.enqueue({ n: 4, rich: false });
+  const richAfter = queue.enqueue({ n: 5, rich: false });
+  const richer = queue.enqueue({ n: 6, rich: true });
+  await tick();
+  gates[2]!.resolve();
+  await emptyFirst;
+  await tick();
+  assert.deepEqual(written.map((snap) => snap.n), [1, 2, 4, 6]);
+  gates[3]!.resolve();
+  await Promise.all([richAfter, richer]);
+  await queue.idle();
+});
+
+test("a request made from inside a settle callback waits for the next write, never a second writer", async () => {
+  const { write, written, gates } = gatedWriter<number>();
+  const queue = createSaveQueue(write);
+  let inner: Promise<{ written: boolean }> | null = null;
+  const first = queue.enqueue(1).then(() => {
+    inner = queue.enqueue(2);
+  });
+  await tick();
+  gates[0]!.resolve();
+  await first;
+  await tick();
+  assert.deepEqual(written, [1, 2], "the settle-time request became the next write");
+  assert.equal(gates.length, 2, "one writer at a time");
+  gates[1]!.resolve();
+  assert.equal((await inner!).written, true);
+  await queue.idle();
+});
+
+test("a write that throws or refuses answers written: false, and the next snapshot still runs", async () => {
+  // writeState refuses an empty snapshot over a richer file and swallows its
+  // own failures. Either way the bytes are not on disk, and the renderer must
+  // not acknowledge a late answer on the strength of that save.
+  const { write, written, gates } = gatedWriter<number>();
+  const queue = createSaveQueue(write);
+  const first = queue.enqueue(1);
+  const second = queue.enqueue(2);
+  const third = queue.enqueue(3);
+  await tick();
+  gates[0]!.reject(new Error("disk full"));
+  assert.equal((await first).written, false, "a failed write did not land");
+  await tick();
+  assert.deepEqual(written, [1, 3], "a rejection ends one write, not every save after it");
+  gates[1]!.resolve(false);
+  assert.equal((await third).written, false, "a refused write did not land either");
+  assert.equal((await second).written, false, "and a superseded caller is still told false");
+  const fourth = queue.enqueue(4);
+  await tick();
+  gates[2]!.resolve();
+  assert.equal((await fourth).written, true, "a write that landed says so");
+  await queue.idle();
+});
+
+test("idle waits for the last write, and answers at once on a quiet queue", async () => {
+  const { write, gates } = gatedWriter<number>();
+  const queue = createSaveQueue(write);
+  await queue.idle();
+  void queue.enqueue(1);
+  void queue.enqueue(2);
+  let idle = false;
+  const waited = queue.idle().then(() => {
+    idle = true;
+  });
+  await tick();
+  assert.equal(idle, false, "idle holds while a write is in flight");
+  gates[0]!.resolve();
+  await tick();
+  assert.equal(idle, false, "and while the newest snapshot is still being written");
+  gates[1]!.resolve();
+  await waited;
 });

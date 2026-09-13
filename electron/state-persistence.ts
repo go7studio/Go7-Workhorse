@@ -487,3 +487,85 @@ export function writeVersionedState(
   atomicWriteJson(file, protectedState, undefined, { fsync: options.fsync ?? options.rotateBackups !== false });
   return protectedState;
 }
+
+/**
+ * One state write in flight, the newest snapshot next.
+ *
+ * `state:save` used to chain every request. The renderer asks for a save on
+ * every change and never waits for the last one, so when a save cost more than
+ * the two seconds between requests the chain grew without bound. Measured on
+ * the live desk on 2026-09-13: a chat that streamed for five minutes left a
+ * backlog that held the main loop 95% of the time for fifteen minutes after the
+ * chat ended, with the main process at 3.4 GB, every queued request holding a
+ * whole desk. Between two writes only the newest snapshot can matter, because
+ * each one is the whole desk; the ones between are never missed on disk.
+ *
+ * Every caller learns whether its own snapshot was the one written and the
+ * write landed. That is not a courtesy: the renderer acknowledges a Grok Bot
+ * late answer on the strength of "the save I made from this state landed",
+ * and a snapshot that was replaced in the queue never reached the disk, nor
+ * did one the writer refused or failed on. A caller told `written: false`
+ * waits for a save that does land; nothing it was made from is lost, because
+ * the renderer still holds it. The writer says whether it wrote; a writer
+ * that throws did not.
+ *
+ * `supersedes` decides whether a newer request may take a waiting one's place.
+ * The desk uses it to keep an empty snapshot from displacing a richer one, the
+ * same refusal `writeState` makes at the disk. A request that may not
+ * supersede is dropped instead, and its callers are told so.
+ *
+ * Last-writer-wins ordering holds because there is never more than one writer.
+ */
+export type SaveOutcome = { written: boolean };
+
+export type SaveQueue<T> = {
+  enqueue: (state: T) => Promise<SaveOutcome>;
+  /** Resolves once nothing is in flight or waiting. */
+  idle: () => Promise<void>;
+};
+
+type SaveWaiter = { resolve: (outcome: SaveOutcome) => void; carried: boolean };
+
+export function createSaveQueue<T>(
+  write: (state: T) => Promise<boolean>,
+  options: { supersedes?: (next: T, waiting: T) => boolean } = {},
+): SaveQueue<T> {
+  const supersedes = options.supersedes ?? (() => true);
+  let inFlight: Promise<void> | null = null;
+  let waiting: { state: T; waiters: SaveWaiter[] } | null = null;
+  const run = async (state: T, waiters: SaveWaiter[]): Promise<void> => {
+    let landed = false;
+    try {
+      landed = (await write(state)) === true;
+    } catch {
+      // The write guards its own body. A throw here must not end every save after it.
+    }
+    for (const waiter of waiters) waiter.resolve({ written: waiter.carried && landed });
+    if (waiting) {
+      const next = waiting;
+      waiting = null;
+      inFlight = run(next.state, next.waiters);
+    } else {
+      inFlight = null;
+    }
+  };
+  return {
+    enqueue: (state) =>
+      new Promise<SaveOutcome>((resolve) => {
+        if (!inFlight) {
+          inFlight = run(state, [{ resolve, carried: true }]);
+        } else if (!waiting) {
+          waiting = { state, waiters: [{ resolve, carried: true }] };
+        } else if (supersedes(state, waiting.state)) {
+          for (const waiter of waiting.waiters) waiter.carried = false;
+          waiting.state = state;
+          waiting.waiters.push({ resolve, carried: true });
+        } else {
+          waiting.waiters.push({ resolve, carried: false });
+        }
+      }),
+    idle: async () => {
+      while (inFlight) await inFlight;
+    },
+  };
+}

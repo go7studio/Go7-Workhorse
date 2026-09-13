@@ -88,7 +88,7 @@ import {
 import { clearPerfCause, setPerfCause, stallThresholdMs, startPerfHeartbeat } from "./perf-heartbeat";
 import { offloadStateTranscripts, readTranscriptSidecar, repairRetiredSidecars, transcriptSidecarPath } from "./transcript-store";
 import { applyComposerDrafts, type ComposerDraftSnap } from "../src/lib/chats";
-import { dueByInterval, readComposerDraftFile, readStringMapFile, readVersionedState, sameJsonValue, STATE_BACKUP_INTERVAL_MS, STATE_FSYNC_INTERVAL_MS, syncFileInPlace, worktreeKeepSet, worktreePruneDecision, writeComposerDraftFile, writeStringMapFile, writeVersionedState, writeVersionedStateAsync } from "./state-persistence";
+import { createSaveQueue, dueByInterval, readComposerDraftFile, readStringMapFile, readVersionedState, sameJsonValue, STATE_BACKUP_INTERVAL_MS, STATE_FSYNC_INTERVAL_MS, syncFileInPlace, worktreeKeepSet, worktreePruneDecision, writeComposerDraftFile, writeStringMapFile, writeVersionedState, writeVersionedStateAsync } from "./state-persistence";
 import { workhorseUserDataOverride, workhorseVolatileCredentials } from "../src/lib/user-data";
 import {
   bookmarksFromProjects,
@@ -640,11 +640,23 @@ let lastStateBackupAt = 0;
 let lastStateFsyncAt = 0;
 
 /*
- * Saves are serialized: an overlapping save must not let an older snapshot's
- * rename land after a newer one. The chain keeps last-writer-wins ordering
- * without holding the IPC handler.
+ * Saves are serialized and coalesced: one write in flight, and while it runs
+ * only the newest snapshot waits. An older snapshot's rename can never land
+ * after a newer one, and a burst of saves cannot pile whole desks up in memory
+ * (see `createSaveQueue`). The handler returns without holding the IPC.
  */
-let stateSaveChain: Promise<void> = Promise.resolve();
+const stateSaves = createSaveQueue<Persistable>((state) => writeState(state), {
+  // An empty snapshot never takes a richer one's place in the queue, for the
+  // reason writeState refuses to put one on disk over a richer file.
+  supersedes: (next, waiting) => !(emptySnapshot(next) && !emptySnapshot(waiting)),
+});
+
+/** No chats and no usage: the shape of a renderer that has not loaded yet. */
+function emptySnapshot(state: Persistable): boolean {
+  const sessions = Array.isArray(state.sessions) ? state.sessions.length : 0;
+  const usage = Array.isArray(state.usage) ? state.usage.length : 0;
+  return sessions === 0 && usage === 0;
+}
 
 /*
  * Hot saves skip fsync on purpose — flushing a 46MB file sixty times a minute
@@ -674,7 +686,8 @@ function stateFileSize(file: string): number {
   }
 }
 
-async function writeState(state: Persistable) {
+/** True when the file now holds this snapshot; false when the save was refused or failed. */
+async function writeState(state: Persistable): Promise<boolean> {
   try {
     /*
      * The tag covers the clones and the stringify — the stretch that actually
@@ -688,10 +701,8 @@ async function writeState(state: Persistable) {
     setPerfCause("state:save");
     fs.mkdirSync(path.dirname(statePath()), { recursive: true });
     const file = statePath();
-    const sessions = Array.isArray(state.sessions) ? state.sessions.length : 0;
-    const usage = Array.isArray(state.usage) ? state.usage.length : 0;
     // Never clobber a richer file with an empty snapshot.
-    if (sessions === 0 && usage === 0 && fs.existsSync(file)) {
+    if (emptySnapshot(state) && fs.existsSync(file)) {
       try {
         const previous = JSON.parse(fs.readFileSync(file, "utf8")) as Persistable;
         const prevSessions = Array.isArray(previous.sessions) ? previous.sessions.length : 0;
@@ -699,7 +710,7 @@ async function writeState(state: Persistable) {
         if (prevSessions > 0 || prevUsage > 0) {
           console.error("workhorse refused to overwrite saved chats with an empty state");
           mainLog.record("state:save", `refused empty overwrite prev_sessions=${prevSessions} prev_usage=${prevUsage}`);
-          return;
+          return false;
         }
       } catch {
         // existing file unreadable — write through
@@ -751,9 +762,11 @@ async function writeState(state: Persistable) {
       rememberFolderBookmark(folder, bookmark, io);
     }
     jobEngine?.sync(state.sessions);
+    return true;
   } catch (error) {
     console.error("workhorse state save failed", error);
     mainLog.record("state:save", `failed ${faultDetail(error)}`);
+    return false;
   } finally {
     clearPerfCause();
   }
@@ -1693,7 +1706,7 @@ app.whenReady().then(async () => {
   };
 
   ipcMain.handle("state:save", (_event, state: Persistable) => {
-    if (!state || typeof state !== "object") return;
+    if (!state || typeof state !== "object") return { written: false };
     if ("settings" in state) {
       const nextSettings = normalizeSettings((state as { settings?: unknown }).settings);
       const workshopChanged = JSON.stringify(liveSettings.workshop) !== JSON.stringify(nextSettings.workshop);
@@ -1709,11 +1722,9 @@ app.whenReady().then(async () => {
       const theme = (state as { theme: string }).theme;
       if (theme === "system" || theme === "light" || theme === "dark" || theme === "workhorse") liveTheme = theme;
     }
-    // The catch keeps the chain alive: writeState guards its own body, but a
-    // future edit that throws before its try would otherwise poison the chain
-    // and silently end every save after it.
-    stateSaveChain = stateSaveChain.then(() => writeState(state)).catch(() => {});
-    return stateSaveChain;
+    // The queue guards the write: writeState guards its own body, but a future
+    // edit that throws before its try must not silently end every save after it.
+    return stateSaves.enqueue(state);
   });
   ipcMain.handle("state:save-drafts", (_event, drafts: unknown) => {
     if (!drafts || typeof drafts !== "object" || Array.isArray(drafts)) return;
@@ -2451,7 +2462,7 @@ async function drainStateForQuit(): Promise<void> {
   let timer: NodeJS.Timeout | undefined;
   try {
     await Promise.race([
-      stateSaveChain.catch(() => {}),
+      stateSaves.idle(),
       new Promise<void>((resolve) => {
         timer = setTimeout(resolve, QUIT_DRAIN_MS);
       }),

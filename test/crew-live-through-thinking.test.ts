@@ -5,8 +5,9 @@ import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import { isLiveChat } from "../src/lib/chats";
 import { crewActivityLine, crewTurnInFlight, crewWorkerLive, vendorTurnWorking } from "../src/lib/crew-live";
+import { applyFailedPeerAsk } from "../src/lib/grok-events";
 import { askedChatStatusSnapshot } from "../src/lib/subagents";
-import { namedWorkSummary } from "../src/lib/turns";
+import { isGenericWorkName, keepSubagentChip, namedCrewSummary, namedWorkSummary, workPopState } from "../src/lib/turns";
 import { shouldReviveIdleTurn } from "../src/lib/vendor-bridge";
 import { crewDotKind } from "../src/ui/ChatRow";
 import type { ChatMessage, Session } from "../src/lib/types";
@@ -203,4 +204,41 @@ test("agent_status does not declare a thinking worker finished", () => {
   assert.ok(snap);
   assert.equal(snap!.status, "running");
   assert.equal(snap!.next, "wait");
+});
+
+test("a failed ask with no real chat does not mint a red the-other-agent card", () => {
+  assert.equal(isGenericWorkName("the other agent"), true);
+  assert.equal(keepSubagentChip({ fromTitle: "the other agent", text: "the other agent" }), false);
+  assert.equal(keepSubagentChip({ fromTitle: "the other agent", subagentSessionId: "kid" }), true);
+  assert.equal(
+    namedCrewSummary([{ name: "the other agent", live: false, failed: true }]),
+    "",
+  );
+  assert.equal(workPopState({ live: false, failed: false }), "done");
+  const parent = {
+    id: "parent",
+    parentId: undefined,
+    status: "idle" as const,
+    messages: [{ id: "u", role: "user" as const, text: "look into this", createdAt: 1 }],
+  };
+  const after = applyFailedPeerAsk([parent as never], {
+    parentId: "parent",
+    error: "no such chat",
+  });
+  assert.equal(
+    after[0]?.messages.some((message) => message.kind === "subagent"),
+    false,
+    "do not add a nameless failed chip",
+  );
+  const named = applyFailedPeerAsk([parent as never], {
+    parentId: "parent",
+    childId: "kid",
+    targetTitle: "Marlow · mesh",
+    error: "Grok is over its day bank",
+  });
+  assert.equal(named[0]?.messages.find((message) => message.kind === "subagent")?.fromTitle, "Marlow · mesh");
+  const popout = read("src/ui/WorkPopout.tsx");
+  assert.match(popout, /keepSubagentChip/);
+  const rules = read("src/lib/workhorse-rules.ts");
+  assert.match(rules, /Do not ask or spawn another agent unless the user asked you to talk to that chat or to hire help/);
 });

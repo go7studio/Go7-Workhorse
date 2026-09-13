@@ -414,8 +414,24 @@ export type CrewSummaryWorker = {
 
 export type WorkPopState = "working" | "done" | "failed";
 
+export function isNamelessAgentLabel(name: string): boolean {
+  const value = name.trim().toLowerCase();
+  return value === "the other agent" || value === "another agent" || value === "other agent" || value === "subagent";
+}
+
 export function isGenericWorkName(name: string): boolean {
-  return name.trim().toLowerCase() === "tool";
+  const value = name.trim().toLowerCase();
+  return value === "tool" || isNamelessAgentLabel(value);
+}
+
+/** A failed ask with no real chat must not mint a red "the other agent" card. */
+export function keepSubagentChip(
+  marker: { fromTitle?: string; text?: string; subagentSessionId?: string },
+  child?: { id: string } | null,
+): boolean {
+  if (child) return true;
+  if (marker.subagentSessionId?.trim()) return true;
+  return !isNamelessAgentLabel(marker.fromTitle || marker.text || "");
 }
 
 function joinCappedNames(names: string[]): string {

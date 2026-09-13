@@ -183,7 +183,8 @@ export function applyFailedPeerAsk(
         message.toolStatus === "failed" &&
         chipMatchesAskTurn(message, input),
     );
-    if (isParent && input.addMarker !== false && !marked) {
+    const nameless = !targetTitle && !childId;
+    if (isParent && input.addMarker !== false && !marked && !nameless) {
       messages = [
         ...messages,
         {

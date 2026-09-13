@@ -17,6 +17,7 @@ import {
   namedWorkSummary,
   packWorkRows,
   earlierWorkLabel,
+  keepSubagentChip,
   resolveWorkedMs,
   workPopState,
   type CrewSummaryWorker,
@@ -73,14 +74,15 @@ function crewWorkerFailed(
 }
 
 function crewWorkersFromStore(store: Store, threads: ChatMessage[]): CrewSummaryWorker[] {
-  return threads.map((marker) => {
+  return threads.flatMap((marker) => {
     const child = store.sessions.find((item) => item.id === marker.subagentSessionId);
+    if (!keepSubagentChip(marker, child)) return [];
     const live = crewWorkerLive(marker, child);
-    return {
+    return [{
       name: crewWorkerName(marker, child),
       live,
       failed: crewWorkerFailed(marker, child, live),
-    };
+    }];
   });
 }
 
@@ -428,7 +430,7 @@ export const WorkPopout = memo(function WorkPopout({
   const [now, setNow] = useState(Date.now());
   const { open: bodyOpen, onToggle: onBodyToggle } = useFoldOpen(false);
   const { open: earlierOpen, onToggle: onEarlierToggle } = useFoldOpen(false);
-  const threads = block.subagents;
+  const threads = block.subagents.filter((marker) => keepSubagentChip(marker));
   const tools = block.tools;
   const crewWorkers = useStoreSelector((store) => crewWorkersFromStore(store, threads), sameCrewWorkers);
   const anyChildLive = crewWorkers.some((worker) => worker.live) || threads.some((marker) => marker.toolStatus === "running");
@@ -443,6 +445,7 @@ export const WorkPopout = memo(function WorkPopout({
   const steps = bodyOpen && hasInner ? displayWorkSteps(block, { live, peeled }) : [];
   const visible = steps.filter((step) => {
     if (step.type === "tool" && hideSpawnTool(step.message, threads.length > 0)) return false;
+    if (step.type === "subagent" && !keepSubagentChip(step.message)) return false;
     return true;
   });
   const hasWork = hasInner || foldLive;

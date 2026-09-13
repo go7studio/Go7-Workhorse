@@ -26,6 +26,8 @@ When you add a feature, add it here in the same commit.
 - Nested workers and Grok's own subagents stay working through thinking. The
   fold does not say done, and agent_status does not say the run finished,
   while the child still has work.
+- A failed ask with no real chat does not mint a red "the other agent" card.
+  The closed work line stays quiet instead of painting the whole fold failed.
 - Only the failed mound overlaps. Every other motion keeps the pieces separated.
 - The mascot wears its own bot's colour on every theme, so a row says which bot
   is working before you read it. That is the colour set for the bot in Settings,

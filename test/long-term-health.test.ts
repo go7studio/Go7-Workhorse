@@ -532,6 +532,10 @@ test("the merge never appends a row the restored array already holds", () => {
   // A row appended since is still a later row.
   assert.deepEqual(mergeTranscriptRows([row("a"), row("d")], full)?.map((m) => m.id), ["a", "b", "c", "d"]);
   assert.deepEqual(mergeTranscriptRows([], full)?.map((m) => m.id), ["a", "b", "c"]);
+  // The note the desk appends when a sidecar would not load (missingTranscriptId
+  // in store.tsx) is a later row too, and a later open must still carry it.
+  const note = row("msg_transcript_missing_s");
+  assert.deepEqual(mergeTranscriptRows([row("a"), note], full)?.map((m) => m.id), ["a", "b", "c", "msg_transcript_missing_s"]);
 });
 
 test("a sidecar bloated by re-retirement reads back once per row, and housekeeping rewrites it once", async () => {
@@ -540,14 +544,17 @@ test("a sidecar bloated by re-retirement reads back once per row, and housekeepi
     const { io, store, writes } = countingIo();
     const row = (id: string): ChatMessage => ({ id, role: "assistant", text: id, createdAt: 0 });
     // The live desk's shape, small: three rows, then the prose appended on
-    // every one of three more saves.
-    const rows = [row("a"), row("b"), row("c"), row("b"), row("c"), row("b"), row("c"), row("b"), row("c")];
+    // every one of three more saves. The later copies carry different text so
+    // the assertion can tell first-wins from last-wins.
+    const stale = (id: string, pass: number): ChatMessage => ({ ...row(id), text: `${id} as re-appended on pass ${pass}` });
+    const rows = [row("a"), row("b"), row("c"), stale("b", 1), stale("c", 1), stale("b", 2), stale("c", 2), stale("b", 3), stale("c", 3)];
     const bloated: TranscriptSidecar = { version: 1, sessionId: "sess_bloat", total: rows.length, rows: rows.map((message, index) => ({ index, message })) };
     const file = transcriptSidecarPath(dir, "sess_bloat");
     store.set(file, JSON.stringify(bloated));
 
     const read = readTranscriptSidecar(file, io);
     assert.deepEqual(read?.rows.map((r) => r.message.id), ["a", "b", "c"], "a read never shows a row twice");
+    assert.deepEqual(read?.rows.map((r) => r.message.text), ["a", "b", "c"], "the first copy is the one kept");
     assert.equal(read?.total, 3);
 
     // A partial sidecar keeps its seats even with a repeated id: the inline
@@ -566,7 +573,9 @@ test("a sidecar bloated by re-retirement reads back once per row, and housekeepi
     assert.deepEqual({ files: first.files, rowsDropped: first.rowsDropped }, { files: 1, rowsDropped: 6 });
     assert.ok(first.bytesAfter < first.bytesBefore);
     assert.equal(writes(), 1, "only the bloated file is rewritten");
-    assert.equal(JSON.parse(store.get(file) ?? "null").total, 3);
+    const repaired = JSON.parse(store.get(file) ?? "null");
+    assert.equal(repaired.total, 3);
+    assert.deepEqual(repaired.rows.map((r: { message: { text: string } }) => r.message.text), ["a", "b", "c"], "the file keeps the first copies");
     assert.equal(store.get(partialFile), JSON.stringify(partial), "a partial sidecar is not touched");
 
     const second = await repairRetiredSidecars(sessions, dir, io, { yieldLoop: async () => undefined });

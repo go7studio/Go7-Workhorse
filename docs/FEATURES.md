@@ -113,6 +113,8 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
 - A project is a name. Folders and references are optional, added later.
 - Chats belong to a project. Rename, archive, delete, or drag one to another.
 - Vendor, model and thinking effort are set per chat, not per app.
+- Changing This chat's model or effort drops the previous vendor session, so a
+  resend to Grok 4.6 High actually goes there. The thinking timer starts over.
 - A vendor session opens with your own prompt, so the vendor titles the chat
   from the task. A vendor that echoes the private context is rejected.
 - Fork a chat to try another model on the same history, in a managed worktree

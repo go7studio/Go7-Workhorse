@@ -645,7 +645,18 @@ let lastStateFsyncAt = 0;
  * after a newer one, and a burst of saves cannot pile whole desks up in memory
  * (see `createSaveQueue`). The handler returns without holding the IPC.
  */
-const stateSaves = createSaveQueue<Persistable>((state) => writeState(state));
+const stateSaves = createSaveQueue<Persistable>((state) => writeState(state), {
+  // An empty snapshot never takes a richer one's place in the queue, for the
+  // reason writeState refuses to put one on disk over a richer file.
+  supersedes: (next, waiting) => !(emptySnapshot(next) && !emptySnapshot(waiting)),
+});
+
+/** No chats and no usage: the shape of a renderer that has not loaded yet. */
+function emptySnapshot(state: Persistable): boolean {
+  const sessions = Array.isArray(state.sessions) ? state.sessions.length : 0;
+  const usage = Array.isArray(state.usage) ? state.usage.length : 0;
+  return sessions === 0 && usage === 0;
+}
 
 /*
  * Hot saves skip fsync on purpose — flushing a 46MB file sixty times a minute
@@ -689,10 +700,8 @@ async function writeState(state: Persistable) {
     setPerfCause("state:save");
     fs.mkdirSync(path.dirname(statePath()), { recursive: true });
     const file = statePath();
-    const sessions = Array.isArray(state.sessions) ? state.sessions.length : 0;
-    const usage = Array.isArray(state.usage) ? state.usage.length : 0;
     // Never clobber a richer file with an empty snapshot.
-    if (sessions === 0 && usage === 0 && fs.existsSync(file)) {
+    if (emptySnapshot(state) && fs.existsSync(file)) {
       try {
         const previous = JSON.parse(fs.readFileSync(file, "utf8")) as Persistable;
         const prevSessions = Array.isArray(previous.sessions) ? previous.sessions.length : 0;

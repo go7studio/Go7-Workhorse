@@ -500,51 +500,69 @@ export function writeVersionedState(
  * whole desk. Between two writes only the newest snapshot can matter, because
  * each one is the whole desk; the ones between are never missed on disk.
  *
- * Every caller's promise resolves when a write that carries its state, or a
- * newer one, has landed. Last-writer-wins ordering holds because there is never
- * more than one writer.
+ * Every caller learns whether its own snapshot was the one written. That is
+ * not a courtesy: the renderer acknowledges a Grok Bot late answer on the
+ * strength of "the save I made from this state landed", and a snapshot that
+ * was replaced in the queue never reached the disk. A caller told `written:
+ * false` waits for a save that does land; nothing it was made from is lost,
+ * because the renderer still holds it.
+ *
+ * `supersedes` decides whether a newer request may take a waiting one's place.
+ * The desk uses it to keep an empty snapshot from displacing a richer one, the
+ * same refusal `writeState` makes at the disk. A request that may not
+ * supersede is dropped instead, and its callers are told so.
+ *
+ * Last-writer-wins ordering holds because there is never more than one writer.
  */
+export type SaveOutcome = { written: boolean };
+
 export type SaveQueue<T> = {
-  enqueue: (state: T) => Promise<void>;
+  enqueue: (state: T) => Promise<SaveOutcome>;
   /** Resolves once nothing is in flight or waiting. */
   idle: () => Promise<void>;
-  /** In flight plus waiting: 0, 1 or 2, never more. */
-  depth: () => number;
 };
 
-export function createSaveQueue<T>(write: (state: T) => Promise<void>): SaveQueue<T> {
+type SaveWaiter = { resolve: (outcome: SaveOutcome) => void; carried: boolean };
+
+export function createSaveQueue<T>(
+  write: (state: T) => Promise<void>,
+  options: { supersedes?: (next: T, waiting: T) => boolean } = {},
+): SaveQueue<T> {
+  const supersedes = options.supersedes ?? (() => true);
   let inFlight: Promise<void> | null = null;
-  let waiting: { state: T; settle: Array<() => void> } | null = null;
-  const run = async (state: T, settle: Array<() => void>): Promise<void> => {
+  let waiting: { state: T; waiters: SaveWaiter[] } | null = null;
+  const run = async (state: T, waiters: SaveWaiter[]): Promise<void> => {
     try {
       await write(state);
     } catch {
       // The write guards its own body. A throw here must not end every save after it.
     }
-    for (const done of settle) done();
+    for (const waiter of waiters) waiter.resolve({ written: waiter.carried });
     if (waiting) {
       const next = waiting;
       waiting = null;
-      inFlight = run(next.state, next.settle);
+      inFlight = run(next.state, next.waiters);
     } else {
       inFlight = null;
     }
   };
   return {
     enqueue: (state) =>
-      new Promise<void>((resolve) => {
+      new Promise<SaveOutcome>((resolve) => {
         if (!inFlight) {
-          inFlight = run(state, [resolve]);
-        } else if (waiting) {
+          inFlight = run(state, [{ resolve, carried: true }]);
+        } else if (!waiting) {
+          waiting = { state, waiters: [{ resolve, carried: true }] };
+        } else if (supersedes(state, waiting.state)) {
+          for (const waiter of waiting.waiters) waiter.carried = false;
           waiting.state = state;
-          waiting.settle.push(resolve);
+          waiting.waiters.push({ resolve, carried: true });
         } else {
-          waiting = { state, settle: [resolve] };
+          waiting.waiters.push({ resolve, carried: false });
         }
       }),
     idle: async () => {
       while (inFlight) await inFlight;
     },
-    depth: () => (inFlight ? 1 : 0) + (waiting ? 1 : 0),
   };
 }

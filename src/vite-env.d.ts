@@ -153,7 +153,8 @@ type WorkhorseBridge = {
   onTerminalEvent?: (handler: (event: import("../electron/terminal-host").TerminalEvent) => void) => () => void;
   loadState: () => Promise<Record<string, unknown>>;
   liveRunIds: () => Promise<string[]>;
-  saveState: (state: Record<string, unknown>) => Promise<void>;
+  /** Resolves once a write has landed; `written: false` means this snapshot was superseded in the queue and never reached the disk. */
+  saveState: (state: Record<string, unknown>) => Promise<{ written: boolean } | void>;
   /** One routing:decision line in main.log. Optional, like every other bridge method. */
   recordRoutingDecision?: (detail: string) => Promise<void>;
   /** Optional, like every other bridge method: an older shell simply shows the prose. */

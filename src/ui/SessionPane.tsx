@@ -6,6 +6,7 @@ import { sessionExecutionCwd } from "../lib/session-environment";
 import { peelPlanningPreamble, unsquashSentences } from "../lib/markdown";
 import { brainCaption, messageBrain } from "../lib/session";
 import { talkingToSummary } from "../lib/tool-labels";
+import { vendorTurnWorking } from "../lib/crew-live";
 import { LINEUP_FINISHED_NOTICE } from "../lib/lineup";
 import {
   createTranscriptGrouper,
@@ -199,7 +200,7 @@ export function SessionPane() {
   );
   const toggleSetup = useCallback(() => setSetupOpen((value) => !value), []);
   const openSetup = useCallback(() => setSetupOpen(true), []);
-  const working = session?.status === "running";
+  const working = session ? vendorTurnWorking(session) : false;
   const project = desk.projects.find((item) => item.id === session?.projectId);
   const localCwd = primaryFolder(project, desk.folderExists)?.path ?? "";
   const cwd = session ? sessionExecutionCwd(session.environment, localCwd) : localCwd;

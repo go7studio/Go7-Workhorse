@@ -17,6 +17,7 @@ import {
   readChatAttachment,
   type DroppedFile,
 } from "../lib/images";
+import { vendorTurnWorking } from "../lib/crew-live";
 import { wrapMarkdown } from "../lib/markdown";
 import { deskInk } from "../lib/settings";
 import { formatChatSidebar } from "../lib/session";
@@ -131,7 +132,7 @@ export const Composer = memo(function Composer({
     deskSkills,
   } = useStoreSelector(selectComposerDesk, sameComposerDesk);
   const ink = session ? deskInk(session, settings) : undefined;
-  const running = session?.status === "running";
+  const running = session ? vendorTurnWorking(session) : false;
   const queue = session?.queue ?? [];
   const [value, setValue] = useState(() => session?.composerDraft ?? "");
   const [images, setImages] = useState<ChatImage[]>(() => session?.composerImages ?? []);

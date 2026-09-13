@@ -8,6 +8,13 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.6.78](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.77...v0.6.78) (2026-09-13)
+
+
+### Bug Fixes
+
+* nested workers stay working through thinking ([#336](https://github.com/go7studio/Go7-Workhorse/issues/336)) ([6ea186c](https://github.com/go7studio/Go7-Workhorse/commit/6ea186c467ab24aa95ffe2dbdc9669ec7b5c9fcd))
+
 ## [0.6.77](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.76...v0.6.77) (2026-09-13)
 
 

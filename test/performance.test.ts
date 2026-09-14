@@ -382,12 +382,30 @@ test("a field the guard was never told about still reaches disk", () => {
     const after = { ...before, [key]: value } as unknown as AppState;
     assert.equal(deskPersistBodyEqual(before, after), false, `${key} is written and read back, so it is a change`);
   }
-  // And the one field that is deliberately not worth a save on its own.
+  // A field nobody has thought of yet counts too. That is the whole point of
+  // dropping the list: the next persisted field cannot be forgotten.
+  assert.equal(
+    deskPersistBodyEqual(before, { ...before, aFieldAddedNextYear: 1 } as unknown as AppState),
+    false,
+    "a key the guard has never heard of is still a change",
+  );
+
+  // The exceptions, and only these two. A chat click is read back but is not
+  // worth cloning the desk for; a sheet is not read back at all, so writing it
+  // changes bytes nothing will ever read.
   assert.equal(
     deskPersistBodyEqual(before, { ...before, activeSessionId: "chat-a" } as AppState),
     true,
     "a chat click is still not a reason to clone the desk",
   );
+  assert.equal(
+    deskPersistBodyEqual(before, { ...before, sheet: "project" } as unknown as AppState),
+    true,
+    "opening a sheet must not clone the desk: the loader throws the value away",
+  );
+  // The two that look like it but are read back, so they do count.
+  assert.equal(deskPersistBodyEqual(before, { ...before, panel: "settings" } as unknown as AppState), false);
+  assert.equal(deskPersistBodyEqual(before, { ...before, settingsSection: "llms" } as unknown as AppState), false);
 });
 
 test("the walk reads only the rows whose identity moved", () => {

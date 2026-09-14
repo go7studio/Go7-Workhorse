@@ -2,21 +2,27 @@ import { sameJsonValue } from "./same-json";
 import type { AppState } from "./types";
 
 /**
- * The one field a save carries that is not worth a save of its own.
+ * The two fields a save carries that are not worth a save of their own, and
+ * why each one is here. Nothing goes in this set without an answer.
  *
- * Clicking a chat changes the selection and nothing else. It is written when
- * something else saves, and a desk that quit on a click reopens on the chat it
- * had before — which is the trade this has always made, and the reason the
- * whole desk is not cloned onto the main thread every time somebody browses.
+ * `activeSessionId` is read back — a desk reopens on the chat it had — but a
+ * click changes the selection and nothing else, and cloning the whole desk
+ * onto the main thread every time somebody browses is the cost this guard
+ * exists to avoid. A click alone is not saved; the next save carries it.
+ *
+ * `sheet` is never read back at all: the loader hard-sets it to null, because
+ * nobody wants yesterday's modal reopening. Writing it changes bytes that
+ * nothing will ever read, so opening a sheet must not clone the desk.
  *
  * Everything else in `AppState` is compared, because `saveState` spreads the
  * whole of it (`store.tsx`) and the loader reads most of it back: pane widths,
  * the usage window and range, interrupted-path leases, the theme to return to,
- * the update version somebody dismissed. Naming the fields that count was how
- * this went wrong once already — a hand-kept list of eleven left those out, so
- * resizing a pane and quitting lost the width.
+ * the update version somebody dismissed, the settings section they left open.
+ * Naming the fields that count was how this went wrong once already — a
+ * hand-kept list of eleven left those out, so resizing a pane and quitting
+ * lost the width. The list is gone; this set is the exception, and short.
  */
-const NOT_WORTH_A_SAVE = new Set(["activeSessionId"]);
+const NOT_WORTH_A_SAVE = new Set(["activeSessionId", "sheet"]);
 
 /**
  * One value, compared the way a save cares about.

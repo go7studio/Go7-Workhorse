@@ -278,7 +278,99 @@ test("selection-only desk updates do not look like persist work", () => {
   } as unknown as AppState;
   const selected = { ...body, activeSessionId: "chat-b" } as AppState;
   assert.equal(deskPersistBodyEqual(body, selected), true);
-  assert.equal(deskPersistBodyEqual(body, { ...body, sessions: [] } as AppState), false);
+  assert.equal(
+    deskPersistBodyEqual(body, { ...body, sessions: [{ id: "chat-a" }] } as unknown as AppState),
+    false,
+    "a chat that was not there is a change",
+  );
+  // This line used to read `{ ...body, sessions: [] }` and expect false. That
+  // encoded the old rule — a new array is a change — which is the defect,
+  // not the contract: an empty desk rebuilt is still an empty desk.
+  assert.equal(deskPersistBodyEqual(body, { ...body, sessions: [] } as AppState), true);
+});
+
+/*
+ * 2026-09-13, the live desk, idle, nobody touching it: the whole 13.5 MB state
+ * file written 44 times in 90 seconds, every byte the same as the last. The
+ * guard compared references, so any effect that rebuilt `sessions` with `.map`
+ * looked like a change worth a save and a whole-desk clone across the bridge.
+ */
+
+const chat = (id: string, text: string) => ({ id, messages: [{ id: `m-${id}`, role: "assistant", text }] });
+
+function desk(sessions: unknown[]): AppState {
+  return {
+    sessions,
+    projects: [{ id: "p1", name: "One" }],
+    settings: { retentionDays: 7 },
+    usage: [{ id: "u1", tokens: 10 }],
+    theme: "dark",
+    lastModel: { claude: "opus" },
+    watchPermits: {},
+    watchDayMarks: {},
+    pending: [],
+    externalTasks: { byId: {} },
+    deskPlans: {},
+  } as unknown as AppState;
+}
+
+test("a desk rebuilt without changing is not a save", () => {
+  const rows = [chat("a", "one"), chat("b", "two"), chat("c", "three")];
+  const before = desk(rows);
+  // What every `.map` that changes nothing produces: a new array holding the
+  // very same rows.
+  const repaint = { ...before, sessions: rows.map((row) => row) } as AppState;
+  assert.equal(deskPersistBodyEqual(before, repaint), true, "a rebuilt array of the same rows is not a change");
+
+  // And a rebuilt array of rebuilt rows, which is the same claim one level down.
+  const deeper = { ...before, sessions: rows.map((row) => ({ ...row })) } as unknown as AppState;
+  assert.equal(deskPersistBodyEqual(before, deeper), true, "rows copied field for field are still the same rows");
+
+  // The small keys too: settings rebuilt, usage rebuilt, nothing different.
+  const shallow = {
+    ...before,
+    settings: { ...(before.settings as object) },
+    usage: (before.usage as unknown[]).map((row) => ({ ...(row as object) })),
+    lastModel: { ...(before.lastModel as object) },
+  } as unknown as AppState;
+  assert.equal(deskPersistBodyEqual(before, shallow), true);
+});
+
+test("a real change is still a save, wherever it is", () => {
+  const rows = [chat("a", "one"), chat("b", "two"), chat("c", "three")];
+  const before = desk(rows);
+  const edited = { ...before, sessions: rows.map((row) => (row.id === "c" ? chat("c", "three, and then some") : row)) } as AppState;
+  assert.equal(deskPersistBodyEqual(before, edited), false, "a message that grew is a change");
+  assert.equal(deskPersistBodyEqual(before, desk([...rows, chat("d", "four")])), false, "a new chat is a change");
+  assert.equal(deskPersistBodyEqual(before, desk(rows.slice(0, 2))), false, "a chat that went is a change");
+  assert.equal(
+    deskPersistBodyEqual(before, { ...before, settings: { retentionDays: 0 } } as unknown as AppState),
+    false,
+    "a setting is a change",
+  );
+  assert.equal(deskPersistBodyEqual(before, { ...before, theme: "light" } as AppState), false, "the theme is a change");
+  assert.equal(
+    deskPersistBodyEqual(before, { ...before, usage: [{ id: "u1", tokens: 11 }] } as unknown as AppState),
+    false,
+    "a usage row is a change",
+  );
+  // A field appearing or going is a change, even when everything else matches.
+  const gained = { ...before, sessions: [{ ...rows[0], pinned: true }, rows[1], rows[2]] } as unknown as AppState;
+  assert.equal(deskPersistBodyEqual(before, gained), false, "a field a row did not have is a change");
+});
+
+test("the walk reads only the rows whose identity moved", () => {
+  // The cost that decides whether this can run on every keystroke of a
+  // streaming turn. Nine hundred rows, one of them new: the comparison must
+  // touch that one, not the other 899.
+  const read = new Set<string>();
+  const row = (id: string, text: string) => ({ id, get text() { read.add(id); return text; } });
+  const rows = Array.from({ length: 900 }, (_, index) => row(`c${index}`, "steady"));
+  const before = desk(rows);
+  const oneMoved = { ...before, sessions: rows.map((item, index) => (index === 450 ? row("c450", "steady") : item)) } as unknown as AppState;
+  read.clear();
+  assert.equal(deskPersistBodyEqual(before, oneMoved), true);
+  assert.deepEqual([...read], ["c450"], "only the row that moved is read; the other 899 cost one comparison each");
 });
 
 test("older transcript blocks fill one idle slice at a time", () => {

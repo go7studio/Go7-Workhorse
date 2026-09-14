@@ -1,13 +1,20 @@
 /**
- * Is this the same value once JSON has had its say?
+ * JSON equality without building the JSON.
  *
- * Two jobs share it. The desk asks on load whether the file it just read is
- * the file it would write, and the renderer asks on every state change whether
- * the change is worth a save. Both are the same question: would writing this
- * put different bytes on disk.
+ * Boot decided whether to rewrite the state by serialising it twice and
+ * comparing the strings — 155 ms on the live 46 MB desk, on the main process,
+ * before first paint, to answer a question whose answer is almost always "no".
  *
- * It stops at the first difference, so a real change is cheap. Two
- * `JSON.stringify` calls would build 28 MB of string to answer the same thing.
+ * This answers the same question by walking the two structures and stopping at
+ * the first difference. Nothing is allocated, and the expensive case inverts: a
+ * state that HAS changed costs a handful of nodes instead of two full
+ * serialisations.
+ *
+ * JSON's rules, not JavaScript's. A key whose value is `undefined` does not
+ * exist, because `JSON.stringify` does not write it, and every non-finite number
+ * is `null` on the way out so they all compare alike. Key ORDER is the one place
+ * this is looser than the string compare it replaces: a reshuffle with no change
+ * of content is not a reason to rewrite 46 MB.
  */
 export function sameJsonValue(rawLeft: unknown, rawRight: unknown): boolean {
   // Every non-finite number is written as `null`, so it has to become one

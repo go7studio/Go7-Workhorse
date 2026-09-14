@@ -359,6 +359,37 @@ test("a real change is still a save, wherever it is", () => {
   assert.equal(deskPersistBodyEqual(before, gained), false, "a field a row did not have is a change");
 });
 
+test("a field the guard was never told about still reaches disk", () => {
+  // The gate on #345 caught this: `saveState` spreads the whole of AppState,
+  // and the guard named eleven fields. Pane widths, interrupted-path leases,
+  // the usage window and the dismissed update version are all written and all
+  // read back, and none of them were named — so once the repaint churn stopped
+  // flushing the desk by accident, resizing a pane and quitting lost the width.
+  const rows = [chat("a", "one")];
+  const before = desk(rows);
+  const moves: Array<[string, unknown]> = [
+    ["sidebarWidth", 420],
+    ["threadWidth", 900],
+    ["usageRange", "week"],
+    ["usagePlanWindow", "weekly"],
+    ["leases", { "chat-a": { path: "/tmp/x" } }],
+    ["themeReturn", "light"],
+    ["dismissedUpdateVersion", "0.6.79"],
+    ["activeProjectId", "p1"],
+    ["dismissedAttention", { "chat-a": 1 }],
+  ];
+  for (const [key, value] of moves) {
+    const after = { ...before, [key]: value } as unknown as AppState;
+    assert.equal(deskPersistBodyEqual(before, after), false, `${key} is written and read back, so it is a change`);
+  }
+  // And the one field that is deliberately not worth a save on its own.
+  assert.equal(
+    deskPersistBodyEqual(before, { ...before, activeSessionId: "chat-a" } as AppState),
+    true,
+    "a chat click is still not a reason to clone the desk",
+  );
+});
+
 test("the walk reads only the rows whose identity moved", () => {
   // The cost that decides whether this can run on every keystroke of a
   // streaming turn. Nine hundred rows, one of them new: the comparison must

@@ -310,24 +310,6 @@ function firstFiniteNumber(...values: unknown[]): number | null {
 }
 
 /**
- * JSON equality without building the JSON.
- *
- * Boot decided whether to rewrite the state by serialising it twice and
- * comparing the strings — 155 ms on the live 46 MB desk, on the main process,
- * before first paint, to answer a question whose answer is almost always "no".
- *
- * This answers the same question by walking the two structures and stopping at
- * the first difference. Nothing is allocated, and the expensive case inverts: a
- * state that HAS changed costs a handful of nodes instead of two full
- * serialisations.
- *
- * JSON's rules, not JavaScript's. A key whose value is `undefined` does not
- * exist, because `JSON.stringify` does not write it, and every non-finite number
- * is `null` on the way out so they all compare alike. Key ORDER is the one place
- * this is looser than the string compare it replaces: a reshuffle with no change
- * of content is not a reason to rewrite 46 MB.
- */
-/**
  * How often a save also rotates the backups.
  *
  * Rotation copies the whole live file onto `.bak`. At the old one-minute

@@ -47,6 +47,7 @@ import {
 } from "./chats";
 import { workerJustSettled } from "./worker-settled";
 import { deskPersistBodyEqual } from "./desk-persist";
+import { restoredPanel } from "./restored-panel";
 import { mergeTranscriptRows, normalizeRetentionDays, transcriptFetchPlan, transcriptStillOnDisk } from "./transcript-sidecar";
 import { autoTitleForSend, firstUserText, suggestedTitleForSession, titleAcceptsVendor, titleFromIntent } from "./titles";
 import {
@@ -968,7 +969,7 @@ function hydrate(value: unknown, liveRunIds?: ReadonlySet<string>): AppState {
       ? record.dismissedAttention.filter((item): item is string => typeof item === "string")
       : [],
     sheet: null,
-    panel: panel === "usage" || panel === "settings" ? "settings" : null,
+    panel: restoredPanel(panel),
     settingsSection:
       panel === "usage"
         ? "usage"

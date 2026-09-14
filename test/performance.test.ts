@@ -22,6 +22,7 @@ import { mergeStreamedText } from "../src/lib/markdown";
 import { searchChats } from "../src/lib/search";
 import { dropDrafts } from "../src/lib/chats";
 import { deskPersistBodyEqual } from "../src/lib/desk-persist";
+import { restoredPanel } from "../src/lib/restored-panel";
 import { peelPlanningPreamble, peelRestateWork } from "../src/lib/markdown";
 import { projectEdits, projectFileChanges, projectWriteHarvestWork } from "../src/lib/project-edits";
 import { createTranscriptGrouper, groupTranscript, recentTranscriptText, scheduleAfterPaint, startTranscriptFill } from "../src/lib/turns";
@@ -398,14 +399,33 @@ test("a field the guard was never told about still reaches disk", () => {
     true,
     "a chat click is still not a reason to clone the desk",
   );
+  // Fields the loader does not read back the way they were written are
+  // compared as it would restore them, so a save is never spent on a value the
+  // next launch throws away. Three gates found this same mistake three times,
+  // in the sheet, then the panel.
   assert.equal(
     deskPersistBodyEqual(before, { ...before, sheet: "project" } as unknown as AppState),
     true,
-    "opening a sheet must not clone the desk: the loader throws the value away",
+    "opening a sheet must not clone the desk: the loader always drops it",
   );
-  // The two that look like it but are read back, so they do count.
+  assert.equal(
+    deskPersistBodyEqual(before, { ...before, panel: "add-bot" } as unknown as AppState),
+    true,
+    "opening Add Bot must not clone the desk either: the loader keeps only Settings",
+  );
+  // Settings does survive a quit, so it counts, and so does the section.
   assert.equal(deskPersistBodyEqual(before, { ...before, panel: "settings" } as unknown as AppState), false);
   assert.equal(deskPersistBodyEqual(before, { ...before, settingsSection: "llms" } as unknown as AppState), false);
+  // The guard reads the panel through the loader's own rule, so the two cannot
+  // drift: whatever comes back as Settings counts, and the rest does not.
+  assert.equal(restoredPanel("add-bot"), null);
+  assert.equal(restoredPanel("settings"), "settings");
+  assert.equal(restoredPanel("usage"), "settings");
+  assert.equal(
+    deskPersistBodyEqual({ ...before, panel: "usage" } as unknown as AppState, { ...before, panel: "settings" } as unknown as AppState),
+    true,
+    "two values that restore alike are not a change",
+  );
 });
 
 test("the walk reads only the rows whose identity moved", () => {

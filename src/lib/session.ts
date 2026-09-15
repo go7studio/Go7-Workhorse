@@ -16,7 +16,8 @@ import { normalizePortableCheckpoint } from "./portable-compaction";
 import { normalizeRoutingDecision } from "./routing";
 import { normalizeSpawnAllowlist } from "./spawn-allowlist";
 import { normalizeCrewModes } from "./workhorse-rules";
-import type { ChatMessage, CustomBot, EffortLevel, PermissionMode, ProviderId, SandboxProfile, Session } from "./types";
+import { folderFromPath } from "./project";
+import type { ChatMessage, CustomBot, EffortLevel, LinkedFolder, PermissionMode, ProviderId, SandboxProfile, Session } from "./types";
 
 export type BrainStamp = {
   provider: ProviderId;
@@ -319,6 +320,26 @@ export function normalizeSession(raw: unknown, liveRunIds?: ReadonlySet<string>)
     composerImages: (() => {
       const images = normalizeImages(record.composerImages);
       return images.length > 0 ? images : undefined;
+    })(),
+    folders: (() => {
+      if (!Array.isArray(record.folders)) return undefined;
+      const folders: LinkedFolder[] = [];
+      const seen = new Set<string>();
+      for (const item of record.folders) {
+        if (!item || typeof item !== "object") continue;
+        const folder = item as Record<string, unknown>;
+        const folderPath = typeof folder.path === "string" ? folder.path.trim() : "";
+        if (!folderPath || seen.has(folderPath)) continue;
+        seen.add(folderPath);
+        const bookmark = typeof folder.bookmark === "string" ? folder.bookmark.trim() : "";
+        const next = folderFromPath(folderPath, bookmark);
+        folders.push({
+          ...next,
+          id: typeof folder.id === "string" && folder.id ? folder.id : next.id,
+          label: typeof folder.label === "string" && folder.label.trim() ? folder.label.trim() : next.label,
+        });
+      }
+      return folders.length > 0 ? folders : undefined;
     })(),
     goal:
       record.status === "needs-input"

@@ -91,8 +91,9 @@ test("ContextMeter populates Cursor retained context without a Grok-only live se
   assert.match(store, /draft\.source === "estimate" && draft\.provider !== "cursor"/);
   assert.match(store, /estimateMessageTokens/);
   assert.match(meter, /formatRetainedPct/);
-  assert.doesNotMatch(meter, /chatSpend/);
-  assert.doesNotMatch(meter, /billed on this chat/);
+  assert.match(meter, /chatSpend\(desk\.usage, session\?\.id\)/);
+  assert.match(meter, /billed on this chat/);
+  assert.match(meter, /context-spend/);
   const spend = readFileSync(path.join(ROOT, "src", "ui", "ChatSpend.tsx"), "utf8");
   const pane = readFileSync(path.join(ROOT, "src", "ui", "SessionPane.tsx"), "utf8");
   assert.match(spend, /crewSpendRows/);

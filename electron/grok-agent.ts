@@ -790,9 +790,15 @@ export class GrokAgent {
   private permissionWaiters = new Map<string, (answer: PermissionAnswer) => void>();
   private handlers: GrokAgentHandlers = {};
   private closed = false;
+  private cancelled = false;
   private promptTail: Promise<unknown> = Promise.resolve();
   sessionId = "";
   opened: "session/new" | "session/load" = "session/new";
+
+  /** True after `cancel()` until the next prompt starts. Hosts must not paint that abort as a failure. */
+  get tookCancel(): boolean {
+    return this.cancelled;
+  }
 
   constructor(spec: GrokLaunchSpec, spawn: GrokSpawnFn = spawnGrokProcess) {
     this.spec = spec;
@@ -944,6 +950,7 @@ export class GrokAgent {
     handlers: GrokAgentHandlers,
     images: ChatImage[] = [],
   ): Promise<GrokPromptResult> {
+    this.cancelled = false;
     let collected = "";
     let thoughts = "";
     const prevChunk = handlers.onChunk;
@@ -959,10 +966,21 @@ export class GrokAgent {
         prevThought?.(chunk);
       },
     };
+    if (this.cancelled) {
+      return { text: collected, stopReason: "cancelled", vendorSessionId: this.sessionId, opened: this.opened };
+    }
     const result = await this.request("session/prompt", {
       sessionId: this.sessionId,
       prompt: buildAcpPrompt(text, hydrateChatImages(images)),
     });
+    if (this.cancelled) {
+      return {
+        text: collected,
+        stopReason: "cancelled",
+        vendorSessionId: this.sessionId,
+        opened: this.opened,
+      };
+    }
     // PromptResponse.usage is the adapter's own total for this turn — Claude's
     // adapter sums every API call it made into it. It is the one number to
     // keep. Mid-turn snapshots are the same tokens seen early; sending the
@@ -1118,12 +1136,13 @@ export class GrokAgent {
   }
 
   cancel(): void {
-    if (!this.sessionId) return;
-    this.notify("session/cancel", { sessionId: this.sessionId });
+    this.cancelled = true;
+    if (this.sessionId) this.notify("session/cancel", { sessionId: this.sessionId });
     for (const [id, waiter] of this.permissionWaiters) {
       waiter("deny");
       this.permissionWaiters.delete(id);
     }
+    this.resolvePendingAsCancelled();
   }
 
   dispose(): void {
@@ -1194,7 +1213,8 @@ export class GrokAgent {
     if (!pending) return;
     this.pending.delete(message.id);
     if (message.error) {
-      pending.reject(new Error(message.error.message || `${this.who} agent request failed`));
+      if (this.cancelled) pending.resolve({ stopReason: "cancelled" });
+      else pending.reject(new Error(message.error.message || `${this.who} agent request failed`));
       return;
     }
     pending.resolve(asRecord(message.result));
@@ -1303,7 +1323,16 @@ export class GrokAgent {
     });
   }
 
+  private resolvePendingAsCancelled(): void {
+    for (const pending of this.pending.values()) pending.resolve({ stopReason: "cancelled" });
+    this.pending.clear();
+  }
+
   private failAll(error: Error): void {
+    if (this.cancelled) {
+      this.resolvePendingAsCancelled();
+      return;
+    }
     for (const pending of this.pending.values()) pending.reject(error);
     this.pending.clear();
   }

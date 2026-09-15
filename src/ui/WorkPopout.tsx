@@ -1,4 +1,5 @@
 import { memo, useEffect, useLayoutEffect, useRef, useState, type SyntheticEvent } from "react";
+import { crewTurnInFlight } from "../lib/crew-live";
 import { collapseToolText, splitToolLine, toolIsFinished } from "../lib/grok-events";
 import { unsquashSentences } from "../lib/markdown";
 import { deskInk } from "../lib/settings";
@@ -23,7 +24,7 @@ import {
   type GroupedWorkRow,
   type TranscriptBlock,
 } from "../lib/turns";
-import type { ChatMessage } from "../lib/types";
+import type { ChatMessage, Session } from "../lib/types";
 import { MessageBody } from "./MessageBody";
 import { TimeStamp } from "./TimeStamp";
 
@@ -60,9 +61,14 @@ export function crewWorkerName(
 
 function crewWorkerLive(
   marker: ChatMessage,
-  child?: { status?: string } | null,
+  child?: Pick<Session, "status" | "agentRun" | "messages"> | null,
 ): boolean {
-  return child?.status === "running" || child?.status === "needs-input" || marker.toolStatus === "running";
+  if (child && crewTurnInFlight(child)) return true;
+  return marker.toolStatus === "running";
+}
+
+function runWasStopped(status: string | undefined): boolean {
+  return status === "cancelled" || status === "interrupted" || status === "timed-out";
 }
 
 function crewWorkerFailed(
@@ -73,7 +79,8 @@ function crewWorkerFailed(
   return (
     !live &&
     child?.agentRun?.executionOwner !== "parent" &&
-    child?.agentRun?.status !== "interrupted" &&
+    !runWasStopped(child?.agentRun?.status) &&
+    !runWasStopped(marker.toolStatus) &&
     (marker.toolStatus === "failed" || child?.agentRun?.status === "failed")
   );
 }
@@ -126,7 +133,8 @@ function foldOpen(active: boolean): { open?: true } {
 function useFoldOpen(initial = false) {
   const [open, setOpen] = useState(initial);
   const onToggle = (event: SyntheticEvent<HTMLDetailsElement>) => {
-    setOpen(event.currentTarget.open);
+    const next = event.currentTarget.open;
+    setOpen((current) => (current === next ? current : next));
   };
   return { open, onToggle };
 }
@@ -134,21 +142,31 @@ function useFoldOpen(initial = false) {
 function useStartOpen(start: boolean) {
   const fold = useRef<HTMLDetailsElement>(null);
   useLayoutEffect(() => {
-    if (start && fold.current) fold.current.open = true;
+    const el = fold.current;
+    if (start && el && !el.open) el.open = true;
   }, [start]);
   return fold;
 }
 
-function ThoughtBlock({ text, live, id, reveal = false }: { text: string; live: boolean; id: string; reveal?: boolean }) {
-  const { open, onToggle } = useFoldOpen(live || reveal);
-  const fold = useStartOpen(live || reveal);
+function ThoughtBlock({ text, live, id }: { text: string; live: boolean; id: string }) {
+  const { open, onToggle } = useFoldOpen(false);
+  const fold = useRef<HTMLDetailsElement>(null);
+  useLayoutEffect(() => {
+    const el = fold.current;
+    if (!el) return;
+    if (live) {
+      if (!el.open) el.open = true;
+    } else if (el.open) {
+      el.open = false;
+    }
+  }, [live]);
   return (
     <details
       key={`${id}-${live ? "live" : "idle"}`}
       ref={fold}
       className={`work-fold${live ? " thought-live" : ""}`}
       {...foldOpen(live)}
-      onToggle={onToggle}
+      onToggle={live ? undefined : onToggle}
     >
       <summary className={live ? "thought-live-label" : undefined}>{live ? "Thinking" : "Thought"}</summary>
       {open || live ? (
@@ -221,9 +239,11 @@ function SubagentRow({
                 ? "parent took over"
                 : child?.agentRun?.status === "interrupted"
                   ? "interrupted"
-                  : failed
-                    ? "failed"
-                    : "done"}
+                  : child?.agentRun?.status === "cancelled" || marker.toolStatus === "cancelled"
+                    ? "stopped"
+                    : failed
+                      ? "failed"
+                      : "done"}
           </span>
         </button>
         {child?.agentRun?.status === "interrupted" ? (
@@ -309,7 +329,7 @@ function WorkRow({
   if (row.type === "thought") {
     return (
       <div key={row.step.id} className="work-step" data-kind="thought">
-        <ThoughtBlock text={row.step.text} live={active} id={row.step.id} reveal={reveal} />
+        <ThoughtBlock text={row.step.text} live={active} id={row.step.id} />
       </div>
     );
   }
@@ -331,6 +351,11 @@ function WorkRow({
     return (
       <div key={`${firstId}-${active ? "live" : "idle"}`} className="work-step" data-kind="tool">
         <ToolLine tool={only} peer={isPeerTool(only)} />
+        {active && toolIsFinished(only.toolStatus) ? (
+          <p className="tool-line live">
+            <span className="tool-name">Thinking</span>
+          </p>
+        ) : null}
       </div>
     );
   }
@@ -461,7 +486,7 @@ export const WorkPopout = memo(function WorkPopout({
   const talking = talkingToSummary(peerTools);
   const named = namedWorkSummary(otherTools, {
     live,
-    allowThinking: !talking && threads.length === 0,
+    allowThinking: !talking,
   });
   const crew = namedCrewSummary(crewWorkers, { live: live || anyChildLive });
   const summary = closedWorkSummary({ label, talking, tools: named, crew });
@@ -507,7 +532,7 @@ export const WorkPopout = memo(function WorkPopout({
                 row={row}
                 rowIndex={rowIndex}
                 active={isActiveWorkRow(rows, rowIndex, live)}
-                reveal={tailIndex === packed.tail.length - 1}
+                reveal={row.type !== "thought" && tailIndex === packed.tail.length - 1}
                 visible={visible}
                 threads={threads}
                 onOpenThread={onOpenThread}

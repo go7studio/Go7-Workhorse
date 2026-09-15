@@ -66,8 +66,8 @@ export function nextPacks(current: PackListing[], change: PackChange): WorkshopP
   return rows.map((item, i) => (i === index ? row : item));
 }
 
-export const WORKSHOP_MISSING_HOST = "Add a Local Compute host under Settings → LLMs first.";
-export const WORKSHOP_ENABLE_HOST = "Enable a Local Compute host under Settings → LLMs first.";
+export const WORKSHOP_MISSING_HOST = "These add-ons watch a machine you add — not this PC.";
+export const WORKSHOP_ENABLE_HOST = "That machine is added but switched off. Enable it under Settings → LLMs, then Turn on.";
 
 /** Catalog search: empty query keeps every row; otherwise match name/id/summary. */
 export function availableSearchMatch(query: string, haystack: string): boolean {
@@ -96,8 +96,8 @@ export type TurnOnPreflight = {
 };
 
 const PREFLIGHT_WORD: Record<TurnOnPreflight["missing"][number], string> = {
-  host: "a Local Compute host",
-  "enabled-host": "a host that is switched on",
+  host: "a machine to watch",
+  "enabled-host": "that machine switched on",
   sources: "at least one source",
 };
 
@@ -411,6 +411,7 @@ export function WorkshopBlock({
     if (!chosenHost || hosts.length === 0) {
       setGrantRefuseId(pack.id);
       setConfirmId(null);
+      setAddHostFor(pack.id);
       setNote(missingHostCopy ?? WORKSHOP_MISSING_HOST);
       return;
     }
@@ -564,13 +565,15 @@ export function WorkshopBlock({
         <>
           <div className="workshop-grant-refuse">
             <p className="workshop-preflight-copy">{missingHostCopy ?? WORKSHOP_MISSING_HOST}</p>
-            <button
-              className="tiny primary"
-              type="button"
-              onClick={() => setAddHostFor((current) => (current === pack.id ? null : pack.id))}
-            >
-              Add host
-            </button>
+            {addHostFor !== pack.id ? (
+              <button
+                className="tiny primary"
+                type="button"
+                onClick={() => setAddHostFor(pack.id)}
+              >
+                Add host
+              </button>
+            ) : null}
             <button className="tiny" type="button" onClick={() => store.setSettingsSection("llms")}>
               Open LLMs
             </button>
@@ -578,9 +581,10 @@ export function WorkshopBlock({
           {addHostFor === pack.id ? (
             <LocalComputeAddHost
               onCancel={() => setAddHostFor(null)}
-              onAdded={() => {
+              onAdded={(host) => {
                 setAddHostFor(null);
-                setNote("Host added. Pick it above, then Confirm.");
+                setHostId(host.id);
+                setNote("Machine added. Turn on to start watching it.");
               }}
             />
           ) : null}
@@ -633,7 +637,7 @@ export function WorkshopBlock({
   const settingsIntro = "Add-ons for this desk. Catalog is shared; installs stay local. Live rail for box health, job meters, and more.";
   const emptyOnCopy =
     hosts.length === 0
-      ? "None on. Add a Local Compute host under LLMs, then Turn on an add-on to watch it from the desk rail."
+      ? "None on. These watch a machine you add, not this PC. Turn on an add-on to add that machine."
       : "None on. Install writes a pack Off on this machine. Turn on watches it from the desk rail.";
   const visibleInstalled = pendingInstalled.filter((pack) =>
     availableSearchMatch(
@@ -868,11 +872,11 @@ export function WorkshopBlock({
                 {grantRefuseId === pack.id && !preflight.ok ? (
                   <div className="workshop-grant-refuse">
                     <p className="workshop-preflight-copy">{preflight.copy}</p>
-                    {preflight.missing.includes("host") ? (
+                    {preflight.missing.includes("host") && addHostFor !== pack.id ? (
                       <button
                         className="tiny primary"
                         type="button"
-                        onClick={() => setAddHostFor((current) => (current === pack.id ? null : pack.id))}
+                        onClick={() => setAddHostFor(pack.id)}
                       >
                         Add host
                       </button>
@@ -888,7 +892,7 @@ export function WorkshopBlock({
                     onAdded={() => {
                       setAddHostFor(null);
                       setGrantRefuseId(null);
-                      setNote("Host added. Turn on again to grant this pack.");
+                      setNote("Machine added. Turn on to start watching it.");
                     }}
                   />
                 ) : null}

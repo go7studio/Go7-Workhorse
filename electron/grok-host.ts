@@ -207,6 +207,10 @@ export class GrokSessionHost {
       emit({ type: "done", sessionId: input.sessionId, stopReason: result.stopReason });
       return result;
     } catch (error) {
+      if (slot.agent.tookCancel) {
+        emit({ type: "done", sessionId: input.sessionId, stopReason: "cancelled" });
+        return { text: "", stopReason: "cancelled", vendorSessionId: slot.agent.sessionId, opened: slot.agent.opened };
+      }
       const message = error instanceof Error ? error.message : String(error);
       emit({ type: "error", sessionId: input.sessionId, message });
       throw error;

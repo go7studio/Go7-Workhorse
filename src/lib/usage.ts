@@ -13,7 +13,9 @@ import {
 } from "./cursor-lane";
 import { isGrokBotUrl } from "./custom-http-identity";
 import { estimateMessageTokens } from "./context-stats";
-import type { CustomBot, GrokPlanProduct, GrokPlanUsage, LlmLink, ProviderId, Session, Settings, UsageDraft, UsageEvent, UsageRange, UsageSource } from "./types";
+import type { CustomBot, GrokPlanProduct, GrokPlanUsage, LlmLink, ProviderId, Session, Settings, UsageDraft, UsageEvent, UsagePlanWindow, UsageRange, UsageSource } from "./types";
+
+export type { UsagePlanWindow };
 
 export type UsageTotals = {
   inputTokens: number;
@@ -974,18 +976,52 @@ export function weeklyPlanLeftover(plan: GrokPlanUsage | undefined): number | un
   return undefined;
 }
 
+export function isShortPlanWindow(product: string): boolean {
+  return SHORT_WINDOW.test(product);
+}
+
+export function planWindowPreference(product: string): UsagePlanWindow {
+  return isShortPlanWindow(product) ? "short" : "weekly";
+}
+
+export function pickPreferredPlanWindow(
+  plan: GrokPlanUsage | undefined,
+  preference: UsagePlanWindow | undefined,
+  provider?: ProviderId,
+): GrokPlanProduct | undefined {
+  const windows = planTimeWindows(plan);
+  const pool = windows.length > 0 ? windows : (plan?.products ?? []);
+  if (pool.length === 0) return undefined;
+  if (preference === "short") {
+    return pool.find((item) => isShortPlanWindow(item.product)) ?? pickPlanWindow(plan, undefined, provider);
+  }
+  if (preference === "weekly") {
+    if (provider === "claude") {
+      return pool.find((item) => item.product === "weekly_all") ?? pool.find((item) => ALLOWANCE_WINDOW.test(item.product)) ?? pool[0];
+    }
+    return (
+      pool.find((item) => ALLOWANCE_WINDOW.test(item.product)) ??
+      pool.find((item) => /weekly/i.test(item.product)) ??
+      pickPlanWindow(plan, undefined, provider)
+    );
+  }
+  return pickPlanWindow(plan, undefined, provider);
+}
+
 export function pickPlanWindow(
   plan: GrokPlanUsage | undefined,
   id?: string,
   provider?: ProviderId,
+  preference?: UsagePlanWindow,
 ): GrokPlanProduct | undefined {
   const windows = planTimeWindows(plan);
   const pool = windows.length > 0 ? windows : (plan?.products ?? []);
   if (pool.length === 0) return undefined;
   if (id) {
     const hit = pool.find((item) => item.product === id);
-    if (hit) return hit;
+    if (hit && (!preference || planWindowPreference(hit.product) === preference)) return hit;
   }
+  if (preference) return pickPreferredPlanWindow(plan, preference, provider);
   if (provider === "claude") {
     return pool.find((item) => item.product === "weekly_all") ?? pool[0];
   }
@@ -1040,7 +1076,7 @@ export function planRingView(
   row: Pick<DeskUsageCard, "focus" | "provider" | "key">,
   plans: Parameters<typeof leftoverForCard>[1],
   claudeWindow?: string,
-  options: { local?: boolean } = {},
+  options: { local?: boolean; preference?: UsagePlanWindow } = {},
 ): { value: number; label: string; plan?: GrokPlanUsage; unmetered?: boolean } | undefined {
   const plan = leftoverForCard(row, plans);
   // A model on this machine reports no allowance because it has none. That is
@@ -1048,13 +1084,15 @@ export function planRingView(
   // tried and failed to read.
   if (!plan) return options.local ? { value: 1, label: "∞", unmetered: true } : undefined;
   // A window the person picked from the tabs wins: they asked for that one.
-  if (claudeWindow) {
-    const chosen = (plan.products ?? []).find((item) => item.product === claudeWindow);
-    if (chosen) {
-      if (chosen.unlimited) return { value: 1, label: "∞", plan, unmetered: true };
-      const left = clampLeftover(100 - chosen.usagePercent);
-      return { value: left / 100, label: `${Math.round(left)}%`, plan };
-    }
+  const chosen = claudeWindow
+    ? (plan.products ?? []).find((item) => item.product === claudeWindow)
+    : options.preference === "short"
+      ? pickPreferredPlanWindow(plan, "short", row.provider)
+      : undefined;
+  if (chosen) {
+    if (chosen.unlimited) return { value: 1, label: "∞", plan, unmetered: true };
+    const left = clampLeftover(100 - chosen.usagePercent);
+    return { value: left / 100, label: `${Math.round(left)}%`, plan };
   }
   const allowance = planAllowance(plan, { ...options, provider: row.provider });
   if (allowance.status === "unmetered") return { value: 1, label: "∞", plan, unmetered: true };
@@ -1708,6 +1746,31 @@ export function heatmapTotal(map: StretchHeatmap): number {
     }
   }
   return tokens;
+}
+
+/** Hold the stretch grid when only `Date.now()` moved the parent render. */
+export function sameStretchHeatmap(left: StretchHeatmap, right: StretchHeatmap): boolean {
+  if (left === right) return true;
+  if (left.rows !== right.rows || left.columns.length !== right.columns.length || left.labels.length !== right.labels.length) {
+    return false;
+  }
+  if (!left.labels.every((item, index) => item.text === right.labels[index]?.text && item.column === right.labels[index]?.column)) {
+    return false;
+  }
+  return left.columns.every((column, columnIndex) =>
+    column.every((cell, rowIndex) => {
+      const other = right.columns[columnIndex]?.[rowIndex];
+      return (
+        other &&
+        cell.key === other.key &&
+        cell.pad === other.pad &&
+        cell.tokens === other.tokens &&
+        cell.inputTokens === other.inputTokens &&
+        cell.outputTokens === other.outputTokens &&
+        (cell.cacheReadTokens ?? 0) === (other.cacheReadTokens ?? 0)
+      );
+    }),
+  );
 }
 
 export function heatLevel(tokens: number, peak: number): 0 | 1 | 2 | 3 | 4 {

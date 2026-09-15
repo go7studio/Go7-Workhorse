@@ -34,7 +34,8 @@ const REAL_OBJECTIVE =
 test("the goal that spawned nothing now asks for workers", () => {
   assert.equal(looksLikeGoalCommand(REAL_OBJECTIVE), true, "still a goal command");
   assert.equal(looksLikeSpawnRequest(REAL_OBJECTIVE), true, "and it asks for bots");
-  assert.equal(withSpawnHint(REAL_OBJECTIVE).startsWith(SPAWN_TURN_HINT), true);
+  assert.equal(withSpawnHint(REAL_OBJECTIVE, undefined, "orchestrate").startsWith(SPAWN_TURN_HINT), true);
+  assert.equal(withSpawnHint(REAL_OBJECTIVE), REAL_OBJECTIVE);
 });
 
 test("a goal that only names work still starts nobody", () => {

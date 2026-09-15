@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { test } from "node:test";
 import {
   assertAgentPathWrite,
@@ -27,6 +29,32 @@ test("omitted isolation for an independent writer is worktree, matching the docu
   assert.equal(omitted?.isolation, "worktree");
   const explicit = normalizeAgentRun({ status: "completed", startedAt: 1, finishedAt: 2, isolation: "shared" });
   assert.equal(explicit?.isolation, "shared");
+});
+
+test("omitted isolation follows the parent chat's workspace", () => {
+  assert.equal(resolveWorkerIsolation({
+    parentEnvironment: { kind: "local" },
+  }), "shared");
+  assert.equal(resolveWorkerIsolation({
+    parentEnvironment: { kind: "worktree", path: "/managed/parent", gitRoot: "/repo", head: "abc" },
+  }), "worktree");
+  assert.equal(resolveWorkerIsolation({
+    isolation: "worktree",
+    parentEnvironment: { kind: "local" },
+  }), "worktree");
+  assert.equal(resolveWorkerIsolation({
+    isolation: "shared",
+    parentEnvironment: { kind: "worktree", path: "/managed/parent", gitRoot: "/repo", head: "abc" },
+  }), "shared");
+  assert.equal(resolveWorkerIsolation({
+    nested: true,
+    isolation: "worktree",
+    parentEnvironment: { kind: "worktree", path: "/managed/parent", gitRoot: "/repo", head: "abc" },
+  }), "shared");
+  const store = readFileSync(path.join(process.cwd(), "src", "lib", "store.tsx"), "utf8");
+  assert.match(store, /resolveWorkerIsolation\(\{\s*isolation: payload\.isolation,\s*nested: isNested,\s*parentEnvironment: caller\.environment,/);
+  const mcp = readFileSync(path.join(process.cwd(), "electron", "workhorse-mcp.ts"), "utf8");
+  assert.match(mcp, /parentEnvironment: caller\?\.environment/);
 });
 
 test("nested helpers stay shared even when a caller asks for a worktree", () => {

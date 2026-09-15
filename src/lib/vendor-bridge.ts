@@ -1,3 +1,4 @@
+import { peelPlanningPreamble } from "./markdown";
 import type { ProviderId } from "./types";
 
 export type VendorSendTarget = "grok" | "codex" | "claude" | "cursor" | "custom" | "preview";
@@ -104,13 +105,14 @@ export const TURN_IDLE_AFTER_TRAILING_MS = 800;
 export function shouldReviveIdleTurn(input: {
   status: string;
   assistantId?: string;
-  messages: ReadonlyArray<{ id: string; role?: string; kind?: string }>;
+  messages: ReadonlyArray<{ id: string; role?: string; kind?: string; workedMs?: number }>;
 }): boolean {
   if (input.status === "running" || input.status === "needs-input") return false;
   const assistantId = input.assistantId?.trim() ?? "";
   if (!assistantId) return false;
   const at = input.messages.findIndex((message) => message.id === assistantId);
   if (at < 0) return false;
+  if (typeof input.messages[at]?.workedMs === "number") return false;
   return !input.messages.slice(at + 1).some((message) => message.role === "user" && !message.kind);
 }
 
@@ -151,6 +153,27 @@ export function turnEndedWithoutProse(input: {
   if (input.stopReason === "cancelled") return "Stopped.";
   if (input.worked) return "";
   return vendorEmptyReply(input.provider);
+}
+
+/**
+ * A user stop is not a reply. Keep real prose; fold unfinished thinking away
+ * and write Stopped instead of dumping the chain of thought as the answer.
+ */
+export function settleCancelledAssistantText(input: {
+  provider: ProviderId;
+  existingText?: string | null;
+  queued?: string | null;
+  worked: boolean;
+}): string {
+  const text = (input.existingText ?? "").trim() || (input.queued ?? "").trim();
+  if (isStoppedReply(text) || isVendorEmptyReply(text) || isVendorFailureReply(text)) return "Stopped.";
+  const body = peelPlanningPreamble(text, true).body.trim();
+  if (assistantHasVisibleReply(body)) return body;
+  return turnEndedWithoutProse({
+    provider: input.provider,
+    stopReason: "cancelled",
+    worked: input.worked,
+  });
 }
 
 /**

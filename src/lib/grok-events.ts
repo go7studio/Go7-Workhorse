@@ -96,7 +96,7 @@ export function toolIsFinished(status?: string): boolean {
 
 export function finishOpenToolMessages(
   messages: ChatMessage[],
-  status: "failed" | "completed",
+  status: "failed" | "completed" | "cancelled",
   detail?: string,
 ): ChatMessage[] {
   return messages.map((message) => {
@@ -104,7 +104,11 @@ export function finishOpenToolMessages(
       return message;
     }
     if (message.kind === "subagent") {
-      return { ...message, toolStatus: status, text: detail?.trim() || message.text };
+      return {
+        ...message,
+        toolStatus: status,
+        text: status === "cancelled" ? message.text : (detail?.trim() || message.text),
+      };
     }
     const { title, detail: previous } = splitToolLine(message.text);
     return {

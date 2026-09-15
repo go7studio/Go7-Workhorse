@@ -206,7 +206,7 @@ function splitReplySentences(text: string): string[] {
   const parts = String(text ?? "")
     .replace(/\r\n/g, "\n")
     .split(
-      /(?<=[.!?:])\s+(?=(?:[A-Z*>]|I['’]ll |I will |Let me |Looking |Checking |Listing |Sending |Joining |Not |No\.|Yes\.))/,
+      /(?<=[.!?])\s+(?=(?:[A-Z*>]|I['’]ll |I['’]m |I will |Let me |Looking |Checking |Listing |Sending |Joining |Not |No\.|Yes\.))/,
     )
     .map((item) => item.trim())
     .filter(Boolean);
@@ -325,11 +325,10 @@ export function peelThinkTags(text: string): { thought: string; body: string } {
 type ReplyUnit = { text: string; para: number; kind: "thought" | "answer" };
 
 function unitsFromParagraph(para: string, paraIndex: number): ReplyUnit[] {
-  if (isLockedAnswerParagraph(para) && !PROCESS_NARRATION.test(para)) {
-    return [{ text: para, para: paraIndex, kind: "answer" }];
-  }
   const parts = splitReplySentences(para);
   if (parts.length <= 1) {
+    const locked = isLockedAnswerParagraph(para) && !PROCESS_NARRATION.test(para);
+    if (locked) return [{ text: para, para: paraIndex, kind: "answer" }];
     const process = isProcessSentence(para) && !isConclusionParagraph(para);
     return [{ text: para, para: paraIndex, kind: process ? "thought" : "answer" }];
   }
@@ -338,6 +337,29 @@ function unitsFromParagraph(para: string, paraIndex: number): ReplyUnit[] {
     para: paraIndex,
     kind: isProcessSentence(text) && !isConclusionParagraph(text) ? "thought" : "answer",
   }));
+}
+
+/** Process sentences in a mixed paragraph take their in-between narration with them. */
+function sandwichProcessUnits(units: ReplyUnit[]): ReplyUnit[] {
+  const byPara = new Map<number, number[]>();
+  units.forEach((unit, index) => {
+    const list = byPara.get(unit.para) ?? [];
+    list.push(index);
+    byPara.set(unit.para, list);
+  });
+  const next = units.slice();
+  for (const indexes of byPara.values()) {
+    for (let i = 1; i < indexes.length - 1; i += 1) {
+      const at = indexes[i]!;
+      const prev = next[indexes[i - 1]!];
+      const cur = next[at];
+      const after = next[indexes[i + 1]!];
+      if (cur?.kind === "answer" && prev?.kind === "thought" && after?.kind === "thought") {
+        next[at] = { ...cur, kind: "thought" };
+      }
+    }
+  }
+  return next;
 }
 
 function dropRestatedAnswers(units: ReplyUnit[]): ReplyUnit[] {
@@ -402,7 +424,9 @@ function peelPlanningUnits(
   live = false,
 ): { thought: string; body: string } {
   const paras = source.split(/\n\n+/).map((item) => item.trim()).filter(Boolean);
-  const units = dropRestatedAnswers(paras.flatMap((para, index) => unitsFromParagraph(para, index)));
+  const units = dropRestatedAnswers(
+    sandwichProcessUnits(paras.flatMap((para, index) => unitsFromParagraph(para, index))),
+  );
   const thoughtParas = [extraThought, joinUnits(units, "thought")].filter((item) => item.trim());
   const bodyParas = joinUnits(units, "answer");
   if (live && !bodyParas) {

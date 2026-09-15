@@ -1,13 +1,13 @@
-import type { CrewMode, LinkedReference, PermissionMode, SandboxProfile } from "./types";
+import type { CrewMode, LinkedReference, PermissionMode, SandboxProfile, SessionEnvironment } from "./types";
+import { sessionEnvironmentKind } from "./session-environment";
 import {
   AUDITOR_SESSION_RULES,
-  CURSOR_SESSION_RULES,
-  CUSTOM_HTTP_SESSION_RULES,
   CUSTOM_HTTP_WORKER_RULES,
   HELPER_SESSION_RULES,
-  WORKHORSE_SESSION_RULES,
   WORKER_SESSION_RULES,
   type DeskRole,
+  orchestrationEnabled,
+  rootSessionRulesFor,
   withCrewModeHint,
   withCrewStatusHint,
   withDeskBotHint,
@@ -39,6 +39,12 @@ export type PrefaceInput = {
   /** mcp = Grok/Codex/Claude with Workhorse tools. http = custom HTTP. cursor = Cursor Agent ACP. */
   surface?: "mcp" | "http" | "cursor";
   role?: DeskRole;
+  /** This chat's workspace. Subagents inherit it when isolation is omitted. */
+  environment?: SessionEnvironment;
+  /** Composer + pins. Orchestrate and Mission enable desk worker hire. */
+  crewModes?: CrewMode[];
+  /** Set by buildSessionPreface from crewModes; gates spawn lines in the workspace map. */
+  orchestration?: boolean;
 };
 
 /** Workspace map for this turn: cwd, extra folders, and project references. */
@@ -52,6 +58,15 @@ export function buildVendorPreface(input: PrefaceInput): string {
     lines.push(
       "- list_dir with no path lists that working directory. Relative paths are from there. If the user means the Workhorse app folder and this path is it, use this path — do not search the home folder.",
     );
+    if (sessionEnvironmentKind(input.environment) === "worktree") {
+      lines.push(
+        "- Workspace: isolated worktree. Subagents inherit this: omit isolation, or pass isolation=worktree / spawn_subagent isolation=worktree. Do not write to the project's local folder.",
+      );
+    } else {
+      lines.push(
+        "- Workspace: this chat's local folder. Subagents inherit this: omit isolation, or pass isolation=shared / spawn_subagent isolation=none. Do not create a worktree.",
+      );
+    }
   } else {
     lines.push("- No project folder is linked to this chat.");
     lines.push(
@@ -63,12 +78,16 @@ export function buildVendorPreface(input: PrefaceInput): string {
     lines.push(
       "- list_dir with no path lists the desk base. Sandbox Off can take any absolute path on the machine, subject to Permission.",
     );
-    lines.push(
-      "- Do not spawn workers until a real project folder is bound, unless you pass folder on spawn.",
-    );
+    if (input.orchestration) {
+      lines.push(
+        "- Do not spawn workers until a real project folder is bound, unless you pass folder on spawn.",
+      );
+    } else {
+      lines.push("- Do the work in this chat yourself — Orchestrate and Mission are off.");
+    }
   }
   if (extras.length > 0) {
-    lines.push("Additional linked folders (already on this project — list_dir their absolute path):");
+    lines.push("Additional linked folders (already on this chat — list_dir their absolute path):");
     for (const folder of extras) lines.push(`- ${folder}`);
   }
   if (refs.length > 0) {
@@ -163,6 +182,7 @@ export function capabilityFromPreface(preface: string | undefined): string {
 /** First-prompt context: desk-slot rules, live limits, extra folders/refs and this-chat map. */
 export function buildSessionPreface(input: PrefaceInput): string {
   const worker = input.role === "worker";
+  const orchestration = orchestrationEnabled(input.crewModes);
   const rules = input.role === "auditor"
     ? AUDITOR_SESSION_RULES
     : input.role === "helper"
@@ -171,17 +191,17 @@ export function buildSessionPreface(input: PrefaceInput): string {
     ? input.surface === "http"
       ? CUSTOM_HTTP_WORKER_RULES
       : WORKER_SESSION_RULES
-    : input.surface === "http"
-      ? CUSTOM_HTTP_SESSION_RULES
-      : input.surface === "cursor"
-        ? CURSOR_SESSION_RULES
-        : WORKHORSE_SESSION_RULES;
+    : rootSessionRulesFor(
+        input.surface === "cursor" ? "cursor" : "grok",
+        input.surface,
+        input.crewModes,
+      );
   const parts = [
     input.sessionId
       ? `This chat's immutable Workhorse session ID is ${input.sessionId}. Use it exactly; never invent or alter a session ID.`
       : "",
     buildPolicyContext(input),
-    buildVendorPreface(input),
+    buildVendorPreface({ ...input, orchestration }),
     input.desk ? buildDeskContext(input.desk) : "",
   ].filter((item) => item.trim());
   const extra = parts.join("\n\n");
@@ -205,7 +225,11 @@ export function composeVendorPrompt(
     withCrewStatusHint(
       withLooseDeleteHint(
         withCrewModeHint(
-          withSpawnHint(withPermissionHint(withPreviewHint(withDeskBotHint(text)), limits?.role), limits?.role),
+          withSpawnHint(
+            withPermissionHint(withPreviewHint(withDeskBotHint(text)), limits?.role),
+            limits?.role,
+            limits?.crewMode,
+          ),
           limits?.crewMode,
           limits?.role,
           limits?.spawnNames,

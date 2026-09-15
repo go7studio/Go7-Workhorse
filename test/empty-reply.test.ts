@@ -11,6 +11,7 @@ import {
   isStoppedReply,
   isVendorEmptyReply,
   keepStreamedAssistantText,
+  settleCancelledAssistantText,
   settleEmptyAssistantText,
   shouldReviveIdleTurn,
   TURN_IDLE_AFTER_DONE_MS,
@@ -39,6 +40,45 @@ test("a turn the person stopped says so", () => {
     turnEndedWithoutProse({ provider: "custom", stopReason: "cancelled", worked: false }),
     "Stopped.",
   );
+});
+
+test("stopping does not promote unfinished thinking into the reply", () => {
+  assert.equal(
+    settleCancelledAssistantText({
+      provider: "grok",
+      existingText: "I'll inspect the workspace and then edit the file.",
+      worked: true,
+    }),
+    "Stopped.",
+  );
+  assert.equal(
+    settleCancelledAssistantText({
+      provider: "grok",
+      existingText: "Here is the short version.\n\nWorkhorse is a desktop multiplexer.",
+      worked: true,
+    }),
+    "Here is the short version.\n\nWorkhorse is a desktop multiplexer.",
+  );
+  assert.equal(
+    settleCancelledAssistantText({
+      provider: "grok",
+      existingText: vendorEmptyReply("grok"),
+      worked: false,
+    }),
+    "Stopped.",
+  );
+  const store = read("src/lib/store.tsx");
+  assert.match(store, /settleCancelledAssistantText/);
+  assert.match(store, /userCancelledTurns/);
+  assert.match(store, /cancelled \? "cancelled" : "completed"/);
+  assert.match(store, /stopReason: "cancelled"/);
+  assert.match(read("electron/grok-agent.ts"), /resolvePendingAsCancelled/);
+  assert.match(read("electron/grok-agent.ts"), /get tookCancel/);
+  assert.match(read("electron/grok-host.ts"), /slot\.agent\.tookCancel/);
+  assert.match(read("electron/claude-host.ts"), /slot\.agent\.tookCancel/);
+  assert.match(read("electron/codex-host.ts"), /slot\.agent\.tookCancel/);
+  assert.match(read("electron/cursor-host.ts"), /slot\.agent\.tookCancel/);
+  assert.match(read("docs/FEATURES.md"), /does not dump the\s+unfinished thought/);
 });
 
 test("a turn that thought and used tools is left to speak for itself", () => {

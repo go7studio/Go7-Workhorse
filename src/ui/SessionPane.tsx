@@ -1,11 +1,12 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { canPlaceInProject, omitQueuedUserMessages } from "../lib/chats";
 import { primaryFolder } from "../lib/project";
-import { editListKey, fileFolderFromPath, fileNameFromPath, holdEditStats, markStatsFetched, mergeEdits, projectEdits, projectWritesKey, sameEditPath, startEditStatsHarvest, type ProjectEdit } from "../lib/project-edits";
+import { editListKey, fileFolderFromPath, fileNameFromPath, holdEditStats, markStatsFetched, mergeEdits, projectEdits, projectWritesKey, sameEditList, sameEditPath, startEditStatsHarvest, type ProjectEdit } from "../lib/project-edits";
 import { sessionExecutionCwd } from "../lib/session-environment";
 import { peelPlanningPreamble, unsquashSentences } from "../lib/markdown";
 import { brainCaption, messageBrain } from "../lib/session";
 import { talkingToSummary } from "../lib/tool-labels";
+import { vendorTurnWorking } from "../lib/crew-live";
 import { LINEUP_FINISHED_NOTICE } from "../lib/lineup";
 import {
   createTranscriptGrouper,
@@ -201,7 +202,7 @@ export function SessionPane() {
   );
   const toggleSetup = useCallback(() => setSetupOpen((value) => !value), []);
   const openSetup = useCallback(() => setSetupOpen(true), []);
-  const working = session?.status === "running";
+  const working = session ? vendorTurnWorking(session) : false;
   const project = desk.projects.find((item) => item.id === session?.projectId);
   const localCwd = primaryFolder(project, desk.folderExists)?.path ?? "";
   const cwd = session ? sessionExecutionCwd(session.environment, localCwd) : localCwd;
@@ -268,7 +269,7 @@ export function SessionPane() {
   useEffect(() => {
     if (visible.length > 0) {
       if (editsBarExit.current) window.clearTimeout(editsBarExit.current);
-      setHeldEdits(visible);
+      setHeldEdits((current) => (sameEditList(current, visible) ? current : visible));
       if (editsBarOpenRef.current) return;
       const frame = requestAnimationFrame(() => setEditsBarOpen(true));
       return () => cancelAnimationFrame(frame);

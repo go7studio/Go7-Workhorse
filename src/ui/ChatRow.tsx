@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { lastTalkedAt } from "../lib/chats";
+import { crewTurnInFlight } from "../lib/crew-live";
 import type { MissionRowLook } from "../lib/lineup";
 import { clampMenuPosition } from "../lib/edit-menu";
 import { formatChatSidebar } from "../lib/session";
@@ -15,12 +16,12 @@ export type CrewDotKind = "working" | "failed" | "stopped" | "needs-you" | "idle
 
 /** Working pulses. Failed rings red. Cancelled and the other stops are a hollow vendor ring. Needs-you pulses amber. Done is a still solid. */
 export function crewDotKind(
-  session: Pick<Session, "status" | "agentRun">,
+  session: Pick<Session, "status" | "agentRun"> & { messages?: Session["messages"] },
   waveRunning = false,
 ): CrewDotKind {
   const run = session.agentRun?.status;
-  if (session.status === "running" || run === "running" || waveRunning) return "working";
   if (session.status === "needs-input") return "needs-you";
+  if (crewTurnInFlight(session) || waveRunning) return "working";
   if (run === "failed") return "failed";
   if (run === "cancelled" || run === "interrupted" || run === "timed-out" || run === "budget-exceeded") return "stopped";
   return "idle";
@@ -133,7 +134,7 @@ export function ChatRow({
 
   useLayoutEffect(() => {
     if (!menu) {
-      setMenuAt(null);
+      setMenuAt((current) => (current === null ? current : null));
       return;
     }
     const place = () => {
@@ -150,7 +151,9 @@ export function ChatRow({
         window.innerWidth,
         window.innerHeight,
       );
-      setMenuAt({ left: next.x, top: next.y });
+      setMenuAt((current) =>
+        current && current.left === next.x && current.top === next.y ? current : { left: next.x, top: next.y },
+      );
     };
     place();
     window.addEventListener("resize", place);
@@ -163,11 +166,12 @@ export function ChatRow({
 
   useLayoutEffect(() => {
     if (!moveOpen || !movePanel.current) {
-      setMoveSide("right");
+      setMoveSide((current) => (current === "right" ? current : "right"));
       return;
     }
     const box = movePanel.current.getBoundingClientRect();
-    setMoveSide(box.right > window.innerWidth - 8 ? "left" : "right");
+    const next = box.right > window.innerWidth - 8 ? "left" : "right";
+    setMoveSide((current) => (current === next ? current : next));
   }, [moveOpen]);
 
   useEffect(() => {

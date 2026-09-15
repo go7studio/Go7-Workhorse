@@ -19,7 +19,6 @@ import {
   archiveChat,
   autoRenameChat,
   deleteChat,
-  dropDrafts,
   appendUserMessage,
   deleteWorkerChats,
   dropQueuedPrompt,
@@ -34,8 +33,10 @@ import {
   applyRenameDeskChat,
   listedChats,
   applyComposerDrafts,
+  composerDraftsFromSessions,
   sameComposerDraft,
   snapComposerDraft,
+  withComposerDrafts,
   type ComposerDraftSnap,
   moveChat,
   resolveListedChat,
@@ -124,6 +125,7 @@ import {
   visibleProjectNames,
   emptyProject,
   findProjectByQuery,
+  combinedFolders,
   folderFromPath,
   normalizeProject,
   primaryFolder,
@@ -273,6 +275,7 @@ import {
   leasePathForWrite,
   refreshSharedFileFingerprint,
   resolveNamedWorker,
+  resolveWorkerIsolation,
   parseWorkerHandoff,
   workerStartMessages,
   reserveWorkerName,
@@ -345,6 +348,7 @@ import {
   isDeskAssistantNotice,
   keepStreamedAssistantText,
   shouldReviveIdleTurn,
+  settleCancelledAssistantText,
   settleEmptyAssistantText,
   TURN_IDLE_AFTER_DONE_MS,
   TURN_IDLE_AFTER_TRAILING_MS,
@@ -402,6 +406,7 @@ import type {
   DeskAccess,
   EffortLevel,
   GrokPlanUsage,
+  LinkedFolder,
   LinkedReference,
   McpServerConfig,
   PermissionMode,
@@ -445,6 +450,7 @@ const EMPTY: AppState = {
   watchDayMarks: {},
   usage: [],
   usageRange: "month",
+  usagePlanWindow: "weekly",
   sidebarWidth: SIDEBAR_PANE.fallback,
   threadWidth: THREAD_PANE.fallback,
   lastModel: DEFAULT_CHOICE,
@@ -460,6 +466,8 @@ export type Store = AppState & {
   selectProject: (id: string) => void;
   linkFolder: (path?: string) => Promise<void>;
   unlinkFolder: (folderId: string) => void;
+  linkSessionFolder: (path: string) => void;
+  unlinkSessionFolder: (folderId: string) => void;
   addReference: (kind: ReferenceKind, value: string, label?: string) => void;
   removeReference: (referenceId: string) => void;
   archiveProject: (id: string, archived?: boolean) => void;
@@ -485,6 +493,7 @@ export type Store = AppState & {
   setSessionEnvironment: (kind: "local" | "worktree") => Promise<{ ok: boolean; message: string }>;
   selectSession: (id: string) => void;
   setComposerDraft: (id: string, text: string, images?: import("./types").ChatImage[], commit?: boolean) => void;
+  peekComposerDraft: (id: string) => ComposerDraftSnap | undefined;
   renameSession: (id: string, title: string) => void;
   deleteSession: (id: string) => void;
   deleteWorkers: (parentId: string) => void;
@@ -556,6 +565,7 @@ export type Store = AppState & {
   openUsage: () => void;
   closeUsage: () => void;
   setUsageRange: (range: UsageRange) => void;
+  setUsagePlanWindow: (window: import("./types").UsagePlanWindow) => void;
   setSidebarWidth: (width: number) => void;
   setThreadWidth: (width: number) => void;
 
@@ -932,6 +942,9 @@ function hydrate(value: unknown, liveRunIds?: ReadonlySet<string>): AppState {
       record.usageRange === "today" || record.usageRange === "week" || record.usageRange === "all"
         ? record.usageRange
         : "month",
+    usagePlanWindow: record.usagePlanWindow === "short" || record.usagePlanWindow === "weekly"
+      ? record.usagePlanWindow
+      : "weekly",
     sidebarWidth: clampPaneWidth((record as { sidebarWidth?: unknown }).sidebarWidth, SIDEBAR_PANE),
     threadWidth: clampPaneWidth((record as { threadWidth?: unknown }).threadWidth, THREAD_PANE),
     lastModel: normalizeChoice(record.lastModel),
@@ -1105,7 +1118,7 @@ function snapshotWriteInstance(
   const project =
     state.projects.find((item) => item.id === session?.projectId) ??
     state.projects.find((item) => item.id === state.activeProjectId);
-  const roots = projectFolderPaths(project);
+  const roots = projectFolderPaths({ folders: combinedFolders(project, session?.folders) });
   void window.workhorse.recordFileWrite(filePath, roots);
 }
 
@@ -1191,6 +1204,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const turnIdleStopReason = useRef<Record<string, string | undefined>>({});
   const pendingIdleClose = useRef<Record<string, () => void>>({});
   const redirectedAssistant = useRef<Record<string, string>>({});
+  const userCancelledTurns = useRef(new Set<string>());
   const ingestCursorLedgerRef = useRef<() => void>(() => undefined);
   const learningTurns = useRef<Record<string, LearningTurnLink>>({});
   const agentCatalogRef = useRef<import("./external-catalog").ExternalAgent[]>([]);
@@ -1212,6 +1226,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
    */
   const [missingFolderPaths, setMissingFolderPaths] = useState<ReadonlySet<string>>(NO_MISSING_FOLDERS);
   const folderExists = useCallback((path: string) => !missingFolders.current.has(path), []);
+  const sessionWorkspace = (session: { environment?: Session["environment"]; folders?: LinkedFolder[] } | undefined, project: Project | undefined) => {
+    const folders = combinedFolders(project, session?.folders);
+    return {
+      folders,
+      paths: projectFolderPaths({ folders }, folderExists),
+      cwd: sessionExecutionCwd(session?.environment, primaryFolder({ folders }, folderExists)?.path ?? ""),
+      roots: folders.map((folder) => folder.path),
+    };
+  };
   const applyMissingFolders = useCallback((next: ReadonlySet<string>) => {
     const current = missingFolders.current;
     if (current.size === next.size && [...next].every((path) => current.has(path))) return;
@@ -1266,7 +1289,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     [],
   );
   useEffect(() => {
-    setState((current) => ({ ...current, deskPlans: plansRef.current }));
+    setState((current) =>
+      current.deskPlans === plansRef.current ? current : { ...current, deskPlans: plansRef.current },
+    );
   }, [grokPlan, codexPlan, claudePlan, cursorPlan, customPlans]);
 
   // A built-in meter that has answered once is known, whatever it answered. A
@@ -1289,6 +1314,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const saved = window.workhorse ? await window.workhorse.loadState() : null;
       if (!cancelled) {
         const next = hydrate(saved, new Set(live));
+        composerDraftsRef.current = composerDraftsFromSessions(next.sessions);
         setState(next);
         setReady(true);
         void (async () => {
@@ -1499,7 +1525,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     setState((current) => ({
       ...current,
       projects: [project, ...current.projects],
-      sessions: dropDrafts(current.sessions),
+      sessions: withComposerDrafts(current.sessions, composerDraftsRef.current),
       activeProjectId: project.id,
       activeSessionId: null,
       panel: null,
@@ -1521,7 +1547,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       panel: null,
       activeProjectId: id,
       activeSessionId: null,
-      sessions: dropDrafts(current.sessions),
+      sessions: withComposerDrafts(current.sessions, composerDraftsRef.current),
       projects: current.projects.map((project) =>
         project.id === id ? { ...project, openedAt: Date.now() } : project,
       ),
@@ -1571,6 +1597,34 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         project.id === current.activeProjectId
           ? { ...project, folders: project.folders.filter((folder) => folder.id !== folderId) }
           : project,
+      ),
+    }));
+  }, []);
+
+  const linkSessionFolder = useCallback((folderPath: string) => {
+    const next = folderPath.trim();
+    if (!next) return;
+    setState((current) => {
+      const sessionId = current.activeSessionId;
+      if (!sessionId) return current;
+      return {
+        ...current,
+        sessions: current.sessions.map((session) => {
+          if (session.id !== sessionId) return session;
+          if ((session.folders ?? []).some((folder) => folder.path === next)) return session;
+          return { ...session, folders: [...(session.folders ?? []), folderFromPath(next)] };
+        }),
+      };
+    });
+  }, []);
+
+  const unlinkSessionFolder = useCallback((folderId: string) => {
+    setState((current) => ({
+      ...current,
+      sessions: current.sessions.map((session) =>
+        session.id === current.activeSessionId
+          ? { ...session, folders: (session.folders ?? []).filter((folder) => folder.id !== folderId) }
+          : session,
       ),
     }));
   }, []);
@@ -1674,7 +1728,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         mode: seat.mode,
         customBotId,
       };
-      const opened = openDraft(current.sessions, {
+      const opened = openDraft(applyComposerDrafts(current.sessions, composerDraftsRef.current), {
         id: uid("sess"),
         projectId: project?.id ?? null,
         provider: choice.provider,
@@ -1798,7 +1852,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
 
     const project = snapshot.projects.find((item) => item.id === session.projectId);
-    const root = primaryFolder(project, folderExists)?.path ?? "";
+    const root = sessionWorkspace(session, project).cwd || primaryFolder(project, folderExists)?.path || "";
     if (!root) return { ok: false, message: "Link a project folder before creating a worktree." };
     if (!window.workhorse?.ensureWorktree) {
       return { ok: false, message: "Restart Workhorse before creating a managed worktree." };
@@ -1832,10 +1886,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         panel: null,
         activeSessionId: id,
         activeProjectId: session?.projectId ?? null,
-        sessions: dropDrafts(current.sessions, id),
+        sessions: withComposerDrafts(current.sessions, composerDraftsRef.current, id),
       };
     });
   }, []);
+
+  const peekComposerDraft = useCallback((id: string) => composerDraftsRef.current[id], []);
 
   const setComposerDraft = useCallback((id: string, text: string, images?: import("./types").ChatImage[], commit = false) => {
     const snap = snapComposerDraft(text, images);
@@ -1870,6 +1926,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const deleteSession = useCallback((id: string) => {
+    if (id in composerDraftsRef.current) {
+      delete composerDraftsRef.current[id];
+      void window.workhorse?.saveComposerDrafts?.(composerDraftsRef.current);
+    }
     setState((current) => {
       const sessions = deleteChat(current.sessions, id);
       if (!sessions) return current;
@@ -2286,7 +2346,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         provider: session.provider,
         tool: "run command",
         detail: "git status",
-        path: project ? primaryFolder(project, folderExists)?.path : undefined,
+        path: project ? sessionWorkspace(session, project).cwd || undefined : undefined,
       };
       return {
         ...current,
@@ -2457,7 +2517,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if (match?.run === "new") {
         setState((current) => ({
           ...current,
-          sessions: dropDrafts(current.sessions),
+          sessions: withComposerDrafts(current.sessions, composerDraftsRef.current),
           activeSessionId: null,
         }));
         return;
@@ -2606,7 +2666,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           return;
         }
         const project = snapshot.projects.find((item) => item.id === session.projectId);
-        const cwd = sessionExecutionCwd(session.environment, primaryFolder(project, folderExists)?.path ?? "");
+        const cwd = sessionWorkspace(session, project).cwd;
         setState((latest) => ({
           ...latest,
           sessions: latest.sessions.map((item) =>
@@ -2996,7 +3056,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           hiddenWorker: Boolean(session.hidden),
         },
       });
-      const cwd = sessionExecutionCwd(session.environment, primaryFolder(project, folderExists)?.path ?? "");
+      const cwd = sessionWorkspace(session, project).cwd;
       setState((latest) => {
         const queued = grokChunkQueue.current[session.id] ?? "";
         delete grokChunkQueue.current[session.id];
@@ -3076,12 +3136,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           preface: withPortableHistory(buildSessionPreface({
             sessionId: session.id,
             cwd,
-            folders: projectFolderPaths(project, folderExists),
+            folders: sessionWorkspace(session, project).paths,
             references: project?.references ?? [],
             mode: session.mode,
             sandbox: session.sandbox,
+            environment: session.environment,
             surface: session.provider === "custom" ? "http" : session.provider === "cursor" ? "cursor" : "mcp",
             role: deskRoleOf(session),
+            crewModes: session.crewModes,
             desk: {
               title: session.title,
               projectName: project?.name,
@@ -3134,7 +3196,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             mcpServers: mcpServersForSession(stateRef.current.settings.mcpServers, session),
             securityPolicy: session.securityPolicy,
             permissionGrants: session.permissionGrants,
-            folders: projectFolderPaths(project, folderExists),
+            folders: sessionWorkspace(session, project).paths,
             parentId: session.parentId,
             hidden: session.hidden,
             role: deskRoleOf(session),
@@ -3689,7 +3751,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       panel: null,
     });
     const project = current.projects.find((item) => item.id === source.projectId);
-    const root = primaryFolder(project, folderExists)?.path ?? "";
+    const root = sessionWorkspace(source, project).cwd;
     const attachGrokFork = (cwd: string) => {
       if (source.provider !== "grok" || !window.workhorse?.grokFork) return;
       void window.workhorse
@@ -3861,18 +3923,20 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           });
           if (hold) throw new Error(watchHoldMessage(hold));
           const project = snapshot.projects.find((item) => item.id === session.projectId);
-          const cwd = sessionExecutionCwd(session.environment, primaryFolder(project, folderExists)?.path ?? "");
+          const cwd = sessionWorkspace(session, project).cwd;
           const live = vendorSendTarget(session.provider);
           const role = deskRoleOf(session);
           const preface = buildSessionPreface({
             sessionId: session.id,
             cwd,
-            folders: projectFolderPaths(project, folderExists),
+            folders: sessionWorkspace(session, project).paths,
             references: project?.references ?? [],
             mode: session.mode,
             sandbox: session.sandbox,
+            environment: session.environment,
             surface: session.provider === "custom" ? "http" : session.provider === "cursor" ? "cursor" : "mcp",
             role,
+            crewModes: session.crewModes,
           });
           const promptInput = {
             sessionId: session.id,
@@ -3922,7 +3986,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               mcpServers: runtimeMcpServers,
               securityPolicy: session.securityPolicy,
               permissionGrants: session.permissionGrants,
-              folders: projectFolderPaths(project, folderExists),
+              folders: sessionWorkspace(session, project).paths,
               parentId: session.parentId,
               hidden: session.hidden,
               role,
@@ -4874,7 +4938,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 activeSessionId: null,
                 panel: null,
                 sheet: null,
-                sessions: dropDrafts(current.sessions),
+                sessions: withComposerDrafts(current.sessions, composerDraftsRef.current),
                 projects: current.projects.map((item) =>
                   item.id === project.id ? { ...item, openedAt: Date.now() } : item,
                 ),
@@ -5236,7 +5300,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               ? latest.projects.find((item) => item.id === inboundProjectId) ?? null
               : null;
             const title = titleFromIntent(payload.description?.trim() || payload.message.trim());
-            const opened = openDraft(latest.sessions, {
+            const opened = openDraft(applyComposerDrafts(latest.sessions, composerDraftsRef.current), {
               id: uid("sess"),
               projectId: project?.id ?? null,
               provider: remembered.provider,
@@ -5372,13 +5436,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 routing: latest.settings.routing,
                 prompt: payload.message,
                 fromSessionId: caller.id,
-                workspace: sessionExecutionCwd(
-                  caller.environment,
-                  (() => {
-                    const project = latest.projects.find((item) => item.id === caller.projectId);
-                    return project ? primaryFolder(project, folderExists)?.path ?? "" : "";
-                  })(),
-                ),
+                workspace: sessionWorkspace(
+                  caller,
+                  latest.projects.find((item) => item.id === caller.projectId),
+                ).cwd,
                 store: taskStore,
                 envelope: storedEnvelope ?? {
                   origin: "workhorse",
@@ -5473,7 +5534,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                   dayMarks: latest.watchDayMarks,
                 })
               : [];
-            const projectFolder = primaryFolder(boundProject, folderExists)?.path ?? "";
+            const projectFolder = sessionWorkspace(caller, boundProject).cwd;
             const nestedPolicy = nestedWorkerPolicy({
               nested: isNested,
               parentEnvironment: caller.environment,
@@ -5560,7 +5621,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             const requestedEffort = parseEffort(String(payload.effort ?? ""))
               ?? parseEffortFromText(lastUserMessage(caller)?.text ?? "")
               ?? parseEffortFromText(String(payload.message ?? ""));
-            const spawnIsolation = nestedPolicy.isolation ?? payload.isolation ?? "worktree";
+            const spawnIsolation = nestedPolicy.isolation ?? resolveWorkerIsolation({
+              isolation: payload.isolation,
+              nested: isNested,
+              parentEnvironment: caller.environment,
+            });
             const admitted = admitSpawn({
               parent: caller,
               projectFolder: nestedPolicy.projectFolder,
@@ -5843,6 +5908,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               environment = { kind: "worktree", path: isolated.path, gitRoot: isolated.gitRoot, head: isolated.head };
             } else {
               isolation = "shared";
+              // Shared with a worktree parent means that tree, not the
+              // project's local folder. Nested helpers already resolve cwd
+              // through the parent; stamp the same environment so the child
+              // chat's workspace matches.
+              environment = caller.environment ?? { kind: "local" };
             }
             const childCwd = sessionExecutionCwd(environment, root);
             let claimedLeases = releaseSessionLeases(pathLeasesRef.current, childId);
@@ -5971,6 +6041,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               }),
               securityPolicy: parent.securityPolicy,
               environment,
+              folders: priorWorker?.folders ?? parent.folders,
               status: "running",
               contextUsed: 0,
               agentRun: {
@@ -7013,10 +7084,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               return;
             }
             const project = stateRef.current.projects.find((item) => item.id === owner.projectId);
-            const root = sessionExecutionCwd(
-              owner.environment,
-              project ? primaryFolder(project, folderExists)?.path ?? "" : "",
-            );
+            const root = sessionWorkspace(owner, project).cwd;
             const refreshKey = `${owner.id}:${leasePathForWrite(writePath, root).toLowerCase()}`;
             const pendingRefresh = pathFingerprintRefreshes.current.get(refreshKey) ?? Promise.resolve();
             void pendingRefresh.then(() => window.workhorse!.readSourceFile!(writePath, root ? [root] : [])).then((source) => {
@@ -7113,11 +7181,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               tool: classifyTool,
               detail: event.detail,
               path: event.path,
-              roots: ownerProject?.folders.map((folder) => folder.path) ?? [],
+              roots: sessionWorkspace(owner, ownerProject).roots,
               // Where this worker actually runs, so a `..` inside a command is
               // measured from there. A worktree session is not its project
               // folder, and resolving against the wrong one moves the boundary.
-              cwd: sessionExecutionCwd(owner.environment, primaryFolder(ownerProject, folderExists)?.path ?? ""),
+              cwd: sessionWorkspace(owner, ownerProject).cwd,
             })
           : { answer: null };
         const forced = security.answer ?? (owner
@@ -7466,9 +7534,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             (liveRun.budgetPhase === "verify" || liveRun.budgetPhase === "handoff");
           let sessions = current.sessions.map((session) => {
             if (session.id !== event.sessionId) return session;
-            const messages = finishOpenToolMessages(
-              failPeerAskMessages(
-                assistantId
+            const cancelled = event.stopReason === "cancelled";
+            const settledMessages = assistantId
                   ? (() => {
                       // Did this turn leave anything behind? Thinking and tool
                       // calls land as their own messages after the assistant
@@ -7479,7 +7546,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                         const text = (message.text ?? "").trim() || queued.trim();
                         return {
                           ...message,
-                          text: assistantHasVisibleReply(text)
+                          text: cancelled
+                            ? settleCancelledAssistantText({
+                                provider: session.provider,
+                                existingText: text,
+                                worked,
+                              })
+                            : assistantHasVisibleReply(text)
                             ? text
                             : turnEndedWithoutProse({
                                 provider: session.provider,
@@ -7490,10 +7563,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                         };
                       });
                     })()
-                  : session.messages,
-                { error: "the other chat did not answer" },
-              ),
-              safetyPaused ? "failed" : "completed",
+                  : session.messages;
+            const messages = finishOpenToolMessages(
+              cancelled
+                ? settledMessages
+                : failPeerAskMessages(settledMessages, { error: "the other chat did not answer" }),
+              safetyPaused ? "failed" : cancelled ? "cancelled" : "completed",
             );
             const reportedBlocked = Boolean(session.parentId) && workerReportedBlocked(childReportText({ messages }));
             const failed = safetyPaused || reportedBlocked;
@@ -7544,6 +7619,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         });
         };
         const stopReason = event.stopReason;
+        if (stopReason === "cancelled") userCancelledTurns.current.delete(event.sessionId);
         if (stopReason === "cancelled" || stopReason === "safety_pause") {
           const handle = turnIdleTimer.current[event.sessionId];
           if (handle) window.clearTimeout(handle);
@@ -7559,6 +7635,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         return;
       }
       if (event.type === "error") {
+        if (userCancelledTurns.current.has(event.sessionId)) {
+          userCancelledTurns.current.delete(event.sessionId);
+          apply({ type: "done", sessionId: event.sessionId, stopReason: "cancelled" });
+          return;
+        }
         const idleHandle = turnIdleTimer.current[event.sessionId];
         if (idleHandle) window.clearTimeout(idleHandle);
         delete turnIdleTimer.current[event.sessionId];
@@ -8142,6 +8223,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     setState((current) => ({ ...current, usageRange: range }));
   }, []);
 
+  const setUsagePlanWindow = useCallback((window: import("./types").UsagePlanWindow) => {
+    setState((current) => (current.usagePlanWindow === window ? current : { ...current, usagePlanWindow: window }));
+  }, []);
+
   const setSidebarWidth = useCallback((width: number) => {
     setState((current) => ({ ...current, sidebarWidth: clampPaneWidth(width, SIDEBAR_PANE) }));
   }, []);
@@ -8545,28 +8630,27 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         permits: state.watchPermits,
         dayMarks: state.watchDayMarks,
       }),
-    [state.settings, state.usage, state.watchPermits, state.watchDayMarks, grokPlan, codexPlan, claudePlan, customPlans],
+    [state.settings, state.usage, state.watchPermits, state.watchDayMarks, grokPlan, codexPlan, claudePlan, cursorPlan, customPlans],
   );
 
   const watchNotices = useMemo(() => collectWatchNotices(watchStatuses), [watchStatuses]);
 
   useEffect(() => {
     const leftovers = leftoverByWatchKey(watchStatuses);
-    const marks = syncWatchDayMarks(state.watchDayMarks ?? {}, leftovers);
-    const permits = pruneWatchPermits(state.watchPermits);
-    if (marks === state.watchDayMarks && permits === state.watchPermits) return;
-    setState((current) => ({
-      ...current,
-      watchDayMarks: marks,
-      watchPermits: permits,
-    }));
-  }, [state.watchPermits, state.watchDayMarks, watchStatuses]);
+    setState((current) => {
+      const marks = syncWatchDayMarks(current.watchDayMarks ?? {}, leftovers);
+      const permits = pruneWatchPermits(current.watchPermits);
+      if (marks === current.watchDayMarks && permits === current.watchPermits) return current;
+      return { ...current, watchDayMarks: marks, watchPermits: permits };
+    });
+  }, [watchStatuses]);
 
   const cancelRun = useCallback(() => {
     setState((current) => {
       const id = current.activeSessionId;
       const targets = id ? new Set([id, ...descendantSessionIds(current.sessions, id)]) : new Set<string>();
       const now = Date.now();
+      for (const target of targets) userCancelledTurns.current.add(target);
       for (const child of current.sessions) {
         if (targets.has(child.id) && child.status === "running") cancelVendorSession(child);
       }
@@ -8670,6 +8754,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       selectProject,
       linkFolder,
       unlinkFolder,
+      linkSessionFolder,
+      unlinkSessionFolder,
       addReference,
       removeReference,
       archiveProject,
@@ -8693,6 +8779,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       setSessionEnvironment,
       selectSession,
       setComposerDraft,
+      peekComposerDraft,
       renameSession,
       deleteSession,
       deleteWorkers,
@@ -8750,6 +8837,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       openUsage,
       closeUsage,
       setUsageRange,
+      setUsagePlanWindow,
       setSidebarWidth,
       setThreadWidth,
       setUsageBudget,
@@ -8810,6 +8898,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       selectProject,
       linkFolder,
       unlinkFolder,
+      linkSessionFolder,
+      unlinkSessionFolder,
       addReference,
       removeReference,
       archiveProject,
@@ -8833,6 +8923,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       setSessionEnvironment,
       selectSession,
       setComposerDraft,
+      peekComposerDraft,
       renameSession,
       deleteSession,
       deleteWorkers,
@@ -8888,6 +8979,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       openUsage,
       closeUsage,
       setUsageRange,
+      setUsagePlanWindow,
       setSidebarWidth,
       setThreadWidth,
       setUsageBudget,

@@ -223,6 +223,7 @@ import {
 } from "../electron/custom-tools";
 import {
   CUSTOM_HTTP_PEER_HINT,
+  CUSTOM_HTTP_SOLO_PEER_HINT,
   CUSTOM_HTTP_SESSION_RULES,
   looksLikePeerRequest,
   withCustomPeerHint,
@@ -2085,7 +2086,7 @@ test("custom HTTP request includes tools and parses tool_use then gates by sandb
   assert.match(listDir?.description ?? "", /Omit path to list this chat/);
   assert.match(listDir?.description ?? "", /Sandbox is Off \(machine-wide\)/);
 
-  const { looksLikePeerRequest, withCustomPeerHint, CUSTOM_HTTP_PEER_HINT } = await import(
+  const { looksLikePeerRequest, withCustomPeerHint, CUSTOM_HTTP_PEER_HINT, CUSTOM_HTTP_SOLO_PEER_HINT } = await import(
     "../src/lib/workhorse-rules"
   );
   assert.equal(looksLikePeerRequest("Please call a Grok bot"), true);
@@ -2093,7 +2094,8 @@ test("custom HTTP request includes tools and parses tool_use then gates by sandb
   assert.equal(looksLikePeerRequest("Codex Sol please"), true);
   assert.equal(looksLikePeerRequest("Sol"), true);
   assert.equal(looksLikePeerRequest("list the folder"), false);
-  assert.equal(withCustomPeerHint("Codex Sol please").startsWith(CUSTOM_HTTP_PEER_HINT), true);
+  assert.equal(withCustomPeerHint("Codex Sol please", undefined, "orchestrate").startsWith(CUSTOM_HTTP_PEER_HINT), true);
+  assert.equal(withCustomPeerHint("talk to the other chat").startsWith(CUSTOM_HTTP_SOLO_PEER_HINT), true);
   assert.match(CUSTOM_HTTP_PEER_HINT, /roleplay|fake sub-agent/i);
   assert.match(CUSTOM_HTTP_SESSION_RULES, /Never pretend/);
 
@@ -2165,11 +2167,12 @@ test("custom HTTP request includes tools and parses tool_use then gates by sandb
 });
 
 test("API bots treat vendor names as summons and resolve Sol to Codex not MiniMax", () => {
-  const phrases = ["Codex Sol please", "Sol", "call Grok", "spawn Codex", "Please call a Grok bot", "talk to the other chat"];
-  for (const phrase of phrases) {
+  const spawnPhrases = ["Codex Sol please", "Sol", "call Grok", "spawn Codex", "Please call a Grok bot"];
+  for (const phrase of spawnPhrases) {
     assert.equal(looksLikePeerRequest(phrase), true, phrase);
-    assert.equal(withCustomPeerHint(phrase).startsWith(CUSTOM_HTTP_PEER_HINT), true, phrase);
+    assert.equal(withCustomPeerHint(phrase, undefined, "orchestrate").startsWith(CUSTOM_HTTP_PEER_HINT), true, phrase);
   }
+  assert.equal(withCustomPeerHint("talk to the other chat").startsWith(CUSTOM_HTTP_SOLO_PEER_HINT), true);
   assert.equal(looksLikePeerRequest("list the folder"), false);
   assert.equal(withCustomPeerHint("list the folder"), "list the folder");
   assert.match(CUSTOM_HTTP_PEER_HINT, /workhorse_spawn_agent/);

@@ -102,6 +102,22 @@ export function appendProjectFolder(folders: LinkedFolder[], folderPath: string,
   return [...folders, folderFromPath(next, bookmark)];
 }
 
+/** Project folders plus extra folders linked on a chat. First live path is cwd. */
+export function combinedFolders(
+  project: Pick<Project, "folders"> | undefined,
+  extra?: LinkedFolder[],
+): LinkedFolder[] {
+  const seen = new Set<string>();
+  const folders: LinkedFolder[] = [];
+  for (const folder of [...(project?.folders ?? []), ...(extra ?? [])]) {
+    const path = folder.path.trim();
+    if (!path || seen.has(path)) continue;
+    seen.add(path);
+    folders.push(folder);
+  }
+  return folders;
+}
+
 export type PickedFolder = { path: string; bookmark?: string };
 
 export function asPickedFolder(raw: unknown): PickedFolder | null {
@@ -132,7 +148,7 @@ export function folderFromPath(path: string, bookmark?: string): LinkedFolder {
  * naming a path the person actually linked rather than an empty string.
  */
 export function primaryFolder(
-  project: Project | undefined,
+  project: Pick<Project, "folders"> | undefined,
   folderExists?: (path: string) => boolean,
 ): LinkedFolder | null {
   const folders = project?.folders ?? [];

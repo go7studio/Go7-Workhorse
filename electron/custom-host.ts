@@ -368,8 +368,13 @@ export class CustomSessionHost {
         text: withCrewModeHint(
           withLooseDeleteHint(
             withCustomPeerHint(
-              withSpawnHint(withPermissionHint(withWriteLimitHint(input.text, mode, sandbox), role), role),
+              withSpawnHint(
+                withPermissionHint(withWriteLimitHint(input.text, mode, sandbox), role),
+                role,
+                input.crewModes,
+              ),
               role,
+              input.crewModes,
             ),
             role,
           ),

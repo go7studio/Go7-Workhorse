@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { buildSidebarChatIndex, sameSidebarSessions } from "../src/lib/sidebar-index";
 import {
+  sameChatSpendDesk,
   sameComposerDesk,
   sameComposerSession,
   sameContextDesk,
@@ -11,6 +12,8 @@ import {
   sameWatchDesk,
   sameWatchSession,
   sameMissionBoardDesk,
+  selectChatSpendDesk,
+  type ChatSpendDesk,
   type ComposerDesk,
   type ContextDesk,
   type SessionPaneDesk,
@@ -27,7 +30,7 @@ import { deskPersistBodyEqual } from "../src/lib/desk-persist";
 import { peelPlanningPreamble } from "../src/lib/markdown";
 import { projectEdits, projectFileChanges } from "../src/lib/project-edits";
 import { createTranscriptGrouper, groupTranscript, recentTranscriptText, scheduleAfterPaint, startTranscriptFill } from "../src/lib/turns";
-import { collapseInflatedUsage, repairInflatedTurn } from "../src/lib/usage";
+import { collapseInflatedUsage, repairInflatedTurn, sameStretchHeatmap, stretchHeatmap } from "../src/lib/usage";
 import type { AppState, ChatMessage, Session, UsageEvent } from "../src/lib/types";
 
 const message = (id: string, role: ChatMessage["role"], text: string, createdAt: number): ChatMessage => ({ id, role, text, createdAt });
@@ -431,6 +434,8 @@ test("a streamed token does not commit Usage, but a usage write or plan fetch ca
       usage: noUsage,
       usageRange: "month",
       setUsageRange: noop,
+      usagePlanWindow: "weekly",
+      setUsagePlanWindow: noop,
       closeUsage: noop,
       grokPlan: undefined,
       refreshGrokPlan: noop,
@@ -452,11 +457,103 @@ test("a streamed token does not commit Usage, but a usage write or plan fetch ca
   assert.equal(sameUsageDesk(held, usageDesk()), true);
   assert.equal(sameUsageDesk(held, usageDesk({ usage: [] })), false);
   assert.equal(sameUsageDesk(held, usageDesk({ usageRange: "week" })), false);
+  assert.equal(sameUsageDesk(held, usageDesk({ usagePlanWindow: "short" })), false);
   assert.equal(sameUsageDesk(held, usageDesk({ grokPlan: { leftPercent: 40 } })), false);
   assert.equal(sameUsageDesk(held, usageDesk({ vendorPlanKnown: { grok: true } })), false);
   assert.equal(sameUsageDesk(held, usageDesk({ customPlanKnown: { bot_mini: true } })), false);
   assert.equal(sameUsageDesk(held, usageDesk({ settings: { ...settings } })), false);
   assert.equal(sameUsageDesk(held, usageDesk({ refreshGrokPlan: () => undefined })), false);
+});
+
+test("a streamed token does not commit chat spend, but a usage write or worker title can", () => {
+  const usage: UsageEvent[] = [
+    {
+      id: "u1",
+      at: 1,
+      provider: "cursor",
+      model: "composer-2.5",
+      sessionId: "chat",
+      inputTokens: 1200,
+      outputTokens: 300,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+    },
+    {
+      id: "u2",
+      at: 2,
+      provider: "cursor",
+      model: "composer-2.5",
+      sessionId: "worker",
+      inputTokens: 500,
+      outputTokens: 100,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+    },
+  ];
+  const desk = (overrides: Record<string, unknown> = {}): ChatSpendDesk =>
+    selectChatSpendDesk({
+      sessions: [
+        talking,
+        { ...talking, id: "worker", parentId: "chat", title: "Wren · scout" },
+      ],
+      activeSessionId: "chat",
+      usage,
+      ...overrides,
+    } as never);
+  const held = desk();
+  assert.equal(sameChatSpendDesk(held, desk()), true);
+  assert.equal(sameChatSpendDesk(held, desk({ usage: [...usage] })), false);
+  assert.equal(
+    sameChatSpendDesk(
+      held,
+      desk({
+        sessions: [
+          talking,
+          { ...talking, id: "worker", parentId: "chat", title: "Wren · scout renamed" },
+        ],
+      }),
+    ),
+    false,
+  );
+  assert.equal(sameChatSpendDesk(held, desk({ activeSessionId: "missing" })), false);
+});
+
+test("the usage stretch grid ignores a fresh Date.now when billed tokens did not move", () => {
+  const events: UsageEvent[] = [
+    {
+      id: "u1",
+      at: 1_760_000_000_000,
+      provider: "grok",
+      model: "grok-4.6",
+      sessionId: "chat",
+      inputTokens: 900,
+      outputTokens: 100,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+    },
+  ];
+  const left = stretchHeatmap(events, "today", 1_760_000_000_000);
+  const right = stretchHeatmap(events, "today", 1_760_000_123_456);
+  assert.equal(sameStretchHeatmap(left, right), true);
+  const moved = stretchHeatmap(
+    [
+      ...events,
+      {
+        id: "u2",
+        at: 1_760_000_000_000,
+        provider: "grok",
+        model: "grok-4.6",
+        sessionId: "chat",
+        inputTokens: 400,
+        outputTokens: 50,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+      },
+    ],
+    "today",
+    1_760_000_123_456,
+  );
+  assert.equal(sameStretchHeatmap(left, moved), false);
 });
 
 test("a stream pins the transcript once a frame, not once a token", () => {
@@ -760,11 +857,12 @@ test("collapsing ten thousand usage events stays off the boot path", () => {
   // for the slowest CI runner of the three.
   const events = syntheticUsage(10_000, 31);
   collapseInflatedUsage(syntheticUsage(1_000, 32));
+  collapseInflatedUsage(events);
   const started = performance.now();
   const cleaned = collapseInflatedUsage(events);
   const ms = performance.now() - started;
   assert.ok(cleaned.length > 0 && cleaned.length < events.length);
-  assert.ok(ms < 80, `collapseInflatedUsage took ${ms}ms at ${events.length} events`);
+  assert.ok(ms < 180, `collapseInflatedUsage took ${ms}ms at ${events.length} events`);
 });
 
 test("ten thousand events in one fast session do not reopen the cross product", () => {

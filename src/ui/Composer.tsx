@@ -1,4 +1,5 @@
-import { memo, useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { composerStateForSession, sameComposerImages } from "../lib/chats";
 import { commandNeedsInput, commandsForSession, filterPalette } from "../lib/commands";
 import {
   collectDroppedFiles,
@@ -7,6 +8,8 @@ import {
   droppedFromPickerFile,
   filesFromClipboard,
   folderNameFromPath,
+  folderChipLabel,
+  folderPathsFromAttachments,
   groupAttachments,
   imageSrc,
   isPicture,
@@ -15,11 +18,12 @@ import {
   readChatAttachment,
   type DroppedFile,
 } from "../lib/images";
+import { vendorTurnWorking } from "../lib/crew-live";
 import { wrapMarkdown } from "../lib/markdown";
 import { deskInk } from "../lib/settings";
 import { formatChatSidebar } from "../lib/session";
 import { spawnPickerRows, toggleSpawnAllowlistId, orchestrateChipLabel, spawnAllowlistActive } from "../lib/spawn-allowlist";
-import { useStoreSelector } from "../lib/store";
+import { useStoreReader, useStoreSelector } from "../lib/store";
 import { sameComposerDesk, selectComposerDesk } from "../lib/store-select";
 import type { ChatImage, CrewMode } from "../lib/types";
 import { crewModeLabel, hasCrewMode, orderedCrewModes, sameCrewModes, toggleCrewMode } from "../lib/workhorse-rules";
@@ -116,13 +120,20 @@ export const Composer = memo(function Composer({
     setComposerDraft,
     setCrewMode,
     setSpawnAllowlist,
+    linkSessionFolder,
+    unlinkSessionFolder,
     deskSkills,
   } = useStoreSelector(selectComposerDesk, sameComposerDesk);
+  const readStore = useStoreReader();
   const ink = session ? deskInk(session, settings) : undefined;
-  const running = session?.status === "running";
+  const running = session ? vendorTurnWorking(session) : false;
   const queue = session?.queue ?? [];
-  const [value, setValue] = useState(() => session?.composerDraft ?? "");
-  const [images, setImages] = useState<ChatImage[]>(() => session?.composerImages ?? []);
+  const restored = composerStateForSession(
+    session,
+    session ? readStore().peekComposerDraft(session.id) : undefined,
+  );
+  const [value, setValue] = useState(restored.text);
+  const [images, setImages] = useState<ChatImage[]>(restored.images);
   const [over, setOver] = useState(false);
   const [active, setActive] = useState(0);
   const [plusOpen, setPlusOpen] = useState(false);
@@ -139,6 +150,33 @@ export const Composer = memo(function Composer({
   const imagesRef = useRef(images);
   valueRef.current = value;
   imagesRef.current = images;
+
+  useLayoutEffect(() => {
+    if (!sessionId) {
+      setValue("");
+      setImages([]);
+      return;
+    }
+    const live = readStore();
+    const overlay = live.peekComposerDraft(sessionId);
+    const active = live.sessions.find((item) => item.id === sessionId);
+    const next = composerStateForSession(active, overlay);
+    setValue((current) => (current === next.text ? current : next.text));
+    setImages((current) => (sameComposerImages(current, next.images) ? current : next.images));
+    valueRef.current = next.text;
+    imagesRef.current = next.images;
+  }, [sessionId, readStore]);
+
+  useEffect(() => {
+    if (!sessionId) return;
+    const live = readStore();
+    const overlay = live.peekComposerDraft(sessionId);
+    if (overlay) return;
+    const active = live.sessions.find((item) => item.id === sessionId);
+    const next = composerStateForSession(active, overlay);
+    if (!next.text && next.images.length === 0) return;
+    live.setComposerDraft(sessionId, next.text, next.images);
+  }, [sessionId, readStore]);
 
   const extras = useMemo(() => commandsForSession(session, deskSkills), [deskSkills, session]);
   const crewModes = useMemo(() => orderedCrewModes(session?.crewModes), [session?.crewModes]);
@@ -225,6 +263,8 @@ export const Composer = memo(function Composer({
       event.preventDefault();
       const next = `${valueRef.current}${event.key}`;
       setValue(next);
+      valueRef.current = next;
+      if (sessionId) setComposerDraft(sessionId, next, imagesRef.current);
       el.focus();
       const place = () => el.setSelectionRange(next.length, next.length);
       queueMicrotask(place);
@@ -257,10 +297,20 @@ export const Composer = memo(function Composer({
         ? droppedFromPickerFile(item, window.workhorse?.pathForFile(item) || undefined)
         : item;
       const image = dropped.attachment ?? (dropped.file ? await readChatAttachment(dropped.file, dropped.sourcePath) : null);
-      if (image) next.push(dropped.folder ? { ...image, folder: dropped.folder } : image);
+      if (!image) continue;
+      next.push({
+        ...image,
+        ...(dropped.folder ? { folder: dropped.folder } : {}),
+        ...(dropped.folderPath ? { folderPath: dropped.folderPath } : {}),
+      });
     }
     if (next.length === 0) return;
-    setImages((current) => [...current, ...next].slice(0, MAX_IMAGES));
+    for (const folderPath of folderPathsFromAttachments(next)) linkSessionFolder(folderPath);
+    setImages((current) => {
+      const merged = [...current, ...next].slice(0, MAX_IMAGES);
+      if (sessionId) setComposerDraft(sessionId, valueRef.current, merged);
+      return merged;
+    });
   };
 
   const pickCrewMode = (mode: CrewMode) => {
@@ -435,26 +485,31 @@ export const Composer = memo(function Composer({
             ))}
           </ul>
         )}
-        {images.length > 0 && (
+        {(images.length > 0 || (session?.folders ?? []).length > 0) && (
           <ul className="composer-thumbs">
             {groupAttachments(images).map((group) => {
               if (group.type === "folder") {
+                const folderPath =
+                  group.files.find((item) => item.directory)?.sourcePath ||
+                  group.files.find((item) => item.folderPath)?.folderPath;
+                const linked = folderPath ? session?.folders?.find((folder) => folder.path === folderPath) : undefined;
                 return (
                   <li key={`folder:${group.name}`} className="composer-thumb file folder">
-                    <span className="composer-file" title={`${group.name} · ${group.files.length} files`}>
+                    <span className="composer-file" title={folderPath ? `${group.name} · ${folderPath}` : `${group.name} · ${folderChipLabel(group.files)}`}>
                       {group.name}
-                      <em>
-                        {group.files.length} file{group.files.length === 1 ? "" : "s"}
-                      </em>
+                      <em>{folderChipLabel(group.files)}</em>
                     </span>
                     <button
                       type="button"
                       aria-label={`Remove ${group.name}`}
-                      onClick={() =>
-                        setImages((current) =>
-                          current.filter((item) => (item.folder || folderNameFromPath(item.name)) !== group.name),
-                        )
-                      }
+                      onClick={() => {
+                        if (linked) unlinkSessionFolder(linked.id);
+                        setImages((current) => {
+                          const merged = current.filter((item) => (item.folder || folderNameFromPath(item.name)) !== group.name);
+                          if (sessionId) setComposerDraft(sessionId, valueRef.current, merged);
+                          return merged;
+                        });
+                      }}
                     >
                       <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
                         <path
@@ -482,7 +537,13 @@ export const Composer = memo(function Composer({
                   <button
                     type="button"
                     aria-label={`Remove ${image.name}`}
-                    onClick={() => setImages((current) => current.filter((item) => item.id !== image.id))}
+                    onClick={() =>
+                      setImages((current) => {
+                        const merged = current.filter((item) => item.id !== image.id);
+                        if (sessionId) setComposerDraft(sessionId, valueRef.current, merged);
+                        return merged;
+                      })
+                    }
                   >
                     <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
                       <path
@@ -496,6 +557,26 @@ export const Composer = memo(function Composer({
                 </li>
               );
             })}
+            {(session?.folders ?? [])
+              .filter((folder) => !folderPathsFromAttachments(images).includes(folder.path))
+              .map((folder) => (
+                <li key={`linked:${folder.id}`} className="composer-thumb file folder">
+                  <span className="composer-file" title={folder.path}>
+                    {folder.label}
+                    <em>Folder</em>
+                  </span>
+                  <button type="button" aria-label={`Remove ${folder.label}`} onClick={() => unlinkSessionFolder(folder.id)}>
+                    <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
+                      <path
+                        d="M3 3l6 6M9 3 3 9"
+                        stroke="currentColor"
+                        strokeWidth="1.8"
+                        strokeLinecap="round"
+                      />
+                    </svg>
+                  </button>
+                </li>
+              ))}
           </ul>
         )}
         <form
@@ -523,7 +604,11 @@ export const Composer = memo(function Composer({
             event.preventDefault();
             void addFiles(files);
           }}
-          onChange={(event) => setValue(event.target.value)}
+          onChange={(event) => {
+            const next = event.target.value;
+            setValue(next);
+            if (sessionId) setComposerDraft(sessionId, next, imagesRef.current);
+          }}
           onKeyDown={(event) => {
             if (open && (event.key === "ArrowDown" || event.key === "ArrowUp")) {
               event.preventDefault();
@@ -573,7 +658,6 @@ export const Composer = memo(function Composer({
           className="composer-file-input"
           type="file"
           multiple
-          accept="image/*,.txt,.md,.json,.csv,.ts,.tsx,.js,.jsx,.py,.go,.rs,.java,.pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.rtf,.odt,audio/*,video/*"
           onChange={(event) => {
             void addFiles([...event.target.files ?? []]);
             event.target.value = "";

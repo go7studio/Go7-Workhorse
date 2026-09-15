@@ -100,7 +100,7 @@ test("the block installs, removes, and updates through the workshop bridge", () 
   }
   assert.match(block, /placeholder="https:\/\/github\.com\/owner\/repo"/);
   assert.match(block, /Sources changed\. Turn on to review\./);
-  assert.match(block, /Add a Local Compute host under Settings → LLMs first\./);
+  assert.match(block, /These add-ons watch a machine you add — not this PC\./);
   // Confirm needs a host and at least one checked source.
   assert.match(block, /disabled=\{busy \|\| !hostId \|\| checked\.length === 0\}/);
 });
@@ -206,7 +206,7 @@ test("the preflight names every missing piece, not only the first", () => {
   const noHost = turnOnPreflight(0, 0, 2);
   assert.equal(noHost.ok, false);
   assert.deepEqual(noHost.missing, ["host"]);
-  assert.match(noHost.copy, /Local Compute host/);
+  assert.match(noHost.copy, /machine to watch/);
 
   // A configured but switched-off host is a different fix from having none.
   const offHost = turnOnPreflight(1, 0, 2);
@@ -216,7 +216,7 @@ test("the preflight names every missing piece, not only the first", () => {
   // Both gaps are named in one strip, so the second is not a surprise after fixing the first.
   const both = turnOnPreflight(0, 0, 0);
   assert.deepEqual(both.missing, ["host", "sources"]);
-  assert.match(both.copy, /Local Compute host · at least one source/);
+  assert.match(both.copy, /machine to watch · at least one source/);
 
   assert.deepEqual(turnOnPreflight(2, 2, 0).missing, ["sources"]);
 });
@@ -228,6 +228,9 @@ test("a refused Turn on offers the fix in place and still points at LLMs", () =>
   assert.match(block, />\s*Add host\s*</);
   assert.match(block, /LocalComputeAddHost/);
   assert.match(block, /addHostFor/);
+  // Missing host opens the add-machine form on that card instead of sending you to LLMs first.
+  const begin = block.slice(block.indexOf("const beginTurnOn"), block.indexOf("const turnOff"));
+  assert.match(begin, /setAddHostFor\(pack\.id\)/);
   // The credential field lives in the shared form; this block still never names one.
   assert.doesNotMatch(block, /token/i);
 });

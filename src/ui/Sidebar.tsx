@@ -221,7 +221,10 @@ function ProjectFolder({
   const pinned = pinnedCollapsedChat(chats, open, store.activeSessionId);
   const live = projectLiveLine(chats, index.linksBySession);
   const toggleFolder = () => {
-    if (open) setOpenCrew({});
+    if (open) {
+      setOpenCrew({});
+      setShowMore(false);
+    }
     onToggle();
   };
   const skipClickAfterDrag = () => Date.now() - draggedAt.current < 400;

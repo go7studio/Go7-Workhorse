@@ -81,6 +81,27 @@ const VIDEO_MIME_BY_EXT: Record<string, string> = {
  * text/plain for every one of them loses html and markdown for no reason.
  * Anything absent here is still text — it just falls back to text/plain.
  */
+const BINARY_MIME_BY_EXT: Record<string, string> = {
+  blend: "application/x-blender",
+  blend1: "application/x-blender",
+  blend2: "application/x-blender",
+  fbx: "application/octet-stream",
+  obj: "model/obj",
+  gltf: "model/gltf+json",
+  glb: "model/gltf-binary",
+  usd: "model/vnd.usda",
+  usda: "model/vnd.usda",
+  usdc: "model/vnd.usdc",
+  stl: "model/stl",
+  ply: "application/octet-stream",
+  dae: "model/vnd.collada+xml",
+  zip: "application/zip",
+  "7z": "application/x-7z-compressed",
+  rar: "application/vnd.rar",
+  tar: "application/x-tar",
+  gz: "application/gzip",
+};
+
 const TEXT_MIME_BY_EXT: Record<string, string> = {
   md: "text/markdown",
   markdown: "text/markdown",
@@ -181,14 +202,15 @@ export function attachmentKind(file: { name?: string; type?: string }): Attachme
   if (mappedMime(file, "document")) return "document";
   if (mappedMime(file, "audio")) return "audio";
   if (mappedMime(file, "video")) return "video";
-  return null;
+  return file.name?.trim() ? "file" : null;
 }
 
 export function attachmentMime(file: { name?: string; type?: string }, kind = attachmentKind(file)): string {
   if (kind === "image") return imageMime(file) ?? "image/png";
   if (kind === "document" || kind === "audio" || kind === "video") return mappedMime(file, kind) ?? file.type ?? "application/octet-stream";
   const ext = file.name?.toLowerCase().split(".").pop() ?? "";
-  return file.type || TEXT_MIME_BY_EXT[ext] || "text/plain";
+  if (isTextFile(file)) return file.type || TEXT_MIME_BY_EXT[ext] || "text/plain";
+  return BINARY_MIME_BY_EXT[ext] || file.type || "application/octet-stream";
 }
 
 export function isPicture(item: Pick<ChatImage, "kind" | "mimeType" | "name">): boolean {
@@ -321,23 +343,38 @@ export function normalizeImages(raw: unknown): ChatImage[] {
     const mimeType = typeof record.mimeType === "string" ? record.mimeType : "";
     const text = typeof record.text === "string" ? record.text : "";
     const kind = record.kind ?? attachmentKind({ type: mimeType, name });
-    if (kind === "file" || (text && kind !== "image")) {
-      if (!text) continue;
+    const folder = typeof record.folder === "string" && record.folder.trim() ? record.folder.trim() : "";
+    const folderPath = typeof record.folderPath === "string" && record.folderPath.trim() ? record.folderPath.trim() : "";
+    const sourcePath = typeof record.sourcePath === "string" ? record.sourcePath.trim() : "";
+    if (record.directory === true && sourcePath) {
       images.push({
         id: typeof record.id === "string" && record.id ? record.id : uid("file"),
         name,
-        mimeType: mimeType || "text/plain",
+        mimeType: mimeType || "inode/directory",
         data: "",
         kind: "file",
-        text,
-        ...(typeof record.folder === "string" && record.folder.trim() ? { folder: record.folder.trim() } : {}),
-        ...(typeof record.sourcePath === "string" && record.sourcePath.trim() ? { sourcePath: record.sourcePath.trim() } : {}),
+        directory: true,
+        sourcePath,
+        folder: folder || name,
+        folderPath: folderPath || sourcePath,
+      });
+    } else if (kind === "file" || (text && kind !== "image")) {
+      if (!text && !sourcePath) continue;
+      images.push({
+        id: typeof record.id === "string" && record.id ? record.id : uid("file"),
+        name,
+        mimeType: mimeType || (text ? "text/plain" : "application/octet-stream"),
+        data: "",
+        kind: "file",
+        ...(text ? { text } : {}),
+        ...(folder ? { folder } : {}),
+        ...(folderPath ? { folderPath } : {}),
+        ...(sourcePath ? { sourcePath } : {}),
         ...(typeof record.size === "number" && record.size >= 0 ? { size: record.size } : {}),
       });
     } else if (kind === "image") {
       const imageType = imageMime({ type: mimeType, name: record.name });
       const data = typeof record.data === "string" ? record.data.replace(/^data:[^;]+;base64,/, "") : "";
-      const sourcePath = typeof record.sourcePath === "string" ? record.sourcePath.trim() : "";
       if (!imageType || (!data && !sourcePath)) continue;
       images.push({
         id: typeof record.id === "string" && record.id ? record.id : uid("img"),
@@ -345,13 +382,13 @@ export function normalizeImages(raw: unknown): ChatImage[] {
         mimeType: imageType,
         data,
         kind: "image",
-        ...(typeof record.folder === "string" && record.folder.trim() ? { folder: record.folder.trim() } : {}),
+        ...(folder ? { folder } : {}),
+        ...(folderPath ? { folderPath } : {}),
         ...(sourcePath ? { sourcePath } : {}),
         ...(typeof record.size === "number" && record.size >= 0 ? { size: record.size } : {}),
       });
     } else if (kind === "document" || kind === "audio" || kind === "video") {
       const data = typeof record.data === "string" ? record.data.replace(/^data:[^;]+;base64,/, "") : "";
-      const sourcePath = typeof record.sourcePath === "string" ? record.sourcePath.trim() : "";
       const derivedImages = record.derivedImages
         ? normalizeImages(record.derivedImages).filter((row) => row.kind === "image")
         : [];
@@ -363,7 +400,8 @@ export function normalizeImages(raw: unknown): ChatImage[] {
         data,
         kind,
         ...(sourcePath ? { sourcePath } : {}),
-        ...(typeof record.folder === "string" && record.folder.trim() ? { folder: record.folder.trim() } : {}),
+        ...(folder ? { folder } : {}),
+        ...(folderPath ? { folderPath } : {}),
         ...(typeof record.size === "number" && record.size >= 0 ? { size: record.size } : {}),
         ...(typeof record.durationMs === "number" && record.durationMs >= 0 ? { durationMs: record.durationMs } : {}),
         ...(derivedImages.length > 0 ? { derivedImages } : {}),
@@ -485,19 +523,30 @@ export async function readChatAttachment(file: File, sourcePath?: string): Promi
     };
   }
   if (kind !== "file") return null;
-  if (file.size > MAX_FILE_BYTES) return null;
-  if (!isTextFile(file) && file.size > 32 * 1024) return null;
-  const text = await file.text();
-  if (!looksLikeText(text)) return null;
+  if (isTextFile(file) && file.size > 0 && file.size <= MAX_FILE_BYTES) {
+    const text = await file.text();
+    if (looksLikeText(text)) {
+      return {
+        id: uid("file"),
+        name: file.name?.trim() || "file",
+        mimeType: file.type || attachmentMime(file, "file"),
+        data: "",
+        kind: "file",
+        text,
+        size: file.size,
+        ...(path ? { sourcePath: path } : {}),
+      };
+    }
+  }
+  if (!path) return null;
   return {
     id: uid("file"),
     name: file.name?.trim() || "file",
-    mimeType: file.type || "text/plain",
+    mimeType: attachmentMime(file, "file"),
     data: "",
     kind: "file",
-    text,
     size: file.size,
-    ...(path ? { sourcePath: path } : {}),
+    sourcePath: path,
   };
 }
 
@@ -550,6 +599,7 @@ export type DroppedFile = {
   file?: File;
   attachment?: ChatImage;
   folder?: string;
+  folderPath?: string;
   sourcePath?: string;
 };
 
@@ -577,6 +627,24 @@ export async function droppedFromDiskPaths(paths: string[]): Promise<DroppedFile
   const clean = paths.map((item) => item.trim()).filter(Boolean);
   if (clean.length === 0 || !window.workhorse?.listDropFiles) return [];
   return filesFromListedDrop(await window.workhorse.listDropFiles(clean));
+}
+
+export function folderChipLabel(files: ChatImage[]): string {
+  const nested = files.filter((item) => !item.directory);
+  if (nested.length === 0) return "Folder";
+  return `${nested.length} file${nested.length === 1 ? "" : "s"}`;
+}
+
+export function folderPathsFromAttachments(items: ChatImage[]): string[] {
+  const paths: string[] = [];
+  const seen = new Set<string>();
+  for (const item of items) {
+    const next = (item.directory ? item.sourcePath : item.folderPath)?.trim() || "";
+    if (!next || seen.has(next)) continue;
+    seen.add(next);
+    paths.push(next);
+  }
+  return paths;
 }
 
 export function groupAttachments(items: ChatImage[]): AttachmentGroup[] {
@@ -616,9 +684,38 @@ async function collectDropEntry(entry: DropEntry, prefix: string, folder: string
   const nextFolder = folder ?? entry.name;
   const children = await readDirectory(entry.createReader());
   for (const child of children) {
-    if (into.length >= MAX_IMAGES) return;
+    if (into.length >= MAX_IMAGES) break;
     await collectDropEntry(child, nextPrefix, nextFolder, into);
   }
+  let sourcePath = "";
+  try {
+    const asFile = await new Promise<File>((resolve, reject) => {
+      entry.file(resolve, reject);
+    });
+    sourcePath = window.workhorse?.pathForFile(asFile)?.trim() ?? "";
+  } catch {
+    /* some hosts refuse File from a directory entry */
+  }
+  if (folder) return;
+  if (sourcePath) {
+    for (const item of into) {
+      if (item.folder === nextFolder && !item.folderPath) item.folderPath = sourcePath;
+    }
+  }
+  into.unshift({
+    attachment: {
+      id: uid("file"),
+      name: entry.name,
+      mimeType: "inode/directory",
+      data: "",
+      kind: "file",
+      directory: true,
+      folder: nextFolder,
+      ...(sourcePath ? { sourcePath, folderPath: sourcePath } : {}),
+    },
+    folder: nextFolder,
+    ...(sourcePath ? { sourcePath, folderPath: sourcePath } : {}),
+  });
 }
 
 export function filesFromDataTransfer(transfer: DataTransfer | null): File[] {
@@ -635,11 +732,34 @@ function filesFromListedDrop(
     data?: string;
     sourcePath?: string;
     size?: number;
+    folder?: string;
+    folderPath?: string;
+    directory?: boolean;
   }[],
 ): DroppedFile[] {
   const files: DroppedFile[] = [];
   for (const row of rows) {
-    const folder = folderNameFromPath(row.name);
+    const folder = row.folder?.trim() || folderNameFromPath(row.name);
+    const folderPath = row.folderPath?.trim();
+    if (row.directory && row.sourcePath) {
+      files.push({
+        attachment: {
+          id: uid("file"),
+          name: row.name,
+          mimeType: row.mimeType || "inode/directory",
+          data: "",
+          kind: "file",
+          directory: true,
+          sourcePath: row.sourcePath,
+          folder: folder || row.name,
+          folderPath: folderPath || row.sourcePath,
+        },
+        folder: folder || row.name,
+        folderPath: folderPath || row.sourcePath,
+        sourcePath: row.sourcePath,
+      });
+      continue;
+    }
     let file: File | null = null;
     if (row.kind === "image" && row.data) {
       const binary = atob(row.data);
@@ -649,8 +769,14 @@ function filesFromListedDrop(
     } else if (row.text) {
       file = new File([row.text], row.name, { type: row.mimeType || "text/plain" });
     }
-    if (file) files.push({ file, ...(folder ? { folder } : {}), ...(row.sourcePath ? { sourcePath: row.sourcePath } : {}) });
-    else if (row.sourcePath) {
+    if (file) {
+      files.push({
+        file,
+        ...(folder ? { folder } : {}),
+        ...(folderPath ? { folderPath } : {}),
+        ...(row.sourcePath ? { sourcePath: row.sourcePath } : {}),
+      });
+    } else if (row.sourcePath) {
       files.push({
         attachment: {
           id: uid(row.kind),
@@ -660,8 +786,11 @@ function filesFromListedDrop(
           kind: row.kind,
           sourcePath: row.sourcePath,
           size: row.size,
+          ...(folder ? { folder } : {}),
+          ...(folderPath ? { folderPath } : {}),
         },
         ...(folder ? { folder } : {}),
+        ...(folderPath ? { folderPath } : {}),
         sourcePath: row.sourcePath,
       });
     }
@@ -722,13 +851,22 @@ function mediaLength(durationMs?: number): string {
 }
 
 export function attachmentLabel(file: ChatImage): string {
+  if (file.directory) return "Folder";
   const kind = file.kind === "document" ? "Document" : file.kind === "audio" ? "Audio" : file.kind === "video" ? "Video" : "File";
   const length = mediaLength(file.durationMs);
   return length ? `${kind} · ${length}` : kind;
 }
 
 export function attachmentPromptBlock(file: ChatImage): string {
-  if (file.kind === "file" || file.text) return filePromptBlock(file);
+  if (file.directory) {
+    const dest = file.sourcePath || file.folderPath || file.name;
+    return `Linked folder \`${file.name}\` at \`${dest}\`. List and read files from that absolute path; do not assume the contents were inlined.`;
+  }
+  if (file.text) return filePromptBlock(file);
+  if (file.kind === "file" && file.sourcePath) {
+    return `Linked file \`${file.name}\` at \`${file.sourcePath}\`. Read it from that absolute path; the bytes were not inlined.`;
+  }
+  if (file.kind === "file") return filePromptBlock(file);
   const kind = file.kind ?? "attachment";
   const details = [file.mimeType, mediaLength(file.durationMs), file.size ? `${Math.ceil(file.size / 1024)} KB` : ""]
     .filter(Boolean)
@@ -742,8 +880,13 @@ export function buildAcpPrompt(text: string, images: ChatImage[] = []): AcpConte
   const blocks: AcpContentBlock[] = [];
   if (text) blocks.push({ type: "text", text });
   for (const image of images) {
+    if (image.directory) {
+      blocks.push({ type: "text", text: attachmentPromptBlock(image) });
+      continue;
+    }
     if (image.kind === "file" || (image.text && !isPicture(image))) {
       if (image.text) blocks.push({ type: "text", text: filePromptBlock(image) });
+      else if (image.sourcePath) blocks.push({ type: "text", text: attachmentPromptBlock(image) });
       continue;
     }
     if (isPicture(image) && image.data && image.mimeType) {
@@ -760,6 +903,7 @@ export function buildAcpPrompt(text: string, images: ChatImage[] = []): AcpConte
 }
 
 export function hasSendableAttachment(image: ChatImage): boolean {
-  if (image.kind === "file" || image.text) return Boolean(image.text);
+  if (image.directory) return Boolean(image.sourcePath);
+  if (image.kind === "file" || image.text) return Boolean(image.text || image.sourcePath);
   return Boolean((image.data && image.mimeType) || image.sourcePath || image.derivedImages?.length);
 }

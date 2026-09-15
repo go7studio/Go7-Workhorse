@@ -1408,7 +1408,7 @@ test("a worker's CLI is launched with worker rules, an orchestrator's with the b
   const { buildClaudeLaunchSpec } = await import("../electron/claude-launch");
   const { buildCodexLaunchSpec } = await import("../electron/codex-launch");
   const { buildCursorLaunchSpec } = await import("../electron/cursor-launch");
-  const { WORKER_SESSION_RULES, WORKHORSE_SESSION_RULES, CURSOR_SESSION_RULES, sessionRulesFor } = await import("../src/lib/workhorse-rules");
+  const { WORKER_SESSION_RULES, WORKHORSE_SESSION_RULES, WORKHORSE_SOLO_SESSION_RULES, CURSOR_SESSION_RULES, CURSOR_SOLO_SESSION_RULES, sessionRulesFor } = await import("../src/lib/workhorse-rules");
   const base = { model: "m", effort: null, cwd: process.cwd(), mode: "always-approve" as const, sandbox: "off" as const };
   const rulesOf = (spec: { sessionParams: { _meta?: unknown } }) =>
     ((spec.sessionParams._meta ?? {}) as { rules?: string }).rules ?? "";
@@ -1417,14 +1417,16 @@ test("a worker's CLI is launched with worker rules, an orchestrator's with the b
   // its preface gave it — two rule sets that disagreed on whether it may list
   // bots. Seven workers in one review paid ~15k tokens for that.
   assert.equal(rulesOf(buildGrokLaunchSpec({ ...base, role: "worker" })), WORKER_SESSION_RULES);
-  assert.equal(rulesOf(buildGrokLaunchSpec({ ...base, role: "orchestrator" })), WORKHORSE_SESSION_RULES);
-  assert.equal(rulesOf(buildGrokLaunchSpec(base)), WORKHORSE_SESSION_RULES, "no role means the root chat");
+  assert.equal(rulesOf(buildGrokLaunchSpec({ ...base, role: "orchestrator" })), WORKHORSE_SOLO_SESSION_RULES);
+  assert.equal(rulesOf(buildGrokLaunchSpec(base)), WORKHORSE_SOLO_SESSION_RULES, "no role means the root chat");
+  assert.equal(sessionRulesFor(undefined, "grok", ["orchestrate"]), WORKHORSE_SESSION_RULES);
   assert.equal(rulesOf(buildClaudeLaunchSpec({ ...base, role: "worker" })), WORKER_SESSION_RULES);
   assert.equal(rulesOf(buildCodexLaunchSpec({ ...base, role: "worker" })), WORKER_SESSION_RULES);
   // Cursor's orchestrator rules are the bible with two identity sentences
   // changed; nothing Cursor-mechanical, so a Cursor worker takes worker rules too.
   assert.equal(rulesOf(buildCursorLaunchSpec({ ...base, role: "worker" })), WORKER_SESSION_RULES);
-  assert.equal(rulesOf(buildCursorLaunchSpec(base)), CURSOR_SESSION_RULES);
+  assert.equal(rulesOf(buildCursorLaunchSpec(base)), CURSOR_SOLO_SESSION_RULES);
+  assert.equal(sessionRulesFor(undefined, "cursor", ["orchestrate"]), CURSOR_SESSION_RULES);
   assert.equal(sessionRulesFor("worker", "cursor"), WORKER_SESSION_RULES);
   const { AUDITOR_SESSION_RULES } = await import("../src/lib/workhorse-rules");
   assert.equal(sessionRulesFor("auditor"), AUDITOR_SESSION_RULES);

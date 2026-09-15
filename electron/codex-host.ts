@@ -190,6 +190,10 @@ export class CodexSessionHost {
         text: stripCodexRuntimeNotices(result.text).trimStart(),
       };
     } catch (error) {
+      if (slot.agent.tookCancel) {
+        emit({ type: "done", sessionId: input.sessionId, stopReason: "cancelled" });
+        return { text: "", stopReason: "cancelled", vendorSessionId: slot.agent.sessionId, opened: slot.agent.opened };
+      }
       const message = error instanceof Error ? error.message : String(error);
       emit({ type: "error", sessionId: input.sessionId, message });
       throw error;

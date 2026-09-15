@@ -167,12 +167,17 @@ transcript rather than as a path.
   until this turn ends and is not a chat line yet. Steer interrupts the
   in-flight prompt and sends now — a redirect, not a stop. The chat stays
   working and does not say Stopped.
+- Stop on the main bot ends the turn as Stopped. It does not dump the
+  unfinished thought as the reply, leave that fold open, or paint spawned
+  workers as failed.
 - Cancelling one worker stops that worker only. The desk does not prompt
   the parent with that worker's report, and it does not say the wave
   finished while the parent or other workers are still going.
 - A long transcript opens on the latest turns. Scrolling up pages in the next older window without jumping.
 - A portable transcript follows a chat when its vendor changes.
 - Search runs over chat titles and message text across every project.
+- A project folder shows five chats, then Show more. Closing the folder
+  puts that list back under the cap, so the next open is short again.
 - Each chat row shows how old the last prompt is in a compact form such as
   `25m`, `2h`, or `3d`. Hover the stamp for the full time. A parent with workers
   folds them on the count button. Closing the project hides those workers too,
@@ -225,7 +230,8 @@ transcript rather than as a path.
   path for 24 hours. Changed or expired requests ask again.
 - **Execution directory** — a chat starts in a linked folder or managed git
   worktree; the terminal can navigate elsewhere and Review opens cited external
-  files. A loose top-level chat can search from the desk base, while workers
+  files. A folder attached on the chat is linked there too, beside the
+  project's folders. A loose top-level chat can search from the desk base, while workers
   need an absolute folder. A project with several folders linked runs in the
   first one still on disk, so moving one repo does not stop the project. When
   none of them is there, the chat names the missing folder instead of failing as
@@ -284,8 +290,9 @@ transcript rather than as a path.
 - **Turn log** — a chat can reconstruct model history from its own turn and
   step log. The log is per chat. It is never shared across vendors.
 - **Subagents** — lifecycle records, cascading
-  cancellation, changed-file review, and worktree isolation where the project
-  supports it. The desk does not stop a worker on a token ceiling or a runtime
+  cancellation, changed-file review, and isolation that follows the parent
+  chat's workspace: an isolated worktree parent mints a worktree; a local
+  parent keeps children in that folder. Nested helpers stay shared. The desk does not stop a worker on a token ceiling or a runtime
   limit. Billed spend for that chat and each orchestrated bot is on the left
   of the transcript. A reused worker starts a new slice
   count; billed usage for the chat is the lifetime total.
@@ -337,20 +344,27 @@ transcript rather than as a path.
   builder in `exclude` for that. Plan admission spawns its own auditor and
   picks a vendor the builders did not use.
 - **Composer + menu** — Orchestrate and Mission pin on the chat, together if
-  you want both; one Attach item at the bottom takes files or a folder. Each
+  you want both; one Attach item at the bottom takes files or a folder. A
+  dropped or picked folder stays linked on that chat (the agent can list it)
+  and still carries the files inside it. A `.blend` or any other file the
+  desk does not inline is linked by its path the same way. On Windows the picker asks files or
+  folder first, because that dialog cannot take both at once. Each
   pin stays as a chip next to + until you clear it. Two pins collapse to +2 on
-  the bar; click it to expand them. Orchestrate tells this chat
-  it is the orchestrator and must spawn desk workers (one assignment is one
-  worker or a named continuation on this parent for the same topic; a bare spawn
-  still starts clear-headed. Auto ranks, fan-out only when asked). A gear on that chip, or a
-  right-click, opens a this-chat list of which connected bots it may spawn.
-  All bots is the default; a subset stays on this chat until you clear it, and
-  a new chat starts at all again. Left-click still clears the pin. Mission is
-  mission-board tracking for an adaptive loop, not a spawn request. When the
-  work needs desk workers, spawn a wave, then continue remaining work with
-  `workhorse_continue_mission`. The chat then shows that loop as a compact
-  chip above the composer; click it to open the usual board. With both on, the chat spawns as orchestrator
-  and then continues unmet work as a mission.
+  the bar; click it to expand them. With neither pin on, this chat works alone:
+  the seated bot uses its own tools and does not spawn desk workers or ask to
+  resume one. Ordinary words like look into, investigate, or agent do not turn
+  on hiring. Orchestrate tells this chat it is the orchestrator and must spawn
+  desk workers (one assignment is one worker or a named continuation on this
+  parent for the same topic; a bare spawn still starts clear-headed. Auto ranks,
+  fan-out only when asked). A gear on that chip, or a right-click, opens a
+  this-chat list of which connected bots it may spawn. All bots is the default;
+  a subset stays on this chat until you clear it, and a new chat starts at all
+  again. Left-click still clears the pin. Mission is mission-board tracking for
+  an adaptive loop, not a spawn request. When the work needs desk workers,
+  spawn a wave, then continue remaining work with `workhorse_continue_mission`.
+  The chat then shows that loop as a compact chip above the composer; click it
+  to open the usual board. With both on, the chat spawns as orchestrator and
+  then continues unmet work as a mission.
 - **Routing** — your own chat keeps the model you picked until you set it to
   **Auto**; Auto picks the bot and effort for each message. Auto does not pick
   Cursor Auto; that stays a named chat pick. When the prompt asks to generate

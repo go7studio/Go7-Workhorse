@@ -6,6 +6,7 @@ import { test } from "node:test";
 import { LINEUP_FINISHED_NOTICE } from "../src/lib/lineup";
 import { subagentTurns, workerTaskTitle } from "../src/lib/subagents";
 import { displayWorkSteps, groupTranscript } from "../src/lib/turns";
+import { crewActivityLine, crewTurnInFlight } from "../src/lib/crew-live";
 import { crewDoneKind } from "../src/ui/SessionPane";
 import { workerFoldLabel, crewWorkerName } from "../src/ui/WorkPopout";
 
@@ -19,6 +20,46 @@ function cssBlock(css: string, selector: string): string {
   assert.ok(match, `missing CSS rule ${selector}`);
   return match[0];
 }
+
+test("a worker stays live through thinking, not only while a tool is in flight", () => {
+  const running = { status: "running" as const, messages: [] };
+  assert.equal(crewTurnInFlight(running), true);
+  const thinking = {
+    status: "idle" as const,
+    agentRun: { status: "running" as const, startedAt: 1, isolation: "shared" as const },
+    messages: [{ id: "th", role: "assistant" as const, kind: "thought" as const, text: "planning the mesh", createdAt: 1 }],
+  };
+  assert.equal(crewTurnInFlight(thinking), true);
+  assert.equal(crewActivityLine(thinking as never), "Thinking");
+  const leftoverThought = {
+    status: "idle" as const,
+    agentRun: { status: "completed" as const, startedAt: 1, finishedAt: 2, isolation: "shared" as const },
+    messages: [{ id: "th", role: "assistant" as const, kind: "thought" as const, text: "planning the mesh", createdAt: 1 }],
+  };
+  assert.equal(crewTurnInFlight(leftoverThought), false);
+  const toolLive = {
+    status: "idle" as const,
+    agentRun: { status: "running" as const, startedAt: 1, isolation: "shared" as const },
+    messages: [{ id: "t", role: "system" as const, kind: "tool" as const, text: "Read File · running", toolStatus: "running", createdAt: 1 }],
+  };
+  assert.equal(crewTurnInFlight(toolLive), true);
+  const afterTool = {
+    status: "idle" as const,
+    agentRun: { status: "completed" as const, startedAt: 1, finishedAt: 2, isolation: "shared" as const },
+    messages: [{ id: "t", role: "system" as const, kind: "tool" as const, text: "Read File · completed", toolStatus: "completed", createdAt: 1 }],
+  };
+  assert.equal(crewTurnInFlight(afterTool), false);
+  const emptyAssistant = {
+    status: "idle" as const,
+    agentRun: { status: "running" as const, startedAt: 1, isolation: "shared" as const },
+    messages: [{ id: "a", role: "assistant" as const, text: "", createdAt: 1 }],
+  };
+  assert.equal(crewTurnInFlight(emptyAssistant), true);
+  const popout = read("src/ui/WorkPopout.tsx");
+  assert.match(popout, /crewTurnInFlight\(child\)/);
+  assert.match(popout, /tool-name">Thinking/);
+  assert.match(popout, /allowThinking: !talking/);
+});
 
 test("work-fold labels use the nested sidebar identity, not a slice fragment", () => {
   assert.equal(
@@ -139,6 +180,17 @@ test("empty parent thoughts never become a work row that could look like a bar",
     displayWorkSteps(reply).filter((step) => step.type === "thought").length,
     0,
   );
+});
+
+test("a stopped turn does not leave the last thought fold open", () => {
+  const popout = read("src/ui/WorkPopout.tsx");
+  const thought = popout.slice(popout.indexOf("function ThoughtBlock"), popout.indexOf("function workRowKey"));
+  assert.match(thought, /useFoldOpen\(false\)/);
+  assert.match(thought, /el\.open = false/);
+  assert.doesNotMatch(thought, /reveal/);
+  assert.match(popout, /reveal=\{row\.type !== "thought" && tailIndex === packed\.tail\.length - 1\}/);
+  assert.match(popout, /runWasStopped\(child\?\.agentRun\?\.status\)/);
+  assert.match(popout, /"stopped"/);
 });
 
 test("nested worker fold starts closed; .open is only the toggle class on the preview", () => {

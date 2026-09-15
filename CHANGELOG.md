@@ -8,6 +8,15 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.6.81](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.80...v0.6.81) (2026-09-15)
+
+
+### Features
+
+* **composer:** Orchestrate and Mission are off by default — the seated bot works solo until + pins a hire mode
+* **usage:** chat spend watch on the transcript header and context pop; Usage 5h/Weekly plan window tabs
+* **usage:** vendor leftover rings stay plan totals; CPU and bot usage surfaces render without empty-range crashes
+
 ## [0.6.66](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.65...v0.6.66) (2026-09-07)
 
 

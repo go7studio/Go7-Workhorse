@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { colorFromWheel, hexToHsv, hsvToHex, parseHex, rgbToHex } from "../lib/color";
 
+const FALLBACK_HSV = { h: 211, s: 1, v: 0.89 };
+
 export function ColorWheel({
   color,
   onChange,
@@ -9,11 +11,12 @@ export function ColorWheel({
   onChange: (hex: string) => void;
 }) {
   const disk = useRef<HTMLDivElement>(null);
-  const hsv = hexToHsv(color) ?? { h: 211, s: 1, v: 0.89 };
+  const hsv = hexToHsv(color) ?? FALLBACK_HSV;
   const [hexDraft, setHexDraft] = useState(color || hsvToHex(hsv.h, hsv.s, hsv.v));
 
   useEffect(() => {
-    setHexDraft(color || hsvToHex(hsv.h, hsv.s, hsv.v));
+    const next = color || hsvToHex(hsv.h, hsv.s, hsv.v);
+    setHexDraft((current) => (current === next ? current : next));
   }, [color, hsv.h, hsv.s, hsv.v]);
 
   const pick = (clientX: number, clientY: number) => {

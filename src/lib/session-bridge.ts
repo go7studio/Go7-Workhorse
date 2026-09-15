@@ -1,3 +1,4 @@
+import { peelPlanningPreamble } from "./markdown";
 import { formatChatSidebar } from "./session";
 
 export type BridgeMessage = {
@@ -63,7 +64,11 @@ function previewFrom(messages: unknown): string {
   for (let i = messages.length - 1; i >= 0; i -= 1) {
     const item = asRecord(messages[i]);
     if (item.role === "system") continue;
-    const text = typeof item.text === "string" ? item.text.replace(/\s+/g, " ").trim() : "";
+    if (item.kind === "thought" || item.kind === "tool" || item.kind === "compact" || item.kind === "subagent") continue;
+    const raw = typeof item.text === "string" ? item.text : "";
+    const shown =
+      item.role === "assistant" ? peelPlanningPreamble(raw, false).body.trim() || raw : raw;
+    const text = shown.replace(/\s+/g, " ").trim();
     if (text) return text.slice(0, 160);
   }
   return "";

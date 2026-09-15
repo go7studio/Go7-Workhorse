@@ -463,6 +463,10 @@ export function namedWorkSummary(
     if (!name || isGenericWorkName(name) || names.includes(name)) continue;
     names.push(name);
   }
+  if (live && input.allowThinking !== false) {
+    const inFlight = tools.some((tool) => namedToolAction(tool).live);
+    if (!inFlight) return "Thinking";
+  }
   if (names.length === 0) return live && input.allowThinking !== false ? "Thinking" : "";
   return joinCappedNames(names);
 }

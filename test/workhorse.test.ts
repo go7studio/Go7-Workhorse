@@ -32,6 +32,7 @@ import { parseCodexPlanUsage } from "../electron/codex-plan";
 import { detectGrokLogin } from "../electron/grok-login";
 import { titleFromRecord } from "../electron/grok-title";
 import { listDropFiles } from "../electron/drop-files";
+import { attachDialogProperties, attachDialogTitle, windowsNeedsAttachChoice } from "../electron/attach-pick";
 import {
   deskPath,
   discoverRipgrepDirs,
@@ -74,11 +75,11 @@ import { startWorkhorseBridge } from "../electron/workhorse-bridge";
 import { mediaFileCandidates } from "../electron/media-src";
 import { estimateChatContext, parseSessionContext } from "../src/lib/context-stats";
 import { buildSessionPreface, buildVendorPreface, composeVendorPrompt, withVendorPreface } from "../src/lib/context-preface";
-import { CREW_STATUS_HINT, CURSOR_SESSION_RULES, CUSTOM_HTTP_SESSION_RULES, DESK_BOT_TURN_HINT, LOOSE_DELETE_HINT, MISSION_MODE_HINT, ORCHESTRATE_MODE_HINT, SPAWN_TURN_HINT, WORKER_SESSION_RULES, crewModeLabel, looksLikeCrewImpatience, looksLikeDeskBotRequest, looksLikeGoalCommand, looksLikeLooseDeleteRequest, looksLikePermissionQuestion, looksLikePreviewQuestion, looksLikeSpawnRequest, looksLikeWorkerBrief, orderedCrewModes, sameCrewModes, PERMISSION_TURN_HINT, PREVIEW_TURN_HINT, toggleCrewMode, withCrewModeHint, withCrewStatusHint, withDeskBotHint, withLooseDeleteHint, withPermissionHint, withSpawnHint, withCustomPeerHint, CUSTOM_HTTP_PEER_HINT, CUSTOM_HTTP_WORKER_RULES } from "../src/lib/workhorse-rules";
+import { CREW_STATUS_HINT, CURSOR_SESSION_RULES, CUSTOM_HTTP_SESSION_RULES, DESK_BOT_TURN_HINT, LOOSE_DELETE_HINT, MISSION_MODE_HINT, ORCHESTRATE_MODE_HINT, SPAWN_TURN_HINT, SOLO_SEATED_LAW, WORKER_SESSION_RULES, WORKHORSE_SOLO_SESSION_RULES, crewModeLabel, looksLikeCrewImpatience, looksLikeDeskBotRequest, looksLikeGoalCommand, looksLikeLooseDeleteRequest, looksLikePermissionQuestion, looksLikePreviewQuestion, looksLikeSpawnRequest, looksLikeWorkerBrief, orchestrationEnabled, orderedCrewModes, sameCrewModes, PERMISSION_TURN_HINT, PREVIEW_TURN_HINT, toggleCrewMode, withCrewModeHint, withCrewStatusHint, withDeskBotHint, withLooseDeleteHint, withPermissionHint, withSpawnHint, withCustomPeerHint, CUSTOM_HTTP_PEER_HINT, CUSTOM_HTTP_WORKER_RULES } from "../src/lib/workhorse-rules";
 import { applySessionElevation, applySessionModelChange, applySessionPolicyChange, brainCaption, brainStamp, formatChatSidebar, isSessionIntro, messageBrain, normalizeMessage, normalizeSession, parsePermissionMode, stampUnstampedMessages, vendorSessionForSend } from "../src/lib/session";
 import { workerSidebarLabel } from "../src/ui/ChatRow";
-import { buildAcpPrompt, droppedFromPickerFile, groupAttachments, imageMime, normalizeImages, shouldSkipDropDir } from "../src/lib/images";
-import { catalogSessions, existingPeerReply, findSession, findSessionForLink, formatPeerPrompt, matchListedChat, peerPromptParts, sameSessionCrew, sessionTranscript } from "../src/lib/session-bridge";
+import { attachmentPromptBlock, buildAcpPrompt, droppedFromPickerFile, folderChipLabel, folderPathsFromAttachments, groupAttachments, imageMime, normalizeImages, shouldSkipDropDir } from "../src/lib/images";
+import { catalogSessions, chatPreview, existingPeerReply, findSession, findSessionForLink, formatPeerPrompt, matchListedChat, peerPromptParts, sameSessionCrew, sessionTranscript } from "../src/lib/session-bridge";
 import {
   admitSpawn,
   collectChildAgentReports,
@@ -169,8 +170,8 @@ import {
 import { applyPermissionAnswer, autoAllowPermission, classifyPermissionTool, classifyElevation, deskClampNote, describeElevation, elevationForBlock, enqueuePermission, grantedPolicyAnswer, inboundAccess, isQuietDeskTool, lineageGrant, looksLikeDelegationTool, looksLikeSearchOnly, looksLikeShellTool, looksLikeWriteTool, parseElevationInput, pathOwnerMode, permissionGrantKey, permissionPolicyAnswer, permissionResumeStatus, promptOwner, workerAccess, workerGrant, workerTightening } from "../src/lib/permissions";
 import { detectClaudeAccessDefaults, detectCursorAccessDefaults, detectGrokAccessDefaults } from "../electron/vendor-access";
 import { normalizePermissionGrants } from "../src/lib/permission-grants";
-import { appendUserMessage, applyComposerDrafts, applyDeleteDeskChat, applyDeleteLooseDeskChats, applyRenameDeskChat, archiveChat, autoRenameChat, canPlaceInProject, deleteChat, deleteChatGuard, deleteWorkerChats, dropDrafts, dropQueuedPrompt, enqueuePrompt, findListedChat, forkChat, omitQueuedUserMessages, forkTitle, formatLastTalked, hasComposerDraft, hiddenProjectChatCount, isDraftChat, isLooseDeleteScope, lastProjectChat, lastTalkedAt, lastUserMessage, listedChats, defaultInboundParentId, messagesThrough, moveChat, openDraft, activeProjectChat, pinnedCollapsedChat, PROJECT_CHAT_LIMIT, renameChat, resolveListedChat, rewindToUserMessage, shiftQueuedPrompt, visibleProjectChats, workersFoldOpen } from "../src/lib/chats";
-import { applyArchiveProject, applyCreateWorkhorseProject, applyDeleteProject, applyProjectChatFate, applyRenameDeskProject, applyReorderProjects, emptyProject, findProjectByQuery, projectForSpawn, renameTookOnDesk, visibleProjectNames } from "../src/lib/project";
+import { appendUserMessage, applyComposerDrafts, applyDeleteDeskChat, applyDeleteLooseDeskChats, applyRenameDeskChat, archiveChat, autoRenameChat, canPlaceInProject, composerDraftsFromSessions, composerStateForSession, deleteChat, deleteChatGuard, deleteWorkerChats, dropDrafts, dropQueuedPrompt, enqueuePrompt, findListedChat, forkChat, omitQueuedUserMessages, forkTitle, formatLastTalked, hasComposerDraft, hiddenProjectChatCount, isDraftChat, isLooseDeleteScope, lastProjectChat, lastTalkedAt, lastUserMessage, listedChats, defaultInboundParentId, messagesThrough, moveChat, openDraft, activeProjectChat, pinnedCollapsedChat, PROJECT_CHAT_LIMIT, renameChat, resolveListedChat, rewindToUserMessage, shiftQueuedPrompt, snapComposerDraft, visibleProjectChats, withComposerDrafts, workersFoldOpen } from "../src/lib/chats";
+import { applyArchiveProject, applyCreateWorkhorseProject, applyDeleteProject, applyProjectChatFate, applyRenameDeskProject, applyReorderProjects, combinedFolders, emptyProject, findProjectByQuery, projectForSpawn, renameTookOnDesk, visibleProjectNames } from "../src/lib/project";
 import { agentSystemsFromInboundSelect, applyUpdateStockBot, DEFAULT_SETTINGS, deskInk, deskLabel, firstAttachedChoice, hasAttachedLlm, inboundParentSelectValue, keepVendorAccessDefaults, normalizeDeskAccess, normalizeSettings, vendorAttachedForSession, vendorEnabled, vendorLabel, vendorTint } from "../src/lib/settings";
 import { customBotEnabled } from "../src/lib/custom-bots";
 import { COUNT_MS, COUNT_SNAP, countAt, countMotion, countToward, shouldSnapCount } from "../src/lib/count";
@@ -1038,10 +1039,42 @@ test("dropped images become ACP image blocks and stay on the user turn", () => {
     mkdirSync(path.join(dropRoot, "src"));
     mkdirSync(path.join(dropRoot, "node_modules", "pkg"), { recursive: true });
     writeFileSync(path.join(dropRoot, "src", "note.md"), "# hi");
+    writeFileSync(path.join(dropRoot, "hero.blend"), Buffer.alloc(64 * 1024));
     writeFileSync(path.join(dropRoot, "node_modules", "pkg", "skip.js"), "nope");
     const listed = listDropFiles([dropRoot]);
+    assert.ok(listed.some((item) => item.directory && item.sourcePath === dropRoot && item.folder === path.basename(dropRoot)));
     assert.ok(listed.some((item) => item.name.endsWith("src/note.md") && item.text?.includes("# hi")));
+    const blend = listed.find((item) => item.name.endsWith("hero.blend"));
+    assert.ok(blend);
+    assert.equal(blend.kind, "file");
+    assert.equal(blend.mimeType, "application/x-blender");
+    assert.equal(blend.text, undefined);
+    assert.equal(blend.sourcePath, path.join(dropRoot, "hero.blend"));
+    const linked = normalizeImages([blend]);
+    assert.equal(linked[0]?.sourcePath, path.join(dropRoot, "hero.blend"));
+    assert.match(attachmentPromptBlock(linked[0]!), /Linked file/);
     assert.ok(!listed.some((item) => item.name.includes("node_modules")));
+    const restored = normalizeImages(listed.filter((item) => item.directory));
+    assert.equal(restored[0]?.directory, true);
+    assert.equal(restored[0]?.sourcePath, dropRoot);
+    assert.match(attachmentPromptBlock(restored[0]!), /Linked folder/);
+    assert.deepEqual(folderPathsFromAttachments(restored), [dropRoot]);
+    assert.equal(folderChipLabel(restored), "Folder");
+    const extras = combinedFolders(emptyProject("Desk", ["/repo"]), [{ id: "fold_chat", path: dropRoot, label: path.basename(dropRoot) }]);
+    assert.deepEqual(extras.map((folder) => folder.path), ["/repo", dropRoot]);
+    const saved = normalizeSession({
+      id: "sess_folder",
+      provider: "grok",
+      model: "grok-4",
+      title: "Chat",
+      mode: "always-approve",
+      sandbox: "off",
+      status: "idle",
+      contextUsed: 0,
+      messages: [],
+      folders: [{ id: "fold_chat", path: dropRoot, label: path.basename(dropRoot) }],
+    });
+    assert.equal(saved?.folders?.[0]?.path, dropRoot);
   } finally {
     rmSync(dropRoot, { recursive: true, force: true });
   }
@@ -1057,6 +1090,9 @@ test("dropped images become ACP image blocks and stay on the user turn", () => {
   assert.match(store, /from "\.\/store-context"/);
   assert.match(readFileSync(path.join(ROOT, "src", "lib", "store-context.ts"), "utf8"), /createContext/);
   assert.match(readFileSync(path.join(ROOT, "src", "main.tsx"), "utf8"), /StoreProvider[\s\S]*ErrorBoundary/);
+  const crash = readFileSync(path.join(ROOT, "src", "ui", "ErrorBoundary.tsx"), "utf8");
+  assert.match(crash, /crash-stack/);
+  assert.match(crash, /info\.componentStack/);
 });
 
 test("chat rename, move, archive, and delete", () => {
@@ -1473,7 +1509,7 @@ for (const model of GROK_MODELS) {
         assert.equal(spec.effort, effort);
         assert.equal(spec.sessionParams.cwd, ROOT);
         assert.deepEqual(spec.sessionParams.mcpServers, []);
-        assert.equal(spec.sessionParams._meta?.rules, WORKHORSE_SESSION_RULES);
+        assert.equal(spec.sessionParams._meta?.rules, WORKHORSE_SOLO_SESSION_RULES);
         assert.equal(spec.sessionParams._meta?.goalMode, true);
         assert.ok(!/claude|codex|custom/i.test([spec.command, ...spec.argv].join(" ")));
         if (mode === "always-approve") {
@@ -2554,6 +2590,42 @@ test("chat markdown turns status dumps into facts and renders inline marks", () 
   const finishedThink = peelPlanningPreamble("I'll inspect the workspace and then edit the file.", false);
   assert.equal(finishedThink.thought, "");
   assert.match(finishedThink.body, /I'll inspect the workspace/);
+  const mixedThisChat = peelPlanningPreamble(
+    [
+      "This chat’s preview is the last-message snippet from my previous reply, starting with “The screenshot is asking about a nested Preview: Preview: … snippet…”. I’ll check how the desk fills that field, because “always empty” is a different problem than the quoting loop. The empty value is coming from how the desk snapshot is built before a turn. I’m tracing that path next, especially for Cursor chats. This chat’s preview is **not** empty. It is the last-message snippet:",
+      "",
+      "> The screenshot is asking about a nested “Preview: Preview: …” snippet in that other chat.",
+    ].join("\n"),
+  );
+  assert.match(mixedThisChat.thought, /I’ll check how the desk fills that field/);
+  assert.match(mixedThisChat.thought, /I’m tracing that path next/);
+  assert.match(mixedThisChat.thought, /empty value is coming from how the desk snapshot/);
+  assert.match(mixedThisChat.body, /This chat’s preview is the last-message snippet from my previous reply/);
+  assert.match(mixedThisChat.body, /This chat’s preview is \*\*not\*\* empty/);
+  assert.doesNotMatch(mixedThisChat.body, /I’ll check how the desk fills/);
+  assert.doesNotMatch(mixedThisChat.body, /I’m tracing that path next/);
+  const liveMixed = peelPlanningPreamble(
+    "This chat’s preview is the last-message snippet from my previous reply, starting with “The screenshot is asking about a nested Preview: Preview: … snippet…”. I’ll check how the desk fills that field, because “always empty” is a different problem than the quoting loop. This chat’s preview is **not** empty.",
+    true,
+  );
+  assert.match(liveMixed.body, /This chat’s preview is \*\*not\*\* empty/);
+  assert.doesNotMatch(liveMixed.body, /I’ll check how the desk fills/);
+  assert.match(liveMixed.thought, /I’ll check how the desk fills that field/);
+  const quotedPreview = peelPlanningPreamble(
+    "This chat’s own preview is currently: I'll list the other sidebar chats and read their preview text.\n\nThere are more chats below those.",
+  );
+  assert.match(quotedPreview.body, /This chat’s own preview is currently: I'll list the other sidebar chats/);
+  assert.match(quotedPreview.body, /There are more chats below those/);
+  assert.doesNotMatch(quotedPreview.thought, /I'll list the other sidebar chats/);
+  const previewSnippet = chatPreview([
+    { role: "user", text: "Why is it always empty?" },
+    {
+      role: "assistant",
+      text: "This chat’s preview is the last-message snippet from my previous reply. I’ll check how the desk fills that field. This chat’s preview is **not** empty.",
+    },
+  ]);
+  assert.match(previewSnippet, /This chat’s preview is \*\*not\*\* empty/);
+  assert.doesNotMatch(previewSnippet, /I’ll check how the desk fills/);
   const leaked = peelPlanningPreamble(
     [
       "I want to be upfront with you: I'm a bot inside a Workhorse chat, so I can't drive the GUI.",
@@ -4784,6 +4856,7 @@ test("project home lists edited files from write tools, not Choose a brain", () 
   assert.match(pane, /startEditStatsHarvest/);
   assert.match(pane, /markStatsFetched/);
   assert.match(pane, /heldEditsRef/);
+  assert.match(pane, /sameEditList\(current, visible\)/);
   assert.match(pane, /hiddenByChat/);
   assert.match(pane, /label="Changes"/);
   assert.match(pane, /onDismiss=\{dismissFile\}/);
@@ -5412,7 +5485,7 @@ test("sidebar nests project chats in folders; top New chat stays loose", async (
   assert.match(sidebar, /project-info/);
   assert.match(sidebar, /lastProjectChat/);
   assert.match(sidebar, /if \(open\) \{\s*toggleFolder\(\);\s*return;/);
-  assert.match(sidebar, /if \(open\) setOpenCrew\(\{\}\);/);
+  assert.match(sidebar, /if \(open\) \{\s*setOpenCrew\(\{\}\);\s*setShowMore\(false\);/);
   assert.match(sidebar, /if \(last\) store\.selectSession\(last\.id\)/);
   assert.match(sidebar, /store\.selectProject\(project\.id\)/);
   assert.match(css, /\.tool-name\s*\{[\s\S]*text-overflow:\s*ellipsis/);
@@ -5440,6 +5513,10 @@ test("sidebar nests project chats in folders; top New chat stays loose", async (
   assert.match(css, /\.place-project/);
   assert.match(sidebar, /Show more/);
   assert.match(sidebar, /chats\.length > PROJECT_CHAT_LIMIT && hidden > 0/);
+  assert.match(
+    readFileSync(path.join(ROOT, "docs", "FEATURES.md"), "utf8"),
+    /A project folder shows five chats, then Show more/,
+  );
   assert.match(sidebar, /settingsOpen/);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "ChatRow.tsx"), "utf8"), /!desk\.settingsOpen/);
   assert.equal(PROJECT_CHAT_LIMIT, 5);
@@ -5829,6 +5906,8 @@ test("UsagePane ships the Figma fuel-ring overview, not the old token line", asy
   assert.match(pane, /usage-limits/);
   assert.match(pane, /claudeWindowTabs/);
   assert.match(pane, /setClaudeWindow/);
+  assert.match(pane, /setUsagePlanWindow/);
+  assert.match(pane, /preference: planWindow/);
   assert.match(pane, /showCodexLeftover \? "left" : "used"/);
   assert.match(pane, /Unlimited/);
   assert.match(pane, /ContextMeter/);
@@ -6306,6 +6385,13 @@ test("Usage rings include every desk LLM even with no spend", () => {
   assert.equal(planWindowChip(miniWindows), "5h: 17% · Weekly: ∞");
   assert.equal(weeklyPlanLeftover(miniWindows), undefined);
   assert.equal(pickPlanWindow(miniWindows, undefined, "custom")?.label, "5h");
+  assert.equal(pickPlanWindow(miniWindows, undefined, "custom", "weekly")?.label, "Weekly");
+  assert.equal(pickPlanWindow(miniWindows, undefined, "custom", "short")?.label, "5h");
+  // A 5h tab click must not keep drawing weekly after the person asked for 5h.
+  assert.equal(
+    pickPlanWindow(miniWindows, "session", "custom", "weekly")?.label,
+    "Weekly",
+  );
   // The ring is the allowance, and this one has no cap. It used to show the
   // 5h burst instead — 83% — which is a rate limit wearing the allowance's
   // clothes. The burst is still on the card, in the chip above.
@@ -6317,6 +6403,12 @@ test("Usage rings include every desk LLM even with no spend", () => {
     planRingView(cards.find((card) => card.label === "MiniMax")!, { custom: { bot_mini: miniWindows } }, "weekly")
       ?.label,
     "∞",
+  );
+  assert.equal(
+    planRingView(cards.find((card) => card.label === "MiniMax")!, { custom: { bot_mini: miniWindows } }, undefined, {
+      preference: "short",
+    })?.label,
+    "83%",
   );
   assert.match(formatPlanReset("2026-08-20T05:59:59Z", Date.parse("2026-08-13T16:00:00Z")), /Resets/);
   assert.equal(formatPlanObservation("2026-08-13T15:52:00Z", Date.parse("2026-08-13T16:00:00Z")), "Updated 8m ago");
@@ -6434,6 +6526,7 @@ test("transcript groups tools and thoughts above the final reply", () => {
   assert.equal(namedWorkSummary([readGoal], { live: true }), "Read GOAL.md");
   assert.equal(namedWorkSummary([grepDone, readGoal], { live: true }), "Read GOAL.md");
   assert.equal(namedWorkSummary([readDone, grepDone]), "Read · Grep");
+  assert.equal(namedWorkSummary([readDone, grepDone], { live: true }), "Thinking");
   assert.equal(namedWorkSummary([], { live: true }), "Thinking");
   assert.equal(namedWorkSummary([], { live: true, allowThinking: false }), "");
   assert.equal(
@@ -6566,9 +6659,15 @@ test("transcript groups tools and thoughts above the final reply", () => {
   assert.match(popout, /work-step/);
   assert.match(popout, /groupWorkRows/);
   assert.match(popout, /isActiveWorkRow/);
-  assert.match(popout, /reveal=\{tailIndex === packed\.tail\.length - 1\}/);
+  assert.match(popout, /reveal=\{row\.type !== "thought" && tailIndex === packed\.tail\.length - 1\}/);
+  assert.match(popout, /el\.open = false/);
+  assert.match(popout, /cancelled" \|\| marker\.toolStatus === "cancelled"/);
+  assert.match(popout, /stopped/);
   assert.match(popout, /useStartOpen/);
-  assert.match(popout, /fold\.current\.open = true/);
+  assert.match(popout, /el\.open = true/);
+  assert.match(popout, /!el\.open/);
+  assert.match(popout, /current === next \? current : next/);
+  assert.match(popout, /onToggle=\{live \? undefined : onToggle\}/);
   assert.match(popout, /foldOpen/);
   assert.match(popout, /<details className="work-pop" data-state=\{state\} onToggle=\{onBodyToggle\}>/);
   assert.doesNotMatch(popout, /<details className="work-pop" open=\{live\}>/);
@@ -6845,6 +6944,17 @@ test("transcript groups tools and thoughts above the final reply", () => {
   assert.equal(closed[0]?.toolStatus, "failed");
   assert.match(closed[0]?.text ?? "", /failed/);
   assert.equal(closed[1]?.toolStatus, "completed");
+  const stopped = finishOpenToolMessages(
+    [
+      { id: "crew", role: "system", kind: "subagent", fromTitle: "the other agent", text: "the other agent", toolStatus: "running", createdAt: 1 },
+      { id: "spawn", role: "system", kind: "tool", text: "Spawn agent · running", toolStatus: "running", createdAt: 2 },
+    ],
+    "cancelled",
+  );
+  assert.equal(stopped[0]?.toolStatus, "cancelled");
+  assert.equal(stopped[0]?.text, "the other agent");
+  assert.equal(stopped[1]?.toolStatus, "cancelled");
+  assert.match(stopped[1]?.text ?? "", /cancelled/);
   const overBank = interpretPeerAskHttp(400, { error: "Grok is over its day bank" });
   assert.equal(overBank.ok, false);
   assert.equal(overBank.retryable, false);
@@ -6944,7 +7054,7 @@ test("shipped launch spec maps sandbox and plan without yolo", () => {
   assert.equal(off.argv[off.argv.indexOf("--permission-mode") + 1], "default");
   assert.ok(off.argv.indexOf("--sandbox") < off.argv.indexOf("agent"));
   assert.ok(!off.argv.includes("--rules"));
-  assert.equal(off.sessionParams._meta?.rules, WORKHORSE_SESSION_RULES);
+  assert.equal(off.sessionParams._meta?.rules, WORKHORSE_SOLO_SESSION_RULES);
   assert.equal(off.sandbox, "off");
   assert.equal(off.initializeParams.clientCapabilities.sessionLoad, true);
   assert.equal(off.initializeParams.clientCapabilities.permissionPrompts, true);
@@ -7476,10 +7586,11 @@ test("Grok /goal is not a desk spawn and keeps the typed slash", () => {
   // workers. Blocking every /goal meant "assign bots ... create and drive the
   // bots" ran solo: 504 tool calls, 0 workers, on 2026-08-18.
   assert.equal(looksLikeSpawnRequest("/goal assign skeptic verifier subagents"), true);
-  assert.equal(withSpawnHint("/goal assign skeptic and spawn subagents").startsWith(SPAWN_TURN_HINT), true);
-  assert.equal(withSpawnHint("Summon multiple subagents").startsWith(SPAWN_TURN_HINT), true);
+  assert.equal(withSpawnHint("/goal assign skeptic and spawn subagents", undefined, "orchestrate").startsWith(SPAWN_TURN_HINT), true);
+  assert.equal(withSpawnHint("Summon multiple subagents", undefined, "orchestrate").startsWith(SPAWN_TURN_HINT), true);
+  assert.equal(withSpawnHint("Summon multiple subagents"), "Summon multiple subagents");
 
-  const composed = composeVendorPrompt("/goal prove native /goal", WORKHORSE_SESSION_RULES, "session/load");
+  const composed = composeVendorPrompt("/goal prove native /goal", WORKHORSE_SOLO_SESSION_RULES, "session/load");
   assert.doesNotMatch(composed, new RegExp(SPAWN_TURN_HINT.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   assert.doesNotMatch(composed, /The user asked you to spawn or summon agents/);
   assert.doesNotMatch(composed, /workhorse_spawn_agent/);
@@ -7609,7 +7720,7 @@ test("unsent composer text and images survive normalizeSession", () => {
   assert.equal(normalizeSession({ ...saved, crewMode: "nope" })?.crewModes, undefined);
   const composer = readFileSync(path.join(ROOT, "src", "ui", "Composer.tsx"), "utf8");
   assert.match(composer, /setComposerDraft/);
-  assert.match(composer, /composerDraft/);
+  assert.match(composer, /composerStateForSession/);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "SessionPane.tsx"), "utf8"), /key=\{session\.id\}/);
   // Typing used to write the draft into the live store every 120ms, which
   // rebuilt the desk and serialized every chat (megabytes) through IPC.
@@ -7617,11 +7728,83 @@ test("unsent composer text and images survive normalizeSession", () => {
   assert.match(store, /saveComposerDrafts/);
   assert.match(store, /commit = false/);
   assert.match(store, /if \(!commit\) return;/);
+  assert.match(store, /peekComposerDraft/);
+  assert.match(store, /withComposerDrafts/);
+  assert.match(store, /composerDraftsFromSessions/);
+  assert.match(composer, /composerStateForSession/);
+  assert.match(composer, /peekComposerDraft/);
   assert.match(store, /settleSessionGoals/);
   assert.match(store, /if \(!settled\.changed\) return current;/);
   assert.match(store, /busy \? 2_000 : 400/);
   assert.match(composer, /setComposerDraft\(sessionId, value, images\)/);
   assert.match(composer, /setComposerDraft\(sessionId, valueRef\.current, imagesRef\.current, true\)/);
+  assert.match(composer, /setComposerDraft\(sessionId, next, imagesRef\.current\)/);
+});
+
+test("unsent composer text and images restore per chat after a switch", () => {
+  const image = { id: "img_1", name: "shot.png", mimeType: "image/png", data: "abcd", kind: "image" as const };
+  const chatA: Session = {
+    id: "sess_a",
+    projectId: null,
+    provider: "grok",
+    model: "grok-4.6",
+    effort: "medium",
+    title: "Existing A",
+    mode: "ask",
+    sandbox: "off",
+    status: "idle",
+    messages: [{ id: "u1", role: "user", text: "already sent", createdAt: 1 }],
+    contextUsed: 0,
+  };
+  const chatB: Session = { ...chatA, id: "sess_b", title: "Existing B", messages: [{ id: "u2", role: "user", text: "other chat", createdAt: 1 }] };
+  const empty: Session = {
+    ...chatA,
+    id: "sess_new",
+    title: "New chat",
+    messages: [],
+  };
+  const drafts = {
+    sess_a: snapComposerDraft("hello world", [image]),
+  };
+
+  const switched = withComposerDrafts([chatA, chatB, empty], drafts, "sess_b");
+  const restoredA = switched.find((item) => item.id === "sess_a");
+  const restoredB = switched.find((item) => item.id === "sess_b");
+  assert.equal(restoredA?.composerDraft, "hello world");
+  assert.equal(restoredA?.composerImages?.[0]?.name, "shot.png");
+  assert.equal(restoredB?.composerDraft, undefined);
+  assert.equal(composerStateForSession(restoredA, drafts.sess_a).text, "hello world");
+  assert.equal(composerStateForSession(restoredB, undefined).text, "");
+  assert.deepEqual(composerStateForSession(restoredA, drafts.sess_a).images, [image]);
+
+  const typedEmpty = { sess_new: snapComposerDraft("hello world") };
+  assert.equal(isDraftChat(empty), true);
+  assert.deepEqual(dropDrafts([empty, chatA], "sess_a").map((item) => item.id), ["sess_a"]);
+  const kept = withComposerDrafts([empty, chatA], typedEmpty, "sess_a");
+  assert.deepEqual(kept.map((item) => item.id), ["sess_new", "sess_a"]);
+  assert.equal(kept.find((item) => item.id === "sess_new")?.composerDraft, "hello world");
+
+  const afterNewChat = openDraft(applyComposerDrafts([chatA], drafts), empty);
+  assert.equal(afterNewChat.sessions.find((item) => item.id === "sess_a")?.composerDraft, "hello world");
+  assert.equal(composerStateForSession(afterNewChat.session, undefined).text, "");
+
+  const cleared = applyComposerDrafts(kept, { sess_new: snapComposerDraft("", []) });
+  assert.equal(cleared.find((item) => item.id === "sess_new")?.composerDraft, undefined);
+  assert.equal(composerStateForSession(cleared.find((item) => item.id === "sess_new"), snapComposerDraft("", [])).text, "");
+
+  const seeded = composerDraftsFromSessions([
+    { id: "sess_a", composerDraft: "hello world", composerImages: [image] },
+    { id: "sess_b" },
+  ]);
+  assert.equal(seeded.sess_a?.text, "hello world");
+  assert.equal(seeded.sess_b, undefined);
+
+  const store = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
+  assert.match(store, /withComposerDrafts\(current\.sessions, composerDraftsRef\.current, id\)/);
+  assert.match(store, /openDraft\(applyComposerDrafts\(current\.sessions, composerDraftsRef\.current\)/);
+  const composer = readFileSync(path.join(ROOT, "src", "ui", "Composer.tsx"), "utf8");
+  assert.match(composer, /useLayoutEffect/);
+  assert.match(readFileSync(path.join(ROOT, "src", "ui", "SessionPane.tsx"), "utf8"), /key=\{session\.id\}/);
 });
 
 test("turns keep the bot that ran them after a switch", () => {
@@ -8572,15 +8755,34 @@ test("vendor preface lists extra folders and references, not cwd", () => {
     references: [{ kind: "url", value: "https://example.com", label: "Spec" }],
   });
   assert.match(preface, /Working directory: C:\\proj\\app/);
+  assert.match(preface, /this chat's local folder/);
+  const worktreePreface = buildVendorPreface({
+    cwd: "C:\\wt\\sess_a",
+    folders: ["C:\\wt\\sess_a"],
+    references: [],
+    environment: { kind: "worktree", path: "C:\\wt\\sess_a", gitRoot: "C:\\proj\\app", head: "abc" },
+  });
+  assert.match(worktreePreface, /isolated worktree/);
+  assert.doesNotMatch(worktreePreface, /this chat's local folder/);
   assert.match(preface, /C:\\proj\\docs/);
-  assert.match(preface, /already on this project/);
+  assert.match(preface, /already on this chat/);
   assert.doesNotMatch(preface, /^- C:\\proj\\app$/m);
   assert.match(preface, /url: https:\/\/example.com/);
   const onlyCwd = buildVendorPreface({ cwd: "C:\\proj\\app", folders: ["C:\\proj\\app"], references: [] });
   assert.match(onlyCwd, /Working directory: C:\\proj\\app/);
   assert.equal(withVendorPreface("Hi", preface).startsWith(preface), true);
   const session = buildSessionPreface({ cwd: "C:\\proj\\app", folders: ["C:\\proj\\app"], references: [] });
-  assert.match(session, new RegExp(WORKHORSE_SESSION_RULES.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.match(session, new RegExp(WORKHORSE_SOLO_SESSION_RULES.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.doesNotMatch(session, /You are the orchestrator/);
+  assert.doesNotMatch(session, /One bounded assignment is one workhorse_spawn_agent/);
+  const orchestratedPreface = buildSessionPreface({
+    cwd: "C:\\proj\\app",
+    folders: ["C:\\proj\\app"],
+    references: [],
+    crewModes: ["orchestrate"],
+  });
+  assert.match(orchestratedPreface, /You are the orchestrator/);
+  assert.match(orchestratedPreface, /One bounded assignment is one workhorse_spawn_agent/);
   assert.match(session, /This chat’s live desk limits/);
   assert.match(session, /Working directory: C:\\proj\\app/);
   const machine = buildSessionPreface({
@@ -8805,18 +9007,26 @@ test("desk-bot requests get a turn hint instead of a source dive", () => {
   // workers. Blocking every /goal meant "assign bots ... create and drive the
   // bots" ran solo: 504 tool calls, 0 workers, on 2026-08-18.
   assert.equal(looksLikeSpawnRequest("/goal assign skeptic verifier subagents"), true);
-  assert.equal(withSpawnHint("/goal assign skeptic and spawn subagents").startsWith(SPAWN_TURN_HINT), true);
-  assert.equal(withSpawnHint("Summon multiple subagents").startsWith(SPAWN_TURN_HINT), true);
-  const spawnAsk = composeVendorPrompt("Summon multiple subagents", WORKHORSE_SESSION_RULES, "session/load");
+  assert.equal(withSpawnHint("/goal assign skeptic and spawn subagents", undefined, "orchestrate").startsWith(SPAWN_TURN_HINT), true);
+  assert.equal(withSpawnHint("Summon multiple subagents", undefined, "orchestrate").startsWith(SPAWN_TURN_HINT), true);
+  assert.equal(withSpawnHint("Summon multiple subagents"), "Summon multiple subagents");
+  const spawnAsk = composeVendorPrompt("Summon multiple subagents", WORKHORSE_SESSION_RULES, "session/load", {
+    crewMode: "orchestrate",
+  });
   assert.match(spawnAsk, /canCall/);
   assert.match(spawnAsk, /do not name it/);
   assert.match(spawnAsk, /API key is already on the desk/);
-  const loaded = composeVendorPrompt("Set up MiniMax", WORKHORSE_SESSION_RULES, "session/load");
+  const soloInvestigate = composeVendorPrompt("please look into this bug", WORKHORSE_SOLO_SESSION_RULES, "session/load");
+  assert.doesNotMatch(soloInvestigate, new RegExp(SPAWN_TURN_HINT.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.doesNotMatch(soloInvestigate, /You are the orchestrator this turn/);
+  assert.match(soloInvestigate, /please look into this bug/);
+  const loaded = composeVendorPrompt("Set up MiniMax", WORKHORSE_SOLO_SESSION_RULES, "session/load");
   assert.match(loaded, /workhorse_list_bots/);
   assert.match(loaded, /Set up MiniMax/);
-  const fresh = composeVendorPrompt("hi", WORKHORSE_SESSION_RULES, "session/new");
+  const fresh = composeVendorPrompt("hi", WORKHORSE_SOLO_SESSION_RULES, "session/new");
   assert.equal(fresh.startsWith("hi\n\nWorkhorse private operating context follows."), true);
-  assert.match(fresh, new RegExp(WORKHORSE_SESSION_RULES.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.match(fresh, new RegExp(WORKHORSE_SOLO_SESSION_RULES.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.match(fresh, new RegExp(SOLO_SEATED_LAW.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   assert.doesNotMatch(fresh, new RegExp(DESK_BOT_TURN_HINT.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   const visible = "Fix the body bag placement behavior";
   const transformed = composeVendorPrompt(
@@ -8843,6 +9053,8 @@ test("composer + pins Orchestrate and Mission and those modes inject the bible",
   assert.deepEqual(toggleCrewMode(["orchestrate"], "mission"), ["orchestrate", "mission"]);
   assert.deepEqual(toggleCrewMode(["orchestrate", "mission"], "mission"), ["orchestrate"]);
   assert.deepEqual(orderedCrewModes(["mission", "orchestrate"]), ["orchestrate", "mission"]);
+  assert.equal(orderedCrewModes(undefined), orderedCrewModes([]));
+  assert.equal(orderedCrewModes(undefined), orderedCrewModes(undefined));
   assert.equal(sameCrewModes(["orchestrate"], ["orchestrate"]), true);
   assert.equal(sameCrewModes(["orchestrate"], ["orchestrate", "mission"]), false);
   const held = ["orchestrate"] as const;
@@ -8897,9 +9109,13 @@ test("composer + pins Orchestrate and Mission and those modes inject the bible",
   });
   assert.match(composedBoth, /You are the orchestrator this turn/);
   assert.match(composedBoth, /workhorse_continue_mission/);
-  const plain = composeVendorPrompt(review, WORKHORSE_SESSION_RULES, "session/load");
+  const plain = composeVendorPrompt(review, WORKHORSE_SOLO_SESSION_RULES, "session/load");
   assert.doesNotMatch(plain, new RegExp(ORCHESTRATE_MODE_HINT.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   assert.doesNotMatch(plain, /workhorse_continue_mission/);
+  assert.doesNotMatch(plain, new RegExp(SPAWN_TURN_HINT.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.equal(orchestrationEnabled(undefined), false);
+  assert.equal(orchestrationEnabled(["orchestrate"]), true);
+  assert.equal(orchestrationEnabled(["mission"]), true);
 
   const composer = readFileSync(path.join(ROOT, "src", "ui", "Composer.tsx"), "utf8");
   assert.match(composer, /composer-plus-menu/);
@@ -8923,9 +9139,18 @@ test("composer + pins Orchestrate and Mission and those modes inject the bible",
   assert.match(composer, /CrewModeIcon/);
   assert.match(composer, /attachFromMenu/);
   assert.match(composer, /pickAttach/);
+  assert.match(composer, /linkSessionFolder/);
+  assert.match(composer, /folderPathsFromAttachments/);
   assert.doesNotMatch(composer, /Attach files/);
   assert.doesNotMatch(composer, /Attach folder/);
   assert.doesNotMatch(composer, /webkitdirectory/);
+  assert.equal(windowsNeedsAttachChoice("win32"), true);
+  assert.equal(windowsNeedsAttachChoice("darwin"), false);
+  assert.deepEqual(attachDialogProperties("win32", "mixed"), ["openFile", "multiSelections"]);
+  assert.deepEqual(attachDialogProperties("win32", "folder"), ["openDirectory"]);
+  assert.deepEqual(attachDialogProperties("darwin", "mixed"), ["openFile", "openDirectory", "multiSelections"]);
+  assert.equal(attachDialogTitle("folder"), "Attach folder");
+  assert.match(readFileSync(path.join(ROOT, "electron", "main.ts"), "utf8"), /windowsNeedsAttachChoice/);
   assert.match(
     composer,
     /pickCrewMode\("orchestrate"\)[\s\S]*pickCrewMode\("mission"\)[\s\S]*attachFromMenu\(\)/,
@@ -8958,6 +9183,8 @@ test("composer + pins Orchestrate and Mission and those modes inject the bible",
   assert.match(store, /crewModes: session\.crewModes/);
   assert.match(store, /setCrewMode/);
   assert.match(store, /setSpawnAllowlist/);
+  assert.match(store, /linkSessionFolder/);
+  assert.match(store, /unlinkSessionFolder/);
   assert.match(readFileSync(path.join(ROOT, "electron", "grok-host.ts"), "utf8"), /crewMode: input\.crewModes/);
   assert.match(readFileSync(path.join(ROOT, "electron", "claude-host.ts"), "utf8"), /crewMode: input\.crewModes/);
   assert.match(readFileSync(path.join(ROOT, "electron", "codex-host.ts"), "utf8"), /crewMode: input\.crewModes/);
@@ -9432,10 +9659,10 @@ test("desk-enforced orchestrator vs worker lineup", async () => {
           },
         ],
         sessions: [
-          { id: "sess_orch", title: "Main", provider: "custom", projectId: "proj_ships" },
+          { id: "sess_orch", title: "Main", provider: "custom", projectId: "proj_ships", crewModes: ["orchestrate"] },
           { id: "sess_worker", title: "src tree review", provider: "custom", parentId: "sess_orch", hidden: true, projectId: "proj_ships" },
           { id: "sess_helper", title: "nested check", provider: "custom", parentId: "sess_worker", hidden: true, projectId: "proj_ships" },
-          { id: "sess_loose", title: "Loose", provider: "custom", projectId: null },
+          { id: "sess_loose", title: "Loose", provider: "custom", projectId: null, crewModes: ["orchestrate"] },
         ],
       }),
     );

@@ -1,6 +1,6 @@
 import { memo, useEffect, useRef, useState } from "react";
 import { splitGoalCommand } from "../lib/commands";
-import { attachmentLabel, groupAttachments, imageSrc, isPicture } from "../lib/images";
+import { attachmentLabel, folderChipLabel, groupAttachments, imageSrc, isPicture } from "../lib/images";
 import { peerPromptParts } from "../lib/session-bridge";
 import { useStoreSelector } from "../lib/store";
 import type { ChatImage, ChatMessage } from "../lib/types";
@@ -117,12 +117,10 @@ export const UserTurn = memo(function UserTurn({ message, readOnly = false }: { 
                   <span
                     key={`folder:${group.name}`}
                     className="say-file folder"
-                    title={`${group.name} · ${group.files.length} files`}
+                    title={`${group.name} · ${folderChipLabel(group.files)}`}
                   >
                     {group.name}
-                    <em>
-                      {group.files.length} file{group.files.length === 1 ? "" : "s"}
-                    </em>
+                    <em>{folderChipLabel(group.files)}</em>
                   </span>
                 ) : isPicture(group.file) ? (
                   <DeferredChatImage key={group.file.id} image={group.file} />

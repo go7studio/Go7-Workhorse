@@ -125,6 +125,9 @@ test("a dead weekly gauge reads unmetered, and a live one is not hidden by the b
   assert.equal(planAllowance(kimi).status, "known");
   assert.equal(planRingView(card("k"), { custom: { k: kimi } })?.label, "53%");
   assert.equal(planWindowChip(kimi), "5h: 0% · Weekly: 47%");
+  // A saved 5h pick must stick on the ring. Weekly is the default allowance.
+  assert.equal(planRingView(card("k"), { custom: { k: kimi } }, undefined, { preference: "short" })?.label, "100%");
+  assert.equal(planRingView(card("k"), { custom: { k: kimi } }, undefined, { preference: "weekly" })?.label, "53%");
 
   // Codex names its weekly `primary`; picking by label would have missed it
   // and moved a ring that was already right.

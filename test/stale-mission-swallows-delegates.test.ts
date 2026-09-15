@@ -21,7 +21,11 @@ const STALE: MissionIteration = {
 };
 
 /** A chat that finished a mission: the lineup keeps it, and the pass's worker is terminal. */
-function deskWhereAMissionFinished(dir: string, workerStatus = "budget-exceeded"): string {
+function deskWhereAMissionFinished(
+  dir: string,
+  workerStatus = "budget-exceeded",
+  crewModes: Session["crewModes"] | "solo" = ["orchestrate"],
+): string {
   const statePath = path.join(dir, "state.json");
   const linked = path.join(dir, "linked");
   mkdirSync(linked, { recursive: true });
@@ -35,6 +39,7 @@ function deskWhereAMissionFinished(dir: string, workerStatus = "budget-exceeded"
         provider: "grok",
         projectId: "project",
         messages: [],
+        ...(crewModes === "solo" ? {} : { crewModes }),
         lineup: {
           id: "lineup_old",
           folder: linked,
@@ -84,6 +89,20 @@ async function delegateAndCapture(statePath: string, args: Record<string, unknow
     else process.env.WORKHORSE_STATE_PATH = previous.state;
   }
 }
+
+test("delegate is blocked when Orchestrate and Mission are off", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "wh-solo-delegate-"));
+  try {
+    const statePath = deskWhereAMissionFinished(dir, "budget-exceeded", "solo");
+    const { seen, error } = await delegateAndCapture(statePath, {
+      task: "Review the diff on this branch and report what is wrong with it.",
+    });
+    assert.match(error ?? "", /Orchestrate and Mission are off/);
+    assert.equal(seen, undefined);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 test("a plain delegate from a chat that finished a mission carries no mission of its own", async () => {
   const dir = mkdtempSync(path.join(tmpdir(), "wh-stale-mission-"));

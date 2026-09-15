@@ -32,7 +32,7 @@ import {
   readCursorAuthToken,
 } from "../electron/cursor-plan";
 import { cursorExtensionResult, extractToolEvent } from "../electron/grok-agent";
-import { CURSOR_SESSION_RULES, WORKHORSE_SESSION_RULES } from "../src/lib/workhorse-rules";
+import { CURSOR_SESSION_RULES, CURSOR_SOLO_SESSION_RULES, WORKHORSE_SESSION_RULES } from "../src/lib/workhorse-rules";
 import { buildSessionPreface } from "../src/lib/context-preface";
 import { normalizeRoutingDecision } from "../src/lib/routing";
 
@@ -193,8 +193,9 @@ test("buildCursorLaunchSpec never spawns grok or Cursor.app", () => {
   assert.deepEqual(spec.argv, ["--model", "composer-2.5", "acp"]);
   assert.equal(spec.cwd, "/proj");
   assert.equal(spec.model, "composer-2.5");
-  assert.equal(spec.sessionParams._meta?.rules, CURSOR_SESSION_RULES);
+  assert.equal(spec.sessionParams._meta?.rules, CURSOR_SOLO_SESSION_RULES);
   assert.notEqual(spec.sessionParams._meta?.rules, WORKHORSE_SESSION_RULES);
+  assert.notEqual(spec.sessionParams._meta?.rules, CURSOR_SESSION_RULES);
   assert.match(spec.sessionParams._meta?.rules ?? "", /You are the Cursor Agent/);
   assert.match(spec.sessionParams._meta?.rules ?? "", /Grok, Claude, Codex, and Cursor/);
   assert.doesNotMatch(spec.sessionParams._meta?.rules ?? "", /Grok Build/);

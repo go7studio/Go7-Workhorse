@@ -11,7 +11,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { spawn } from "node:child_process";
 import { spawnCwd } from "../electron/spawn-cwd";
-import { primaryFolder } from "../src/lib/project";
+import { combinedFolders, primaryFolder } from "../src/lib/project";
 import { volatileFolderPath } from "../src/lib/store";
 import type { Project } from "../src/lib/types";
 
@@ -43,6 +43,14 @@ test("with nothing to fall back to, it still names a folder the person linked", 
 
 test("without a probe the old choice stands, so a slow answer changes nothing", () => {
   assert.equal(primaryFolder(project(DEAD, LIVE))?.path, DEAD);
+});
+
+test("a folder linked on the chat sits beside the project's folders", () => {
+  const extra = [{ id: "fold_chat", path: LIVE, label: "moved-away" }];
+  const folders = combinedFolders(project(DEAD), extra);
+  assert.deepEqual(folders.map((folder) => folder.path), [DEAD, LIVE]);
+  assert.equal(primaryFolder({ folders }, exists)?.path, LIVE);
+  assert.equal(combinedFolders(project(LIVE), extra).length, 1);
 });
 
 test("a missing folder says so, instead of blaming the vendor's binary", () => {
@@ -87,10 +95,12 @@ test("nothing that decides a directory picks a folder without asking", () => {
 
 test("the store never picks a folder without asking whether it is there", () => {
   // Each of these decides where an agent runs. A bare folders[0] here is the
-  // bug returning.
+  // bug returning. Chat-linked folders go through the same helper as the
+  // project's, so a live extra folder can be cwd when the project one is gone.
   const store = readFileSync(new URL("../src/lib/store.tsx", import.meta.url), "utf8");
-  const picks = [...store.matchAll(/sessionExecutionCwd\(/g)].length;
-  assert.ok(picks >= 4, `expected the execution-cwd sites, found ${picks}`);
+  const picks = [...store.matchAll(/sessionWorkspace\(/g)].length;
+  assert.ok(picks >= 8, `expected the execution-cwd sites, found ${picks}`);
+  assert.match(store, /combinedFolders\(project, session/);
   const bare = [...store.matchAll(/\?\.folders\[0\]\?\.path/g)];
   assert.equal(bare.length, 0, "a folder that may be gone was chosen without a check");
 });

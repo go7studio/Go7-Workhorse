@@ -22,6 +22,9 @@ export type ListedDropFile = {
   data?: string;
   sourcePath?: string;
   size?: number;
+  folder?: string;
+  folderPath?: string;
+  directory?: boolean;
 };
 
 function walkDropPath(abs: string, rel: string, into: { name: string; path: string }[]): void {
@@ -54,6 +57,7 @@ export function listDropFiles(roots: unknown): ListedDropFile[] {
     (value): value is string => typeof value === "string" && value.trim().length > 0,
   );
   const paths: { name: string; path: string }[] = [];
+  const directories: { name: string; path: string }[] = [];
   for (const root of start) {
     const resolved = path.resolve(root);
     let stat: fs.Stats;
@@ -62,10 +66,25 @@ export function listDropFiles(roots: unknown): ListedDropFile[] {
     } catch {
       continue;
     }
-    if (stat.isDirectory()) walkDropPath(resolved, path.basename(resolved), paths);
-    else if (stat.isFile()) paths.push({ name: path.basename(resolved), path: resolved });
+    if (stat.isDirectory()) {
+      directories.push({ name: path.basename(resolved), path: resolved });
+      walkDropPath(resolved, path.basename(resolved), paths);
+    } else if (stat.isFile()) paths.push({ name: path.basename(resolved), path: resolved });
   }
   const files: ListedDropFile[] = [];
+  for (const dir of directories) {
+    files.push({
+      name: dir.name,
+      mimeType: "inode/directory",
+      kind: "file",
+      sourcePath: dir.path,
+      folder: dir.name,
+      folderPath: dir.path,
+      directory: true,
+    });
+  }
+  const folderRootFor = (abs: string): string | undefined =>
+    directories.find((dir) => abs === dir.path || abs.startsWith(`${dir.path}${path.sep}`))?.path;
   for (const item of paths) {
     if (files.length >= MAX_IMAGES) break;
     let stat: fs.Stats;
@@ -76,6 +95,8 @@ export function listDropFiles(roots: unknown): ListedDropFile[] {
     }
     if (!stat.isFile() || stat.size <= 0) continue;
     const imageType = imageMime({ name: item.name });
+    const folderPath = folderRootFor(item.path);
+    const folder = folderPath ? path.basename(folderPath) : undefined;
     if (imageType) {
       if (stat.size > MAX_IMAGE_BYTES) continue;
       files.push({
@@ -83,6 +104,8 @@ export function listDropFiles(roots: unknown): ListedDropFile[] {
         mimeType: imageType,
         kind: "image",
         data: fs.readFileSync(item.path).toString("base64"),
+        ...(folder ? { folder, folderPath } : {}),
+        sourcePath: item.path,
       });
       continue;
     }
@@ -95,18 +118,31 @@ export function listDropFiles(roots: unknown): ListedDropFile[] {
         text: fs.readFileSync(item.path, "utf8"),
         sourcePath: item.path,
         size: stat.size,
+        ...(folder ? { folder, folderPath } : {}),
       });
       continue;
     }
     const kind = attachmentKind({ name: item.name });
-    const limit = kind === "document" ? MAX_DOCUMENT_BYTES : kind === "audio" ? MAX_AUDIO_BYTES : kind === "video" ? MAX_VIDEO_BYTES : 0;
-    if (!kind || !limit || stat.size > limit) continue;
+    if (kind === "document" || kind === "audio" || kind === "video") {
+      const limit = kind === "document" ? MAX_DOCUMENT_BYTES : kind === "audio" ? MAX_AUDIO_BYTES : MAX_VIDEO_BYTES;
+      if (stat.size > limit) continue;
+      files.push({
+        name: item.name,
+        mimeType: attachmentMime({ name: item.name }, kind),
+        kind,
+        sourcePath: item.path,
+        size: stat.size,
+        ...(folder ? { folder, folderPath } : {}),
+      });
+      continue;
+    }
     files.push({
       name: item.name,
-      mimeType: attachmentMime({ name: item.name }, kind),
-      kind,
+      mimeType: attachmentMime({ name: item.name }, "file"),
+      kind: "file",
       sourcePath: item.path,
       size: stat.size,
+      ...(folder ? { folder, folderPath } : {}),
     });
   }
   return files;

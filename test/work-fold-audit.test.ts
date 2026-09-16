@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
-import { LINEUP_FINISHED_NOTICE } from "../src/lib/lineup";
+import { addLineupRow, emptyLineup, LINEUP_FINISHED_NOTICE, lineupIsTerminal, reconcileIdleChildren } from "../src/lib/lineup";
 import { subagentTurns, workerTaskTitle } from "../src/lib/subagents";
 import { displayWorkSteps, groupTranscript } from "../src/lib/turns";
 import { crewActivityLine, crewTurnInFlight } from "../src/lib/crew-live";
@@ -59,6 +59,50 @@ test("a worker stays live through thinking, not only while a tool is in flight",
   assert.match(popout, /crewTurnInFlight\(child\)/);
   assert.match(popout, /tool-name">Thinking/);
   assert.match(popout, /allowThinking: !talking/);
+});
+
+test("await-agents must not sit a still-running worker down between tool rounds", () => {
+  const folder = "D:\\Godot\\Projects\\demo-game";
+  const parent = {
+    id: "orch",
+    title: "Open Dev Host",
+    status: "idle" as const,
+    createdAt: 1,
+    updatedAt: 1,
+    projectId: "p",
+    provider: "grok" as const,
+    model: "grok-4.6",
+    contextUsed: 0,
+    messages: [] as never[],
+    lineup: addLineupRow(emptyLineup(folder, 1, "ship 0.6.82"), {
+      childId: "sess_dexter",
+      title: "Dexter · Ship 0.6.82 horses now",
+      slice: "Ship 0.6.82 horses now",
+      folder,
+      vendor: "Grok",
+      status: "running",
+      startedAt: 1,
+    }),
+  };
+  const dexter = {
+    ...parent,
+    id: "sess_dexter",
+    parentId: "orch",
+    hidden: true,
+    title: "Dexter · Ship 0.6.82 horses now",
+    workerName: "Dexter",
+    lineup: undefined,
+    status: "idle" as const,
+    agentRun: { status: "running" as const, startedAt: 1, isolation: "shared" as const },
+    messages: [{ id: "a", role: "assistant" as const, text: "Tag is on Git Hub. Next I’ll run the Windows NSIS build", createdAt: 2 }],
+  };
+  const reconciled = reconcileIdleChildren([parent, dexter] as never, "orch", 11);
+  const child = reconciled.find((item) => item.id === "sess_dexter");
+  const orch = reconciled.find((item) => item.id === "orch");
+  assert.equal(child?.agentRun?.status, "running");
+  assert.equal(orch?.lineup?.rows[0]?.status, "running");
+  assert.equal(lineupIsTerminal(orch?.lineup), false);
+  assert.equal(crewTurnInFlight(child!), true);
 });
 
 test("work-fold labels use the nested sidebar identity, not a slice fragment", () => {

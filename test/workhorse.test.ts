@@ -7858,7 +7858,7 @@ test("turns keep the bot that ran them after a switch", () => {
   const store = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
   assert.match(pane, /turn-who/);
   assert.match(pane, /brainCaption/);
-  assert.match(row, /background: ink/);
+  assert.match(row, /<HorseStatus kind=\{dotKind\} ink=\{ink \|\| `var\(--\$\{session\.provider\}\)`\} \/>/);
   assert.match(store, /applySessionModelChange/);
   assert.match(readFileSync(path.join(ROOT, "src", "lib", "session.ts"), "utf8"), /stampUnstampedMessages\(session\.messages, brainStamp\(session\)\)/);
 });
@@ -9984,7 +9984,7 @@ test("desk builds one named join prompt and syncs idle children", () => {
       id: "c2",
       title: "Two",
       status: "idle",
-      agentRun: { status: "running", startedAt: 1, isolation: "shared" },
+      agentRun: { status: "completed", startedAt: 1, isolation: "shared", finishedAt: 2 },
       messages: [{ id: "a", role: "assistant", text: "", createdAt: 2 }],
     },
     {
@@ -9992,7 +9992,7 @@ test("desk builds one named join prompt and syncs idle children", () => {
       id: "c3",
       title: "Three",
       status: "idle",
-      agentRun: { status: "running", startedAt: 1, isolation: "shared" },
+      agentRun: { status: "completed", startedAt: 1, isolation: "shared", finishedAt: 2 },
       messages: [{ id: "a", role: "assistant", text: "Permission / Sandbox lecture", createdAt: 2 }],
     },
     {

@@ -19,6 +19,7 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 
 ### Bug Fixes
 
+* **desk:** await-agents must not complete a worker whose agentRun is still running — Grok sits idle between tool rounds and the horse was sitting down
 * **mcp:** spawn caller crewModes is CrewMode[], so dist:win typecheck passes
 * **eval:** config.example.json expectedVersion matches the package version
 

@@ -437,10 +437,13 @@ export function reconcileIdleChildren(sessions: Session[], parentId: string, now
   for (const session of sessions) {
     if (session.parentId !== parentId) continue;
     if (session.status === "running") continue;
-    const runRunning = session.agentRun?.status === "running";
+    // ACP/Grok workers sit at session.status idle between tool rounds while
+    // agentRun stays running. Treating that as "stuck" made await-agents join
+    // a still-working slice and sat the sidebar horse down.
+    if (session.agentRun?.status === "running") continue;
     const row = sessions.find((item) => item.id === parentId)?.lineup?.rows.find((item) => item.childId === session.id);
     const rowOpen = row && (row.status === "queued" || row.status === "running");
-    if (!runRunning && !rowOpen) continue;
+    if (!rowOpen) continue;
     const report = childReportText(session);
     next = applyChildIdleSync(next, session.id, report ? "completed" : "failed", {
       report,

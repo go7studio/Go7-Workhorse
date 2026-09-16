@@ -1,0 +1,121 @@
+.horse-status {
+  --horse-image: url("../../assets/app-icons/go7-workhorse-transparent.png");
+  /* The solid mascot sits outside the cube grid, so it inherits no cell. These
+     defaults keep its mask arithmetic valid; a cube overrides both inline. */
+  --col: 0; --row: 0;
+  position: relative; display: inline-block; flex: 0 0 24px; width: 24px; height: 27px;
+  align-self: center; color: var(--text); isolation: isolate; perspective: 100px;
+}
+/* Sidebar chats: a little smaller than the 24px mascot, not the header mark.
+   `zoom` did this by shrinking used values, so every row paid layout for a
+   size. `scale` is the individual transform property, so it composes with the
+   `transform` the stride and tilt keyframes animate; `transform: scale()` here
+   would be overwritten by them. Each pose keeps the pivot it has at full size,
+   written in mascot pixels so the smaller box cannot move it, and `translate`
+   is -0.25 of that pivot, which puts the shrunk mascot back in the corner zoom
+   left it in. */
+.chat-row .horse-status {
+  flex-basis: 18px; width: 18px; height: 20.25px;
+  scale: .75; transform-origin: 12px 13.5px; translate: -3px -3.375px;
+}
+.chat-row .horse-status.is-needs-you { transform-origin: 12px 21.6px; translate: -3px -5.4px; }
+.horse-cube {
+  position: absolute; left: calc(var(--col) * 8px); top: calc(var(--row) * 8px);
+  width: 8px; height: 8px; transition: transform 480ms var(--ease), opacity 240ms;
+}
+/* The sprite is a mask, not a picture: the art supplies the silhouette and
+   `--horse-vendor` supplies the colour, so a row reads as its own bot at a
+   glance. This was `filter: brightness(0)`, inverted to white on dark — a
+   filter chain can only reach black or white, so every vendor got the same
+   silhouette and the ink the component already passes down went unused. */
+.horse-fragment {
+  display: block; width: 100%; height: 100%;
+  background-color: var(--horse-vendor, var(--text-tertiary));
+  -webkit-mask-image: var(--horse-image); mask-image: var(--horse-image);
+  -webkit-mask-size: 24px 24px; mask-size: 24px 24px;
+  -webkit-mask-position: calc(var(--col) * -8px) calc(var(--row) * -8px);
+  mask-position: calc(var(--col) * -8px) calc(var(--row) * -8px);
+  -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat;
+  clip-path: inset(.15px);
+}
+.horse-solid {
+  position: absolute; inset: 0 auto auto 0; width: 24px; height: 24px;
+  -webkit-mask-position: 0 0; mask-position: 0 0;
+  clip-path: none; opacity: 0;
+  transition: opacity 160ms ease-out; pointer-events: none;
+}
+.horse-status:is(.is-idle, .is-needs-you) .horse-solid { opacity: 1; }
+.horse-status:is(.is-idle, .is-needs-you) .horse-cube { opacity: 0; }
+.horse-status.is-working { animation: horse-stride 2600ms ease-in-out 160ms infinite both; }
+.horse-status.is-working .horse-cube {
+  animation: horse-cube-work 2600ms cubic-bezier(.45, 0, .25, 1) infinite both;
+  animation-delay: var(--wake-delay);
+}
+/* Each piece turns inside its own cell; shrink before moving, then reassemble. */
+@keyframes horse-cube-work {
+  0%, 100% { transform: translate(0, 0) rotate(0) scale(1); }
+  12%, 88% { transform: translate(0, 0) rotate(0) scale(.68); }
+  32% { transform: translate(.35px, -.35px) rotate(-18deg) scale(.68); }
+  54% { transform: translate(-.35px, .35px) rotate(18deg) scale(.68); }
+  72% { transform: translate(.2px, -.35px) rotate(-10deg) scale(.68); }
+}
+@keyframes horse-stride {
+  0%, 100% { transform: translate(0, 0) rotate(0); }
+  25% { transform: translate(1px, -2px) rotate(-5deg); }
+  55% { transform: translate(-1px, 0) rotate(4deg); }
+  80% { transform: translate(0, -1px); }
+}
+/* Resting is still, and nothing here animates it. A sidebar holds every chat,
+   so a keyframe on the resting state is one running animation per row: 854
+   idle chats held the renderer at 23-43% CPU with nothing to show. The tiles
+   still part when work starts, because that is a transition, not a loop. */
+
+/* Fall with weight, bounce into a loose pile, then gather back into the mascot.
+   Once, not on a loop: a failed chat is a terminal state, and a desk of them
+   has to come to rest like every other resting row. `both` holds the last
+   frame. */
+.horse-status.is-failed .horse-cube {
+  background: transparent;
+  box-shadow: none;
+  z-index: calc(var(--z-raised) + var(--pile-layer));
+  transform: translate(var(--fall-x), var(--fall-y)) rotate(var(--fall-angle)) scale(.78);
+  animation: horse-cube-fall 6200ms var(--fall-delay) linear 1 both;
+}
+@keyframes horse-cube-fall {
+  0%, 8%, 94%, 100% { transform: translate(0, 0) rotate(0) scale(1); }
+  12% { transform: translate(var(--push-x), -2px) rotate(-8deg) scale(.9); animation-timing-function: cubic-bezier(.55, .05, .85, .5); }
+  25% { transform: translate(var(--fall-x), calc(var(--fall-y) + .6px)) rotate(calc(var(--fall-angle) + 8deg)) scale(.78); animation-timing-function: ease-out; }
+  29% { transform: translate(var(--fall-x), calc(var(--fall-y) - 2px)) rotate(calc(var(--fall-angle) - 5deg)) scale(.78); animation-timing-function: ease-in; }
+  34%, 49%, 56%, 70% { transform: translate(var(--fall-x), var(--fall-y)) rotate(var(--fall-angle)) scale(.78); }
+  51% { transform: translate(calc(var(--fall-x) + .2px), calc(var(--fall-y) - .35px)) rotate(calc(var(--fall-angle) + 2deg)) scale(.78); }
+  53% { transform: translate(var(--fall-x), var(--fall-y)) rotate(var(--fall-angle) - 1deg) scale(.78); }
+  74% { transform: translate(var(--fall-x), var(--fall-y)) rotate(var(--fall-angle)) scale(.78); animation-timing-function: cubic-bezier(.4, 0, .2, 1); }
+  90% { transform: translate(0, -.7px) rotate(0) scale(1); animation-timing-function: ease-in-out; }
+}
+/* An intact horse leans in, holds a questioning tilt, then gives two small nods. */
+.horse-status.is-needs-you { transform-origin: 50% 80%; animation: horse-listen 4600ms ease-in-out infinite; }
+@keyframes horse-listen {
+  0%, 8%, 90%, 100% { transform: translate(0, 0) rotate(0); }
+  22%, 46% { transform: translate(1px, -1px) rotate(13deg); }
+  53%, 65% { transform: translate(1px, .6px) rotate(5deg); }
+  59%, 72% { transform: translate(1px, -1px) rotate(13deg); }
+}
+/* A stopped mechanism: brief opposing vibrations, then suspended pieces. The
+   vibration runs once and holds the suspended pose, which is where the
+   keyframe ends anyway. */
+.horse-status.is-stopped .horse-cube {
+  opacity: .72;
+  transform: translate(0, 0) rotate(var(--stop-angle)) scale(.68);
+  animation: horse-brake 3200ms ease-in-out 1 forwards;
+  animation-delay: var(--delay);
+}
+@keyframes horse-brake {
+  0%, 18%, 100% { transform: translate(0, 0) rotate(var(--stop-angle)) scale(.68); }
+  3%, 9%, 15% { transform: translate(-.5px, 0) rotate(calc(var(--stop-angle) - 4deg)) scale(.68); }
+  6%, 12% { transform: translate(.5px, -.25px) rotate(calc(var(--stop-angle) + 4deg)) scale(.68); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .horse-status, .horse-status .horse-cube, .horse-solid { animation: none !important; transition: none; }
+  .horse-status.is-working .horse-cube { transform: translate(var(--push-x), var(--push-y)); }
+  .horse-status.is-needs-you .horse-cube { transform: translateY(-1px); }
+}

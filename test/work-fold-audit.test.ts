@@ -185,8 +185,9 @@ test("empty parent thoughts never become a work row that could look like a bar",
 test("a stopped turn does not leave the last thought fold open", () => {
   const popout = read("src/ui/WorkPopout.tsx");
   const thought = popout.slice(popout.indexOf("function ThoughtBlock"), popout.indexOf("function workRowKey"));
-  assert.match(thought, /useFoldOpen\(false\)/);
-  assert.match(thought, /el\.open = false/);
+  assert.match(thought, /useForcedDetailsOpen\(live, true\)/);
+  assert.match(popout, /closeWhenReleased && wasForced\.current && !forced && open/);
+  assert.doesNotMatch(thought, /el\.open\s*=/);
   assert.doesNotMatch(thought, /reveal/);
   assert.match(popout, /reveal=\{row\.type !== "thought" && tailIndex === packed\.tail\.length - 1\}/);
   assert.match(popout, /runWasStopped\(child\?\.agentRun\?\.status\)/);

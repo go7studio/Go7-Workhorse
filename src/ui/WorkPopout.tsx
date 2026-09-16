@@ -1,4 +1,4 @@
-import { memo, useEffect, useLayoutEffect, useRef, useState, type SyntheticEvent } from "react";
+import { memo, useEffect, useRef, useState, type SyntheticEvent } from "react";
 import { crewTurnInFlight } from "../lib/crew-live";
 import { collapseToolText, splitToolLine, toolIsFinished } from "../lib/grok-events";
 import { unsquashSentences } from "../lib/markdown";
@@ -126,8 +126,8 @@ function ToolLine({ tool, peer }: { tool: ChatMessage; peer?: boolean }) {
   );
 }
 
-function foldOpen(active: boolean): { open?: true } {
-  return active ? { open: true } : {};
+function foldOpen(active: boolean): { open: boolean } {
+  return { open: active };
 }
 
 function useFoldOpen(initial = false) {
@@ -139,34 +139,35 @@ function useFoldOpen(initial = false) {
   return { open, onToggle };
 }
 
-function useStartOpen(start: boolean) {
-  const fold = useRef<HTMLDetailsElement>(null);
-  useLayoutEffect(() => {
-    const el = fold.current;
-    if (start && el && !el.open) el.open = true;
-  }, [start]);
-  return fold;
+/**
+ * Controlled <details> for work folds. React 19 treats `open` as a controlled
+ * prop and listens to `toggle`; writing `el.open` in layout (or passing
+ * `open={true}` without onToggle) re-fires toggle until error #185. Codex
+ * GPT turns emit many thought/tool folds, so that loop takes the whole desk
+ * down. Always pass a boolean `open` plus onToggle. Never assign el.open.
+ */
+function useForcedDetailsOpen(forced: boolean, closeWhenReleased = false) {
+  const [open, setOpen] = useState(forced);
+  const wasForced = useRef(forced);
+  if (forced && !open) setOpen(true);
+  if (closeWhenReleased && wasForced.current && !forced && open) setOpen(false);
+  wasForced.current = forced;
+  const onToggle = (event: SyntheticEvent<HTMLDetailsElement>) => {
+    if (forced) return;
+    const next = event.currentTarget.open;
+    setOpen((current) => (current === next ? current : next));
+  };
+  return { open: forced || open, onToggle };
 }
 
 function ThoughtBlock({ text, live, id }: { text: string; live: boolean; id: string }) {
-  const { open, onToggle } = useFoldOpen(false);
-  const fold = useRef<HTMLDetailsElement>(null);
-  useLayoutEffect(() => {
-    const el = fold.current;
-    if (!el) return;
-    if (live) {
-      if (!el.open) el.open = true;
-    } else if (el.open) {
-      el.open = false;
-    }
-  }, [live]);
+  const { open, onToggle } = useForcedDetailsOpen(live, true);
   return (
     <details
-      key={`${id}-${live ? "live" : "idle"}`}
-      ref={fold}
       className={`work-fold${live ? " thought-live" : ""}`}
-      {...foldOpen(live)}
-      onToggle={live ? undefined : onToggle}
+      data-thought-id={id}
+      {...foldOpen(open)}
+      onToggle={onToggle}
     >
       <summary className={live ? "thought-live-label" : undefined}>{live ? "Thinking" : "Thought"}</summary>
       {open || live ? (
@@ -325,7 +326,8 @@ function WorkRow({
   onOpenThread?: (id: string) => void;
   now: number;
 }) {
-  const toolsFold = useStartOpen(active || reveal);
+  const toolsForced = active || reveal;
+  const toolsFold = useForcedDetailsOpen(toolsForced);
   if (row.type === "thought") {
     return (
       <div key={row.step.id} className="work-step" data-kind="thought">
@@ -361,11 +363,11 @@ function WorkRow({
   }
   return (
     <details
-      key={`${firstId}-${active ? "live" : "idle"}`}
-      ref={toolsFold}
+      key={firstId}
       className="work-fold work-step"
       data-kind="tool"
-      {...foldOpen(active)}
+      {...foldOpen(toolsFold.open)}
+      onToggle={toolsFold.onToggle}
     >
       <summary>
         {count} tools

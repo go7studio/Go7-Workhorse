@@ -16,6 +16,15 @@ When you add a feature, add it here in the same commit.
 Each vendor runs under its own login. Subscriptions, context and sandboxes are
 never pooled.
 
+Chat status is a tiled Workhorse mascot: a 3-by-3 grid with the bottom-right
+pixel sliver omitted. It rests as one seamless image that separates into tiles
+when work starts. An intact horse tilts and double-nods for input. Stopped is a
+brief opposing vibration with the tiles suspended. Failure is a rocky collapse
+then reassembly. The mascot wears its own bot's colour on every theme, so a row
+says which bot is working before you read it. Sidebar horses sit smaller than
+the header mark. A parent chat with workers also gets a Crew tray above the
+composer: one horse per worker, follow-up without leaving the parent.
+
 The client and model are separate. For Grok, **Grok Build CLI** is the local
 client; **Grok 4.6** and **Grok 4.5** are model IDs it can run. The CLI's live
 catalog is authoritative as models change. Workhorse records, routes, and

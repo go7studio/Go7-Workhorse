@@ -502,7 +502,7 @@ export type Store = AppState & {
   forkFrom: (messageId: string, sessionId?: string) => void;
   send: (
     text: string,
-    options?: { replaceUserId?: string; images?: import("./types").ChatImage[]; steer?: boolean; permit?: boolean },
+    options?: { replaceUserId?: string; images?: import("./types").ChatImage[]; steer?: boolean; permit?: boolean; sessionId?: string },
   ) => boolean | void;
   dropQueued: (id: string) => void;
   steerQueued: (id: string) => void;
@@ -511,7 +511,7 @@ export type Store = AppState & {
   requestEditMessage: (messageId: string) => void;
   requestEditLastPrompt: (sessionId?: string) => void;
   clearEditMessage: () => void;
-  cancelRun: () => void;
+  cancelRun: (sessionId?: string) => void;
   setMode: (mode: PermissionMode) => void;
   setDeskAccess: (patch: Partial<DeskAccess>) => void;
   setSandbox: (sandbox: SandboxProfile) => void;
@@ -8645,9 +8645,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     });
   }, [watchStatuses]);
 
-  const cancelRun = useCallback(() => {
+  const cancelRun = useCallback((sessionId?: string) => {
     setState((current) => {
-      const id = current.activeSessionId;
+      const id = sessionId ?? current.activeSessionId;
       const targets = id ? new Set([id, ...descendantSessionIds(current.sessions, id)]) : new Set<string>();
       const now = Date.now();
       for (const target of targets) userCancelledTurns.current.add(target);

@@ -18,6 +18,7 @@ function easeOutCubic(t: number): number {
 /** Skip a second 0→value intro when a refresh restates the same leftover. */
 export function sameFuelTarget(left: number | undefined, right: number | undefined): boolean {
   if (left === undefined || right === undefined) return left === right;
+  if (!Number.isFinite(left) || !Number.isFinite(right)) return false;
   return Math.abs(left - right) < FUEL_TARGET_EPS;
 }
 
@@ -86,7 +87,7 @@ export function FuelRing({
   const stroke = size >= 140 ? 10 : 8;
   const radius = size / 2 - stroke;
   const length = 2 * Math.PI * radius;
-  const leftover = value === undefined ? undefined : Math.max(0, Math.min(1, value));
+  const leftover = value === undefined || !Number.isFinite(value) ? undefined : Math.max(0, Math.min(1, value));
   const overflow = Math.max(0, Math.min(1, over));
   const shown = useTween(leftover, delay);
   const overShown = useTween(value === undefined ? undefined : overflow, delay);

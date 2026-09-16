@@ -5877,6 +5877,8 @@ test("UsagePane ships the Figma fuel-ring overview, not the old token line", asy
   assert.equal(sameFuelTarget(0.95, 0.951), true);
   assert.equal(sameFuelTarget(0.2, 0.95), false);
   assert.equal(sameFuelTarget(undefined, 0.95), false);
+  assert.equal(sameFuelTarget(Number.NaN, Number.NaN), false);
+  assert.match(ring, /!Number\.isFinite\(value\)/);
   assert.match(css, /@keyframes fuel-in/);
   assert.match(pane, /This stretch/);
   assert.match(pane, /heatmapTotal/);
@@ -6660,14 +6662,13 @@ test("transcript groups tools and thoughts above the final reply", () => {
   assert.match(popout, /groupWorkRows/);
   assert.match(popout, /isActiveWorkRow/);
   assert.match(popout, /reveal=\{row\.type !== "thought" && tailIndex === packed\.tail\.length - 1\}/);
-  assert.match(popout, /el\.open = false/);
   assert.match(popout, /cancelled" \|\| marker\.toolStatus === "cancelled"/);
   assert.match(popout, /stopped/);
-  assert.match(popout, /useStartOpen/);
-  assert.match(popout, /el\.open = true/);
-  assert.match(popout, /!el\.open/);
+  assert.match(popout, /useForcedDetailsOpen/);
+  assert.match(popout, /Never assign el\.open/);
+  assert.doesNotMatch(popout, /el\.open\s*=/);
   assert.match(popout, /current === next \? current : next/);
-  assert.match(popout, /onToggle=\{live \? undefined : onToggle\}/);
+  assert.match(popout, /onToggle=\{onToggle\}/);
   assert.match(popout, /foldOpen/);
   assert.match(popout, /<details className="work-pop" data-state=\{state\} onToggle=\{onBodyToggle\}>/);
   assert.doesNotMatch(popout, /<details className="work-pop" open=\{live\}>/);

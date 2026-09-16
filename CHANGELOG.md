@@ -8,6 +8,20 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.6.82](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.81...v0.6.82) (2026-09-15)
+
+
+### Features
+
+* **ui:** restore sidebar Horse Status and the Crew tray from 0.6.80 onto the 0.6.81 spend-watch desk
+* **ui:** each chat row and crew worker wears a tiled mascot in that bot's colour
+
+
+### Bug Fixes
+
+* **mcp:** spawn caller crewModes is CrewMode[], so dist:win typecheck passes
+* **eval:** config.example.json expectedVersion matches the package version
+
 ## [0.6.81](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.80...v0.6.81) (2026-09-15)
 
 

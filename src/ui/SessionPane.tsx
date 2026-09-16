@@ -25,6 +25,7 @@ import { clampPaneWidth, FILE_PANE } from "../lib/pane";
 import { useStoreSelector } from "../lib/store";
 import { sameSessionPaneDesk, selectSessionPaneDesk } from "../lib/store-select";
 import { Composer } from "./Composer";
+import { CrewTray } from "./CrewTray";
 import { GoalBar } from "./GoalBar";
 import { MissionBoard } from "./MissionBoard";
 import { WatchBanners } from "./WatchNotices";
@@ -589,6 +590,7 @@ export function SessionPane() {
       ) : null}
       <div className="session-notices">
         <VendorTasksStrip tasks={session.vendorTasks} />
+        <CrewTray key={session.id} />
         <MissionBoard />
         <GoalBar />
         <WatchBanners onSwitchModel={openSetup} setupOpen={setupOpen} />

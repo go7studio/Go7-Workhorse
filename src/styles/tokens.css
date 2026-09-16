@@ -24,6 +24,7 @@
   --display: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", system-ui, sans-serif;
   --mono: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
   --ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --z-raised: 1;
   --radius: 12px;
   --radius-sm: 8px;
   --titlebar: 48px;

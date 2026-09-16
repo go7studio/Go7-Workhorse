@@ -16,7 +16,7 @@ import { applyCreateWorkhorseProject, normalizeProject } from "../src/lib/projec
 import { normalizeSettings } from "../src/lib/settings";
 import { applyVendorCatalog, resetVendorCatalog } from "../src/lib/models";
 import { passGrantedAccess, releasedHelper } from "../src/lib/permissions";
-import type { AttachmentKind, ChatImage, CustomLlm, MissionIteration, Session, SessionEnvironment, UsageEvent, WatchDayMarks, WatchPermits, SandboxProfile } from "../src/lib/types";
+import type { AttachmentKind, ChatImage, CrewMode, CustomLlm, MissionIteration, Session, SessionEnvironment, UsageEvent, WatchDayMarks, WatchPermits, SandboxProfile } from "../src/lib/types";
 import {
   attachmentKind,
   attachmentMime,
@@ -1933,7 +1933,7 @@ type SpawnCaller = {
   parentId?: string | null;
   hidden?: boolean;
   projectId?: string | null;
-  crewModes?: string[];
+  crewModes?: CrewMode[];
   lineup?: { mission?: MissionIteration; rows?: Array<{ childId?: string; status?: string }> };
   agentRun?: { mission?: MissionIteration; paths?: string[]; tokenBudget?: number; usedTokens?: number };
   environment?: SessionEnvironment;

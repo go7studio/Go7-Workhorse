@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -54,4 +55,49 @@ test("a status horse paints in its own bot's ink, not one silhouette for every v
   // whose it is — and it is the theme this desk actually runs on.
   assert.doesNotMatch(css, /\[data-theme=[^\]]*\][^{]*\.horse-fragment/);
   assert.doesNotMatch(css.replace(/\/\*[\s\S]*?\*\//g, ""), /background-image/);
+});
+
+function git(args: string[]): string {
+  return execFileSync("git", args, { cwd: ROOT, encoding: "utf8" }).trim();
+}
+
+function hasRef(ref: string): boolean {
+  try {
+    git(["rev-parse", "--verify", ref]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** 0.6.81 was cut from 0.6.66 and shipped without horses. Fail that class. */
+test("a cut from an older official release cannot drop Horse Status", () => {
+  const chatRow = readFileSync(path.join(ROOT, "src", "ui", "ChatRow.tsx"), "utf8");
+  const evalKit = readFileSync(path.join(ROOT, "scripts", "workhorse-eval.mjs"), "utf8");
+  assert.match(chatRow, /<HorseStatus\b/, "ChatRow must render HorseStatus, not a vendor dot");
+  assert.equal(existsSync(path.join(ROOT, "src", "ui", "HorseStatus.tsx")), true);
+  assert.equal(existsSync(path.join(ROOT, "src", "styles", "horse-status.css")), true);
+  assert.match(evalKit, /ChatRow must render HorseStatus/, "dist:win validate must refuse a vendor-dot ChatRow");
+
+  const main = ["official/main", "origin/main"].find(hasRef);
+  if (!main) return;
+  const mergeBase = git(["merge-base", "HEAD", main]);
+  const latest = git(["tag", "--list", "v0.6.*", "--merged", main, "--sort=-v:refname"])
+    .split("\n")
+    .map((line) => line.trim())
+    .find(Boolean);
+  if (!latest) return;
+  let behind = false;
+  try {
+    git(["merge-base", "--is-ancestor", latest, mergeBase]);
+  } catch {
+    behind = true;
+  }
+  if (behind) {
+    assert.match(
+      chatRow,
+      /<HorseStatus\b/,
+      `merge-base with ${main} is behind ${latest}; Horse Status must still ship`,
+    );
+  }
 });

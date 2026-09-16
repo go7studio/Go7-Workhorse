@@ -21,6 +21,7 @@ const configExamplePath = path.join(evalDir, "config.example.json");
 const sourceCommandPath = path.join(root, "src", "lib", "commands.ts");
 const sourceSettingsPath = path.join(root, "src", "lib", "settings.ts");
 const sourceDeskToolsPath = path.join(root, "electron", "workhorse-mcp.ts");
+const sourceChatRowPath = path.join(root, "src", "ui", "ChatRow.tsx");
 const packagePath = path.join(root, "package.json");
 const validExecutors = new Set(["electron", "provider", "api", "restart", "package", "static", "unit"]);
 const validTestability = new Set(["auto", "auto-partial", "manual"]);
@@ -230,7 +231,7 @@ function sourceSettingsSections(source) {
 }
 
 async function validate() {
-  const [suite, commands, providers, orchestration, capabilities, executionPlan, deviceCapabilities, learningMemory, performance, usage, regressions, configExample, packageManifest, commandSource, settingsSource, deskToolsSource] = await Promise.all([
+  const [suite, commands, providers, orchestration, capabilities, executionPlan, deviceCapabilities, learningMemory, performance, usage, regressions, configExample, packageManifest, commandSource, settingsSource, deskToolsSource, chatRowSource] = await Promise.all([
     json(suitePath),
     json(commandPath),
     json(providerPath),
@@ -247,6 +248,7 @@ async function validate() {
     readFile(sourceCommandPath, "utf8"),
     readFile(sourceSettingsPath, "utf8"),
     readFile(sourceDeskToolsPath, "utf8"),
+    readFile(sourceChatRowPath, "utf8"),
   ]);
   const problems = [];
   if (
@@ -278,6 +280,11 @@ async function validate() {
     problems.push(
       `config expectedVersion must match package version (${configExample.source?.expectedVersion ?? "missing"} != ${packageManifest.version})`,
     );
+  }
+  // 0.6.81 shipped from a 0.6.66 merge-base and dropped tiled Horse Status.
+  // dist:win runs this validate; a vendor-dot ChatRow cannot pack again.
+  if (!/<HorseStatus\b/.test(chatRowSource)) {
+    problems.push("ChatRow must render HorseStatus; a vendor dot cannot ship in its place");
   }
 
   const profileIds = providers.profiles.map((profile) => profile.id);

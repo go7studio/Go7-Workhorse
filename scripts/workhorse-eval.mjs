@@ -22,6 +22,10 @@ const sourceCommandPath = path.join(root, "src", "lib", "commands.ts");
 const sourceSettingsPath = path.join(root, "src", "lib", "settings.ts");
 const sourceDeskToolsPath = path.join(root, "electron", "workhorse-mcp.ts");
 const sourceChatRowPath = path.join(root, "src", "ui", "ChatRow.tsx");
+const sourceAddBotPath = path.join(root, "src", "ui", "AddBot.tsx");
+const sourceComposerPath = path.join(root, "src", "ui", "Composer.tsx");
+const sourcePermissionsPath = path.join(root, "src", "lib", "permissions.ts");
+const sourceAppCssPath = path.join(root, "src", "styles", "app.css");
 const packagePath = path.join(root, "package.json");
 const validExecutors = new Set(["electron", "provider", "api", "restart", "package", "static", "unit"]);
 const validTestability = new Set(["auto", "auto-partial", "manual"]);
@@ -231,7 +235,7 @@ function sourceSettingsSections(source) {
 }
 
 async function validate() {
-  const [suite, commands, providers, orchestration, capabilities, executionPlan, deviceCapabilities, learningMemory, performance, usage, regressions, configExample, packageManifest, commandSource, settingsSource, deskToolsSource, chatRowSource] = await Promise.all([
+  const [suite, commands, providers, orchestration, capabilities, executionPlan, deviceCapabilities, learningMemory, performance, usage, regressions, configExample, packageManifest, commandSource, settingsSource, deskToolsSource, chatRowSource, addBotSource, composerSource, permissionsSource, appCssSource] = await Promise.all([
     json(suitePath),
     json(commandPath),
     json(providerPath),
@@ -249,6 +253,10 @@ async function validate() {
     readFile(sourceSettingsPath, "utf8"),
     readFile(sourceDeskToolsPath, "utf8"),
     readFile(sourceChatRowPath, "utf8"),
+    readFile(sourceAddBotPath, "utf8"),
+    readFile(sourceComposerPath, "utf8"),
+    readFile(sourcePermissionsPath, "utf8"),
+    readFile(sourceAppCssPath, "utf8"),
   ]);
   const problems = [];
   if (
@@ -285,6 +293,40 @@ async function validate() {
   // dist:win runs this validate; a vendor-dot ChatRow cannot pack again.
   if (!/<HorseStatus\b/.test(chatRowSource)) {
     problems.push("ChatRow must render HorseStatus; a vendor dot cannot ship in its place");
+  }
+  const officialFacing = [
+    [/"dgx-spark"/.test(addBotSource), "AddBot must offer DGX Spark"],
+    [/Cost cap/.test(composerSource), "Composer must offer a Mission cost cap"],
+    [/function vendorLaunchMode/.test(permissionsSource), "spawned workers must copy the orchestrator seat via vendorLaunchMode"],
+    [/\.usage-dots\.week \.usage-dot\s*\{[^}]*max-width:\s*64px/.test(appCssSource), "week stretch pies must cap at 64px"],
+  ];
+  for (const [ok, message] of officialFacing) {
+    if (!ok) problems.push(message);
+  }
+  // A cut from an older official tag cannot drop 0.6.80 desk UI.
+  for (const ref of ["official/main", "origin/main"]) {
+    try {
+      execFileSync("git", ["rev-parse", "--verify", ref], { cwd: root, stdio: "ignore" });
+      const mergeBase = execFileSync("git", ["merge-base", "HEAD", ref], { cwd: root, encoding: "utf8" }).trim();
+      const latest = execFileSync("git", ["tag", "--list", "v0.6.*", "--merged", ref, "--sort=-v:refname"], {
+        cwd: root,
+        encoding: "utf8",
+      })
+        .split("\n")
+        .map((line) => line.trim())
+        .find(Boolean);
+      if (!latest) break;
+      try {
+        execFileSync("git", ["merge-base", "--is-ancestor", latest, mergeBase], { cwd: root, stdio: "ignore" });
+      } catch {
+        if (!/<HorseStatus\b/.test(chatRowSource) || officialFacing.some(([ok]) => !ok)) {
+          problems.push(`merge-base with ${ref} is behind ${latest}; 0.6.80 Horse Status and desk UI must still ship`);
+        }
+      }
+      break;
+    } catch {
+      /* remote missing */
+    }
   }
 
   const profileIds = providers.profiles.map((profile) => profile.id);

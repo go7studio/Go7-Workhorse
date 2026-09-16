@@ -1016,6 +1016,21 @@ export function pathOwnerMode(mode: PermissionMode): PermissionMode {
   return MODE_RANK[mode] > MODE_RANK.ask ? "ask" : mode;
 }
 
+/**
+ * Vendor launch only. The worker chat still shows the orchestrator's seat.
+ * Path ownership needs Ask at the vendor so write events reach preflight;
+ * putting that Ask on session.mode is what made a child look like Ask-each-time
+ * under an Always parent.
+ */
+export function vendorLaunchMode(session: {
+  mode: PermissionMode;
+  hidden?: boolean;
+  agentRun?: { paths?: string[] };
+}): PermissionMode {
+  if (session.hidden && (session.agentRun?.paths?.length ?? 0) > 0) return pathOwnerMode(session.mode);
+  return session.mode;
+}
+
 export type WorkerAccessPrior = {
   mode: PermissionMode;
   sandbox: SandboxProfile;
@@ -1053,7 +1068,7 @@ export function workerAccess(input: {
   prior?: WorkerAccessPrior;
 }): DeskAccess {
   const seat: DeskAccess = {
-    mode: input.owned ? pathOwnerMode(input.inherited.mode) : input.inherited.mode,
+    mode: input.inherited.mode,
     sandbox: input.readOnly ? "read-only" : input.inherited.sandbox,
   };
   return tighterAccess(seat, workerTightening(input.prior));

@@ -17,6 +17,7 @@ import {
   requestedWorkerAccess,
   sandboxSourceNote,
   spawnAccessLogDetail,
+  vendorLaunchMode,
   workerAccess,
   workerGrant,
   workerTightening,
@@ -248,19 +249,21 @@ test("a nested helper sits at the seat it inherited unless the call asks it to r
   assert.equal(releasedHelper({ role: "helper" }), true, "a helper the call did not clamp is released");
 });
 
-test("the desk ceiling still holds over a delegation to a path-owned worker", () => {
-  // A path allowlist clamps the vendor session to Ask so ownership can still
-  // be checked per write. That is the desk's clamp, and it survives a call
-  // asking for always-approve — but the recorded grant keeps what was granted.
+test("a path-owned worker still shows the orchestrator seat, and only the vendor launch is Ask", () => {
   const spawned = spawnSeat({
-    caller: READ_ONLY_REVIEW,
+    caller: DESK_DEFAULT,
     desk: DESK_DEFAULT,
     call: { permission: "always-approve", sandbox: "off" },
     owned: true,
   });
-  assert.equal(spawned.seat.mode, "ask", "the preflight still gets to read the writes");
+  assert.equal(spawned.seat.mode, "always-approve", "the worker chip copies the parent, not Ask each time");
   assert.equal(spawned.seat.sandbox, "off");
-  assert.equal(spawned.granted.mode, "always-approve", "and the desk answers those writes from this");
+  assert.equal(spawned.granted.mode, "always-approve", "the desk answers in-path writes from this grant");
+  assert.equal(
+    vendorLaunchMode({ mode: spawned.seat.mode, hidden: true, agentRun: { paths: ["src/app.ts"] } }),
+    "ask",
+    "the vendor still emits write events so path ownership can be preflighted",
+  );
 });
 
 // ---------------------------------------------------------------------------

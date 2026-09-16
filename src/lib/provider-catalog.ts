@@ -235,6 +235,17 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     keyPrefixes: [],
     models: [{ id: "grok-bot", name: "Grok Bot", contextWindow: 128_000 }],
   },
+  {
+    id: "dgx-spark",
+    name: "DGX Spark",
+    hint: "Qwen on the Spark gateway. NVIDIA Sync is SSH: local-forward 8788, then Test API collects /v1/models. Fail closed if the tunnel is down.",
+    color: "#76b900",
+    baseUrl: "http://127.0.0.1:8788/v1",
+    api: "openai-completions",
+    billing: "local",
+    keyPrefixes: [],
+    models: [{ id: "qwen3.8-27b", name: "Qwen 3.8 27B", contextWindow: 262_144 }],
+  },
 ];
 
 export function providerPresetsByBilling(): {

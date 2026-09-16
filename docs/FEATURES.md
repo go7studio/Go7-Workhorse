@@ -25,6 +25,13 @@ says which bot is working before you read it. Sidebar horses sit smaller than
 the header mark. A parent chat with workers also gets a Crew tray above the
 composer: one horse per worker, follow-up without leaving the parent.
 
+Add a bot lists **DGX Spark** as a local OpenAI-compatible gateway on
+`127.0.0.1:8788`. NVIDIA Sync local-forwards that port; Test API collects
+`/v1/models`. Spawned workers copy the orchestrator's seat; path-owned Ask
+stays on the vendor launch only. Mission + pins a cost cap and a token cap
+the desk honours between passes. Week stretch pies sit at 64px circles. Usage
+On marks are circles; leftover rings show the percent.
+
 The client and model are separate. For Grok, **Grok Build CLI** is the local
 client; **Grok 4.6** and **Grok 4.5** are model IDs it can run. The CLI's live
 catalog is authoritative as models change. Workhorse records, routes, and

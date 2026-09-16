@@ -5448,7 +5448,7 @@ test("sidebar nests project chats in folders; top New chat stays loose", async (
   assert.match(addBot, /CATALOG/);
   assert.match(addBot, /addBotChoices/);
   assert.match(addBot, /choices.length === 1/);
-  assert.match(addBot, /item.id === "own" \|\| !llms\[item.id\]\?\.connected/);
+  assert.match(addBot, /ALWAYS_OFFERED/);
   const { addBotChoices, vendorSetupHelpCopy, vendorStatusCopy } = await import("../src/ui/AddBot.tsx");
   assert.deepEqual(
     addBotChoices({
@@ -5457,7 +5457,7 @@ test("sidebar nests project chats in folders; top New chat stays loose", async (
       claude: { connected: true },
       cursor: { connected: true },
     }).map((item) => item.id),
-    ["grok-bot", "own"],
+    ["grok-bot", "dgx-spark", "own"],
   );
   assert.deepEqual(
     addBotChoices({
@@ -5466,7 +5466,7 @@ test("sidebar nests project chats in folders; top New chat stays loose", async (
       claude: { connected: true },
       cursor: { connected: true },
     }).map((item) => item.id),
-    ["codex", "grok-bot", "own"],
+    ["codex", "grok-bot", "dgx-spark", "own"],
   );
   assert.equal(vendorStatusCopy("cursor", { connected: false, available: false }), "Needs Cursor Agent CLI");
   assert.equal(

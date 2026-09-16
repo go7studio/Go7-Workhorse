@@ -8,6 +8,19 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.6.83](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.82...v0.6.83) (2026-09-16)
+
+
+### Features
+
+* **ui:** fold remaining 0.6.80 desk UI onto the spend-watch tree: DGX Spark, Mission cost cap, 64px week pies, orchestrator seat on workers
+* **eval:** dist:win fails if a cut behind official/main drops Horse Status, DGX Spark, cost cap, vendorLaunchMode, or 64px week pies
+
+
+### Bug Fixes
+
+* **usage:** leftover rings show the percent; On marks and stretch cells are circles again
+
 ## [0.6.82](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.81...v0.6.82) (2026-09-15)
 
 

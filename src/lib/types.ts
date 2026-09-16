@@ -429,6 +429,15 @@ export type MissionIteration = {
   clearance?: CampaignClearance;
   /** Mission-level token ceiling. One pass cannot spend this whole amount. */
   tokenBudget?: number;
+  /** Person-set dollar ceiling. The desk stops between passes, never mid-turn. */
+  maxCostUsd?: number;
+  /** Person-set token ceiling. Honoured with maxCostUsd between passes. */
+  maxTokens?: number;
+};
+
+export type MissionCaps = {
+  maxCostUsd?: number;
+  maxTokens?: number;
 };
 
 export type FileLease = {
@@ -645,6 +654,8 @@ export type Session = {
   routingDecision?: RoutingDecision;
   /** Composer + pins. Orchestrate and Mission can be on together. */
   crewModes?: CrewMode[];
+  /** Ceilings typed under Mission. The desk honours them between passes. */
+  missionCaps?: MissionCaps;
   /** This-chat Orchestrate bot list. Empty means all bots. */
   spawnAllowlist?: string[];
 };

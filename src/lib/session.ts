@@ -17,7 +17,7 @@ import { normalizeRoutingDecision } from "./routing";
 import { normalizeSpawnAllowlist } from "./spawn-allowlist";
 import { normalizeCrewModes } from "./workhorse-rules";
 import { folderFromPath } from "./project";
-import type { ChatMessage, CustomBot, EffortLevel, LinkedFolder, PermissionMode, ProviderId, SandboxProfile, Session } from "./types";
+import type { ChatMessage, CustomBot, EffortLevel, LinkedFolder, MissionCaps, PermissionMode, ProviderId, SandboxProfile, Session } from "./types";
 
 export type BrainStamp = {
   provider: ProviderId;
@@ -362,7 +362,22 @@ export function normalizeSession(raw: unknown, liveRunIds?: ReadonlySet<string>)
       return modes.length > 0 ? modes : undefined;
     })(),
     spawnAllowlist: normalizeSpawnAllowlist((record as { spawnAllowlist?: unknown }).spawnAllowlist),
+    missionCaps: normalizeMissionCaps((record as { missionCaps?: unknown }).missionCaps),
   };
+}
+
+/** Only a positive number is a ceiling. Anything else is no ceiling at all. */
+export function normalizeMissionCaps(raw: unknown): MissionCaps | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const row = raw as { maxCostUsd?: unknown; maxTokens?: unknown };
+  const cost =
+    typeof row.maxCostUsd === "number" && Number.isFinite(row.maxCostUsd) && row.maxCostUsd > 0 ? row.maxCostUsd : undefined;
+  const tokens =
+    typeof row.maxTokens === "number" && Number.isFinite(row.maxTokens) && row.maxTokens > 0
+      ? Math.floor(row.maxTokens)
+      : undefined;
+  if (cost === undefined && tokens === undefined) return undefined;
+  return { ...(cost === undefined ? {} : { maxCostUsd: cost }), ...(tokens === undefined ? {} : { maxTokens: tokens }) };
 }
 
 export function isSessionIntro(message: Pick<ChatMessage, "role" | "kind" | "text">): boolean {

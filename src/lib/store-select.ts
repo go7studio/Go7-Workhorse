@@ -34,6 +34,7 @@ export type ComposerDesk = {
   clearWatchRestore: Store["clearWatchRestore"];
   setComposerDraft: Store["setComposerDraft"];
   setCrewMode: Store["setCrewMode"];
+  setMissionCaps: Store["setMissionCaps"];
   setSpawnAllowlist: Store["setSpawnAllowlist"];
   linkSessionFolder: Store["linkSessionFolder"];
   unlinkSessionFolder: Store["unlinkSessionFolder"];
@@ -52,6 +53,7 @@ export function selectComposerDesk(store: Store): ComposerDesk {
     clearWatchRestore: store.clearWatchRestore,
     setComposerDraft: store.setComposerDraft,
     setCrewMode: store.setCrewMode,
+    setMissionCaps: store.setMissionCaps,
     setSpawnAllowlist: store.setSpawnAllowlist,
     linkSessionFolder: store.linkSessionFolder,
     unlinkSessionFolder: store.unlinkSessionFolder,
@@ -72,6 +74,8 @@ export function sameComposerSession(left: Session | null, right: Session | null)
     left.mode === right.mode &&
     left.routingMode === right.routingMode &&
     (left.crewModes ?? []).join() === (right.crewModes ?? []).join() &&
+    (left.missionCaps?.maxCostUsd ?? "") === (right.missionCaps?.maxCostUsd ?? "") &&
+    (left.missionCaps?.maxTokens ?? "") === (right.missionCaps?.maxTokens ?? "") &&
     (left.spawnAllowlist ?? []).join() === (right.spawnAllowlist ?? []).join() &&
     left.queue === right.queue &&
     left.grokCommands === right.grokCommands &&
@@ -96,6 +100,7 @@ export function sameComposerDesk(left: ComposerDesk, right: ComposerDesk): boole
     left.clearWatchRestore === right.clearWatchRestore &&
     left.setComposerDraft === right.setComposerDraft &&
     left.setCrewMode === right.setCrewMode &&
+    left.setMissionCaps === right.setMissionCaps &&
     left.setSpawnAllowlist === right.setSpawnAllowlist &&
     left.linkSessionFolder === right.linkSessionFolder &&
     left.unlinkSessionFolder === right.unlinkSessionFolder

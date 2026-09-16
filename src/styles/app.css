@@ -6209,7 +6209,7 @@ html.pane-dragging * {
 }
 
 .usage-dots.dense .usage-dot {
-  border-radius: 3px;
+  border-radius: 50%;
 }
 
 .usage-dot {
@@ -6221,7 +6221,7 @@ html.pane-dragging * {
   min-height: 0;
   padding: 0;
   border: 0;
-  border-radius: 4px;
+  border-radius: 50%;
   overflow: hidden;
   isolation: isolate;
   background: color-mix(in srgb, var(--text) 8%, transparent);
@@ -6234,15 +6234,21 @@ html.pane-dragging * {
   width: 100%;
   aspect-ratio: 1;
   height: auto;
-  border-radius: 4px;
+  border-radius: 50%;
+}
+
+.usage-dots.week .usage-dot-col {
+  align-items: center;
 }
 
 .usage-dots.week .usage-dot {
   flex: none;
-  width: 100%;
-  aspect-ratio: auto;
-  height: 36px;
-  border-radius: 8px;
+  width: min(100%, 64px);
+  max-width: 64px;
+  aspect-ratio: 1;
+  height: auto;
+  margin-inline: auto;
+  border-radius: 50%;
 }
 
 .usage-dot:disabled {
@@ -9213,6 +9219,43 @@ html.pane-dragging * {
 
 .plus-row.mission[aria-checked="true"]:hover {
   background: color-mix(in srgb, var(--warn) 22%, transparent);
+}
+
+.plus-caps {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 10px 8px;
+}
+.plus-caps label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.plus-caps label span { flex: 1; min-width: 0; }
+.plus-caps input {
+  width: 84px;
+  padding: 4px 6px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--bg-solid);
+  color: var(--text);
+  font-size: 12px;
+  text-align: right;
+}
+.plus-caps label em {
+  width: 44px;
+  font-style: normal;
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+.plus-caps p {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--text-tertiary);
 }
 
 .composer-plus-menu hr {

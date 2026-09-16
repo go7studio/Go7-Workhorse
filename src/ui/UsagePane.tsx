@@ -676,7 +676,7 @@ export function UsagePane({
                   >
                     <div className="usage-limit-top">
                       <strong>{item.label}</strong>
-                      <em>{item.unlimited ? "Unlimited" : `${Math.round(displayPercent)}% ${showCodexLeftover ? "left" : "used"}`}</em>
+                      <em>{item.unlimited ? "Unlimited" : `${Math.round(displayPercent)}%${showCodexLeftover ? "" : " used"}`}</em>
                     </div>
                     <div className="usage-split-track wide">
                       <i
@@ -704,7 +704,7 @@ export function UsagePane({
                 size={120}
                 tone={focused.provider}
                 color={focused.color}
-                label={plan ? `${Math.round(plan.leftPercent)}% left` : missingPlan?.label ?? "…"}
+                label={plan ? `${Math.round(plan.leftPercent)}%` : missingPlan?.label ?? "…"}
                 unknown={missingPlan?.unknown}
                 title={missingPlan?.title}
               />

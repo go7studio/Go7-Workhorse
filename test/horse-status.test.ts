@@ -78,6 +78,14 @@ test("a cut from an older official release cannot drop Horse Status", () => {
   assert.equal(existsSync(path.join(ROOT, "src", "ui", "HorseStatus.tsx")), true);
   assert.equal(existsSync(path.join(ROOT, "src", "styles", "horse-status.css")), true);
   assert.match(evalKit, /ChatRow must render HorseStatus/, "dist:win validate must refuse a vendor-dot ChatRow");
+  assert.match(evalKit, /AddBot must offer DGX Spark/);
+  assert.match(evalKit, /Composer must offer a Mission cost cap/);
+  assert.match(evalKit, /vendorLaunchMode/);
+  assert.match(evalKit, /week stretch pies must cap at 64px/);
+  assert.match(readFileSync(path.join(ROOT, "src", "ui", "AddBot.tsx"), "utf8"), /dgx-spark/);
+  assert.match(readFileSync(path.join(ROOT, "src", "ui", "Composer.tsx"), "utf8"), /Cost cap/);
+  assert.match(readFileSync(path.join(ROOT, "src", "lib", "permissions.ts"), "utf8"), /function vendorLaunchMode/);
+  assert.match(readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8"), /\.usage-dots\.week \.usage-dot\s*\{[^}]*max-width:\s*64px/);
 
   const main = ["official/main", "origin/main"].find(hasRef);
   if (!main) return;

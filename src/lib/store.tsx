@@ -79,6 +79,7 @@ import {
   sandboxSourceNote,
   securityPolicyAnswer,
   spawnAccessLogDetail,
+  vendorLaunchMode,
   workerAccess,
   workerGrant,
 } from "./permissions";
@@ -257,6 +258,8 @@ import {
   isHiddenSession,
   nestedSpawnError,
   nestedWorkerPolicy,
+  missionCapError,
+  lowerMissionCap,
   normalizeMissionIteration,
   normalizeFileLeases,
   normalizePathAllowlist,
@@ -307,6 +310,7 @@ import {
   applyVendorTurnIdle,
   brainStamp,
   formatChatSidebar,
+  normalizeMissionCaps,
   normalizeSession,
   parsePermissionMode,
   parseSandbox,
@@ -408,6 +412,7 @@ import type {
   GrokPlanUsage,
   LinkedFolder,
   LinkedReference,
+  MissionCaps,
   McpServerConfig,
   PermissionMode,
   PermissionRequest,
@@ -477,6 +482,7 @@ export type Store = AppState & {
   setSessionModel: (provider: ProviderId, model: string, customBotId?: string) => void;
   setSessionRoutingMode: (mode: "auto" | "manual") => void;
   setCrewMode: (modes: CrewMode[] | undefined) => void;
+  setMissionCaps: (caps: MissionCaps | undefined) => void;
   setSpawnAllowlist: (ids: string[] | undefined) => void;
   /** Pick an interrupted worker back up. Returns why not, when it cannot. */
   resumeAgentRun: (sessionId: string) => { ok: boolean; message: string };
@@ -751,6 +757,25 @@ export function livePassForSpawn(
       session.agentRun?.mission?.iteration === mission.iteration,
   );
   return pass?.agentRun?.status === "running" ? pass : undefined;
+}
+
+/**
+ * The ceilings the person set under Mission on this chat. The desk applies
+ * them itself, so a bot cannot drop the person's stop by leaving loop out of
+ * the call. The person's field is a ceiling, never a default: where the call
+ * named one too the lower of the two stands.
+ */
+export function withDeskMissionCaps(
+  mission: MissionIteration | undefined,
+  caps: MissionCaps | undefined,
+): MissionIteration | undefined {
+  if (!mission) return undefined;
+  if (caps?.maxCostUsd === undefined && caps?.maxTokens === undefined) return mission;
+  return {
+    ...mission,
+    maxCostUsd: lowerMissionCap(mission.maxCostUsd, caps.maxCostUsd),
+    maxTokens: lowerMissionCap(mission.maxTokens, caps.maxTokens),
+  };
 }
 
 export function campaignSpawnGate(input: {
@@ -1804,6 +1829,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       ...current,
       sessions: current.sessions.map((item) =>
         item.id === current.activeSessionId ? { ...item, crewModes: modes } : item,
+      ),
+    }));
+  }, []);
+
+  const setMissionCaps = useCallback((caps: MissionCaps | undefined) => {
+    const missionCaps = normalizeMissionCaps(caps);
+    setState((current) => ({
+      ...current,
+      sessions: current.sessions.map((item) =>
+        item.id === current.activeSessionId ? { ...item, missionCaps } : item,
       ),
     }));
   }, []);
@@ -3122,7 +3157,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           images,
           model: session.model,
           effort: session.effort,
-          mode: session.mode,
+          mode: vendorLaunchMode(session),
           cwd,
           vendorSessionId,
           sandbox: session.sandbox,
@@ -3189,7 +3224,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             model: session.model || custom.model,
             effort: session.effort,
             cwd,
-            mode: session.mode,
+            mode: vendorLaunchMode(session),
             sandbox: session.sandbox,
             preface: promptInput.preface,
             history,
@@ -3945,7 +3980,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             images,
             model: session.model,
             effort: session.effort,
-            mode: session.mode,
+            mode: vendorLaunchMode(session),
             cwd,
             vendorSessionId: vendorSessionForSend(session),
             sandbox: session.sandbox,
@@ -3975,7 +4010,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               model: session.model || custom.model,
               effort: session.effort,
               cwd,
-              mode: session.mode,
+              mode: vendorLaunchMode(session),
               sandbox: session.sandbox,
               preface,
               // A custom bot has no session of its own, so the conversation
@@ -5365,10 +5400,23 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               requested: requestedMission,
               desk: deskMission,
             });
-            const spawnMission = gate.mission;
+            const spawnMission = withDeskMissionCaps(gate.mission, caller.missionCaps);
             if (gate.error) {
               await replyAsk({ error: gate.error });
               return;
+            }
+            if (spawnMission) {
+              const capped = missionCapError({
+                sessions: latest.sessions,
+                parentId: caller.id,
+                mission: spawnMission,
+                usage: latest.usage,
+                desk: caller.missionCaps,
+              });
+              if (capped) {
+                await replyAsk({ error: capped });
+                return;
+              }
             }
             if (spawnMission) {
               const mission = spawnMission;
@@ -8765,6 +8813,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       setSessionModel,
       setSessionRoutingMode,
       setCrewMode,
+      setMissionCaps,
       setSpawnAllowlist,
       resumeAgentRun,
       createCustomBot,
@@ -8909,6 +8958,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       setSessionModel,
       setSessionRoutingMode,
       setCrewMode,
+      setMissionCaps,
       setSpawnAllowlist,
       resumeAgentRun,
       createCustomBot,

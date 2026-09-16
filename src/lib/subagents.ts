@@ -16,8 +16,10 @@ import type {
   EffortLevel,
   ExecutionOwner,
   FileLease,
+  MissionCaps,
   MissionIteration,
   ProviderId,
+  UsageEvent,
   RoutingDecision,
   Session,
   SessionEnvironment,
@@ -1928,6 +1930,8 @@ export function normalizeMissionIteration(raw: unknown): MissionIteration | unde
         }
       : {}),
     ...(typeof row.tokenBudget === "number" && row.tokenBudget > 0 ? { tokenBudget: Math.floor(row.tokenBudget) } : {}),
+    ...(typeof row.maxCostUsd === "number" && row.maxCostUsd > 0 ? { maxCostUsd: row.maxCostUsd } : {}),
+    ...(typeof row.maxTokens === "number" && row.maxTokens > 0 ? { maxTokens: Math.floor(row.maxTokens) } : {}),
   };
 }
 
@@ -2252,6 +2256,111 @@ export function missionWave(
       session.agentRun.startedAt < passEnd,
   );
   return [...new Set([...ids, ...bearing.map((session) => session.id), ...plain.map((session) => session.id)])];
+}
+
+export function missionMembers(
+  sessions: Session[],
+  parentId: string,
+  mission: { id: string; iteration: number },
+): string[] {
+  const ids = new Set<string>();
+  for (let pass = 1; pass <= mission.iteration; pass += 1) {
+    for (const id of missionWave(sessions, parentId, [], { id: mission.id, iteration: pass })) ids.add(id);
+  }
+  return [...ids];
+}
+
+export type MissionSpend = {
+  tokens: number;
+  costUsd: number;
+  costKnown: boolean;
+  workers: number;
+};
+
+function sessionSpend(usage: UsageEvent[] | undefined, sessionId: string): { tokens: number; costUsd?: number } | undefined {
+  if (!usage) return undefined;
+  const rows = usage.filter((event) => event.sessionId === sessionId);
+  if (rows.length === 0) return undefined;
+  let tokens = 0;
+  let costUsd = 0;
+  let hasCost = false;
+  for (const event of rows) {
+    tokens += event.inputTokens + event.outputTokens;
+    if (typeof event.costUsd === "number") {
+      costUsd += event.costUsd;
+      hasCost = true;
+    }
+  }
+  return { tokens, costUsd: hasCost ? costUsd : undefined };
+}
+
+export function missionSpend(
+  sessions: Session[],
+  parentId: string,
+  mission: { id: string; iteration: number },
+  usage?: UsageEvent[],
+): MissionSpend {
+  return missionMembers(sessions, parentId, mission).reduce<MissionSpend>(
+    (sum, id) => {
+      const spend = sessionSpend(usage, id);
+      if (!spend) return sum;
+      return {
+        tokens: sum.tokens + spend.tokens,
+        costUsd: sum.costUsd + (spend.costUsd ?? 0),
+        costKnown: sum.costKnown || spend.costUsd !== undefined,
+        workers: sum.workers + 1,
+      };
+    },
+    { tokens: 0, costUsd: 0, costKnown: false, workers: 0 },
+  );
+}
+
+function missionCap(value: unknown): number | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) return undefined;
+  return value;
+}
+
+export function lowerMissionCap(left: unknown, right: unknown): number | undefined {
+  const first = missionCap(left);
+  const second = missionCap(right);
+  if (first === undefined) return second;
+  if (second === undefined) return first;
+  return Math.min(first, second);
+}
+
+export function missionCapsFor(
+  mission: Pick<MissionIteration, "maxCostUsd" | "maxTokens">,
+  raise?: MissionCaps,
+  desk?: MissionCaps,
+): MissionCaps {
+  const maxCostUsd = lowerMissionCap(missionCap(raise?.maxCostUsd) ?? mission.maxCostUsd, desk?.maxCostUsd);
+  const maxTokens = lowerMissionCap(missionCap(raise?.maxTokens) ?? mission.maxTokens, desk?.maxTokens);
+  return {
+    ...(maxCostUsd === undefined ? {} : { maxCostUsd }),
+    ...(maxTokens === undefined ? {} : { maxTokens }),
+  };
+}
+
+export const MISSION_CAP_PREFIX = "mission cap reached:";
+
+export function missionCapError(input: {
+  sessions: Session[];
+  parentId: string;
+  mission: Pick<MissionIteration, "id" | "iteration" | "maxCostUsd" | "maxTokens">;
+  usage?: UsageEvent[];
+  raise?: MissionCaps;
+  desk?: MissionCaps;
+}): string | undefined {
+  const caps = missionCapsFor(input.mission, input.raise, input.desk);
+  if (caps.maxCostUsd === undefined && caps.maxTokens === undefined) return undefined;
+  const spend = missionSpend(input.sessions, input.parentId, input.mission, input.usage);
+  if (caps.maxCostUsd !== undefined && spend.costUsd >= caps.maxCostUsd) {
+    return `${MISSION_CAP_PREFIX} $${spend.costUsd.toFixed(2)} of $${caps.maxCostUsd.toFixed(2)}`;
+  }
+  if (caps.maxTokens !== undefined && spend.tokens >= caps.maxTokens) {
+    return `${MISSION_CAP_PREFIX} ${spend.tokens} of ${caps.maxTokens} tokens`;
+  }
+  return undefined;
 }
 
 export function nextMissionIteration(

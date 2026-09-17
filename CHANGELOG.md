@@ -8,6 +8,15 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.6.85](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.84...v0.6.85) (2026-09-16)
+
+
+### Bug Fixes
+
+* **desk:** incomplete worker replies continue locally before reporting to the head; stale replies no longer replace the latest result
+* **desk:** new chats use this desk's access defaults instead of another app's CLI defaults
+* **ui:** chat settings scroll above a tall composer, with a clickable close button
+
 ## [0.6.84](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.83...v0.6.84) (2026-09-16)
 
 

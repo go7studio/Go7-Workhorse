@@ -846,10 +846,12 @@ const CHECK_MARKERS: Array<[RegExp, string]> = [
   [/\beslint\b|\bnpm run lint\b/i, "lint"],
 ];
 
-function lastAssistantReport(messages: ChatMessage[] | undefined): ChatMessage | undefined {
-  return [...(messages ?? [])]
-    .reverse()
-    .find((message) => message.role === "assistant" && message.kind !== "tool" && message.kind !== "thought" && message.text.trim());
+export function lastAssistantReport(messages: ChatMessage[] | undefined): ChatMessage | undefined {
+  for (const message of [...(messages ?? [])].reverse()) {
+    if (message.role === "user") return undefined;
+    if (message.role === "assistant" && !message.kind && message.text.trim()) return message;
+  }
+  return undefined;
 }
 
 export function boundWorkerReport(

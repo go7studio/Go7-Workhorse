@@ -1,3 +1,4 @@
+import { finishWorkerTask } from "./worker-completion";
 import {
   useCallback,
   useEffect,
@@ -1229,6 +1230,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const turnIdleTimer = useRef<Record<string, number>>({});
   const turnIdleStopReason = useRef<Record<string, string | undefined>>({});
   const pendingIdleClose = useRef<Record<string, () => void>>({});
+  const workerTaskTurns = useRef(new Map<string, { stopped: boolean }>());
   const redirectedAssistant = useRef<Record<string, string>>({});
   const userCancelledTurns = useRef(new Set<string>());
   const ingestCursorLedgerRef = useRef<() => void>(() => undefined);
@@ -1736,15 +1738,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const picked = provider ?? remembered!.provider;
       const model = provider ? defaultModel(provider).id : remembered!.model;
       const customBotId = picked === "custom" ? remembered?.customBotId : undefined;
-      const nativeAccess = picked === "custom" ? undefined : current.settings.llms[picked].accessDefaults;
-      // A new chat starts at the desk default, narrowed by that vendor's own
-      // config. It no longer copies the last chat of the same vendor: one
-      // read-only review chat then made every next Grok chat read-only, and
-      // nobody had asked for that. A chat is tightened by the person, on that
-      // chat. Vendor, model and effort still come from memory below.
+      // Chat access is chosen on this desk. Detected CLI defaults describe
+      // another app and must not silently reset this desk's explicit choice.
       const seat = inboundAccess({
         desk: current.settings.access,
-        vendor: nativeAccess,
       });
       const choice = {
         provider: picked,
@@ -3940,7 +3937,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             /* host waiter may already have settled */
           }
         };
-        const promptVendor = async (
+        const promptVendorOnce = async (
           session: Session,
           text: string,
           mcpServers: McpServerConfig[],
@@ -4064,6 +4061,55 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           if (!window.workhorse?.grokPrompt) throw new Error("Grok agent runs in the Workhorse desktop window.");
           const result = await window.workhorse.grokPrompt(promptInput);
           return typeof result?.text === "string" ? result.text.trim() : "";
+        };
+
+        const promptVendor: typeof promptVendorOnce = async (session, text, servers, images = [], restart = false) => {
+          if (!session.parentId || !session.agentRun) return promptVendorOnce(session, text, servers, images, restart);
+          const task = { stopped: false };
+          workerTaskTurns.current.set(session.id, task);
+          const timer = turnIdleTimer.current[session.id];
+          if (timer) window.clearTimeout(timer);
+          delete pendingIdleClose.current[session.id];
+          let currentWorker = session;
+          let turns = 0;
+          try {
+            const result = await finishWorkerTask({
+              prompt: text,
+              stopped: () => task.stopped || userCancelledTurns.current.has(session.id),
+              run: async (prompt) => {
+                if (turns++ > 0) {
+                  const nextAssistant = uid("msg");
+                  grokAssistantId.current[session.id] = nextAssistant;
+                  const continuationMessages: ChatMessage[] = [
+                    { id: uid("msg"), role: "user", text: prompt, createdAt: Date.now() },
+                    { id: nextAssistant, role: "assistant", text: "", createdAt: Date.now() },
+                  ];
+                  currentWorker = {
+                    ...currentWorker,
+                    messages: [...currentWorker.messages, ...continuationMessages],
+                  };
+                  setState((current) => ({ ...current, sessions: current.sessions.map((item) =>
+                    item.id === session.id ? { ...item, status: "running", messages: [...item.messages, ...continuationMessages] } : item) }));
+                }
+                const answer = await promptVendorOnce(currentWorker, prompt, servers, turns === 1 ? images : [], turns === 1 && restart);
+                const live = stateRef.current.sessions.find((item) => item.id === session.id) ?? currentWorker;
+                const answerId = grokAssistantId.current[session.id];
+                currentWorker = { ...live, messages: live.messages.map((message) =>
+                  message.id === answerId ? { ...message, text: answer || message.text, workedMs: Date.now() - message.createdAt } : message) };
+                setState((current) => ({ ...current, sessions: current.sessions.map((item) =>
+                  item.id === session.id ? { ...item, messages: item.messages.map((message) =>
+                    message.id === answerId ? { ...message, text: answer || message.text, workedMs: Date.now() - message.createdAt } : message) } : item) }));
+                return answer || childReportText(currentWorker);
+              },
+            });
+            const finalAssistantId = grokAssistantId.current[session.id];
+            setState((current) => ({ ...current, sessions: current.sessions.map((item) =>
+              item.id === session.id ? { ...item, messages: item.messages.map((message) =>
+                message.id === finalAssistantId ? { ...message, text: result } : message) } : item) }));
+            return result;
+          } finally {
+            workerTaskTurns.current.delete(session.id);
+          }
         };
 
         try {
@@ -6295,7 +6341,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               const worked = liveChild
                 ? turnWorkedAfterAssistant(liveChild.messages, assistantId)
                 : false;
-              const fallback = settleEmptyAssistantText({
+              const fallback = reply.trim() || settleEmptyAssistantText({
                 provider: spec.provider,
                 reply,
                 existingText: liveChild?.messages.find((entry) => entry.id === assistantId)?.text,
@@ -6578,23 +6624,26 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           const runPeer = async () => {
             const reply = await promptVendor(target, prompt, stateRef.current.settings.mcpServers);
             const liveTarget = stateRef.current.sessions.find((item) => item.id === target.id);
-            const fallback = settleEmptyAssistantText({
+            const fallback = reply.trim() || settleEmptyAssistantText({
               provider: target.provider,
               reply,
               existingText: liveTarget?.messages.find((entry) => entry.id === assistantId)?.text,
               worked: liveTarget ? turnWorkedAfterAssistant(liveTarget.messages, assistantId) : false,
             });
             const finishedAt = Date.now();
-            setState((current) => ({
-              ...current,
-              sessions: withSubagentStatus(
+            const peerFailed = Boolean(target.parentId) && workerReportedBlocked(fallback);
+            setState((current) => {
+              let sessions = withSubagentStatus(
                 current.sessions.map((item) =>
                   item.id === target.id
                     ? {
                         ...item,
                         status: "idle",
                         agentRun: item.agentRun
-                          ? { ...item.agentRun, status: "completed" as const, finishedAt, error: undefined }
+                          ? { ...item.agentRun,
+                              status: item.agentRun.status === "running" ? (peerFailed ? "failed" as const : "completed" as const) : item.agentRun.status,
+                              finishedAt: item.agentRun.finishedAt ?? finishedAt,
+                              error: peerFailed ? "Worker did not verify completion." : item.agentRun.error }
                           : undefined,
                         messages: item.messages.map((entry) =>
                           entry.id === assistantId && !assistantHasVisibleReply(entry.text)
@@ -6613,10 +6662,25 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                     : item,
                 ),
                 target.id,
-                "completed",
+                peerFailed ? "failed" : "completed",
                 { correlationId: peerCorrelationId, toolCallId: payload.id },
-              ),
-            }));
+              );
+              if (target.parentId && target.agentRun) {
+                const finished = sessions.find((item) => item.id === target.id);
+                const status = finished?.agentRun?.status;
+                const rowStatus = status === "cancelled" || status === "timed-out"
+                  ? status : status === "completed" && !peerFailed ? "completed" : "failed";
+                sessions = applyChildIdleSync(sessions, target.id, rowStatus, { report: fallback });
+                if (shouldJoinAfterChildSettle(rowStatus)) {
+                  const admitted = joinAdmit(sessions, target.parentId, current, plansRef.current);
+                  sessions = admitted.sessions;
+                  queueMicrotask(() => {
+                    if (admitted.auditor) sendRef.current(admitted.auditor.brief, { sessionId: admitted.auditor.id, hideUser: true });
+                  });
+                }
+              }
+              return { ...current, sessions };
+            });
             return fallback;
           };
           if (payload.wait === false) {
@@ -6779,7 +6843,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if (handle) window.clearTimeout(handle);
       turnIdleTimer.current[sessionId] = window.setTimeout(() => {
         delete turnIdleTimer.current[sessionId];
-        pendingIdleClose.current[sessionId]?.();
+        const close = pendingIdleClose.current[sessionId];
+        delete pendingIdleClose.current[sessionId];
+        close?.();
       }, delayMs);
     };
     const noteTrailingTurnActivity = (sessionId: string) => {
@@ -7579,7 +7645,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             .catch(() => markVendorPlanKnown("cursor"));
           ingestCursorLedgerRef.current();
         }
+        const workerTask = workerTaskTurns.current.get(event.sessionId);
+        if (workerTask) {
+          workerTask.stopped = safetyPaused || event.stopReason === "cancelled";
+          // The caller owns task settlement. A vendor end_turn only closes
+          // one turn; publishing here races verification and continuation.
+          if (!workerTask.stopped) return;
+        }
+        const closingAssistantId = grokAssistantId.current[event.sessionId];
         const closeTurn = () => {
+        if (grokAssistantId.current[event.sessionId] !== closingAssistantId) return;
         setState((current) => {
           const queued = grokChunkQueue.current[event.sessionId] ?? "";
           delete grokChunkQueue.current[event.sessionId];

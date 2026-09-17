@@ -273,8 +273,6 @@ test("a completed adaptive wave does not leave parent.mission at scout with noth
   const nextParent = settled.find((session) => session.id === "parent");
   assert.equal(nextParent?.lineup?.mission, undefined, "completed loop spawn must drop the parent mission");
   assert.equal(missionBoardView(nextParent, []), undefined);
-  const stillScout = nextParent?.lineup?.mission?.phase === "scout" && missionBoardView(nextParent, [])?.running === false;
-  assert.equal(stillScout, false);
 });
 
 test("a failed or unmet adaptive mission is visible as failed, not Scout idle", () => {

@@ -25,6 +25,15 @@ says which bot is working before you read it. Sidebar horses sit smaller than
 the header mark. A parent chat with workers also gets a Crew tray above the
 composer: one horse per worker, follow-up without leaving the parent.
 
+Delegated workers distinguish a vendor turn ending from the task finishing.
+Incomplete replies continue in the worker chat before the parent receives a
+report. Workers declare completion with verification evidence; explicit
+blockers, cancellation, repeated replies, or eight continuation turns stop
+the task without claiming success. This checks the report contract, not the
+truth of arbitrary artifacts. Tool output and thinking are never final reports.
+New chats use this desk's access defaults instead of importing CLI defaults.
+Chat settings scroll above the composer, including when the draft is long.
+
 Add a bot lists **DGX Spark** as a local OpenAI-compatible gateway on
 `127.0.0.1:8788`. NVIDIA Sync local-forwards that port; Test API collects
 `/v1/models`. Spawned workers copy the orchestrator's seat; path-owned Ask

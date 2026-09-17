@@ -344,8 +344,8 @@ test("startSession no longer seeds a new chat's seat from the last chat", () => 
   // it. `if (false) {}` around the old block would leave this failing.
   assert.match(
     store,
-    /const seat = inboundAccess\(\{\n\s*desk: current\.settings\.access,\n\s*vendor: nativeAccess,\n\s*\}\);/,
-    "a new chat takes the desk default and that vendor's own config, nothing else",
+    /const seat = inboundAccess\(\{\n\s*desk: current\.settings\.access,\n\s*\}\);/,
+    "a new chat takes the desk default without importing another app's defaults",
   );
   assert.doesNotMatch(store, /rememberedAccess/, "the seat memory is gone, not merely unused");
   // Vendor, model and effort memory stay: this lane took the seat, not the brain.

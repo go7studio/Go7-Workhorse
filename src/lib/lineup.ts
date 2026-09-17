@@ -388,9 +388,12 @@ function childFindings(session: Pick<Session, "messages" | "agentRun"> | undefin
 }
 
 export function childReportText(session: (Pick<Session, "messages"> & Partial<Pick<Session, "id">>) | undefined): string {
-  const last = [...(session?.messages ?? [])]
+  const messages = session?.messages ?? [];
+  let turnStart = messages.length - 1;
+  while (turnStart >= 0 && messages[turnStart]?.role !== "user") turnStart -= 1;
+  const last = messages.slice(turnStart + 1)
     .reverse()
-    .find((message) => message.role === "assistant" && message.text.trim());
+    .find((message) => message.role === "assistant" && !message.kind && message.text.trim());
   if (!last) return "";
   const raw = stripSafetyPauseNotice(last.text.trim());
   return boundWorkerReport(raw, { workerId: session?.id ?? "(worker id)" }).report;

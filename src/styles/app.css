@@ -7841,11 +7841,12 @@ html.pane-dragging * {
 /* Refined, right-anchored model and chat inspector. */
 .session-setup {
   --setup-paper: color-mix(in srgb, var(--bg-solid) 96%, var(--setup-vendor) 4%);
+  z-index: 50;
   --setup-paper-on: color-mix(in srgb, var(--bg-solid) 91%, var(--setup-vendor) 9%);
   right: clamp(14px, 2.2cqi, 26px);
-  bottom: clamp(108px, 14cqh, 122px);
+  bottom: calc(var(--composer-input, 108px) + 8px);
   width: min(720px, calc(100% - 32px));
-  max-height: calc(100% - 108px);
+  max-height: max(80px, calc(100% - var(--composer-input, 108px) - 24px));
   padding: 0 0 10px;
   gap: 0;
   font-size: 13px;

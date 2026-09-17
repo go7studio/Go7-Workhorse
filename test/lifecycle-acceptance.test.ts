@@ -30,6 +30,74 @@ import {
 } from "../src/lib/subagents";
 import type { Session } from "../src/lib/types";
 import { applyWorkerBudgetUsage } from "../src/lib/worker-budget";
+import { finishWorkerTask } from "../src/lib/worker-completion";
+
+test("worker progress stays local until a verified completion report", async () => {
+  const reports = ["Walk 3 reached hang overlay and pack.", "Still working.\nMission status: continue", "Farewell is visible in final.png; all requested checks passed.\nMission status: complete"];
+  const prompts: string[] = [];
+  const result = await finishWorkerTask({
+    prompt: "Drive GREET through DONE and inspect each PNG.",
+    stopped: () => false,
+    run: async (prompt) => { prompts.push(prompt); return reports[prompts.length - 1]!; },
+  });
+  assert.equal(prompts.length, 3);
+  assert.equal(result, reports[2]);
+  assert.match(prompts[1]!, /Continue the remaining work/);
+});
+
+test("a repeated partial report stops blocked instead of cycling through the head", async () => {
+  let calls = 0;
+  const result = await finishWorkerTask({ prompt: "Finish the walkthrough", stopped: () => false,
+    run: async () => { calls += 1; return "Walk reached the pack."; } });
+  assert.equal(calls, 2);
+  assert.match(result, /repeated reply/);
+  assert.match(result, /Mission status: blocked$/);
+});
+
+test("an explicit statement that nothing remains does not create a continuation loop", async () => {
+  let calls = 0;
+  const report = "All checks passed. No remaining work.\nRemaining work: none\nMission status: complete";
+  assert.equal(await finishWorkerTask({ prompt: "Verify", stopped: () => false,
+    run: async () => { calls += 1; return report; } }), report);
+  assert.equal(calls, 1);
+});
+
+test("a completion label with explicit unfinished work keeps the worker going", async () => {
+  let calls = 0;
+  const result = await finishWorkerTask({ prompt: "Build and verify", stopped: () => false,
+    run: async () => ++calls === 1 ? "Next I will rebuild.\nMission status: complete" : "Build verified.\nMission status: complete" });
+  assert.equal(calls, 2);
+  assert.match(result, /^Build verified/);
+});
+
+test("worker completion respects cancellation, blockers, and the continuation ceiling", async () => {
+  let stopped = false;
+  let calls = 0;
+  const cancelled = await finishWorkerTask({ prompt: "Verify", stopped: () => stopped,
+    run: async () => { calls += 1; stopped = true; return "Partial."; } });
+  assert.equal(calls, 1);
+  assert.match(cancelled, /Mission status: blocked$/);
+  const blocked = await finishWorkerTask({ prompt: "Verify", stopped: () => false,
+    run: async () => "Device disconnected.\nMission status: blocked" });
+  assert.match(blocked, /^Device disconnected/);
+  calls = 0;
+  const capped = await finishWorkerTask({ prompt: "Verify", stopped: () => false, maxContinuations: 2,
+    run: async () => `Partial ${++calls}.\nMission status: continue` });
+  assert.equal(calls, 3);
+  assert.match(capped, /continuation limit/);
+});
+
+test("report selection excludes tool output, thoughts, and previous assignments", () => {
+  const messages: Session["messages"] = [
+    { id: "u", role: "user", text: "First assignment", createdAt: 1 },
+    { id: "a", role: "assistant", text: "First report", createdAt: 2 },
+    { id: "t", role: "assistant", kind: "tool", text: "WALK DONE", createdAt: 3 },
+    { id: "r", role: "assistant", kind: "thought", text: "I should finish", createdAt: 4 },
+  ];
+  assert.equal(childReportText({ messages }), "First report");
+  messages.push({ id: "u2", role: "user", text: "Continue through farewell", createdAt: 5 });
+  assert.equal(childReportText({ messages }), "");
+});
 
 /**
  * End-to-end lifecycle acceptance for the coordination layer:

@@ -1,7 +1,7 @@
 import { OBJECTIVE_ASK_RULE } from "./ask-default";
 import { enqueuePrompt } from "./chats";
 import { uid } from "./id";
-import { crewHasOpenTools, crewReportSettled, crewTurnInFlight, lastWorkerReport } from "./crew-live";
+import { crewHasOpenTools, crewTurnInFlight, lastWorkerReport } from "./crew-live";
 import { finishOpenToolMessages } from "./grok-events";
 import { boundWorkerReport, crewHasParentTakeover, normalizeMissionIteration, normalizePathAllowlist, normalizeWorkerFindings, parseWorkerFindings, reportLeavesWorkOpen, withSubagentStatus, workerMissionOutcome, workerNameFromTitle, workerTaskTitle } from "./subagents";
 import type { AgentRun, ChatMessage, DeskLineup, DeskLineupRow, DeskLineupRowStatus, MissionIteration, Session, WorkerFinding } from "./types";
@@ -843,7 +843,7 @@ export function applyUserStop(sessions: Session[], targetIds: Iterable<string>, 
   let next = sessions.map((session) => {
     if (!targets.includes(session.id)) return session;
     const rowStatus = settleStatusForStop(session);
-    const runStatus = rowStatus === "completed" ? "completed" : rowStatus === "failed" ? "failed" : "cancelled";
+    const runStatus = agentStatusForRow(rowStatus);
     return {
       ...session,
       status: "idle" as const,

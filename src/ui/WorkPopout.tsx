@@ -26,7 +26,7 @@ import {
   type GroupedWorkRow,
   type TranscriptBlock,
 } from "../lib/turns";
-import type { ChatMessage, Session } from "../lib/types";
+import type { ChatMessage } from "../lib/types";
 import { MessageBody } from "./MessageBody";
 import { TimeStamp } from "./TimeStamp";
 

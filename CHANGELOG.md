@@ -8,6 +8,17 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.6.87](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.86...v0.6.87) (2026-09-17)
+
+
+### Bug Fixes
+
+* **desk:** a last Mission status: complete ends the worker even when the diary said Next I'll
+* **desk:** Stop closes leftover tools, treats a finished report as completed, and wakes the parent when the wave is done
+* **ui:** billed in + out is the Usage total; cached is named last so the line adds up
+* **codex:** harvest token_usage_record and keep the request sum when a smaller turn snapshot arrives
+
+
 ## [0.6.86](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.85...v0.6.86) (2026-09-16)
 
 

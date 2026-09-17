@@ -1,4 +1,4 @@
-import { reportLeavesWorkOpen, workerMissionOutcome, workerReportedBlocked } from "./subagents";
+import { workerMissionOutcome, workerReportedBlocked } from "./subagents";
 
 export const WORKER_COMPLETION_RULE = "Keep working on the assigned task until it is verified. Progress belongs in commentary, not a final reply. End your final report with Mission status: complete only after every requested check passes; otherwise use Mission status: continue or Mission status: blocked and explain what remains. Never treat a tool finishing or a partial milestone as the task finishing.";
 
@@ -35,10 +35,9 @@ export async function finishWorkerTask(input: {
     const report = await input.run(prompt);
     if (input.stopped()) return `${report}\n\n${WORKER_STOPPED_BEFORE_VERIFICATION_NOTE}\nMission status: blocked`;
     const outcome = workerMissionOutcome(report);
-    const completionText = report
-      .replace(/\bno remaining work\b/gi, "nothing remains")
-      .replace(/^\s*remaining work:\s*(?:none|nothing|0)\s*[.!]?\s*$/gim, "nothing remains");
-    if (outcome === "blocked" || (outcome === "complete" && !reportLeavesWorkOpen(completionText))) return report;
+    // The last status line is the result. A diary that said "Next I'll…" on
+    // the way to Mission status: complete is finished work, not a new turn.
+    if (outcome === "blocked" || outcome === "complete") return report;
     if (attempt >= limit || (attempt > 0 && report.trim() === previous)) {
       return `${report}\n\nCompletion was not verified. Worker stopped after ${attempt + 1} turns${report.trim() === previous ? " with a repeated reply" : " at the continuation limit"}.\nMission status: blocked`;
     }

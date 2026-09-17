@@ -1,7 +1,8 @@
 import { OBJECTIVE_ASK_RULE } from "./ask-default";
 import { enqueuePrompt } from "./chats";
 import { uid } from "./id";
-import { crewHasOpenTools, crewTurnInFlight } from "./crew-live";
+import { crewHasOpenTools, crewReportSettled, crewTurnInFlight, lastWorkerReport } from "./crew-live";
+import { finishOpenToolMessages } from "./grok-events";
 import { boundWorkerReport, crewHasParentTakeover, normalizeMissionIteration, normalizePathAllowlist, normalizeWorkerFindings, parseWorkerFindings, reportLeavesWorkOpen, withSubagentStatus, workerMissionOutcome, workerNameFromTitle, workerTaskTitle } from "./subagents";
 import type { AgentRun, ChatMessage, DeskLineup, DeskLineupRow, DeskLineupRowStatus, MissionIteration, Session, WorkerFinding } from "./types";
 import { isVendorRateLimitError } from "./vendor-bridge";
@@ -224,11 +225,16 @@ export function lineupJoinParentIsLive(status?: string | null): boolean {
  * A wave that only stopped (cancel / interrupt) is not a join. The parent
  * already chose that stop; injecting the cancelled transcript is a dump.
  */
-export function lineupJoinHasActionableRow(lineup: DeskLineup | undefined): boolean {
+export function lineupJoinHasActionableRow(
+  lineup: DeskLineup | undefined,
+  children: Array<Pick<Session, "id" | "status" | "agentRun"> & { messages?: ChatMessage[] }> = [],
+): boolean {
+  const byId = new Map(children.map((child) => [child.id, child]));
   return Boolean(
-    lineup?.rows.some(
-      (row) => row.status === "completed" || row.status === "failed" || row.status === "timed-out",
-    ),
+    lineup?.rows.some((row) => {
+      const status = missionRowStatus(row, byId.get(row.childId));
+      return status === "completed" || status === "failed" || status === "timed-out";
+    }),
   );
 }
 
@@ -448,14 +454,16 @@ export function applyChildIdleSync(
   sessions: Session[],
   childId: string,
   status: Exclude<DeskLineupRowStatus, "queued" | "running">,
-  extra?: { report?: string; error?: string; now?: number; correlationId?: string },
+  extra?: { report?: string; error?: string; now?: number; correlationId?: string; force?: boolean },
 ): Session[] {
   const now = extra?.now ?? Date.now();
   const child = sessions.find((session) => session.id === childId);
   if (extra?.correlationId && child?.agentRun?.correlationId !== extra.correlationId) return sessions;
   // A premature host "done" while tools are still open is not a finish.
   // Cursor Composer and Grok both burst tools after sitting session.status idle.
-  if (crewHasOpenTools(child?.messages)) return sessions;
+  // An explicit Stop is the person ending that turn — leftover chips must not
+  // keep the horse walking or block the parent join.
+  if (!extra?.force && crewHasOpenTools(child?.messages)) return sessions;
   const report = (extra?.report ?? childReportText(child)).trim();
   const findings = childFindings(child);
   const nextStatus = agentStatusForRow(status);
@@ -467,13 +475,14 @@ export function applyChildIdleSync(
     // from the vendor is fact, so it is allowed to correct the guess; every
     // other terminal status is already fact and stands.
     const alreadyDone = Boolean(run && run.status !== "running" && run.status !== "interrupted");
+    const replaceRun = extra?.force || !alreadyDone;
     return {
       ...session,
       status: "idle" as const,
       agentRun: run
         ? {
             ...run,
-            status: alreadyDone ? run.status : nextStatus,
+            status: replaceRun ? nextStatus : run.status,
             finishedAt: run.finishedAt ?? now,
             ...(extra?.error && !alreadyDone ? { error: extra.error } : {}),
             ...(findings ? { findings } : {}),
@@ -712,7 +721,7 @@ export function maybeEnqueueLineupJoin(sessions: Session[], parentId: string, no
   const parent = sessions.find((session) => session.id === parentId);
   const children = lineupWaveChildren(sessions, parentId);
   if (!parent?.lineup || parent.lineup.notifiedAt || !lineupIsTerminal(parent.lineup, children)) return sessions;
-  if (lineupJoinParentIsLive(parent.status) || !lineupJoinHasActionableRow(parent.lineup)) return sessions;
+  if (lineupJoinParentIsLive(parent.status) || !lineupJoinHasActionableRow(parent.lineup, children)) return sessions;
   if (parent.lineup.joinOwner === "external-runtime") {
     return handOverLineup(sessions, parentId, now);
   }
@@ -813,6 +822,58 @@ export function applyLineupChildFinish(
     const children = sessions.filter((item) => item.parentId === parentId);
     return { ...session, lineup: settleAdaptiveMission(lineup, children) ?? lineup };
   });
+}
+
+/** Stop keeps a finished report. Mid-work with no complete line is a cancel. */
+export function settleStatusForStop(
+  session: { messages?: ChatMessage[] } | undefined,
+): Exclude<DeskLineupRowStatus, "queued" | "running"> {
+  const outcome = workerMissionOutcome(lastWorkerReport(session ?? {})?.text);
+  if (outcome === "complete") return "completed";
+  if (outcome === "blocked") return "failed";
+  return "cancelled";
+}
+
+/**
+ * The Stop button: close leftover tools, sit the horse down, and if the wave
+ * is now finished with a real report, wake the lead to write the result.
+ */
+export function applyUserStop(sessions: Session[], targetIds: Iterable<string>, now = Date.now()): Session[] {
+  const targets = [...new Set(targetIds)].filter(Boolean);
+  let next = sessions.map((session) => {
+    if (!targets.includes(session.id)) return session;
+    const rowStatus = settleStatusForStop(session);
+    const runStatus = rowStatus === "completed" ? "completed" : rowStatus === "failed" ? "failed" : "cancelled";
+    return {
+      ...session,
+      status: "idle" as const,
+      messages: finishOpenToolMessages(session.messages, "cancelled"),
+      agentRun: {
+        ...(session.agentRun ?? { startedAt: now, isolation: "shared" as const }),
+        status: runStatus,
+        finishedAt: session.agentRun?.finishedAt ?? now,
+        ...(runStatus === "cancelled" && !session.agentRun?.error
+          ? { error: "Cancelled with its parent lifecycle." }
+          : {}),
+      },
+    };
+  });
+  const parents = new Set<string>();
+  for (const id of targets) {
+    const session = next.find((item) => item.id === id);
+    if (!session) continue;
+    if (session.parentId) parents.add(session.parentId);
+    next = applyChildIdleSync(next, id, settleStatusForStop(session), {
+      now,
+      force: true,
+      report: childReportText(session),
+    });
+  }
+  for (const parentId of parents) {
+    next = reconcileIdleChildren(next, parentId, now);
+    next = maybeEnqueueLineupJoin(next, parentId, now);
+  }
+  return next;
 }
 
 export function nestProjectChats<S extends { id: string; parentId?: string }>(
@@ -1023,7 +1084,7 @@ export type MissionRowLook = {
   word?: string;
   /** Failure is loud; unfinished or cancelled work is quiet. */
   tone?: "danger" | "quiet";
-  /** The wave still has a live worker. The parent horse uses the parent's own turn, not this. */
+  /** The wave still has a live worker. The parent horse walks from this. */
   running: boolean;
 };
 
@@ -1035,18 +1096,19 @@ export type MissionRowLook = {
  */
 export function missionRowLook(
   session: Pick<Session, "lineup">,
-  workers: Array<Pick<Session, "id" | "status" | "agentRun">> = [],
+  workers: Array<Pick<Session, "id" | "status" | "agentRun"> & { messages?: ChatMessage[] }> = [],
 ): MissionRowLook | undefined {
   const state = missionState(session.lineup, workers);
-  if (!state) return undefined;
+  const running = Boolean(state?.running) || workers.some((worker) => crewTurnInFlight(worker));
+  if (!state) return running ? { running: true } : undefined;
   const title = missionTitle(session.lineup);
   const caller = missionCaller(session.lineup);
-  if (!title && !caller && !state.word && !state.running) return undefined;
+  if (!title && !caller && !state.word && !running) return undefined;
   return {
     ...(title ? { title } : {}),
     ...(caller ? { caller } : {}),
     ...(state.word ? { word: state.word } : {}),
     ...(state.tone ? { tone: state.tone } : {}),
-    running: state.running,
+    running,
   };
 }

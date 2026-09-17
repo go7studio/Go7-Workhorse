@@ -912,23 +912,24 @@ export function workerMissionOutcome(text: string | undefined): MissionReportOut
 }
 
 /**
- * Leftover work in the prose, even when the worker also wrote
- * `Mission status: complete`. A first-pass scout that says "Next I'll rebuild"
- * is not acceptance met.
+ * Leftover work in the prose. The last Mission status line wins: complete
+ * is settled even when the diary above it says "Next I'll…". Workers narrate
+ * as they go; that is not a reason to keep the horse walking. continue and
+ * blocked stay open. No status line still uses the leftover phrases.
  */
 export function reportLeavesWorkOpen(text: string | undefined): boolean {
   if (!text?.trim()) return false;
   const outcome = workerMissionOutcome(text);
+  if (outcome === "complete") return false;
   if (outcome === "continue" || outcome === "blocked") return true;
-  const body = text.replace(/^\s*(?:mission\s+)?status:\s*(?:blocked|continue|complete(?:d)?)\s*[.!]?\s*$/gim, "\n");
   return (
-    /\bnext I(?:['’]ll| will| am going to)\b/i.test(body) ||
-    /\bI(?:['’]ll| will) (?:rebuild|rerun|install|export|retry|send)\b/i.test(body) ||
-    /\bmissing (?:java|jdk|sdk)\b/i.test(body) ||
-    /\b(?:could not|failed to|cannot) (?:export|install|build|rebuild)\b/i.test(body) ||
-    /\bexport failed\b/i.test(body) ||
-    /\bstale (?:apk|build)\b/i.test(body) ||
-    /\bremaining work\b/i.test(body)
+    /\bnext I(?:['’]ll| will| am going to)\b/i.test(text) ||
+    /\bI(?:['’]ll| will) (?:rebuild|rerun|install|export|retry|send)\b/i.test(text) ||
+    /\bmissing (?:java|jdk|sdk)\b/i.test(text) ||
+    /\b(?:could not|failed to|cannot) (?:export|install|build|rebuild)\b/i.test(text) ||
+    /\bexport failed\b/i.test(text) ||
+    /\bstale (?:apk|build)\b/i.test(text) ||
+    /\bremaining work\b/i.test(text)
   );
 }
 

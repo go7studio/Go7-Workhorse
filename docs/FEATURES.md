@@ -31,8 +31,13 @@ on their own rows and inside the fold. The parent does not say All workers
 finished while any child is still on the job, and a stale banner hides
 once a new worker starts. Steering or stopping a worker before verification
 is a cancel, not No worker finished · 1 failed, so a replacement stays on
-the same wave. Incomplete replies continue in the
-worker chat before the parent receives a report. Workers declare completion with verification evidence; explicit
+the same wave. The last Mission status: complete line ends the worker even
+when the diary above it said Next I'll. Stop closes leftover tools so
+Cancelled does not keep looking like Working. If that worker already
+declared complete, Stop settles the slice as completed. When every worker
+is finished, the parent is asked to write the combined result. Incomplete
+replies continue in the worker chat before the parent receives a report.
+Workers declare completion with verification evidence; explicit
 blockers, cancellation, repeated replies, or eight continuation turns stop
 the task without claiming success. This checks the report contract, not the
 truth of arbitrary artifacts. Tool output and thinking are never final reports.
@@ -200,9 +205,12 @@ transcript rather than as a path.
 - Stop on the main bot ends the turn as Stopped. It does not dump the
   unfinished thought as the reply, leave that fold open, or paint spawned
   workers as failed.
-- Cancelling one worker stops that worker only. The desk does not prompt
-  the parent with that worker's report, and it does not say the wave
-  finished while the parent or other workers are still going.
+- Cancelling one worker that is still mid-work stops that worker only. The
+  desk does not prompt the parent with that worker's report, and it does
+  not say the wave finished while the parent or other workers are still
+  going. Stop on a worker that already declared complete, or Stop when
+  every other slice is already finished, asks the parent for the combined
+  result.
 - A long transcript opens on the latest turns. Scrolling up pages in the next older window without jumping.
 - A portable transcript follows a chat when its vendor changes.
 - Search runs over chat titles and message text across every project.
@@ -300,7 +308,9 @@ transcript rather than as a path.
   stop.
 - **In** is fresh input — what the model read for the first time. **Cached** is
   context served back from cache, named apart so a long chat does not read as
-  millions of new tokens. **Out** is what it wrote. The total is in + out.
+  millions of new tokens. **Out** is what it wrote. The total is billed in +
+  out. Cached is named last so the line does not look like it should sum to
+  that total.
 - Compact shrinks the context meter. Leftover does not move unless that same
   bot ran a billed summary. A full window never holds a send the way a spent
   daily bank does. Retained context is this chat's window occupancy, never the

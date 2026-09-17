@@ -196,25 +196,24 @@ test("the meta line never repeats the worker count", () => {
 
 test("a live wave is still a live wave when the parent chat itself is idle", () => {
   // The parent's own status is idle the whole time a wave runs — the work is
-  // happening on the children. The wave flag stays true for the board and
-  // crew count; the parent horse no longer walks from it.
+  // happening on the children. The wave flag stays true so the parent horse
+  // walks while any worker is still on the job.
   const look = missionRowLook({ lineup: lineup() }, [{ id: "child_1", status: "running" }]);
   assert.equal(look?.running, true);
   assert.equal(look?.word, "Working…");
+  const noLineup = missionRowLook({ lineup: undefined }, [{ id: "child_1", status: "running" }]);
+  assert.equal(noLineup?.running, true);
 });
 
 test("an ordinary chat is left alone", () => {
   assert.equal(missionRowLook({ lineup: undefined }, []), undefined);
 });
 
-test("a live wave reaches the title, not the parent horse", () => {
+test("a live wave walks the parent horse and still reaches the title", () => {
   // The parent chat's own status is idle the whole time a wave runs. The
-  // horse follows that turn. Workers and the crew count already say the
-  // wave is live — walking the orchestrator too made both folds look like
-  // the head was still on the job.
+  // horse still walks: the subagents are doing work on that chat.
   const row = readFileSync(new URL("../src/ui/ChatRow.tsx", import.meta.url), "utf8").replace(/\s+/g, " ");
-  assert.match(row, /const dotKind = crewDotKind\(session\);/, "the parent horse follows the parent turn");
-  assert.doesNotMatch(row, /crewDotKind\(session, Boolean\(mission\?\.running\)\)/, "a live wave must not walk the parent horse");
+  assert.match(row, /const dotKind = crewDotKind\(session, !nested && Boolean\(mission\?\.running\)\);/, "a live worker walks the parent horse");
   assert.match(row, /<HorseStatus kind=\{dotKind\}/);
   assert.match(row, /mission\?\.title \?\? session\.title/, "a named wave must reach the title");
   assert.match(row, /mission\.word !== "Working…"/, "a live wave keeps model · effort instead of Working…");

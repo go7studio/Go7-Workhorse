@@ -17,7 +17,7 @@ import {
 } from "../src/lib/lineup";
 import { normalizeAgentRun, parentHasRunningChildren, subagentTurns, workerTaskTitle } from "../src/lib/subagents";
 import { displayWorkSteps, groupTranscript, workFoldClockLabel, workFoldElapsedMs } from "../src/lib/turns";
-import { crewActivityLine, crewHasOpenTools, crewHasWorkAfterFinish, crewTurnInFlight } from "../src/lib/crew-live";
+import { crewActivityLine, crewHasOpenTools, crewHasWorkAfterFinish, crewTurnInFlight, crewWorkerChipLive } from "../src/lib/crew-live";
 import { crewDoneKind } from "../src/ui/SessionPane";
 import { crewDotKind, workerSidebarLabel } from "../src/ui/ChatRow";
 import { workerFoldLabel, crewWorkerName } from "../src/ui/WorkPopout";
@@ -68,7 +68,7 @@ test("a worker stays live through thinking, not only while a tool is in flight",
   };
   assert.equal(crewTurnInFlight(emptyAssistant), true);
   const popout = read("src/ui/WorkPopout.tsx");
-  assert.match(popout, /crewTurnInFlight\(child\)/);
+  assert.match(popout, /crewWorkerChipLive\(marker, child\)/);
   assert.match(popout, /tool-name">Thinking/);
   assert.match(popout, /allowThinking: !talking/);
   assert.match(popout, /workFoldClockLabel/);
@@ -112,10 +112,10 @@ test("elapsed clock advancing with completing tools says Working, then Worked af
       { id: "t2", role: "system" as const, kind: "tool" as const, text: "Shell · completed", toolStatus: "completed", createdAt: 4 },
     ],
   };
-  assert.equal(crewHasWorkAfterFinish(wren), true);
-  assert.equal(crewTurnInFlight(wren), true);
-  assert.equal(crewDotKind(wren), "working");
-  assert.doesNotMatch(workerSidebarLabel({
+  assert.equal(crewHasWorkAfterFinish(wren), false, "finished chips after the stamp are history");
+  assert.equal(crewTurnInFlight(wren), false);
+  assert.equal(crewDotKind(wren), "idle");
+  assert.match(workerSidebarLabel({
     id: "sess_wren",
     projectId: "scratch0",
     parentId: "sess_ci9j08w1i48y",
@@ -155,6 +155,138 @@ test("elapsed clock advancing with completing tools says Working, then Worked af
     messages: finished.messages,
     agentRun: finished.agentRun,
   } as never), /Done/);
+});
+
+test("a posted Mission status: complete is Done even while the vendor turn is still marked running", () => {
+  const wren = {
+    status: "running" as const,
+    agentRun: { status: "running" as const, startedAt: 1, isolation: "shared" as const },
+    messages: [
+      { id: "u", role: "user" as const, text: "Raise spawn Y.", createdAt: 1 },
+      {
+        id: "a",
+        role: "assistant" as const,
+        text: "Next I'll run the sky-life smoke.\nLift is 12px.\n\nMission status: complete",
+        createdAt: 2,
+      },
+    ],
+  };
+  assert.equal(crewTurnInFlight(wren), false);
+  assert.equal(crewDotKind(wren), "idle");
+  assert.match(workerSidebarLabel({
+    id: "sess_wren",
+    projectId: "scratch0",
+    parentId: "sess_parent",
+    provider: "grok",
+    model: "grok-4.6",
+    effort: "high",
+    title: "Wren · Raise critter spawn height",
+    mode: "always-approve",
+    sandbox: "off",
+    status: "running",
+    contextUsed: 0,
+    messages: wren.messages,
+    agentRun: wren.agentRun,
+  } as never), /Done/);
+  const stillTooling = {
+    ...wren,
+    messages: [
+      ...wren.messages,
+      { id: "t", role: "system" as const, kind: "tool" as const, text: "Shell · running", toolStatus: "running", createdAt: 3 },
+    ],
+  };
+  assert.equal(crewTurnInFlight(stillTooling), true);
+  const catchingUp = {
+    status: "idle" as const,
+    agentRun: { status: "completed" as const, startedAt: 1, finishedAt: 2, isolation: "shared" as const },
+    messages: [
+      { id: "a", role: "assistant" as const, text: "Working the capture.\n\nMission status: complete", createdAt: 2 },
+      { id: "t", role: "system" as const, kind: "tool" as const, text: "Shell · running", toolStatus: "running", createdAt: 3 },
+    ],
+  };
+  assert.equal(crewHasWorkAfterFinish(catchingUp), true);
+  assert.equal(crewTurnInFlight(catchingUp), true);
+});
+
+test("a cancelled worker stays stopped after sidecar thoughts land past finishedAt", () => {
+  const piper = {
+    status: "idle" as const,
+    agentRun: {
+      status: "cancelled" as const,
+      startedAt: 1,
+      finishedAt: 10,
+      isolation: "shared" as const,
+      error: "Cancelled with its parent lifecycle.",
+    },
+    messages: [
+      { id: "a", role: "assistant" as const, text: "I'll start by reading the heritage-tree code.", createdAt: 8 },
+      { id: "th", role: "system" as const, kind: "thought" as const, text: "All captures exist.", createdAt: 20 },
+      { id: "t", role: "system" as const, kind: "tool" as const, text: "heritage-gen3 · completed", toolStatus: "completed", createdAt: 21 },
+    ],
+  };
+  assert.equal(crewHasWorkAfterFinish(piper), false);
+  assert.equal(crewTurnInFlight(piper), false);
+  assert.equal(crewDotKind(piper), "stopped");
+  assert.match(workerSidebarLabel({
+    id: "sess_piper",
+    projectId: "scratch0",
+    parentId: "sess_remove",
+    provider: "grok",
+    model: "grok-4.6",
+    effort: "high",
+    title: "Piper · Gen3 live visual fix",
+    mode: "always-approve",
+    sandbox: "off",
+    status: "idle",
+    contextUsed: 0,
+    messages: piper.messages,
+    agentRun: piper.agentRun,
+  } as never), /Cancelled/);
+  assert.equal(
+    crewWorkerChipLive({ toolStatus: "running" }, piper),
+    false,
+    "a leftover running chip must not outrank a cancelled child",
+  );
+  const leftoverTool = {
+    ...piper,
+    messages: [
+      ...piper.messages,
+      { id: "open", role: "system" as const, kind: "tool" as const, text: "Read · running", toolStatus: "running", createdAt: 22 },
+    ],
+  };
+  assert.equal(crewHasOpenTools(leftoverTool.messages), true);
+  assert.equal(crewTurnInFlight(leftoverTool), false);
+  assert.equal(crewDotKind(leftoverTool), "stopped");
+  const dexter = {
+    status: "idle" as const,
+    agentRun: {
+      status: "failed" as const,
+      startedAt: 1,
+      finishedAt: 10,
+      isolation: "shared" as const,
+      error: "Worker reported blocked.",
+    },
+    messages: [
+      { id: "a", role: "assistant" as const, text: "Mission status: blocked Worker was stopped before verification.", createdAt: 9 },
+    ],
+  };
+  assert.equal(crewTurnInFlight(dexter), false);
+  assert.equal(crewDotKind(dexter), "stopped");
+  assert.match(workerSidebarLabel({
+    id: "sess_dexter",
+    projectId: "scratch0",
+    parentId: "sess_remove",
+    provider: "grok",
+    model: "grok-4.6",
+    effort: "high",
+    title: "Dexter · Finish gen3 verify",
+    mode: "always-approve",
+    sandbox: "off",
+    status: "idle",
+    contextUsed: 0,
+    messages: dexter.messages,
+    agentRun: dexter.agentRun,
+  } as never), /Cancelled/);
 });
 
 test("idle session plus running agentRun is Working, and hydrate does not freeze Worked", () => {
@@ -536,7 +668,7 @@ test("a stopped turn does not leave the last thought fold open", () => {
   assert.doesNotMatch(thought, /el\.open\s*=/);
   assert.doesNotMatch(thought, /reveal/);
   assert.match(popout, /reveal=\{row\.type !== "thought" && tailIndex === packed\.tail\.length - 1\}/);
-  assert.match(popout, /runWasStopped\(child\?\.agentRun\?\.status\)/);
+  assert.match(popout, /runWasStopped\(child\?\.agentRun\?\.status, childStopText\(child\)\)/);
   assert.match(popout, /"stopped"/);
 });
 

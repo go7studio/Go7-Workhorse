@@ -17,8 +17,19 @@ function eventTime(record: Record<string, unknown>): number {
   return 0;
 }
 
+function usageFromCodexPayload(payload: Record<string, unknown>): ReturnType<typeof parseGrokUsage> {
+  return parseGrokUsage(
+    payload.usage ??
+      payload.last_token_usage ??
+      asRecord(payload.info).last_token_usage ??
+      asRecord(payload.info).usage ??
+      payload,
+  );
+}
+
 export function harvestCodexJsonlBills(text: string, after = 0): GrokUsageDraft[] {
-  const bills: GrokUsageDraft[] = [];
+  const records: GrokUsageDraft[] = [];
+  const counts: GrokUsageDraft[] = [];
   for (const line of text.split(/\r?\n/)) {
     if (!line.trim()) continue;
     let parsed: unknown;
@@ -30,14 +41,19 @@ export function harvestCodexJsonlBills(text: string, after = 0): GrokUsageDraft[
     const record = asRecord(parsed);
     const payload = asRecord(record.payload);
     const type = typeof payload.type === "string" ? payload.type : typeof record.sessionUpdate === "string" ? record.sessionUpdate : "";
-    if (type !== "token_count") continue;
+    if (type !== "token_count" && type !== "token_usage_record") continue;
     if (after > 0 && eventTime(record) > 0 && eventTime(record) < after) continue;
-    const info = asRecord(payload.info ?? record.info);
-    const draft = parseGrokUsage(info.last_token_usage ?? payload.last_token_usage ?? info);
+    const draft = usageFromCodexPayload(type === "token_usage_record" ? payload : asRecord(payload.info ?? record.info));
     if (!draft || !usageHasBilledTokens(draft)) continue;
-    bills.push({ ...draft, source: "request" });
+    (type === "token_usage_record" ? records : counts).push({ ...draft, source: "request" });
   }
-  return bills;
+  // Newer rollouts write both. The record is the API call; counting both doubles the turn.
+  // Take the book that billed more in case one stream omitted calls.
+  if (records.length === 0) return counts;
+  if (counts.length === 0) return records;
+  const billed = (drafts: GrokUsageDraft[]) =>
+    drafts.reduce((sum, draft) => sum + draft.inputTokens + draft.outputTokens, 0);
+  return billed(records) >= billed(counts) ? records : counts;
 }
 
 function walkForRollout(dir: string, sessionId: string, depth = 0): string | undefined {

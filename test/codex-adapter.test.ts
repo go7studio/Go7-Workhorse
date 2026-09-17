@@ -1053,6 +1053,67 @@ test("Codex token_count last_token_usage is billed as each request, not a contex
   assert.match(host, /emitResultUsage: false/);
 });
 
+test("Codex jsonl harvest prefers token_usage_record and does not add token_count twice", async () => {
+  const { harvestCodexJsonlBills } = await import("../electron/codex-usage.ts");
+  const jsonl = [
+    JSON.stringify({
+      timestamp: "2026-09-16T12:00:00.000Z",
+      type: "event_msg",
+      payload: {
+        type: "token_count",
+        info: {
+          last_token_usage: {
+            input_tokens: 20_000,
+            cached_input_tokens: 8_000,
+            output_tokens: 100,
+          },
+        },
+      },
+    }),
+    JSON.stringify({
+      timestamp: "2026-09-16T12:00:01.000Z",
+      type: "event_msg",
+      payload: {
+        type: "token_usage_record",
+        usage: {
+          input_tokens: 20_000,
+          cached_input_tokens: 8_000,
+          output_tokens: 100,
+        },
+      },
+    }),
+    JSON.stringify({
+      timestamp: "2026-09-16T12:00:08.000Z",
+      type: "event_msg",
+      payload: {
+        type: "token_usage_record",
+        usage: {
+          input_tokens: 4_000,
+          cached_input_tokens: 18_000,
+          output_tokens: 80,
+        },
+      },
+    }),
+  ].join("\n");
+  const bills = harvestCodexJsonlBills(jsonl);
+  assert.equal(bills.length, 2);
+  assert.equal(
+    bills.reduce((sum, bill) => sum + bill.inputTokens + bill.outputTokens, 0),
+    12_000 + 100 + 4_000 + 80,
+  );
+});
+
+test("Codex finalize keeps the request sum when a smaller turn snapshot arrives last", () => {
+  const folded = finalizeTurnUsage([
+    { provider: "codex", model: "gpt-5.4", inputTokens: 12_000, outputTokens: 400, cacheReadTokens: 8_000, source: "request" },
+    { provider: "codex", model: "gpt-5.4", inputTokens: 4_000, outputTokens: 200, cacheReadTokens: 18_000, source: "request" },
+    { provider: "codex", model: "gpt-5.4", inputTokens: 4_000, outputTokens: 200, cacheReadTokens: 18_000, source: "turn" },
+  ]);
+  assert.equal(folded.inputTokens, 16_000);
+  assert.equal(folded.outputTokens, 600);
+  assert.equal(folded.cacheReadTokens, 26_000);
+});
+
 test("shared ACP usage parser and finalize do not double-count Codex turns", () => {
   const turn = parseAcpUsage({
     sessionUpdate: "turn_completed",

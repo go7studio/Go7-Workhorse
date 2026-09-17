@@ -225,6 +225,7 @@ import { applyVendorBackgroundTask } from "./vendor-tasks";
 import {
   addLineupRow,
   applyChildIdleSync,
+  applyUserStop,
   lineupStatusForTerminalRun,
   awaitAgentsWaits,
   childReportText,
@@ -8801,27 +8802,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const now = Date.now();
       for (const target of targets) userCancelledTurns.current.add(target);
       for (const child of current.sessions) {
-        if (targets.has(child.id) && child.status === "running") cancelVendorSession(child);
+        if (!targets.has(child.id)) continue;
+        if (
+          child.status === "running" ||
+          child.status === "needs-input" ||
+          child.agentRun?.status === "running"
+        ) {
+          cancelVendorSession(child);
+        }
       }
-      let sessions = current.sessions.map((session) => {
-        if (!targets.has(session.id) || session.status !== "running") return session;
-        return {
-          ...session,
-          status: "idle" as const,
-          agentRun: session.agentRun ? {
-            ...session.agentRun,
-            status: "cancelled" as const,
-            finishedAt: now,
-            error: "Cancelled with its parent lifecycle.",
-          } : undefined,
-        };
-      });
-      for (const session of current.sessions) {
-        if (!targets.has(session.id) || !session.parentId) continue;
-        if (session.status !== "running" && session.agentRun?.status !== "running") continue;
-        sessions = applyChildIdleSync(sessions, session.id, "cancelled", { now });
-      }
-      return { ...current, sessions };
+      return { ...current, sessions: applyUserStop(current.sessions, targets, now) };
     });
   }, []);
 

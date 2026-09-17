@@ -92,8 +92,8 @@ function cellSummary(cell: HeatCell): string {
   const bots = cell.bots.map((bot) => `${bot.label} ${formatTokens(bot.tokens)}`).join(", ");
   const io = formatIoLine(cell);
   return bots
-    ? `${cell.label}: ${formatTokens(cell.tokens)} tokens · ${io} · ${bots}`
-    : `${cell.label}: ${formatTokens(cell.tokens)} tokens · ${io}`;
+    ? `${cell.label}: ${formatTokens(cell.tokens)} billed · ${io} · ${bots}`
+    : `${cell.label}: ${formatTokens(cell.tokens)} billed · ${io}`;
 }
 
 function Stretch({
@@ -246,7 +246,7 @@ function Stretch({
       {tip && (
         <div className={`usage-tip ${tip.place}`} style={{ left: tip.left, top: tip.top }}>
           <strong>{tip.cell.label}</strong>
-          <span>{formatTokens(tip.cell.tokens)} tokens</span>
+          <span>{formatTokens(tip.cell.tokens)} billed</span>
           <span>{formatIoLine({ ...tip.cell, events: 1 })}</span>
           {!hideBots && tip.cell.bots.length > 0 ? (
             <ul>
@@ -260,7 +260,7 @@ function Stretch({
                     {bot.label}
                   </span>
                   <em>
-                    {formatTokens(bot.tokens)}
+                    {formatTokens(bot.tokens)} billed
                     <small>
                       {formatIoLine({ ...bot, events: 1 })}
                     </small>

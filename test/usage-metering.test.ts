@@ -224,11 +224,11 @@ test("what a row shows adds up to what a row totals", () => {
   const grok = rows.find((row) => row.label === "grok-4.6")!;
   // The screenshot said "24.5M in" beside a total of 953k. Now the label names
   // fresh input and cache apart, and the total is fresh + out (+ cache writes).
-  assert.equal(formatIoLine(grok), "824k in · 23.7M cached · 129k out");
+  assert.equal(formatIoLine(grok), "824k in · 129k out · 23.7M cached");
   assert.equal(grok.totalTokens, 823_689 + 128_907);
   assert.equal(eventTotal({ id: "a", at: 1, provider: "grok", model: "grok-4.6", inputTokens: 823_689, outputTokens: 128_907, cacheReadTokens: 23_680_384, cacheWriteTokens: 0 }), grok.totalTokens);
   const fable = rows.find((row) => row.label === "claude-fable-5")!;
-  assert.equal(formatIoLine(fable), "74 in · 3.9M cached · 31k out");
+  assert.equal(formatIoLine(fable), "74 in · 31k out · 3.9M cached");
   assert.equal(fable.totalTokens, 31_256);
   assert.equal(formatIoLine({ inputTokens: 0, outputTokens: 0, events: 0 }), "No token data");
 });

@@ -62,12 +62,13 @@ test("an explicit statement that nothing remains does not create a continuation 
   assert.equal(calls, 1);
 });
 
-test("a completion label with explicit unfinished work keeps the worker going", async () => {
+test("Mission status: complete ends the worker even when the diary said Next I'll", async () => {
   let calls = 0;
+  const report = "Next I'll run the sky-life smoke.\nHarvest seats held.\n\nMission status: complete";
   const result = await finishWorkerTask({ prompt: "Build and verify", stopped: () => false,
-    run: async () => ++calls === 1 ? "Next I will rebuild.\nMission status: complete" : "Build verified.\nMission status: complete" });
-  assert.equal(calls, 2);
-  assert.match(result, /^Build verified/);
+    run: async () => { calls += 1; return report; } });
+  assert.equal(calls, 1);
+  assert.equal(result, report);
 });
 
 test("worker completion respects cancellation, blockers, and the continuation ceiling", async () => {

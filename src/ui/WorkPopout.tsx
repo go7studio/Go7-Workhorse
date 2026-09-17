@@ -1,5 +1,6 @@
 import { memo, useEffect, useRef, useState, type SyntheticEvent } from "react";
-import { crewTurnInFlight } from "../lib/crew-live";
+import { crewWorkerChipLive } from "../lib/crew-live";
+import { workerWasStoppedBeforeVerification } from "../lib/worker-completion";
 import { collapseToolText, splitToolLine, toolIsFinished } from "../lib/grok-events";
 import { unsquashSentences } from "../lib/markdown";
 import { deskInk } from "../lib/settings";
@@ -60,27 +61,28 @@ export function crewWorkerName(
   return label.split("·", 1)[0]?.trim() || "Subagent";
 }
 
-function crewWorkerLive(
-  marker: ChatMessage,
-  child?: Pick<Session, "status" | "agentRun" | "messages"> | null,
-): boolean {
-  if (child && crewTurnInFlight(child)) return true;
-  return marker.toolStatus === "running";
+function runWasStopped(status: string | undefined, text?: string): boolean {
+  return (
+    status === "cancelled" ||
+    status === "interrupted" ||
+    status === "timed-out" ||
+    workerWasStoppedBeforeVerification(text)
+  );
 }
 
-function runWasStopped(status: string | undefined): boolean {
-  return status === "cancelled" || status === "interrupted" || status === "timed-out";
+function childStopText(child?: { messages?: ChatMessage[] } | null): string | undefined {
+  return child?.messages?.find((message) => workerWasStoppedBeforeVerification(message.text))?.text;
 }
 
 function crewWorkerFailed(
   marker: ChatMessage,
-  child?: { agentRun?: { status?: string; executionOwner?: string } } | null,
+  child?: { agentRun?: { status?: string; executionOwner?: string }; messages?: ChatMessage[] } | null,
   live = false,
 ): boolean {
   return (
     !live &&
     child?.agentRun?.executionOwner !== "parent" &&
-    !runWasStopped(child?.agentRun?.status) &&
+    !runWasStopped(child?.agentRun?.status, childStopText(child)) &&
     !runWasStopped(marker.toolStatus) &&
     (marker.toolStatus === "failed" || child?.agentRun?.status === "failed")
   );
@@ -89,7 +91,7 @@ function crewWorkerFailed(
 function crewWorkersFromStore(store: Store, threads: ChatMessage[]): CrewSummaryWorker[] {
   return threads.map((marker) => {
     const child = store.sessions.find((item) => item.id === marker.subagentSessionId);
-    const live = crewWorkerLive(marker, child);
+    const live = crewWorkerChipLive(marker, child);
     return {
       name: crewWorkerName(marker, child),
       live,
@@ -198,7 +200,7 @@ function SubagentRow({
   const store = useStore();
   const [open, setOpen] = useState(false);
   const child = store.sessions.find((item) => item.id === marker.subagentSessionId);
-  const childLive = crewWorkerLive(marker, child);
+  const childLive = crewWorkerChipLive(marker, child);
   const title = workerFoldLabel(marker, child);
   const failed = crewWorkerFailed(marker, child, childLive);
   const ink = child ? deskInk(child, store.settings) : undefined;
@@ -241,7 +243,8 @@ function SubagentRow({
                 ? "parent took over"
                 : child?.agentRun?.status === "interrupted"
                   ? "interrupted"
-                  : child?.agentRun?.status === "cancelled" || marker.toolStatus === "cancelled"
+                  : runWasStopped(child?.agentRun?.status, childStopText(child)) ||
+                      runWasStopped(marker.toolStatus)
                     ? "stopped"
                     : failed
                       ? "failed"

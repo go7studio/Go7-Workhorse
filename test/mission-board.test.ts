@@ -232,6 +232,15 @@ test("workerMissionOutcome reads the last status line", () => {
   assert.equal(workerMissionOutcome("The task mentioned STATUS: blocked inline, but the work completed."), undefined);
   assert.equal(reportLeavesWorkOpen("Export failed (missing Java SDK). Next I'll send Wren to rebuild."), true);
   assert.equal(reportLeavesWorkOpen("Path glue fixed and verified.\n\nMission status: complete."), false);
+  assert.equal(
+    reportLeavesWorkOpen("Next I'll run the sky-life smoke.\nHarvest seats held.\n\nMission status: complete"),
+    false,
+    "a diary Next I'll does not override the last complete line",
+  );
+  assert.equal(
+    reportLeavesWorkOpen("Could not export the APK. Missing Java SDK. Next I'll rebuild.\n\nMission status: continue."),
+    true,
+  );
 });
 
 test("a completed adaptive wave does not leave parent.mission at scout with nothing running", () => {
@@ -397,7 +406,7 @@ test("reload settles a completed adaptive mission left on the parent at scout", 
 test("unmet leftover work after a completed child does not settle as complete", () => {
   const current = mission({ iteration: 1, phase: "scout", previousWorkerIds: [] });
   const leftover =
-    "APK export failed (missing Java SDK). Next I'll send Wren to rebuild then Dexter to rerun.\n\nMission status: complete.";
+    "APK export failed (missing Java SDK). Next I'll send Wren to rebuild then Dexter to rerun.\n\nMission status: continue.";
   const parent = parentWithLineup(
     [
       {
@@ -445,7 +454,7 @@ test("unmet leftover work after a completed child does not settle as complete", 
 
 test("a first-pass Next I'll / blocked export is not a successful settle, and continue is offered", () => {
   const current = mission({ iteration: 1, phase: "scout", previousWorkerIds: [] });
-  const leftover = "Could not export the APK. Missing Java SDK. Next I'll rebuild.\n\nMission status: complete.";
+  const leftover = "Could not export the APK. Missing Java SDK. Next I'll rebuild.\n\nMission status: continue.";
   const parent = parentWithLineup(
     [
       {

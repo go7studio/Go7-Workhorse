@@ -1,7 +1,8 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { lastTalkedAt } from "../lib/chats";
-import { crewTurnInFlight } from "../lib/crew-live";
+import { crewReportSettled, crewTurnInFlight } from "../lib/crew-live";
+import { workerWasStoppedBeforeVerification } from "../lib/worker-completion";
 import type { MissionRowLook } from "../lib/lineup";
 import { clampMenuPosition } from "../lib/edit-menu";
 import { formatChatSidebar } from "../lib/session";
@@ -16,14 +17,26 @@ import { HorseStatus } from "./HorseStatus";
 export type CrewDotKind = "working" | "failed" | "stopped" | "needs-you" | "idle";
 
 /** Shared run-state mapping; the sidebar expresses each state with the mascot. */
+function sessionLooksCancelled(
+  session: Pick<Session, "agentRun"> & { messages?: Session["messages"] },
+): boolean {
+  const run = session.agentRun?.status;
+  if (run === "cancelled" || run === "interrupted" || run === "timed-out" || run === "budget-exceeded") return true;
+  return Boolean(
+    run === "failed" &&
+      session.messages?.some((message) => workerWasStoppedBeforeVerification(message.text)),
+  );
+}
+
 export function crewDotKind(
   session: Pick<Session, "status" | "agentRun"> & { messages?: Session["messages"] },
+  crewLive = false,
 ): CrewDotKind {
   const run = session.agentRun?.status;
   if (session.status === "needs-input") return "needs-you";
-  if (crewTurnInFlight(session)) return "working";
+  if (crewTurnInFlight(session) || crewLive) return "working";
+  if (sessionLooksCancelled(session)) return "stopped";
   if (run === "failed") return "failed";
-  if (run === "cancelled" || run === "interrupted" || run === "timed-out" || run === "budget-exceeded") return "stopped";
   return "idle";
 }
 
@@ -38,11 +51,11 @@ export function crewDotClass(kind: CrewDotKind): string {
 export function workerSidebarLabel(session: Session, botName?: string): string {
   const name = botName?.trim() || modelName(session.provider, session.model);
   const effort = effortLabel(session.effort ?? null);
-  const cancelled = session.agentRun?.status === "cancelled" ? "Cancelled" : "";
+  const cancelled = sessionLooksCancelled(session) ? "Cancelled" : "";
   const done =
     !crewTurnInFlight(session) &&
-    session.agentRun?.status === "completed" &&
-    session.agentRun.executionOwner !== "parent"
+    (session.agentRun?.status === "completed" || crewReportSettled(session)) &&
+    session.agentRun?.executionOwner !== "parent"
       ? "Done"
       : "";
   return [name, effort, cancelled, done].filter(Boolean).join(" · ");
@@ -115,7 +128,7 @@ export function ChatRow({
       })
     : "Attach LLM";
   const workerLabel = workerSidebarLabel(session, bot?.name ?? stockLink?.name);
-  const dotKind = crewDotKind(session);
+  const dotKind = crewDotKind(session, !nested && Boolean(mission?.running));
   const waveWord = mission?.word && mission.word !== "Working…" ? mission.word : undefined;
   const link = desk.link;
 

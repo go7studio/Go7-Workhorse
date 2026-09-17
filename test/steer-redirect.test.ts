@@ -3,7 +3,8 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
-import { addLineupRow, applyChildIdleSync, emptyLineup, LINEUP_FINISHED_NOTICE, lineupJoinHasActionableRow, lineupJoinParentIsLive, maybeEnqueueLineupJoin, shouldJoinAfterChildSettle } from "../src/lib/lineup";
+import { addLineupRow, applyChildIdleSync, applyUserStop, emptyLineup, LINEUP_FINISHED_NOTICE, lineupJoinHasActionableRow, lineupJoinParentIsLive, maybeEnqueueLineupJoin, settleStatusForStop, shouldJoinAfterChildSettle } from "../src/lib/lineup";
+import { crewTurnInFlight } from "../src/lib/crew-live";
 import { settleStatusForWorkerReport, workerWasStoppedBeforeVerification } from "../src/lib/worker-completion";
 import { applyStreamQueues } from "../src/lib/stream-commit";
 import { workPopState } from "../src/lib/turns";
@@ -78,6 +79,89 @@ test("a steered turn stays Working while thoughts still belong to the live call"
   });
   assert.equal(drained.sessions[0]?.messages.find((message) => message.id === "a2")?.text, "The miner built and exported.");
   assert.ok(drained.sessions[0]?.messages.some((message) => message.kind === "thought"));
+});
+
+test("Stop on a finished report sits the horse down and wakes the lead", () => {
+  assert.equal(
+    settleStatusForStop({
+      messages: [{ id: "a", role: "assistant", text: "Next I'll capture.\n\nMission status: complete", createdAt: 2 }],
+    }),
+    "completed",
+  );
+  assert.equal(
+    settleStatusForStop({
+      messages: [{ id: "a", role: "assistant", text: "Still replacing 180.", createdAt: 2 }],
+    }),
+    "cancelled",
+  );
+
+  const folder = "/repo";
+  let lineup = addLineupRow(emptyLineup(folder, 1, "critters"), {
+    childId: "wren",
+    title: "Wren · Raise height",
+    slice: "height",
+    folder,
+    vendor: "Grok",
+    status: "running",
+    startedAt: 1,
+  });
+  lineup = addLineupRow(lineup, {
+    childId: "dexter",
+    title: "Dexter · Chip",
+    slice: "chip",
+    folder,
+    vendor: "Grok",
+    status: "running",
+    startedAt: 1,
+  });
+  const parent: Session = {
+    id: "orch",
+    projectId: "p1",
+    provider: "grok",
+    model: "grok-4.6",
+    effort: "medium",
+    title: "Scratch0",
+    mode: "ask",
+    sandbox: "workspace",
+    status: "idle",
+    contextUsed: 0,
+    messages: [],
+    lineup,
+  };
+  const wren: Session = {
+    ...parent,
+    id: "wren",
+    parentId: "orch",
+    hidden: true,
+    title: "Wren · Raise height",
+    status: "running",
+    messages: [
+      { id: "a1", role: "assistant", text: "Lift is 12px.\n\nMission status: complete", createdAt: 2 },
+      { id: "t1", role: "system", kind: "tool", text: "Shell · running", toolStatus: "running", createdAt: 3 },
+    ],
+    agentRun: { status: "cancelled", startedAt: 1, finishedAt: 4, isolation: "shared", error: "Cancelled with its parent lifecycle." },
+    lineup: undefined,
+  };
+  const dexter: Session = {
+    ...wren,
+    id: "dexter",
+    title: "Dexter · Chip",
+    status: "idle",
+    messages: [{ id: "a2", role: "assistant", text: "Chip is in.\n\nMission status: complete", createdAt: 2 }],
+    agentRun: { status: "cancelled", startedAt: 1, finishedAt: 4, isolation: "shared" },
+  };
+  assert.equal(crewTurnInFlight(wren), false, "cancelled run is not live even with a leftover tool");
+  const stopped = applyUserStop([parent, wren, dexter], ["wren"], 5);
+  const nextWren = stopped.find((session) => session.id === "wren");
+  const nextParent = stopped.find((session) => session.id === "orch");
+  assert.equal(nextWren?.status, "idle");
+  assert.equal(nextWren?.agentRun?.status, "completed");
+  assert.equal(nextWren?.messages.some((message) => message.kind === "tool" && message.toolStatus === "running"), false);
+  assert.equal(crewTurnInFlight(nextWren!), false);
+  assert.equal(nextParent?.lineup?.rows.find((row) => row.childId === "wren")?.status, "completed");
+  assert.equal(nextParent?.lineup?.rows.find((row) => row.childId === "dexter")?.status, "completed");
+  assert.ok(nextParent?.queue?.some((item) => item.hideUser && /ORCHESTRATION CALL|workers finished|Raise height/i.test(item.text)));
+  assert.match(store, /applyUserStop/);
 });
 
 test("cancelling one worker does not join or say the wave finished", () => {

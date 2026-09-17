@@ -1884,7 +1884,8 @@ export function promptTokens(row: { inputTokens: number; cacheReadTokens?: numbe
  * "in" is fresh input only. Cache reads are the same context replayed each
  * turn, and were once folded into "in" — so a chat that read 74 new tokens
  * against 3.9M of cached history said "3.9M in", beside a total that left the
- * cache out. Now the two figures are named apart, and both add up to the total.
+ * cache out. In + out is the billed total. Cached is named last so the line
+ * does not look like it should sum to that total.
  */
 export function formatIoLine(row: {
   inputTokens: number;
@@ -1894,9 +1895,8 @@ export function formatIoLine(row: {
 }): string {
   if (row.events === 0) return "No token data";
   const cached = row.cacheReadTokens ?? 0;
-  const parts = [`${formatTokens(row.inputTokens)} in`];
+  const parts = [`${formatTokens(row.inputTokens)} in`, `${formatTokens(row.outputTokens)} out`];
   if (cached > 0) parts.push(`${formatTokens(cached)} cached`);
-  parts.push(`${formatTokens(row.outputTokens)} out`);
   return parts.join(" · ");
 }
 
@@ -2054,8 +2054,22 @@ export function finalizeTurnUsage(drafts: UsageDraft[]): UsageDraft {
     const costUsd = lastDefined(drafts, (draft) => draft.costUsd);
     const trailer = { ...(contextUsed !== undefined ? { contextUsed } : {}), ...(costUsd !== undefined ? { costUsd } : {}) };
     const turns = drafts.filter((draft) => draft.source === "turn" && usageHasBilledTokens(draft));
-    if (turns.length) return { ...turns[turns.length - 1]!, ...trailer };
     const requests = drafts.filter((draft) => draft.source === "request" && usageHasBilledTokens(draft));
+    if (turns.length && requests.length) {
+      const turn = { ...turns[turns.length - 1]!, ...trailer };
+      const request = { ...sumRequestBills(requests), ...trailer };
+      // Grok's turn_completed is the whole turn and must replace snapshots.
+      // Codex often tags the last API call `turn` while harvest lists every
+      // request — keep the larger book so a tool loop is not one leftover call.
+      const codex = turn.provider === "codex" || requests.some((draft) => draft.provider === "codex");
+      if (codex) {
+        const turnBill = turn.inputTokens + turn.outputTokens;
+        const requestBill = request.inputTokens + request.outputTokens;
+        return requestBill >= turnBill ? request : turn;
+      }
+      return turn;
+    }
+    if (turns.length) return { ...turns[turns.length - 1]!, ...trailer };
     if (requests.length) return { ...sumRequestBills(requests), ...trailer };
     const untagged = drafts.filter((draft) => !draft.source && usageHasBilledTokens(draft));
     if (untagged.length) return { ...finalizeTurnUsage(untagged), ...trailer };

@@ -2731,6 +2731,31 @@ test("chat markdown turns status dumps into facts and renders inline marks", () 
   assert.ok(include.some((block) => block.type === "h"));
 });
 
+test("peel keeps a numbered glow-type list that later prose cites", () => {
+  const reply = [
+    "I'll check the field-glow notes and the project code for how many glow types exist. The glow question looks like genome or catalog types — I’ll pull those definitions next. There are **three** ways a fruit counts as a glow fruit (`Catalog.is_glow_fruit`), all gated so **COMMON stays unglazed** (`rarity_rank < 1`):",
+    "",
+    "1. **Lantern** — `body_form == \"lantern\"`",
+    "2. **Ember** — `interior == \"ember\"`",
+    "3. **Glow gene** — scalar `glow > 0.55`",
+    "",
+    "Those are the field-light sources. Ember uses the fire halo (`#e83a12` / `#ff7624`); lantern and glow-gene mix body/accent hue.",
+    "",
+    "Stamps are a separate pair: **GLOW** (scalar `> 0.72`) and **EMBER** (interior). The interior gene itself has four alleles (`none`, `seeds`, `core`, `ember`); only ember is a glow interior.",
+  ].join("\n");
+  for (const live of [true, false]) {
+    const peeled = peelPlanningPreamble(reply, live);
+    assert.match(peeled.body, /1\.\s+\*\*Lantern\*\*/);
+    assert.match(peeled.body, /2\.\s+\*\*Ember\*\*/);
+    assert.match(peeled.body, /3\.\s+\*\*Glow gene\*\*/);
+    assert.doesNotMatch(peeled.body, /^1\.\s*$/m);
+    assert.doesNotMatch(peeled.thought, /\*\*Lantern\*\*/);
+    assert.doesNotMatch(peeled.thought, /\*\*Ember\*\*/);
+    assert.doesNotMatch(peeled.thought, /\*\*Glow gene\*\*/);
+    assert.match(peeled.thought, /I'll check the field-glow notes/);
+  }
+});
+
 test("chat markdown keeps loose numbered lists as one incrementing sequence", () => {
   const inlineText = (parts: { type: string; text?: string }[]) =>
     parts.map((part) => ("text" in part ? String(part.text ?? "") : "")).join("");
@@ -5978,7 +6003,7 @@ test("UsagePane ships the Figma fuel-ring overview, not the old token line", asy
   // "in" is fresh input; cache reads are named apart. This row once read
   // "120k in", which is the whole replayed prompt, beside a total that left
   // the cache out — the two could never be reconciled by eye.
-  assert.equal(formatIoLine({ inputTokens: 6, outputTokens: 2500, cacheReadTokens: 120_000 }), "6 in · 120k cached · 2.5k out");
+  assert.equal(formatIoLine({ inputTokens: 6, outputTokens: 2500, cacheReadTokens: 120_000 }), "6 in · 2.5k out · 120k cached");
   assert.equal(formatIoLine({ inputTokens: 349, outputTokens: 7168 }), "349 in · 7.2k out");
   assert.equal(modelName("custom", "hf:moonshotai/Kimi-K3"), "Kimi K3");
   const mini = byModel(

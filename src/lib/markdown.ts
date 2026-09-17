@@ -202,11 +202,20 @@ function isProcessSentence(text: string): boolean {
   return isPlanningParagraph(trimmed) || PROCESS_SENTENCE.test(trimmed);
 }
 
+function isListOrMarkupParagraph(text: string): boolean {
+  const first = firstLine(text);
+  if (!first) return false;
+  if (/^#{1,6}\s/.test(first) || isTableLine(first) || containsMarkdownTable(text)) return true;
+  return /^[-*•●]\s+\S/.test(first) || /^\d+\.\s+\S/.test(first);
+}
+
 function splitReplySentences(text: string): string[] {
   const parts = String(text ?? "")
     .replace(/\r\n/g, "\n")
     .split(
-      /(?<=[.!?])\s+(?=(?:[A-Z*>]|I['’]ll |I['’]m |I will |Let me |Looking |Checking |Listing |Sending |Joining |Not |No\.|Yes\.))/,
+      // Do not treat `1. **Title**` as two sentences. The `*` lookahead is for
+      // a real new sentence that starts bold; numbered-list markers stay intact.
+      /(?<=[.!?])(?<!(?:^|[\n\s])\d{1,2}\.)\s+(?=(?:[A-Z*>]|I['’]ll |I['’]m |I will |Let me |Looking |Checking |Listing |Sending |Joining |Not |No\.|Yes\.))/,
     )
     .map((item) => item.trim())
     .filter(Boolean);
@@ -325,6 +334,9 @@ export function peelThinkTags(text: string): { thought: string; body: string } {
 type ReplyUnit = { text: string; para: number; kind: "thought" | "answer" };
 
 function unitsFromParagraph(para: string, paraIndex: number): ReplyUnit[] {
+  if (isListOrMarkupParagraph(para) && !PROCESS_NARRATION.test(para)) {
+    return [{ text: para, para: paraIndex, kind: "answer" }];
+  }
   const parts = splitReplySentences(para);
   if (parts.length <= 1) {
     const locked = isLockedAnswerParagraph(para) && !PROCESS_NARRATION.test(para);
@@ -380,6 +392,9 @@ function dropRestatedAnswers(units: ReplyUnit[]): ReplyUnit[] {
         break;
       }
       if (earlier.length < 3) continue;
+      // A numbered list that later prose cites is not a restated sentence.
+      if (isListOrMarkupParagraph(answers[i]?.text ?? "")) continue;
+      if (later.size > earlier.length * 2) continue;
       let overlap = 0;
       for (const word of earlier) if (later.has(word)) overlap += 1;
       if (overlap / earlier.length >= 0.72) {
@@ -460,7 +475,7 @@ function peelPlanningPreambleUncached(text: string, live: boolean): { thought: s
       return peelPlanningUnits(rest, [tagged.thought, lead].filter(Boolean).join("\n\n"), live);
     }
   }
-  const heading = source.match(/\n(?=#{1,6}\s+|[-*•●]\s+\S|\s*\|.+\|)/);
+  const heading = source.match(/\n(?=#{1,6}\s+|[-*•●]\s+\S|\d+\.\s+\S|\s*\|.+\|)/);
   if (heading && heading.index !== undefined && heading.index >= 40) {
     const lead = source.slice(0, heading.index).trim();
     const rest = source.slice(heading.index).trim();

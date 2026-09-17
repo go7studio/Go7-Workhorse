@@ -62,11 +62,16 @@ export function crewHasWorkAfterFinish(
  * are history.
  */
 export function crewTurnInFlight(session: Pick<Session, "status" | "agentRun"> & { messages?: ChatMessage[] }): boolean {
-  if (session.status === "running" || session.status === "needs-input") return true;
+  if (session.status === "needs-input") return true;
   if (crewHasOpenTools(session.messages)) return true;
   if (crewHasWorkAfterFinish(session)) return true;
   const run = session.agentRun?.status;
-  if (!run || TERMINAL_RUN.has(run)) return false;
+  // A leftover session.status of running after a terminal agentRun is not
+  // a live turn. Hydrate used to skip those children, so a failed run kept
+  // the parent saying Working.
+  if (run && TERMINAL_RUN.has(run)) return false;
+  if (session.status === "running") return true;
+  if (!run) return false;
   if (run === "running") return true;
   return Boolean(session.agentRun && !session.agentRun.finishedAt);
 }

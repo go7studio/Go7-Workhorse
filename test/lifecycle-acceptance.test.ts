@@ -30,7 +30,7 @@ import {
 } from "../src/lib/subagents";
 import type { Session } from "../src/lib/types";
 import { applyWorkerBudgetUsage } from "../src/lib/worker-budget";
-import { finishWorkerTask } from "../src/lib/worker-completion";
+import { finishWorkerTask, settleStatusForWorkerReport } from "../src/lib/worker-completion";
 
 test("worker progress stays local until a verified completion report", async () => {
   const reports = ["Walk 3 reached hang overlay and pack.", "Still working.\nMission status: continue", "Farewell is visible in final.png; all requested checks passed.\nMission status: complete"];
@@ -77,9 +77,11 @@ test("worker completion respects cancellation, blockers, and the continuation ce
     run: async () => { calls += 1; stopped = true; return "Partial."; } });
   assert.equal(calls, 1);
   assert.match(cancelled, /Mission status: blocked$/);
+  assert.equal(settleStatusForWorkerReport(cancelled), "cancelled");
   const blocked = await finishWorkerTask({ prompt: "Verify", stopped: () => false,
     run: async () => "Device disconnected.\nMission status: blocked" });
   assert.match(blocked, /^Device disconnected/);
+  assert.equal(settleStatusForWorkerReport(blocked), "failed");
   calls = 0;
   const capped = await finishWorkerTask({ prompt: "Verify", stopped: () => false, maxContinuations: 2,
     run: async () => `Partial ${++calls}.\nMission status: continue` });

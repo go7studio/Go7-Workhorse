@@ -73,6 +73,9 @@ test("a worker stays live through thinking, not only while a tool is in flight",
   assert.match(popout, /allowThinking: !talking/);
   assert.match(popout, /workFoldClockLabel/);
   assert.match(popout, /foldLive/);
+  assert.match(popout, /const ownLive = live \|\| toolsLive;/);
+  assert.match(popout, /workFoldClockLabel\(\{ live: ownLive/);
+  assert.match(popout, /namedCrewSummary\(crewWorkers, \{ live: anyChildLive \}\)/);
 });
 
 test("elapsed clock advancing with completing tools says Working, then Worked after finish", () => {

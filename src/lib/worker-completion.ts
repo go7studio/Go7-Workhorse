@@ -1,6 +1,24 @@
-import { reportLeavesWorkOpen, workerMissionOutcome } from "./subagents";
+import { reportLeavesWorkOpen, workerMissionOutcome, workerReportedBlocked } from "./subagents";
 
 export const WORKER_COMPLETION_RULE = "Keep working on the assigned task until it is verified. Progress belongs in commentary, not a final reply. End your final report with Mission status: complete only after every requested check passes; otherwise use Mission status: continue or Mission status: blocked and explain what remains. Never treat a tool finishing or a partial milestone as the task finishing.";
+
+export const WORKER_STOPPED_BEFORE_VERIFICATION = "Worker was stopped before verification.";
+export const WORKER_STOPPED_BEFORE_VERIFICATION_NOTE = "Worker stopped before verification.";
+
+/** Desk-injected stop stub — not a worker saying the slice is blocked. */
+export function workerWasStoppedBeforeVerification(text: string | undefined): boolean {
+  return Boolean(text && /Worker (?:was )?stopped before verification/i.test(text));
+}
+
+/** A steered or cancelled worker is not a failed wave. A real blocker still is. */
+export function settleStatusForWorkerReport(
+  text: string | undefined,
+  extra?: { cancelled?: boolean; ownershipBlocked?: boolean },
+): "cancelled" | "failed" | "completed" {
+  if (extra?.cancelled || workerWasStoppedBeforeVerification(text)) return "cancelled";
+  if (extra?.ownershipBlocked || workerReportedBlocked(text)) return "failed";
+  return "completed";
+}
 
 /** A vendor turn ending is not evidence that the delegated task finished. */
 export async function finishWorkerTask(input: {
@@ -13,9 +31,9 @@ export async function finishWorkerTask(input: {
   let previous = "";
   const limit = input.maxContinuations ?? 8;
   for (let attempt = 0; ; attempt += 1) {
-    if (input.stopped()) return "Mission status: blocked\nWorker was stopped before verification.";
+    if (input.stopped()) return `Mission status: blocked\n${WORKER_STOPPED_BEFORE_VERIFICATION}`;
     const report = await input.run(prompt);
-    if (input.stopped()) return `${report}\n\nWorker stopped before verification.\nMission status: blocked`;
+    if (input.stopped()) return `${report}\n\n${WORKER_STOPPED_BEFORE_VERIFICATION_NOTE}\nMission status: blocked`;
     const outcome = workerMissionOutcome(report);
     const completionText = report
       .replace(/\bno remaining work\b/gi, "nothing remains")

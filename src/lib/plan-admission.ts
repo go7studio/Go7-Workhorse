@@ -5,7 +5,7 @@ import {
   setPlanStepStatus,
   type PlanTransition,
 } from "./plan";
-import { addLineupRow, lineupIsTerminal, maybeEnqueueLineupJoin } from "./lineup";
+import { addLineupRow, lineupIsTerminal, lineupWaveChildren, maybeEnqueueLineupJoin } from "./lineup";
 import { formatAuditorPrompt, nextWorkerName, workerTaskTitle } from "./subagents";
 import type { PlanEvidence, PlanRun, ProviderId, Session } from "./types";
 
@@ -134,7 +134,7 @@ export function applyPlanAuditorSpawn(
 ): PlanAuditorSpawn {
   const now = ids.now ?? Date.now();
   const parent = sessions.find((session) => session.id === parentId);
-  const children = sessions.filter((session) => session.parentId === parentId);
+  const children = lineupWaveChildren(sessions, parentId);
   if (!parent?.planRun || parent.planRun.status !== "running" || !parent.lineup || !lineupIsTerminal(parent.lineup, children)) {
     return { sessions };
   }

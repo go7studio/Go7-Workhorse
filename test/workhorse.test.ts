@@ -6868,6 +6868,9 @@ test("transcript groups tools and thoughts above the final reply", () => {
   assert.match(popout, /onOpenThread/);
   assert.match(popout, /working · \$\{formatWorked/);
   assert.match(popout, /anyChildLive/);
+  assert.match(popout, /const ownLive = live \|\| toolsLive;/);
+  assert.match(popout, /workFoldClockLabel\(\{ live: ownLive/);
+  assert.match(popout, /workPopState\(\{ live: ownLive/);
   assert.match(popout, /deskInk/);
   assert.match(popout, /subagentTurns/);
   assert.match(popout, /subagent-thread-slot/);
@@ -9571,7 +9574,18 @@ test("desk-enforced orchestrator vs worker lineup", async () => {
   const finished = applyLineupChildFinish([parentSess, childSess], "sess_a", "HUD done", "completed", 9);
   const parentAfter = finished.find((item) => item.id === "orch");
   assert.equal(parentAfter?.lineup?.rows.find((row) => row.childId === "sess_a")?.report, "HUD done");
-  const broken = applyLineupTurnBreak(finished, "orch");
+  const stillLive = applyLineupTurnBreak(finished, "orch");
+  assert.equal(
+    stillLive.find((item) => item.id === "orch")?.messages.some((message) => message.text === LINEUP_FINISHED_NOTICE),
+    false,
+    "sess_b is still running — 0.6.60 posted All workers finished anyway",
+  );
+  const bothDone = finished.map((item) =>
+    item.id === "orch" && item.lineup
+      ? { ...item, lineup: setLineupRowStatus(item.lineup, "sess_b", "completed", { report: "Ships done", finishedAt: 10 })! }
+      : item,
+  );
+  const broken = applyLineupTurnBreak(bothDone, "orch");
   assert.ok(broken.find((item) => item.id === "orch")?.messages.some((message) => message.text === LINEUP_FINISHED_NOTICE));
   assert.match(lineupSynthesizePrompt(done), /HUD report/);
   assert.match(lineupSynthesizePrompt(done), /own words|combined review/);

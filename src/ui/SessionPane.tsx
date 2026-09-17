@@ -73,12 +73,15 @@ export function crewDoneKind(text: string): "ok" | "bad" | null {
 const SystemTurn = memo(function SystemTurn({
   block,
   crewNames,
+  hideCrewDone = false,
 }: {
   block: Extract<TranscriptBlock, { type: "system" }>;
   crewNames?: string;
+  hideCrewDone?: boolean;
 }) {
   if (isDeskNotice(block.message)) return null;
   const crew = crewDoneKind(block.message.text);
+  if (crew && hideCrewDone) return null;
   if (crew) {
     return (
       <article
@@ -541,7 +544,7 @@ export function SessionPane() {
           if (block.type === "user") {
             return <UserTurn key={block.message.id} message={block.message} />;
           }
-          if (block.type === "system") return <SystemTurn key={block.message.id} block={block} crewNames={crewNames} />;
+          if (block.type === "system") return <SystemTurn key={block.message.id} block={block} crewNames={crewNames} hideCrewDone={desk.crewLive} />;
           const live = working && index === liveIndex;
           return (
             <AssistantTurn

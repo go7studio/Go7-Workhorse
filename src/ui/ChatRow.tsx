@@ -18,11 +18,10 @@ export type CrewDotKind = "working" | "failed" | "stopped" | "needs-you" | "idle
 /** Shared run-state mapping; the sidebar expresses each state with the mascot. */
 export function crewDotKind(
   session: Pick<Session, "status" | "agentRun"> & { messages?: Session["messages"] },
-  waveRunning = false,
 ): CrewDotKind {
   const run = session.agentRun?.status;
   if (session.status === "needs-input") return "needs-you";
-  if (crewTurnInFlight(session) || waveRunning) return "working";
+  if (crewTurnInFlight(session)) return "working";
   if (run === "failed") return "failed";
   if (run === "cancelled" || run === "interrupted" || run === "timed-out" || run === "budget-exceeded") return "stopped";
   return "idle";
@@ -116,7 +115,7 @@ export function ChatRow({
       })
     : "Attach LLM";
   const workerLabel = workerSidebarLabel(session, bot?.name ?? stockLink?.name);
-  const dotKind = crewDotKind(session, Boolean(mission?.running));
+  const dotKind = crewDotKind(session);
   const waveWord = mission?.word && mission.word !== "Working…" ? mission.word : undefined;
   const link = desk.link;
 

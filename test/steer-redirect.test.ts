@@ -4,6 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import { addLineupRow, applyChildIdleSync, emptyLineup, LINEUP_FINISHED_NOTICE, lineupJoinHasActionableRow, lineupJoinParentIsLive, maybeEnqueueLineupJoin, shouldJoinAfterChildSettle } from "../src/lib/lineup";
+import { settleStatusForWorkerReport, workerWasStoppedBeforeVerification } from "../src/lib/worker-completion";
 import { applyStreamQueues } from "../src/lib/stream-commit";
 import { workPopState } from "../src/lib/turns";
 import type { Session } from "../src/lib/types";
@@ -173,4 +174,97 @@ test("cancelling one worker does not join or say the wave finished", () => {
     false,
   );
   assert.ok(!cancelParent?.messages.some((message) => message.text === LINEUP_FINISHED_NOTICE));
+});
+
+test("a worker stopped before verification is a cancel, not No worker finished · 1 failed", () => {
+  const stub = "Mission status: blocked\nWorker was stopped before verification.";
+  const afterRun = "Partial inspect.\n\nWorker stopped before verification.\nMission status: blocked";
+  const realBlock = "Device disconnected.\nMission status: blocked";
+  assert.equal(workerWasStoppedBeforeVerification(stub), true);
+  assert.equal(workerWasStoppedBeforeVerification(afterRun), true);
+  assert.equal(workerWasStoppedBeforeVerification(realBlock), false);
+  assert.equal(settleStatusForWorkerReport(stub), "cancelled");
+  assert.equal(settleStatusForWorkerReport(afterRun), "cancelled");
+  assert.equal(settleStatusForWorkerReport(realBlock), "failed");
+  assert.equal(settleStatusForWorkerReport("GREET through DONE.\nMission status: complete"), "completed");
+  assert.equal(shouldJoinAfterChildSettle("cancelled"), false);
+  assert.equal(shouldJoinAfterChildSettle("failed"), true);
+
+  const folder = "/repo";
+  const lineup = addLineupRow(emptyLineup(folder, 1, "Gen 3 verify"), {
+    childId: "dexter",
+    title: "Dexter · Finish gen3 verify",
+    slice: "Gen 3 verify",
+    folder,
+    vendor: "Grok",
+    status: "running",
+    startedAt: 1,
+  });
+  const parent: Session = {
+    id: "orch",
+    projectId: "scratch0",
+    provider: "cursor",
+    model: "grok-4.6",
+    effort: "high",
+    title: "Remove Dashes",
+    mode: "always-approve",
+    sandbox: "off",
+    status: "idle",
+    contextUsed: 0,
+    messages: [],
+    lineup,
+  };
+  const dexter: Session = {
+    ...parent,
+    id: "dexter",
+    parentId: "orch",
+    hidden: true,
+    title: "Dexter · Finish gen3 verify",
+    status: "running",
+    lineup: undefined,
+    messages: [{ id: "a1", role: "assistant", text: stub, createdAt: 2 }],
+    agentRun: { status: "running", startedAt: 1, isolation: "shared" },
+  };
+  const first = applyChildIdleSync([parent, dexter], "dexter", settleStatusForWorkerReport(stub), {
+    report: stub,
+    error: "Subagent was cancelled.",
+    now: 3,
+  });
+  const afterFirst = maybeEnqueueLineupJoin(first, "orch", 4);
+  const orch = afterFirst.find((session) => session.id === "orch");
+  assert.equal(orch?.lineup?.rows[0]?.status, "cancelled");
+  assert.equal(orch?.lineup?.notifiedAt, undefined);
+  assert.ok(!orch?.messages.some((message) => /No worker finished|workers finished/i.test(message.text)));
+
+  const withPiper = addLineupRow(orch!.lineup!, {
+    childId: "piper",
+    title: "Piper · Gen3 visual fix",
+    slice: "Gen 3 verify",
+    folder,
+    vendor: "Grok",
+    status: "running",
+    startedAt: 5,
+  });
+  assert.equal(withPiper.notifiedAt, undefined);
+  assert.deepEqual(withPiper.rows.map((row) => row.childId), ["dexter", "piper"]);
+
+  const piper: Session = {
+    ...dexter,
+    id: "piper",
+    title: "Piper · Gen3 visual fix",
+    messages: [{ id: "a2", role: "assistant", text: stub, createdAt: 6 }],
+  };
+  const second = applyChildIdleSync(
+    afterFirst.map((session) => (session.id === "orch" ? { ...session, lineup: withPiper } : session)).concat(piper),
+    "piper",
+    settleStatusForWorkerReport(stub),
+    { report: stub, error: "Subagent was cancelled.", now: 7 },
+  );
+  const afterSecond = maybeEnqueueLineupJoin(second, "orch", 8);
+  const again = afterSecond.find((session) => session.id === "orch");
+  assert.equal(again?.messages.filter((message) => /No worker finished|1 failed/i.test(message.text)).length, 0);
+  assert.equal(again?.lineup?.notifiedAt, undefined);
+
+  assert.match(store, /settleStatusForWorkerReport/);
+  assert.match(store, /shouldJoinAfterChildSettle\(outcome\)/);
 });

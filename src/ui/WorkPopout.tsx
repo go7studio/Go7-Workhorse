@@ -457,7 +457,8 @@ export const WorkPopout = memo(function WorkPopout({
   const crewWorkers = useStoreSelector((store) => crewWorkersFromStore(store, threads), sameCrewWorkers);
   const toolsLive = tools.some((tool) => !toolIsFinished(tool.toolStatus));
   const anyChildLive = crewWorkers.some((worker) => worker.live) || threads.some((marker) => marker.toolStatus === "running");
-  const foldLive = live || toolsLive || anyChildLive;
+  const ownLive = live || toolsLive;
+  const foldLive = ownLive || anyChildLive;
   useEffect(() => {
     if (!foldLive) return;
     const timer = window.setInterval(() => setNow(Date.now()), 250);
@@ -475,23 +476,23 @@ export const WorkPopout = memo(function WorkPopout({
   if (!hasWork) return stamp;
 
   const elapsed = workFoldElapsedMs({
-    live: foldLive,
+    live: ownLive,
     startedAt,
     now,
     workedMs,
     activityAt: [...tools, ...block.compacts, ...threads].map((message) => message.createdAt),
   });
-  const label = workFoldClockLabel({ live: foldLive, elapsed });
+  const label = workFoldClockLabel({ live: ownLive, elapsed });
   const peerTools = workTools.filter((tool) => isPeerTool(tool));
   const otherTools = workTools.filter((tool) => !peerTools.some((item) => item.id === tool.id));
   const talking = talkingToSummary(peerTools);
   const named = namedWorkSummary(otherTools, {
-    live: foldLive,
+    live: ownLive,
     allowThinking: !talking,
   });
-  const crew = namedCrewSummary(crewWorkers, { live: foldLive });
+  const crew = namedCrewSummary(crewWorkers, { live: anyChildLive });
   const summary = closedWorkSummary({ label, talking, tools: named, crew });
-  const state = workPopState({ live: foldLive, failed: crewWorkers.some((worker) => worker.failed) });
+  const state = workPopState({ live: ownLive, failed: crewWorkers.some((worker) => worker.failed) });
 
   const rows = groupWorkRows(visible);
   const packed = packWorkRows(rows);

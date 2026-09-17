@@ -183,16 +183,36 @@ export function setLineupRowStatus(
   };
 }
 
+/**
+ * A wave is not done while any child is still on the job — including a
+ * worker that is not on a lineup row yet (a second Marlow after the first
+ * wave's banner). 0.6.60 asked only `row.status`, so a completed row next
+ * to a live sibling posted "All workers finished".
+ */
+export function lineupHasLiveWork(
+  lineup: DeskLineup | undefined,
+  children: Array<Pick<Session, "id" | "status" | "agentRun"> & { messages?: ChatMessage[] }> = [],
+): boolean {
+  if (children.some((child) => crewTurnInFlight(child))) return true;
+  if (!lineup || lineup.rows.length === 0) return false;
+  const byId = new Map(children.map((child) => [child.id, child]));
+  return lineup.rows.some((row) => {
+    const status = missionRowStatus(row, byId.get(row.childId));
+    return status === "queued" || status === "running";
+  });
+}
+
 export function lineupIsTerminal(
   lineup: DeskLineup | undefined,
   children: Array<Pick<Session, "id" | "status" | "agentRun"> & { messages?: ChatMessage[] }> = [],
 ): boolean {
   if (!lineup || lineup.rows.length === 0) return false;
-  const byId = new Map(children.map((child) => [child.id, child]));
-  return lineup.rows.every((row) => {
-    const status = missionRowStatus(row, byId.get(row.childId));
-    return status !== "queued" && status !== "running";
-  });
+  return !lineupHasLiveWork(lineup, children);
+}
+
+/** Active crew only — archived leftovers stay off the tray and off this wave. */
+export function lineupWaveChildren(sessions: Session[], parentId: string): Session[] {
+  return sessions.filter((session) => session.parentId === parentId && !session.archivedAt);
 }
 
 /** Parent is still on a turn — a join would steal the composer and dump reports. */
@@ -548,15 +568,25 @@ export function reconcilePersistedLineups(sessions: Session[], now = Date.now())
       changed = true;
     }
   }
+  const childrenByParent = new Map<string, Session[]>();
+  for (const session of next) {
+    if (!session.parentId || session.archivedAt) continue;
+    const list = childrenByParent.get(session.parentId);
+    if (list) list.push(session);
+    else childrenByParent.set(session.parentId, [session]);
+  }
   for (let index = 0; index < next.length; index += 1) {
     const parent = next[index]!;
     if (!parent.lineup) continue;
-    const children = next.filter((session) => session.parentId === parent.id);
+    const children = childrenByParent.get(parent.id) ?? [];
     const settled = settleAdaptiveMission(parent.lineup, children);
     const withSettled = settled && settled !== parent.lineup ? { ...parent, lineup: settled } : parent;
-    const reconciled = maybeEnqueueLineupJoin([withSettled], parent.id, now)[0]!;
-    if (reconciled !== parent) {
+    const reconciled = maybeEnqueueLineupJoin([withSettled, ...children], parent.id, now)[0]!;
+    if (reconciled !== parent && reconciled !== withSettled) {
       next[index] = reconciled;
+      changed = true;
+    } else if (withSettled !== parent) {
+      next[index] = withSettled;
       changed = true;
     }
   }
@@ -680,7 +710,7 @@ export function applyJoinRateLimitRetry(
 
 export function maybeEnqueueLineupJoin(sessions: Session[], parentId: string, now = Date.now()): Session[] {
   const parent = sessions.find((session) => session.id === parentId);
-  const children = sessions.filter((session) => session.parentId === parentId);
+  const children = lineupWaveChildren(sessions, parentId);
   if (!parent?.lineup || parent.lineup.notifiedAt || !lineupIsTerminal(parent.lineup, children)) return sessions;
   if (lineupJoinParentIsLive(parent.status) || !lineupJoinHasActionableRow(parent.lineup)) return sessions;
   if (parent.lineup.joinOwner === "external-runtime") {
@@ -712,7 +742,7 @@ export function maybeEnqueueLineupJoin(sessions: Session[], parentId: string, no
  */
 export function handOverLineup(sessions: Session[], parentId: string, now = Date.now()): Session[] {
   const parent = sessions.find((session) => session.id === parentId);
-  const children = sessions.filter((session) => session.parentId === parentId);
+  const children = lineupWaveChildren(sessions, parentId);
   if (!parent?.lineup || !lineupIsTerminal(parent.lineup, children)) return sessions;
   return applyLineupTurnBreak(sessions, parentId, now).map((session) => {
     if (session.id !== parentId || !session.lineup) return session;
@@ -727,7 +757,7 @@ export function handOverLineup(sessions: Session[], parentId: string, now = Date
 
 export function applyLineupTurnBreak(sessions: Session[], parentId: string, now = Date.now()): Session[] {
   const parent = sessions.find((session) => session.id === parentId);
-  const children = sessions.filter((session) => session.parentId === parentId);
+  const children = lineupWaveChildren(sessions, parentId);
   if (parent?.lineup && !lineupIsTerminal(parent.lineup, children)) return sessions;
   return sessions.map((session) => {
     if (session.id !== parentId) return session;
@@ -842,6 +872,14 @@ export function missionRowStatus(
   // the parent does not keep saying Working… or 1 failed after a stop.
   if (run === "cancelled") return "cancelled";
   if (run === "interrupted") return "interrupted";
+  // The inverse of a live child: a finished or failed run wins over a leftover
+  // queued/running row so hydrate cannot keep the wave Working.
+  if (row.status === "queued" || row.status === "running") {
+    if (run === "completed") return "completed";
+    if (run === "failed") return "failed";
+    if (run === "timed-out") return "timed-out";
+    if (run === "budget-exceeded") return "failed";
+  }
   return row.status;
 }
 
@@ -985,7 +1023,7 @@ export type MissionRowLook = {
   word?: string;
   /** Failure is loud; unfinished or cancelled work is quiet. */
   tone?: "danger" | "quiet";
-  /** A live wave pulses the row even when the parent chat itself sits idle. */
+  /** The wave still has a live worker. The parent horse uses the parent's own turn, not this. */
   running: boolean;
 };
 

@@ -1,3 +1,4 @@
+import { crewTurnInFlight } from "./crew-live";
 import {
   missionBoardWorkersFromSessions,
   sameMissionBoardLineup,
@@ -261,16 +262,21 @@ export type SessionPaneDesk = {
   forkFrom: Store["forkFrom"];
   selectSession: Store["selectSession"];
   folderExists: Store["folderExists"];
+  crewLive: boolean;
 };
 
 export function selectSessionPaneDesk(store: Store): SessionPaneDesk {
+  const session = activeDeskSession(store);
   return {
-    session: activeDeskSession(store),
+    session,
     projects: store.projects,
     settings: store.settings,
     forkFrom: store.forkFrom,
     selectSession: store.selectSession,
     folderExists: store.folderExists,
+    crewLive: session
+      ? store.sessions.some((item) => item.parentId === session.id && !item.archivedAt && crewTurnInFlight(item))
+      : false,
   };
 }
 
@@ -283,6 +289,7 @@ export function sameSessionPaneDesk(left: SessionPaneDesk, right: SessionPaneDes
   if (left === right) return true;
   return (
     left.session === right.session &&
+    left.crewLive === right.crewLive &&
     left.projects === right.projects &&
     left.settings === right.settings &&
     left.forkFrom === right.forkFrom &&

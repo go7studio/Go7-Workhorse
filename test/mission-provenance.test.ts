@@ -194,9 +194,10 @@ test("the meta line never repeats the worker count", () => {
   assert.doesNotMatch(meta, /\d+\s*workers?/, `meta repeated the count: ${meta}`);
 });
 
-test("a live wave pulses a parent chat that is itself idle", () => {
+test("a live wave is still a live wave when the parent chat itself is idle", () => {
   // The parent's own status is idle the whole time a wave runs — the work is
-  // happening on the children. Without this the row looks finished for hours.
+  // happening on the children. The wave flag stays true for the board and
+  // crew count; the parent horse no longer walks from it.
   const look = missionRowLook({ lineup: lineup() }, [{ id: "child_1", status: "running" }]);
   assert.equal(look?.running, true);
   assert.equal(look?.word, "Working…");
@@ -206,16 +207,14 @@ test("an ordinary chat is left alone", () => {
   assert.equal(missionRowLook({ lineup: undefined }, []), undefined);
 });
 
-test("a live wave reaches the dot and the title reaches the row", () => {
-  // missionRowLook is tested above, but nothing else covers the hop from that
-  // object into the DOM, and that hop is the whole feature: a parent chat's own
-  // status is idle for the entire time a wave runs, so without mission.running
-  // in the pulse the row sits still through four hours of work. Verified live —
-  // the two "Working…" rows animate 1.00 → 0.35 → 1.00 on a 1.1s cycle while
-  // every finished row holds flat at 1.00 — and pinned here in the same
-  // source-shape way as test/dead-ui.test.ts, for the same reason.
+test("a live wave reaches the title, not the parent horse", () => {
+  // The parent chat's own status is idle the whole time a wave runs. The
+  // horse follows that turn. Workers and the crew count already say the
+  // wave is live — walking the orchestrator too made both folds look like
+  // the head was still on the job.
   const row = readFileSync(new URL("../src/ui/ChatRow.tsx", import.meta.url), "utf8").replace(/\s+/g, " ");
-  assert.match(row, /crewDotKind\(session, Boolean\(mission\?\.running\)\)/, "a live wave must pulse the horse");
+  assert.match(row, /const dotKind = crewDotKind\(session\);/, "the parent horse follows the parent turn");
+  assert.doesNotMatch(row, /crewDotKind\(session, Boolean\(mission\?\.running\)\)/, "a live wave must not walk the parent horse");
   assert.match(row, /<HorseStatus kind=\{dotKind\}/);
   assert.match(row, /mission\?\.title \?\? session\.title/, "a named wave must reach the title");
   assert.match(row, /mission\.word !== "Working…"/, "a live wave keeps model · effort instead of Working…");

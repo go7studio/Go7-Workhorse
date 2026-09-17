@@ -1,4 +1,4 @@
-import { finishWorkerTask } from "./worker-completion";
+import { finishWorkerTask, settleStatusForWorkerReport } from "./worker-completion";
 import {
   useCallback,
   useEffect,
@@ -304,7 +304,6 @@ import {
   workerTaskTitle,
   continueWorkerRun,
   vendorDisplayName,
-  workerReportedBlocked,
 } from "./subagents";
 import {
   applySessionModelChange,
@@ -6358,7 +6357,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 ? `Path ownership blocked completion: worker changed ${unauthorizedFiles.join(", ")}.`
                 : "";
               const finalReport = ownershipError ? `${fallback}\n\n${ownershipError}`.trim() : fallback;
-              const reportedBlocked = workerReportedBlocked(fallback) || Boolean(ownershipError);
+              const outcome = settleStatusForWorkerReport(fallback, { ownershipBlocked: Boolean(ownershipError) });
+              const reportedBlocked = outcome === "failed";
               setState((current) => {
                 const withReply = current.sessions.map((item) =>
                   item.id === childId
@@ -6387,14 +6387,19 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                       }
                     : item,
                 );
-                const outcome = reportedBlocked ? "failed" as const : "completed" as const;
                 let sessions = applyChildIdleSync(withReply, childId, outcome, {
                   report: finalReport,
-                  ...(reportedBlocked ? { error: ownershipError || "Worker reported blocked." } : {}),
+                  ...(outcome === "cancelled"
+                    ? { error: "Subagent was cancelled." }
+                    : reportedBlocked
+                      ? { error: ownershipError || "Worker reported blocked." }
+                      : {}),
                   correlationId: childCorrelationId,
                 });
-                sessions = settlePlanAssignment(sessions, parent.id, childId, outcome, finalReport);
-                const admitted = joinAdmit(sessions, parent.id, current, plansRef.current);
+                sessions = settlePlanAssignment(sessions, parent.id, childId, outcome === "completed" ? "completed" : "failed", finalReport);
+                const admitted = shouldJoinAfterChildSettle(outcome)
+                  ? joinAdmit(sessions, parent.id, current, plansRef.current)
+                  : { sessions };
                 queueMicrotask(() => {
                   if (admitted.auditor) sendRef.current(admitted.auditor.brief, { sessionId: admitted.auditor.id, hideUser: true });
                 });
@@ -6631,7 +6636,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               worked: liveTarget ? turnWorkedAfterAssistant(liveTarget.messages, assistantId) : false,
             });
             const finishedAt = Date.now();
-            const peerFailed = Boolean(target.parentId) && workerReportedBlocked(fallback);
+            const peerSettle = target.parentId ? settleStatusForWorkerReport(fallback) : "completed";
+            const peerFailed = peerSettle === "failed";
+            const peerCancelled = peerSettle === "cancelled";
             setState((current) => {
               let sessions = withSubagentStatus(
                 current.sessions.map((item) =>
@@ -6641,9 +6648,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                         status: "idle",
                         agentRun: item.agentRun
                           ? { ...item.agentRun,
-                              status: item.agentRun.status === "running" ? (peerFailed ? "failed" as const : "completed" as const) : item.agentRun.status,
+                              status: item.agentRun.status === "running" ? (peerCancelled ? "cancelled" as const : peerFailed ? "failed" as const : "completed" as const) : item.agentRun.status,
                               finishedAt: item.agentRun.finishedAt ?? finishedAt,
-                              error: peerFailed ? "Worker did not verify completion." : item.agentRun.error }
+                              error: peerCancelled ? "Subagent was cancelled." : peerFailed ? "Worker did not verify completion." : item.agentRun.error }
                           : undefined,
                         messages: item.messages.map((entry) =>
                           entry.id === assistantId && !assistantHasVisibleReply(entry.text)
@@ -6662,14 +6669,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                     : item,
                 ),
                 target.id,
-                peerFailed ? "failed" : "completed",
+                peerCancelled ? "cancelled" : peerFailed ? "failed" : "completed",
                 { correlationId: peerCorrelationId, toolCallId: payload.id },
               );
               if (target.parentId && target.agentRun) {
                 const finished = sessions.find((item) => item.id === target.id);
                 const status = finished?.agentRun?.status;
-                const rowStatus = status === "cancelled" || status === "timed-out"
-                  ? status : status === "completed" && !peerFailed ? "completed" : "failed";
+                const rowStatus = status === "cancelled" || status === "timed-out" || peerCancelled
+                  ? (status === "timed-out" ? status : "cancelled")
+                  : status === "completed" && !peerFailed ? "completed" : "failed";
                 sessions = applyChildIdleSync(sessions, target.id, rowStatus, { report: fallback });
                 if (shouldJoinAfterChildSettle(rowStatus)) {
                   const admitted = joinAdmit(sessions, target.parentId, current, plansRef.current);
@@ -7701,7 +7709,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 : failPeerAskMessages(settledMessages, { error: "the other chat did not answer" }),
               safetyPaused ? "failed" : cancelled ? "cancelled" : "completed",
             );
-            const reportedBlocked = Boolean(session.parentId) && workerReportedBlocked(childReportText({ messages }));
+            const settleReport = childReportText({ messages });
+            const workerSettle = session.parentId ? settleStatusForWorkerReport(settleReport, {
+              cancelled: cancelled,
+            }) : "completed";
+            const reportedBlocked = workerSettle === "failed";
             const failed = safetyPaused || reportedBlocked;
             return applyVendorTurnIdle({
               ...session,
@@ -7714,25 +7726,31 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             }, { assistantId, safetyPaused, failed, compacted: event.stopReason === "compacted" });
           });
           const finishedTurn = sessions.find((session) => session.id === event.sessionId);
-          const reportedBlocked = Boolean(finishedTurn?.parentId) && workerReportedBlocked(childReportText(finishedTurn));
+          const workerSettle = finishedTurn?.parentId
+            ? settleStatusForWorkerReport(childReportText(finishedTurn), {
+                cancelled: event.stopReason === "cancelled",
+              })
+            : "completed";
+          const reportedBlocked = workerSettle === "failed";
           const failed = safetyPaused || reportedBlocked;
           sessions = withFinishedTurnSubagentStatus(
             sessions,
             event.sessionId,
-            holdForHandoff ? "running" : failed ? "failed" : "completed",
+            holdForHandoff ? "running" : workerSettle === "cancelled" ? "cancelled" : failed ? "failed" : "completed",
             assistantId,
           );
           const finished = sessions.find((session) => session.id === event.sessionId);
           if (finished?.parentId && !holdForHandoff) {
-            const childSettleStatus =
-              event.stopReason === "cancelled" ? ("cancelled" as const) : failed ? ("failed" as const) : ("completed" as const);
+            const childSettleStatus = workerSettle === "cancelled" || event.stopReason === "cancelled"
+              ? ("cancelled" as const)
+              : failed ? ("failed" as const) : ("completed" as const);
             sessions = applyChildIdleSync(sessions, event.sessionId, childSettleStatus, {
               report: childReportText(finished),
               ...(safetyPaused
                 ? { error: "Agent paused before completing its goal." }
                 : reportedBlocked
                   ? { error: "Worker reported blocked." }
-                  : event.stopReason === "cancelled"
+                  : childSettleStatus === "cancelled"
                     ? { error: "Subagent was cancelled." }
                     : {}),
             });

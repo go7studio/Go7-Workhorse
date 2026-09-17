@@ -26,8 +26,13 @@ the header mark. A parent chat with workers also gets a Crew tray above the
 composer: one horse per worker, follow-up without leaving the parent.
 
 Delegated workers distinguish a vendor turn ending from the task finishing.
-Incomplete replies continue in the worker chat before the parent receives a
-report. Workers declare completion with verification evidence; explicit
+An orchestration parent rests when its own turn ends; workers keep Working
+on their own rows and inside the fold. The parent does not say All workers
+finished while any child is still on the job, and a stale banner hides
+once a new worker starts. Steering or stopping a worker before verification
+is a cancel, not No worker finished · 1 failed, so a replacement stays on
+the same wave. Incomplete replies continue in the
+worker chat before the parent receives a report. Workers declare completion with verification evidence; explicit
 blockers, cancellation, repeated replies, or eight continuation turns stop
 the task without claiming success. This checks the report contract, not the
 truth of arbitrary artifacts. Tool output and thinking are never final reports.

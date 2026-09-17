@@ -417,7 +417,7 @@ test("a streamed token does not commit the mission board, but a worker status ca
 test("the session pane paints its own chat and sleeps through every other one", () => {
   const projects: SessionPaneDesk["projects"] = [];
   const pane = (chat: Session | null, overrides: Record<string, unknown> = {}): SessionPaneDesk =>
-    ({ session: chat, projects, settings, forkFrom: noop, selectSession: noop, ...overrides }) as unknown as SessionPaneDesk;
+    ({ session: chat, projects, settings, forkFrom: noop, selectSession: noop, crewLive: false, ...overrides }) as unknown as SessionPaneDesk;
   const held = pane(talking);
   // The transcript is the live surface: this chat's own token must paint.
   assert.equal(sameSessionPaneDesk(held, pane(streamed(talking, "one two"))), false);

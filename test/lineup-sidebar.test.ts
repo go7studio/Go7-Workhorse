@@ -126,7 +126,7 @@ test("a running chat keeps model and effort on the row, not Working…", () => {
 
 test("crew dots map run state onto the vendor circle", () => {
   assert.equal(crewDotKind({ status: "running", agentRun: { status: "running", startedAt: 1, isolation: "shared" } }), "working");
-  assert.equal(crewDotKind({ status: "idle" }, true), "working");
+  assert.equal(crewDotKind({ status: "idle" }), "idle", "a live wave does not keep the parent horse walking");
   assert.equal(crewDotKind({ status: "needs-input" }), "needs-you");
   assert.equal(crewDotKind({ status: "idle", agentRun: { status: "failed", startedAt: 1, isolation: "shared" } }), "failed");
   assert.equal(crewDotKind({ status: "idle", agentRun: { status: "cancelled", startedAt: 1, isolation: "shared" } }), "stopped");

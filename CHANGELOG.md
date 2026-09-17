@@ -8,6 +8,16 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.6.86](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.85...v0.6.86) (2026-09-16)
+
+
+### Bug Fixes
+
+* **desk:** the parent does not say All workers finished while any child is still on the job; a stale banner hides when a new worker starts
+* **desk:** steering or stopping a worker before verification is a cancel, not No worker finished · 1 failed
+* **ui:** an orchestration parent rests when its own turn ends; workers keep Working on their own rows
+
+
 ## [0.6.85](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.84...v0.6.85) (2026-09-16)
 
 

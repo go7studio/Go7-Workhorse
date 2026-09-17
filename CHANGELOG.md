@@ -8,6 +8,20 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.6.84](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.83...v0.6.84) (2026-09-16)
+
+
+### Features
+
+* **desk:** strip Grok SearchReplace path glue (`rel/path.ext/{json}`, including GDScript quotes and newlines) before path-ownership
+* **desk:** sandbox Off skips path-ownership lease denies (Always + Off); workspace and strict still lease
+
+
+### Bug Fixes
+
+* **desk:** leftover mission prose (`Next I'll…`, failed export) continues instead of settling complete
+* **ui:** work fold says Working while tools are still open; Worked only after the turn ends
+
 ## [0.6.83](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.82...v0.6.83) (2026-09-16)
 
 

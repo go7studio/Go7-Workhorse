@@ -3,7 +3,18 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
-import { addLineupRow, emptyLineup } from "../src/lib/lineup";
+import {
+  addLineupRow,
+  applyChildIdleSync,
+  emptyLineup,
+  formatAwaitAgentsSnapshot,
+  lineupFinishedNotice,
+  lineupJoinPrompt,
+  maybeEnqueueLineupJoin,
+  missionPassCanContinue,
+  reconcilePersistedLineups,
+  settleAdaptiveMission,
+} from "../src/lib/lineup";
 import {
   applyDemoMission,
   DEMO_MISSION_ID,
@@ -15,7 +26,7 @@ import {
   sameMissionBoardLineup,
   sameMissionBoardWorkers,
 } from "../src/lib/mission-board";
-import { workerMissionOutcome, workerReportedBlocked } from "../src/lib/subagents";
+import { reportLeavesWorkOpen, workerMissionOutcome, workerReportedBlocked } from "../src/lib/subagents";
 import { sameMissionBoardDesk, type MissionBoardDesk } from "../src/lib/store-select";
 import type { MissionIteration, Session } from "../src/lib/types";
 
@@ -173,6 +184,9 @@ test("a finished report's Mission status becomes the slice word", () => {
   assert.equal(view?.layers[0]?.slices[0]?.outcome, "continue");
   assert.equal(view?.layers[0]?.slices[0]?.word, "Continue");
   assert.equal(view?.running, false);
+  assert.equal(view?.verdict, "unmet");
+  assert.equal(view?.word, "Unmet");
+  assert.equal(missionBoardChip(view), "Mission · Unmet");
 });
 
 test("a mission with no workers yet still shows the current pass", () => {
@@ -216,6 +230,293 @@ test("workerMissionOutcome reads the last status line", () => {
   assert.equal(workerMissionOutcome("status: complete"), "complete");
   assert.equal(workerReportedBlocked("Mission status: blocked."), true);
   assert.equal(workerMissionOutcome("The task mentioned STATUS: blocked inline, but the work completed."), undefined);
+  assert.equal(reportLeavesWorkOpen("Export failed (missing Java SDK). Next I'll send Wren to rebuild."), true);
+  assert.equal(reportLeavesWorkOpen("Path glue fixed and verified.\n\nMission status: complete."), false);
+});
+
+test("a completed adaptive wave does not leave parent.mission at scout with nothing running", () => {
+  const current = mission({ iteration: 1, phase: "scout", previousWorkerIds: [] });
+  const parent = parentWithLineup(
+    [
+      {
+        childId: "w1",
+        title: "Scout",
+        slice: "Scout",
+        folder: "/repo",
+        vendor: "Codex",
+        status: "running",
+        startedAt: 1,
+        missionId: current.id,
+        iteration: 1,
+      },
+    ],
+    current,
+  );
+  const worker = child("w1", {
+    title: "Marlow · Fix SearchReplace path glue",
+    status: "running",
+    agentRun: { status: "running", startedAt: 1, isolation: "worktree", mission: current },
+    messages: [
+      { id: "u1", role: "user", text: "Fix the path glue.", createdAt: 1 },
+      {
+        id: "a1",
+        role: "assistant",
+        text: "Path glue fixed and verified.\n\nMission status: complete.",
+        createdAt: 2,
+      },
+    ],
+  });
+  const settled = applyChildIdleSync([parent, worker], "w1", "completed", {
+    report: "Path glue fixed and verified.\n\nMission status: complete.",
+    now: 3,
+  });
+  const nextParent = settled.find((session) => session.id === "parent");
+  assert.equal(nextParent?.lineup?.mission, undefined, "completed loop spawn must drop the parent mission");
+  assert.equal(missionBoardView(nextParent, []), undefined);
+  const stillScout = nextParent?.lineup?.mission?.phase === "scout" && missionBoardView(nextParent, [])?.running === false;
+  assert.equal(stillScout, false);
+});
+
+test("a failed or unmet adaptive mission is visible as failed, not Scout idle", () => {
+  const current = mission({ iteration: 1, phase: "scout", previousWorkerIds: [] });
+  const unmetParent = parentWithLineup(
+    [
+      {
+        childId: "w1",
+        title: "Scout",
+        slice: "Scout",
+        folder: "/repo",
+        vendor: "Codex",
+        status: "completed",
+        startedAt: 1,
+        finishedAt: 2,
+        report: "Still missing tests.\nMission status: continue.",
+        missionId: current.id,
+        iteration: 1,
+      },
+    ],
+    current,
+  );
+  const unmet = missionBoardView(unmetParent, [
+    {
+      id: "w1",
+      parentId: "parent",
+      title: "Scout",
+      status: "idle",
+      provider: "codex",
+      runStatus: "completed",
+      missionId: current.id,
+      iteration: 1,
+      phase: "scout",
+    },
+  ]);
+  assert.ok(unmet);
+  assert.equal(unmet?.running, false);
+  assert.equal(unmet?.verdict, "unmet");
+  assert.equal(unmet?.word, "Unmet");
+  assert.equal(missionBoardChip(unmet!), "Mission · Unmet");
+  assert.notEqual(missionBoardChip(unmet!), "Mission · Scout");
+
+  const failedParent = parentWithLineup(
+    [
+      {
+        childId: "w1",
+        title: "Scout",
+        slice: "Scout",
+        folder: "/repo",
+        vendor: "Codex",
+        status: "failed",
+        startedAt: 1,
+        finishedAt: 2,
+        report: "Could not verify.\nMission status: blocked.",
+        missionId: current.id,
+        iteration: 1,
+      },
+    ],
+    current,
+  );
+  const failed = missionBoardView(failedParent, [
+    {
+      id: "w1",
+      parentId: "parent",
+      title: "Scout",
+      status: "idle",
+      provider: "codex",
+      runStatus: "failed",
+      missionId: current.id,
+      iteration: 1,
+      phase: "scout",
+    },
+  ]);
+  assert.ok(failed);
+  assert.equal(failed?.running, false);
+  assert.equal(failed?.verdict, "failed");
+  assert.equal(failed?.word, "Failed");
+  assert.equal(missionBoardChip(failed!), "Mission · Failed");
+  assert.equal(settleAdaptiveMission(failedParent.lineup)?.mission?.phase, "scout", "unmet/failed missions stay pinned so the bar can say so");
+});
+
+test("reload settles a completed adaptive mission left on the parent at scout", () => {
+  const current = mission({ iteration: 1, phase: "scout", previousWorkerIds: [] });
+  const parent = parentWithLineup(
+    [
+      {
+        childId: "w1",
+        title: "Scout",
+        slice: "Scout",
+        folder: "/repo",
+        vendor: "Codex",
+        status: "completed",
+        startedAt: 1,
+        finishedAt: 2,
+        report: "Acceptance met.\nMission status: complete.",
+        missionId: current.id,
+        iteration: 1,
+      },
+    ],
+    current,
+  );
+  const worker = child("w1", {
+    status: "idle",
+    agentRun: {
+      status: "completed",
+      startedAt: 1,
+      finishedAt: 2,
+      isolation: "worktree",
+      mission: current,
+    },
+    messages: [
+      { id: "a1", role: "assistant", text: "Acceptance met.\nMission status: complete.", createdAt: 2 },
+    ],
+  });
+  assert.equal(parent.lineup?.mission?.phase, "scout");
+  const healed = reconcilePersistedLineups([parent, worker], 4);
+  const nextParent = healed.find((session) => session.id === "parent");
+  assert.equal(nextParent?.lineup?.mission, undefined, "hydrate must drop a completed mission so Mission-Scout cannot return");
+  assert.equal(missionBoardView(nextParent, []), undefined);
+});
+
+test("unmet leftover work after a completed child does not settle as complete", () => {
+  const current = mission({ iteration: 1, phase: "scout", previousWorkerIds: [] });
+  const leftover =
+    "APK export failed (missing Java SDK). Next I'll send Wren to rebuild then Dexter to rerun.\n\nMission status: complete.";
+  const parent = parentWithLineup(
+    [
+      {
+        childId: "w1",
+        title: "Scout",
+        slice: "Scout",
+        folder: "/repo",
+        vendor: "Codex",
+        status: "running",
+        startedAt: 1,
+        missionId: current.id,
+        iteration: 1,
+      },
+    ],
+    current,
+  );
+  const worker = child("w1", {
+    title: "Wren · Export APK",
+    status: "running",
+    agentRun: { status: "running", startedAt: 1, isolation: "worktree", mission: current },
+    messages: [{ id: "a1", role: "assistant", text: leftover, createdAt: 2 }],
+  });
+  const settled = applyChildIdleSync([parent, worker], "w1", "completed", { report: leftover, now: 3 });
+  const nextParent = settled.find((session) => session.id === "parent");
+  assert.ok(nextParent?.lineup?.mission, "leftover work must keep the parent mission");
+  assert.equal(nextParent?.lineup?.mission?.phase, "scout");
+  assert.equal(settleAdaptiveMission(nextParent?.lineup)?.mission?.phase, "scout");
+  const view = missionBoardView(nextParent, [
+    {
+      id: "w1",
+      parentId: "parent",
+      title: "Wren · Export APK",
+      status: "idle",
+      provider: "codex",
+      runStatus: "completed",
+      missionId: current.id,
+      iteration: 1,
+      phase: "scout",
+    },
+  ]);
+  assert.equal(view?.verdict, "unmet");
+  assert.equal(missionBoardChip(view!), "Mission · Unmet");
+  assert.equal(missionPassCanContinue(nextParent?.lineup), true);
+});
+
+test("a first-pass Next I'll / blocked export is not a successful settle, and continue is offered", () => {
+  const current = mission({ iteration: 1, phase: "scout", previousWorkerIds: [] });
+  const leftover = "Could not export the APK. Missing Java SDK. Next I'll rebuild.\n\nMission status: complete.";
+  const parent = parentWithLineup(
+    [
+      {
+        childId: "wren",
+        title: "Export",
+        slice: "Export",
+        folder: "/repo",
+        vendor: "Codex",
+        status: "completed",
+        startedAt: 1,
+        finishedAt: 2,
+        report: leftover,
+        missionId: current.id,
+        iteration: 1,
+      },
+    ],
+    current,
+  );
+  assert.equal(lineupFinishedNotice(parent.lineup), "Workers finished this pass · acceptance unmet.");
+  const join = lineupJoinPrompt(parent.lineup, { continueMission: true });
+  assert.match(join, /workhorse_continue_mission/);
+  assert.match(join, /previousPass: 1/);
+  assert.doesNotMatch(join, /Write one combined review/);
+  const snapshot = formatAwaitAgentsSnapshot({ lineup: parent.lineup, wait: false });
+  assert.match(snapshot, /workhorse_continue_mission/);
+  assert.doesNotMatch(snapshot, /Join them now/);
+  const woken = maybeEnqueueLineupJoin([parent], "parent", 4);
+  const queued = woken.find((session) => session.id === "parent")?.queue?.[0]?.text ?? "";
+  assert.match(queued, /workhorse_continue_mission/);
+  assert.match(queued, /Do not tell the user the work is complete/);
+});
+
+test("a last-pass wave that never completed is failed, not Scout idle", () => {
+  const current = mission({ iteration: 4, maxIterations: 4, phase: "scout", previousWorkerIds: ["w0"] });
+  const parent = parentWithLineup(
+    [
+      {
+        childId: "w1",
+        title: "Scout",
+        slice: "Scout",
+        folder: "/repo",
+        vendor: "Codex",
+        status: "completed",
+        startedAt: 1,
+        finishedAt: 2,
+        report: "Still open.\nMission status: continue.",
+        missionId: current.id,
+        iteration: 4,
+      },
+    ],
+    current,
+  );
+  const view = missionBoardView(parent, [
+    {
+      id: "w1",
+      parentId: "parent",
+      title: "Scout",
+      status: "idle",
+      provider: "codex",
+      runStatus: "completed",
+      missionId: current.id,
+      iteration: 4,
+      phase: "scout",
+    },
+  ]);
+  assert.equal(view?.verdict, "failed");
+  assert.equal(view?.word, "Failed");
+  assert.equal(missionBoardChip(view!), "Mission · Failed");
+  assert.ok(parent.lineup?.mission, "cap without complete keeps the bar so Failed stays visible");
 });
 
 test("demo mission pins a layered sample board on the parent chat", () => {

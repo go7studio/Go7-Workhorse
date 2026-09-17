@@ -226,7 +226,12 @@ transcript rather than as a path.
 ## Control
 
 - **Permission modes** — ask, accept-edits, always-approve, plan.
-- **Sandbox profiles** — off, workspace, read-only, strict.
+- **Sandbox profiles** — off, workspace, read-only, strict. Path-ownership
+  leases apply on workspace, read-only, and strict. Sandbox Off skips those
+  lease denies (Always + Off does not block a write for lack of a path
+  allowlist). Grok SearchReplace may glue `rel/path.ext/{json}` onto the write
+  target, including GDScript with quotes and newlines; the desk strips that
+  payload before the lease check so the glued string never leaks into a deny.
 - **Desk access default** — Settings › LLMs holds one Permission and Sandbox
   for work that names no chat: a CLI, MCP, or tool call arriving from outside.
   It ships as Always allow with the sandbox off, so inbound work does not stop

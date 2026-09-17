@@ -3,11 +3,23 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
-import { addLineupRow, emptyLineup, LINEUP_FINISHED_NOTICE, lineupIsTerminal, reconcileIdleChildren } from "../src/lib/lineup";
-import { subagentTurns, workerTaskTitle } from "../src/lib/subagents";
-import { displayWorkSteps, groupTranscript } from "../src/lib/turns";
-import { crewActivityLine, crewTurnInFlight } from "../src/lib/crew-live";
+import {
+  addLineupRow,
+  applyChildIdleSync,
+  applyLineupTurnBreak,
+  emptyLineup,
+  formatAwaitAgentsSnapshot,
+  LINEUP_FINISHED_NOTICE,
+  lineupIsTerminal,
+  maybeEnqueueLineupJoin,
+  reconcileIdleChildren,
+  reconcilePersistedLineups,
+} from "../src/lib/lineup";
+import { normalizeAgentRun, parentHasRunningChildren, subagentTurns, workerTaskTitle } from "../src/lib/subagents";
+import { displayWorkSteps, groupTranscript, workFoldClockLabel, workFoldElapsedMs } from "../src/lib/turns";
+import { crewActivityLine, crewHasOpenTools, crewHasWorkAfterFinish, crewTurnInFlight } from "../src/lib/crew-live";
 import { crewDoneKind } from "../src/ui/SessionPane";
+import { crewDotKind, workerSidebarLabel } from "../src/ui/ChatRow";
 import { workerFoldLabel, crewWorkerName } from "../src/ui/WorkPopout";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -59,6 +71,107 @@ test("a worker stays live through thinking, not only while a tool is in flight",
   assert.match(popout, /crewTurnInFlight\(child\)/);
   assert.match(popout, /tool-name">Thinking/);
   assert.match(popout, /allowThinking: !talking/);
+  assert.match(popout, /workFoldClockLabel/);
+  assert.match(popout, /foldLive/);
+});
+
+test("elapsed clock advancing with completing tools says Working, then Worked after finish", () => {
+  const startedAt = 1_000;
+  const mid = workFoldElapsedMs({
+    live: true,
+    startedAt,
+    now: startedAt + 465_000,
+    activityAt: [startedAt + 450_000],
+  });
+  const later = workFoldElapsedMs({
+    live: true,
+    startedAt,
+    now: startedAt + 485_000,
+    activityAt: [startedAt + 450_000, startedAt + 480_000],
+  });
+  assert.equal(workFoldClockLabel({ live: true, elapsed: mid }), "Working · 7m 45s");
+  assert.equal(workFoldClockLabel({ live: true, elapsed: later }), "Working · 8m 5s");
+  const closed = workFoldElapsedMs({
+    live: false,
+    startedAt,
+    now: startedAt + 600_000,
+    workedMs: 485_000,
+    activityAt: [startedAt + 480_000],
+  });
+  assert.equal(workFoldClockLabel({ live: false, elapsed: closed }), "Worked 8m 5s");
+
+  const wren = {
+    status: "idle" as const,
+    agentRun: { status: "completed" as const, startedAt: 1, finishedAt: 2, isolation: "shared" as const },
+    messages: [
+      { id: "a", role: "assistant" as const, text: "Phone walk completed. Running stress captures…", createdAt: 2 },
+      { id: "t1", role: "system" as const, kind: "tool" as const, text: "Shell · completed", toolStatus: "completed", createdAt: 3 },
+      { id: "t2", role: "system" as const, kind: "tool" as const, text: "Shell · completed", toolStatus: "completed", createdAt: 4 },
+    ],
+  };
+  assert.equal(crewHasWorkAfterFinish(wren), true);
+  assert.equal(crewTurnInFlight(wren), true);
+  assert.equal(crewDotKind(wren), "working");
+  assert.doesNotMatch(workerSidebarLabel({
+    id: "sess_wren",
+    projectId: "scratch0",
+    parentId: "sess_ci9j08w1i48y",
+    provider: "cursor",
+    model: "composer-2.5",
+    effort: "high",
+    title: "Wren · Fix and ship tutorial",
+    mode: "always-approve",
+    sandbox: "off",
+    status: "idle",
+    contextUsed: 0,
+    messages: wren.messages,
+    agentRun: wren.agentRun,
+  } as never), /Done/);
+
+  const finished = {
+    ...wren,
+    messages: [
+      { id: "a", role: "assistant" as const, text: "GREET through DONE.", createdAt: 2 },
+      { id: "t1", role: "system" as const, kind: "tool" as const, text: "Shell · completed", toolStatus: "completed", createdAt: 2 },
+    ],
+  };
+  assert.equal(crewHasWorkAfterFinish(finished), false);
+  assert.equal(crewTurnInFlight(finished), false);
+  assert.match(workerSidebarLabel({
+    id: "sess_wren",
+    projectId: "scratch0",
+    parentId: "sess_ci9j08w1i48y",
+    provider: "cursor",
+    model: "composer-2.5",
+    effort: "high",
+    title: "Wren · Fix and ship tutorial",
+    mode: "always-approve",
+    sandbox: "off",
+    status: "idle",
+    contextUsed: 0,
+    messages: finished.messages,
+    agentRun: finished.agentRun,
+  } as never), /Done/);
+});
+
+test("idle session plus running agentRun is Working, and hydrate does not freeze Worked", () => {
+  const grok = {
+    status: "idle" as const,
+    agentRun: { status: "running" as const, startedAt: 1, isolation: "shared" as const },
+    messages: [{ id: "th", role: "assistant" as const, kind: "thought" as const, text: "next tap", createdAt: 2 }],
+  };
+  assert.equal(crewTurnInFlight(grok), true);
+  const elapsed = workFoldElapsedMs({ live: true, startedAt: 1, now: 8_001, activityAt: [2] });
+  assert.equal(workFoldClockLabel({ live: true, elapsed }), "Working · 8s");
+  const liveRun = normalizeAgentRun({ status: "running", startedAt: 1, isolation: "shared" }, { kind: "local" }, true);
+  assert.equal(liveRun?.status, "running");
+  const hydrated = {
+    status: "idle" as const,
+    agentRun: liveRun,
+    messages: grok.messages,
+  };
+  assert.equal(crewTurnInFlight(hydrated), true);
+  assert.notEqual(workFoldClockLabel({ live: crewTurnInFlight(hydrated), elapsed }), "Worked 8s");
 });
 
 test("await-agents must not sit a still-running worker down between tool rounds", () => {
@@ -103,6 +216,192 @@ test("await-agents must not sit a still-running worker down between tool rounds"
   assert.equal(orch?.lineup?.rows[0]?.status, "running");
   assert.equal(lineupIsTerminal(orch?.lineup), false);
   assert.equal(crewTurnInFlight(child!), true);
+});
+
+function tutorialParent(rowStatus: "running" | "completed" = "running") {
+  const folder = "D:\\Godot\\Projects\\Scratch0";
+  return {
+    id: "sess_ci9j08w1i48y",
+    title: "Tutorial runthrough QA",
+    status: "idle" as const,
+    createdAt: 1,
+    updatedAt: 1,
+    projectId: "scratch0",
+    provider: "grok" as const,
+    model: "grok-4.6",
+    contextUsed: 0,
+    messages: [] as never[],
+    lineup: addLineupRow(emptyLineup(folder, 1, "phone walk"), {
+      childId: "sess_wren",
+      title: "Wren · Fix and ship tutorial",
+      slice: "Fix and ship tutorial",
+      folder,
+      vendor: "Cursor",
+      status: rowStatus,
+      startedAt: 1,
+      ...(rowStatus === "completed" ? { finishedAt: 2, report: "Phone walk completed. Running stress captures…" } : {}),
+    }),
+  };
+}
+
+function composerBurst(patch: {
+  status?: "idle" | "running";
+  run?: "running" | "completed";
+  tools?: "open" | "done" | "none";
+  thought?: boolean;
+}) {
+  const messages = [];
+  if (patch.thought) {
+    messages.push({ id: "th", role: "assistant" as const, kind: "thought" as const, text: "planning taps", createdAt: 1 });
+  }
+  if (patch.tools === "open") {
+    messages.push({
+      id: "t",
+      role: "system" as const,
+      kind: "tool" as const,
+      text: "Shell · running",
+      toolStatus: "running",
+      createdAt: 2,
+    });
+  }
+  if (patch.tools === "done") {
+    messages.push({
+      id: "t",
+      role: "system" as const,
+      kind: "tool" as const,
+      text: "Shell · completed",
+      toolStatus: "completed",
+      createdAt: 2,
+    });
+  }
+  messages.push({
+    id: "a",
+    role: "assistant" as const,
+    text: patch.tools === "open" ? "Phone walk completed. Running stress captures…" : "Phone walk completed.",
+    createdAt: 3,
+  });
+  return {
+    ...tutorialParent(),
+    id: "sess_wren",
+    parentId: "sess_ci9j08w1i48y",
+    hidden: true,
+    title: "Wren · Fix and ship tutorial",
+    workerName: "Wren",
+    provider: "cursor" as const,
+    model: "composer-2.5",
+    lineup: undefined,
+    status: patch.status ?? "idle",
+    agentRun: {
+      status: patch.run ?? "running",
+      startedAt: 1,
+      isolation: "shared" as const,
+      ...(patch.run === "completed" ? { finishedAt: 4 } : {}),
+    },
+    messages,
+  };
+}
+
+test("idle session plus running agentRun stays a running row and is not terminal", () => {
+  const parent = tutorialParent("running");
+  const wren = composerBurst({ status: "idle", run: "running", tools: "none", thought: true });
+  const reconciled = reconcileIdleChildren([parent, wren] as never, parent.id, 11);
+  const orch = reconciled.find((item) => item.id === parent.id);
+  const child = reconciled.find((item) => item.id === "sess_wren");
+  assert.equal(child?.agentRun?.status, "running");
+  assert.equal(orch?.lineup?.rows[0]?.status, "running");
+  assert.equal(lineupIsTerminal(orch?.lineup, reconciled.filter((item) => item.parentId === parent.id)), false);
+  assert.equal(parentHasRunningChildren(reconciled as never, parent.id), true);
+});
+
+test("Composer tool bursts after a false complete are not lineup Done", () => {
+  const parent = tutorialParent("completed");
+  const wren = composerBurst({ status: "idle", run: "completed", tools: "open" });
+  assert.equal(crewHasOpenTools(wren.messages), true);
+  assert.equal(crewTurnInFlight(wren), true);
+  assert.equal(crewDotKind(wren), "working");
+  assert.doesNotMatch(workerSidebarLabel(wren as never), /Done/);
+  const settled = applyChildIdleSync([parent, wren] as never, "sess_wren", "completed", {
+    report: "Phone walk completed. Running stress captures…",
+    now: 11,
+  });
+  assert.equal(settled.find((item) => item.id === "sess_wren")?.agentRun?.status, "completed");
+  assert.equal(settled.find((item) => item.id === "sess_wren")?.agentRun?.finishedAt, 4);
+  assert.equal(
+    lineupIsTerminal(
+      settled.find((item) => item.id === parent.id)?.lineup,
+      settled.filter((item) => item.parentId === parent.id),
+    ),
+    false,
+    "open tools keep the wave live even if the row already says completed",
+  );
+});
+
+test("parent must not post All workers finished or join while a child is in flight", () => {
+  const parent = tutorialParent("completed");
+  const wren = composerBurst({ status: "idle", run: "running", tools: "open" });
+  const sessions = [parent, wren] as never;
+  const joined = maybeEnqueueLineupJoin(sessions, parent.id, 12);
+  assert.equal(joined.find((item) => item.id === parent.id)?.lineup?.notifiedAt, undefined);
+  assert.equal(
+    joined.find((item) => item.id === parent.id)?.messages.some((message) => message.text === LINEUP_FINISHED_NOTICE),
+    false,
+  );
+  const broken = applyLineupTurnBreak(sessions, parent.id, 12);
+  assert.equal(
+    broken.find((item) => item.id === parent.id)?.messages.some((message) => message.text === LINEUP_FINISHED_NOTICE),
+    false,
+  );
+  assert.equal(maybeEnqueueLineupJoin(broken, parent.id, 13), broken);
+  const snapshot = formatAwaitAgentsSnapshot({
+    lineup: parent.lineup,
+    children: [wren],
+    wait: false,
+  });
+  assert.match(snapshot, /Wren · Fix and ship tutorial/);
+  assert.match(JSON.parse(snapshot).running.join(" "), /Wren/);
+});
+
+test("Grok between-tools idle is still running, then Done only after completed+idle", () => {
+  const parent = tutorialParent("running");
+  const grok = {
+    ...composerBurst({ status: "idle", run: "running", tools: "none", thought: true }),
+    provider: "grok" as const,
+    model: "grok-4.6",
+  };
+  const mid = reconcileIdleChildren([parent, grok] as never, parent.id, 5);
+  assert.equal(mid.find((item) => item.id === "sess_wren")?.agentRun?.status, "running");
+  assert.equal(lineupIsTerminal(mid.find((item) => item.id === parent.id)?.lineup, [grok]), false);
+  const finished = {
+    ...grok,
+    agentRun: { status: "completed" as const, startedAt: 1, finishedAt: 6, isolation: "shared" as const },
+    messages: [
+      { id: "a", role: "assistant" as const, text: "GREET through DONE on the new APK.", createdAt: 6 },
+    ],
+  };
+  assert.equal(crewTurnInFlight(finished), false);
+  const settled = applyChildIdleSync(mid, "sess_wren", "completed", {
+    report: "GREET through DONE on the new APK.",
+    now: 6,
+  });
+  const orch = settled.find((item) => item.id === parent.id);
+  assert.equal(orch?.lineup?.rows[0]?.status, "completed");
+  assert.equal(lineupIsTerminal(orch?.lineup, settled.filter((item) => item.parentId === parent.id)), true);
+  assert.match(workerSidebarLabel(settled.find((item) => item.id === "sess_wren") as never), /Done/);
+});
+
+test("hydrate does not sit a live run down", () => {
+  const live = normalizeAgentRun(
+    { status: "running", startedAt: 1, isolation: "shared" },
+    { kind: "local" },
+    true,
+  );
+  assert.equal(live?.status, "running");
+  assert.equal(live?.finishedAt, undefined);
+  const parent = tutorialParent("running");
+  const wren = composerBurst({ status: "idle", run: "running", tools: "open" });
+  const healed = reconcilePersistedLineups([parent, wren] as never, 9);
+  assert.equal(healed.find((item) => item.id === "sess_wren")?.agentRun?.status, "running");
+  assert.equal(healed.find((item) => item.id === parent.id)?.lineup?.rows[0]?.status, "running");
 });
 
 test("work-fold labels use the nested sidebar identity, not a slice fragment", () => {

@@ -249,6 +249,7 @@ import {
   applyCancelWorker,
   admitSpawn,
   assertAgentPathWrite,
+  pathOwnershipEnforced,
   campaignGateError,
   claimSharedFiles,
   collectChildAgentReports,
@@ -5269,12 +5270,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               });
               const parentNow = stateRef.current.sessions.find((item) => item.id === parentId);
               const reports = collectChildAgentReports(stateRef.current.sessions, parentId, waveIdSet);
+              const waveChildren = stateRef.current.sessions.filter(
+                (session) => session.parentId === parentId && waveIdSet.has(session.id),
+              );
               const scopedLineup = parentNow?.lineup
                 ? { ...parentNow.lineup, rows: parentNow.lineup.rows.filter((row) => waveIdSet.has(row.childId)) }
                 : undefined;
               await replyAsk({
                 text: formatAwaitAgentsSnapshot({
                   lineup: scopedLineup,
+                  children: waveChildren,
                   reports,
                   wait: shouldWait,
                 }),
@@ -7102,9 +7107,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         // checked against the desk lease before normal permission policy.
         // An opaque shell command has no reliable target path; changed-file
         // review remains the backstop for vendors that report only the shell.
-        if (owner && ownedPaths.length > 0 && isWriteToolTitle(event.tool)) {
+        if (owner && ownedPaths.length > 0 && pathOwnershipEnforced(owner.sandbox) && isWriteToolTitle(event.tool)) {
           if (!pathPermissionPreflight.current.has(event.requestId)) {
-            const writePath = event.path || writePathFromToolEvent(event.tool, event.detail, event.requestId);
+            const project = stateRef.current.projects.find((item) => item.id === owner.projectId);
+            const root = sessionWorkspace(owner, project).cwd;
+            const writePath = leasePathForWrite(
+              event.path || writePathFromToolEvent(event.tool, event.detail, event.requestId),
+              root,
+            );
             const deny = (reason: string) => {
               if (provider === "codex") void window.workhorse?.codexAnswerPermission?.(event.requestId, "deny");
               else if (provider === "claude") void window.workhorse?.claudeAnswerPermission?.(event.requestId, "deny");
@@ -7131,8 +7141,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               deny("Path ownership blocked a write whose target path could not be verified.");
               return;
             }
-            const project = stateRef.current.projects.find((item) => item.id === owner.projectId);
-            const root = sessionWorkspace(owner, project).cwd;
             const refreshKey = `${owner.id}:${leasePathForWrite(writePath, root).toLowerCase()}`;
             const pendingRefresh = pathFingerprintRefreshes.current.get(refreshKey) ?? Promise.resolve();
             void pendingRefresh.then(() => window.workhorse!.readSourceFile!(writePath, root ? [root] : [])).then((source) => {

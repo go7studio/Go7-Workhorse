@@ -232,6 +232,8 @@ import {
   transcriptPaintStart,
   resolveWorkedMs,
   thoughtForReply,
+  workFoldClockLabel,
+  workFoldElapsedMs,
   workPopState,
   workStepKinds,
   type WorkStreamEvent,
@@ -6505,6 +6507,21 @@ test("transcript groups tools and thoughts above the final reply", () => {
   assert.equal(resolveWorkedMs(1_000, 14_000, [2_000, 20_000]), 14_000);
   assert.equal(resolveWorkedMs(1_000, undefined, [2_000, 20_000]), 19_000);
   assert.equal(resolveWorkedMs(1_000, undefined, [1_000]), undefined);
+  assert.equal(
+    workFoldClockLabel({
+      live: true,
+      elapsed: workFoldElapsedMs({ live: true, startedAt: 1_000, now: 466_000, activityAt: [450_000] }),
+    }),
+    "Working · 7m 45s",
+  );
+  assert.equal(
+    workFoldClockLabel({
+      live: false,
+      elapsed: workFoldElapsedMs({ live: false, startedAt: 1_000, now: 600_000, workedMs: 485_000, activityAt: [480_000] }),
+    }),
+    "Worked 8m 5s",
+  );
+  assert.match(readFileSync(path.join(ROOT, "src", "ui", "WorkPopout.tsx"), "utf8"), /workFoldClockLabel/);
 
   const readGoal: ChatMessage = {
     id: "t1",
@@ -6700,7 +6717,7 @@ test("transcript groups tools and thoughts above the final reply", () => {
   assert.doesNotMatch(popout, /Copy work/);
   assert.match(popout, /unsquashSentences\(text\)/);
   assert.doesNotMatch(pane, /displayWorkSteps\(block, \{ live \}\)/);
-  assert.match(popout, /bodyOpen && hasInner \? displayWorkSteps\(block, \{ live, peeled \}\)/);
+  assert.match(popout, /bodyOpen && hasInner \? displayWorkSteps\(block, \{ live: foldLive, peeled \}\)/);
   assert.match(pane, /transcriptPaintStart/);
   assert.match(pane, /shownBlocks\.map/);
   assert.match(pane, /transcript-stack/);

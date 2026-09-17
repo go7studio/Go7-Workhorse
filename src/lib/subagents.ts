@@ -1,4 +1,5 @@
 import { isExternalAgentAddress } from "./agent-runtime";
+import { crewTurnInFlight } from "./crew-live";
 import { isGrokBotModel, isGrokBotName } from "./custom-http-identity";
 import { uid } from "./id";
 import { cursorUsageLane } from "./cursor-lane";
@@ -695,7 +696,7 @@ export function spawnWaitsForReply(input: { wait?: unknown }): boolean {
 }
 
 export function parentHasRunningChildren(
-  sessions: Array<Pick<Session, "id" | "parentId" | "status" | "agentRun" | "hidden">>,
+  sessions: Array<Pick<Session, "id" | "parentId" | "status" | "agentRun" | "hidden"> & { messages?: Session["messages"] }>,
   parentId: string,
   childIds?: ReadonlySet<string>,
 ): boolean {
@@ -704,7 +705,7 @@ export function parentHasRunningChildren(
       session.parentId === parentId &&
       (!childIds || childIds.has(session.id)) &&
       isWorkerSession(session) &&
-      (session.agentRun?.status === "running" || session.status === "running"),
+      crewTurnInFlight(session),
   );
 }
 
@@ -906,6 +907,27 @@ export function workerMissionOutcome(text: string | undefined): MissionReportOut
   if (last === "continue") return "continue";
   if (last === "complete" || last === "completed") return "complete";
   return undefined;
+}
+
+/**
+ * Leftover work in the prose, even when the worker also wrote
+ * `Mission status: complete`. A first-pass scout that says "Next I'll rebuild"
+ * is not acceptance met.
+ */
+export function reportLeavesWorkOpen(text: string | undefined): boolean {
+  if (!text?.trim()) return false;
+  const outcome = workerMissionOutcome(text);
+  if (outcome === "continue" || outcome === "blocked") return true;
+  const body = text.replace(/^\s*(?:mission\s+)?status:\s*(?:blocked|continue|complete(?:d)?)\s*[.!]?\s*$/gim, "\n");
+  return (
+    /\bnext I(?:['’]ll| will| am going to)\b/i.test(body) ||
+    /\bI(?:['’]ll| will) (?:rebuild|rerun|install|export|retry|send)\b/i.test(body) ||
+    /\bmissing (?:java|jdk|sdk)\b/i.test(body) ||
+    /\b(?:could not|failed to|cannot) (?:export|install|build|rebuild)\b/i.test(body) ||
+    /\bexport failed\b/i.test(body) ||
+    /\bstale (?:apk|build)\b/i.test(body) ||
+    /\bremaining work\b/i.test(body)
+  );
 }
 
 /** A model may finish its turn while explicitly saying the assigned work did not finish. */
@@ -1484,6 +1506,7 @@ export function formatWorkerPrompt(input: WorkerBriefInput): string {
     lines.push("Required follow-up belongs to the parent mission loop. A leaf helper is only an optional bounded check.");
     lines.push("If that helper stops or leaves work incomplete, report continue with the remaining work; do not claim completion.");
     lines.push("Verify the acceptance criteria after the work. End with Mission status: complete, continue, or blocked, plus evidence or remaining work.");
+    lines.push("Report complete only when every acceptance criterion is met and no next step remains. A plan, scout, failed export, or “Next I’ll…” is continue or blocked, not complete.");
   }
   lines.push("Do this slice only. Use list_dir / read_file on FOLDER. Quote real files.");
   if (input.skills?.length) lines.push("Read every listed SKILL.md fully before acting.");
@@ -2492,6 +2515,11 @@ export function workerMayWrite(role?: DeskRole, sandbox?: SandboxProfile): boole
   return sandbox !== "read-only" && sandbox !== "strict";
 }
 
+/** Path-ownership allowlist/lease is a desk gate for sandboxed seats only. */
+export function pathOwnershipEnforced(sandbox?: SandboxProfile): boolean {
+  return sandbox !== "off";
+}
+
 export type CancelWorkerResult = {
   sessions: Session[];
   found: boolean;
@@ -2663,6 +2691,98 @@ export function overlappingAgentFiles(
   return [...conflicts];
 }
 
+const WRITE_PATH_JSON_KEYS = ["file_path", "filePath", "target_file", "targetFile", "path", "file"] as const;
+const WRITE_PATH_EXT = /\.[A-Za-z0-9]{1,8}$/;
+
+function pathFromWritePayloadObject(value: unknown): string {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return "";
+  const record = value as Record<string, unknown>;
+  for (const key of WRITE_PATH_JSON_KEYS) {
+    const item = record[key];
+    if (typeof item === "string" && item.trim()) return item.trim();
+  }
+  return "";
+}
+
+function unescapeJsonPath(raw: string): string {
+  try {
+    const parsed = JSON.parse(`"${raw}"`);
+    return typeof parsed === "string" ? parsed : raw;
+  } catch {
+    return raw.replaceAll("\\/", "/");
+  }
+}
+
+function quotedJsonField(blob: string, key: string): string {
+  const match = blob.match(new RegExp(`"${key}"\\s*:\\s*"((?:\\\\.|[^"\\\\])*)"`));
+  return match?.[1] ? unescapeJsonPath(match[1]) : "";
+}
+
+function pathFromWritePayloadText(text: string): string {
+  const start = text.indexOf("{");
+  if (start < 0) return "";
+  const blob = text.slice(start);
+  // Read file_path from the text before JSON.parse. GDScript old_string/new_string
+  // often carries raw quotes and newlines that make the whole object invalid JSON.
+  for (const key of ["file_path", "filePath", "target_file", "targetFile"]) {
+    const fromKey = quotedJsonField(blob, key);
+    if (fromKey) return fromKey;
+  }
+  try {
+    const fromObj = pathFromWritePayloadObject(JSON.parse(blob));
+    if (fromObj) return fromObj;
+  } catch {
+    /* truncated or GDScript-bearing SearchReplace JSON */
+  }
+  return quotedJsonField(blob, "path") || quotedJsonField(blob, "file");
+}
+
+function isRelativeWritePath(value: string): boolean {
+  return Boolean(
+    value &&
+      !/^[A-Za-z]:[\\/]/.test(value) &&
+      !value.startsWith("/") &&
+      !value.startsWith("\\\\") &&
+      WRITE_PATH_EXT.test(value),
+  );
+}
+
+function splitGluedWritePath(file: string): { prefix: string; json: string } {
+  const text = file.trim();
+  if (!text) return { prefix: "", json: "" };
+  const extSlashBrace = text.search(/\.[A-Za-z0-9]{1,8}[\\/]\s*\{/);
+  const extBrace = extSlashBrace >= 0 ? extSlashBrace : text.search(/\.[A-Za-z0-9]{1,8}\s*\{/);
+  if (extBrace >= 0) {
+    const brace = text.indexOf("{", extBrace);
+    return { prefix: text.slice(0, brace).replace(/[\\/\s]+$/, "").trim(), json: text.slice(brace) };
+  }
+  const brace = text.indexOf("{");
+  if (brace === 0) return { prefix: "", json: text };
+  if (brace > 0 && /"variant"\s*:/.test(text.slice(brace))) {
+    return { prefix: text.slice(0, brace).replace(/[\\/\s]+$/, "").trim(), json: text.slice(brace) };
+  }
+  return { prefix: text, json: "" };
+}
+
+function cutGluedJson(file: string): string {
+  const brace = file.indexOf("{");
+  if (brace < 0) return file;
+  return file.slice(0, brace).replace(/[\\/\s]+$/, "").trim();
+}
+
+/** Grok SearchReplace glues `rel/path.ext/{json}` onto the write target. */
+export function stripWritePathPayload(file: string): string {
+  const trimmed = file.trim();
+  if (!trimmed) return "";
+  const { prefix, json } = splitGluedWritePath(trimmed);
+  const fromJson = json ? pathFromWritePayloadText(json) : "";
+  if (isRelativeWritePath(prefix)) return prefix;
+  if (fromJson) return fromJson;
+  if (prefix && WRITE_PATH_EXT.test(prefix)) return prefix;
+  if (prefix) return prefix;
+  return cutGluedJson(trimmed) || trimmed;
+}
+
 export function normalizeLeasePath(file: string): string {
   return file.replaceAll("\\", "/").replace(/^\.\/+/, "").replace(/^\/+|\/+$/g, "");
 }
@@ -2678,9 +2798,12 @@ export function normalizePathAllowlist(raw: unknown): string[] {
 }
 
 export function leasePathForWrite(file: string, root = ""): string {
-  const clean = normalizeLeasePath(file);
-  const base = normalizeLeasePath(root);
-  if (base && clean.toLowerCase().startsWith(`${base.toLowerCase()}/`)) return clean.slice(base.length + 1);
+  const stripped = cutGluedJson(stripWritePathPayload(file));
+  const clean = normalizeLeasePath(stripped).replace(/\/{2,}/g, "/");
+  const base = normalizeLeasePath(root).replace(/\/{2,}/g, "/");
+  if (base && clean.toLowerCase().startsWith(`${base.toLowerCase()}/`)) {
+    return clean.slice(base.length + 1).replace(/^\/+/, "");
+  }
   return clean;
 }
 
@@ -2829,10 +2952,12 @@ export function assertAgentPathWrite(input: {
   role?: DeskRole;
   sandbox?: SandboxProfile;
 }): { ok: true } | { ok: false; error: string } {
+  if (!pathOwnershipEnforced(input.sandbox)) return { ok: true };
   const path = leasePathForWrite(input.path, input.root);
   const allowed = normalizePathAllowlist(input.paths);
   if (!allowed.some((item) => item.toLowerCase() === path.toLowerCase())) {
-    return { ok: false, error: `Path ownership blocked write: ${path || input.path} is not in this worker's allowlist.` };
+    const shown = cutGluedJson(path) || "the target file";
+    return { ok: false, error: `Path ownership blocked write: ${shown} is not in this worker's allowlist.` };
   }
   return assertSharedWrite({
     leases: input.leases,

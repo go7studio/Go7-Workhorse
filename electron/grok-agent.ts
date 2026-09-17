@@ -15,6 +15,7 @@ import type { ChatImage, Command } from "../src/lib/types";
 import { isCursorInnerTask } from "../src/lib/cursor-lane";
 export { applyCompactUsage } from "../src/lib/grok-events";
 import { parseSubagentFinished, subagentUsageDraft } from "../src/lib/grok-events";
+import { stripWritePathPayload } from "../src/lib/subagents";
 import { parseVendorBackgroundTask, type VendorBackgroundTask } from "../src/lib/vendor-tasks";
 
 export function cursorExtensionResult(method: string): { outcome: { outcome: string; reason?: string } } | null {
@@ -638,12 +639,14 @@ function toolPath(params: Record<string, unknown>): string | undefined {
   const toolCall = asRecord(params.toolCall);
   const locations = Array.isArray(toolCall.locations) ? toolCall.locations : [];
   const first = locations[0];
+  let raw = "";
   if (first && typeof first === "object") {
     const loc = first as Record<string, unknown>;
-    if (typeof loc.path === "string") return loc.path;
+    if (typeof loc.path === "string") raw = loc.path;
   }
-  if (typeof toolCall.path === "string") return toolCall.path;
-  return undefined;
+  if (!raw && typeof toolCall.path === "string") raw = toolCall.path;
+  const clean = stripWritePathPayload(raw);
+  return clean || undefined;
 }
 
 function usageNumber(...values: unknown[]): number | undefined {

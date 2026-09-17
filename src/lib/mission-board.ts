@@ -1,4 +1,4 @@
-import { addLineupRow, emptyLineup, missionRowStatus, missionState } from "./lineup";
+import { addLineupRow, adaptiveMissionVerdict, emptyLineup, missionRowStatus, missionState } from "./lineup";
 import { CAMPAIGN_PHASES, vendorDisplayName, workerMissionOutcome, workerTaskTitle, type MissionReportOutcome } from "./subagents";
 import { normalizeCrewModes } from "./workhorse-rules";
 import type {
@@ -68,6 +68,8 @@ export type MissionBoardLook = {
   running: boolean;
   word?: string;
   tone?: "danger" | "quiet";
+  /** Terminal unmet/failed waves. Absent while a pass is still going. */
+  verdict?: "failed" | "unmet";
 };
 
 export function missionBoardWorkersFromSessions(
@@ -323,6 +325,20 @@ export function missionBoardView(
     agentRun: worker.runStatus ? ({ status: worker.runStatus } as Session["agentRun"]) : undefined,
   }));
   const state = missionState(lineup, children);
+  const verdict = adaptiveMissionVerdict(lineup, children);
+  // A completed adaptive wave must not keep painting Mission-Scout. Persist
+  // drops lineup.mission; this hides a stale copy until that write lands.
+  if (verdict === "complete") return undefined;
+
+  const terminal =
+    verdict === "failed"
+      ? { word: "Failed" as const, tone: "danger" as const, verdict: "failed" as const }
+      : verdict === "unmet"
+        ? { word: "Unmet" as const, tone: "danger" as const, verdict: "unmet" as const }
+        : {
+            ...(state?.word ? { word: state.word } : {}),
+            ...(state?.tone ? { tone: state.tone } : {}),
+          };
 
   return {
     objective: mission.objective,
@@ -333,8 +349,7 @@ export function missionBoardView(
     criteria: mission.acceptanceCriteria,
     layers,
     running: Boolean(state?.running),
-    ...(state?.word ? { word: state.word } : {}),
-    ...(state?.tone ? { tone: state.tone } : {}),
+    ...terminal,
   };
 }
 
@@ -342,7 +357,9 @@ export function missionBoardKicker(view: Pick<MissionBoardLook, "iteration" | "m
   return `Mission · Pass ${view.iteration} of ${view.maxIterations} · ${CAMPAIGN_PHASE_LABEL[view.phase]}`;
 }
 
-export function missionBoardChip(view: Pick<MissionBoardLook, "phase">): string {
+export function missionBoardChip(view: Pick<MissionBoardLook, "phase" | "verdict">): string {
+  if (view.verdict === "failed") return "Mission · Failed";
+  if (view.verdict === "unmet") return "Mission · Unmet";
   return `Mission · ${CAMPAIGN_PHASE_LABEL[view.phase]}`;
 }
 

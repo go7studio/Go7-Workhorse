@@ -41,7 +41,11 @@ export function workerSidebarLabel(session: Session, botName?: string): string {
   const effort = effortLabel(session.effort ?? null);
   const cancelled = session.agentRun?.status === "cancelled" ? "Cancelled" : "";
   const done =
-    session.agentRun?.status === "completed" && session.agentRun.executionOwner !== "parent" ? "Done" : "";
+    !crewTurnInFlight(session) &&
+    session.agentRun?.status === "completed" &&
+    session.agentRun.executionOwner !== "parent"
+      ? "Done"
+      : "";
   return [name, effort, cancelled, done].filter(Boolean).join(" · ");
 }
 

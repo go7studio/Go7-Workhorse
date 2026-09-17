@@ -62,6 +62,25 @@ export function resolveWorkedMs(startedAt: number, workedMs: number | undefined,
   return latest > startedAt ? latest - startedAt : undefined;
 }
 
+/** Live turns tick from now. Closed turns freeze on workedMs or last activity. */
+export function workFoldElapsedMs(input: {
+  live: boolean;
+  startedAt: number;
+  now: number;
+  workedMs?: number;
+  activityAt: number[];
+}): number | undefined {
+  if (input.live) return Math.max(0, input.now - input.startedAt);
+  return resolveWorkedMs(input.startedAt, input.workedMs, input.activityAt);
+}
+
+/** Present tense while the turn is in flight. Past tense only after it ended. */
+export function workFoldClockLabel(input: { live: boolean; elapsed?: number }): string {
+  if (input.live) return `Working · ${formatWorked(input.elapsed ?? 0)}`;
+  if (input.elapsed != null) return `Worked ${formatWorked(input.elapsed)}`;
+  return "Work";
+}
+
 export function isDeskNotice(message: ChatMessage): boolean {
   if (message.role !== "system" || message.kind) return false;
   return /^(Allowed |Elevated |Denied[:\s]|Kept current limits)/i.test(message.text.trim());

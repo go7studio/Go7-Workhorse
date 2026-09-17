@@ -113,7 +113,9 @@ test("a nested worker subtitle names a clean finish as Done", () => {
     }),
     "Composer 2.5 · High · Cancelled",
   );
-  assert.match(read("src/ui/ChatRow.tsx"), /status === "completed" && session\.agentRun\.executionOwner !== "parent"/);
+  assert.match(read("src/ui/ChatRow.tsx"), /!crewTurnInFlight\(session\)/);
+  assert.match(read("src/ui/ChatRow.tsx"), /status === "completed"/);
+  assert.match(read("src/ui/ChatRow.tsx"), /executionOwner !== "parent"/);
 });
 
 test("a running chat keeps model and effort on the row, not Working…", () => {
@@ -131,6 +133,14 @@ test("crew dots map run state onto the vendor circle", () => {
   assert.equal(crewDotKind({ status: "idle", agentRun: { status: "interrupted", startedAt: 1, isolation: "shared" } }), "stopped");
   assert.equal(crewDotKind({ status: "idle", agentRun: { status: "timed-out", startedAt: 1, isolation: "shared" } }), "stopped");
   assert.equal(crewDotKind({ status: "idle", agentRun: { status: "completed", startedAt: 1, isolation: "shared" } }), "idle");
+  assert.equal(
+    crewDotKind({
+      status: "idle",
+      agentRun: { status: "completed", startedAt: 1, finishedAt: 2, isolation: "shared" },
+      messages: [{ id: "t", role: "system", kind: "tool", text: "Shell · running", toolStatus: "running", createdAt: 1 }],
+    }),
+    "working",
+  );
   assert.match(read("src/styles/crew-dots.css"), /\.dot\.failed/);
   assert.match(read("src/styles/crew-dots.css"), /\.dot\.stopped/);
   assert.match(read("src/styles/crew-dots.css"), /\.dot\.needs-you/);

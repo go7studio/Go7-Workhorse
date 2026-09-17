@@ -17,7 +17,8 @@ import {
   namedWorkSummary,
   packWorkRows,
   earlierWorkLabel,
-  resolveWorkedMs,
+  workFoldClockLabel,
+  workFoldElapsedMs,
   workPopState,
   type CrewSummaryWorker,
   type DisplayWorkStep,
@@ -454,45 +455,43 @@ export const WorkPopout = memo(function WorkPopout({
   const threads = block.subagents;
   const tools = block.tools;
   const crewWorkers = useStoreSelector((store) => crewWorkersFromStore(store, threads), sameCrewWorkers);
+  const toolsLive = tools.some((tool) => !toolIsFinished(tool.toolStatus));
   const anyChildLive = crewWorkers.some((worker) => worker.live) || threads.some((marker) => marker.toolStatus === "running");
+  const foldLive = live || toolsLive || anyChildLive;
   useEffect(() => {
-    if (!live && !anyChildLive) return;
+    if (!foldLive) return;
     const timer = window.setInterval(() => setNow(Date.now()), 250);
     return () => window.clearInterval(timer);
-  }, [live, anyChildLive]);
+  }, [foldLive]);
   const workTools = threads.length ? tools.filter((tool) => !isSpawnTool(tool)) : tools;
   const hasInner = block.steps.some((step) => step.type !== "tool" || !hideSpawnTool(step.message, threads.length > 0));
-  const steps = bodyOpen && hasInner ? displayWorkSteps(block, { live, peeled }) : [];
+  const steps = bodyOpen && hasInner ? displayWorkSteps(block, { live: foldLive, peeled }) : [];
   const visible = steps.filter((step) => {
     if (step.type === "tool" && hideSpawnTool(step.message, threads.length > 0)) return false;
     return true;
   });
-  const hasWork = hasInner || live;
+  const hasWork = hasInner || foldLive;
   const stamp = <TimeStamp at={startedAt} />;
   if (!hasWork) return stamp;
 
-  const elapsed = live
-    ? now - startedAt
-    : resolveWorkedMs(
-        startedAt,
-        workedMs,
-        [...tools, ...block.compacts, ...threads].map((message) => message.createdAt),
-      );
-  const label = live
-    ? `Working · ${formatWorked(elapsed ?? 0)}`
-    : elapsed != null
-    ? `Worked ${formatWorked(elapsed)}`
-    : "Work";
+  const elapsed = workFoldElapsedMs({
+    live: foldLive,
+    startedAt,
+    now,
+    workedMs,
+    activityAt: [...tools, ...block.compacts, ...threads].map((message) => message.createdAt),
+  });
+  const label = workFoldClockLabel({ live: foldLive, elapsed });
   const peerTools = workTools.filter((tool) => isPeerTool(tool));
   const otherTools = workTools.filter((tool) => !peerTools.some((item) => item.id === tool.id));
   const talking = talkingToSummary(peerTools);
   const named = namedWorkSummary(otherTools, {
-    live,
+    live: foldLive,
     allowThinking: !talking,
   });
-  const crew = namedCrewSummary(crewWorkers, { live: live || anyChildLive });
+  const crew = namedCrewSummary(crewWorkers, { live: foldLive });
   const summary = closedWorkSummary({ label, talking, tools: named, crew });
-  const state = workPopState({ live: live || anyChildLive, failed: crewWorkers.some((worker) => worker.failed) });
+  const state = workPopState({ live: foldLive, failed: crewWorkers.some((worker) => worker.failed) });
 
   const rows = groupWorkRows(visible);
   const packed = packWorkRows(rows);

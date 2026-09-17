@@ -22,16 +22,49 @@ export function lastCrewActivity(session: { messages?: ChatMessage[] }): ChatMes
   return undefined;
 }
 
+/** A tool row the vendor has not closed. Finished leftover chips are history. */
+export function crewHasOpenTools(messages?: ChatMessage[]): boolean {
+  return (messages ?? []).some((message) => message.kind === "tool" && !toolIsFinished(message.toolStatus));
+}
+
+/**
+ * Tools or thoughts that landed after the host already stamped the run
+ * finished, with no new user turn in between. Composer/Grok keep completing
+ * tools while the fold would otherwise freeze on Worked.
+ */
+export function crewHasWorkAfterFinish(
+  session: Pick<Session, "agentRun"> & { messages?: ChatMessage[] },
+): boolean {
+  const run = session.agentRun?.status;
+  const finishedAt = session.agentRun?.finishedAt;
+  if (!run || !TERMINAL_RUN.has(run) || typeof finishedAt !== "number" || finishedAt <= 0) return false;
+  const messages = session.messages ?? [];
+  let userAfter = false;
+  let workAfter = false;
+  for (const message of messages) {
+    if (typeof message.createdAt !== "number" || message.createdAt <= finishedAt) continue;
+    if (message.role === "user") userAfter = true;
+    else if (message.kind === "tool" || message.kind === "thought" || (message.role === "assistant" && message.kind !== "subagent")) {
+      workAfter = true;
+    }
+  }
+  return workAfter && !userAfter;
+}
+
 /**
  * A worker is still on the job through thinking, not only while a tool is
  * in flight. Status can go idle between vendor rounds; the agent run is
  * what says the turn is still open.
  *
- * Leftover thoughts, empty assistant bubbles, and stuck tool rows after a
- * finished run are history — they must not keep the horse walking.
+ * Cursor Composer and Grok both sit session.status idle between tool bursts.
+ * Open tools, and work that arrives after a premature finishedAt, keep the
+ * turn live. Leftover thoughts and finished chips from before the stamp
+ * are history.
  */
 export function crewTurnInFlight(session: Pick<Session, "status" | "agentRun"> & { messages?: ChatMessage[] }): boolean {
   if (session.status === "running" || session.status === "needs-input") return true;
+  if (crewHasOpenTools(session.messages)) return true;
+  if (crewHasWorkAfterFinish(session)) return true;
   const run = session.agentRun?.status;
   if (!run || TERMINAL_RUN.has(run)) return false;
   if (run === "running") return true;

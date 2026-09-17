@@ -134,7 +134,8 @@ export function applyPlanAuditorSpawn(
 ): PlanAuditorSpawn {
   const now = ids.now ?? Date.now();
   const parent = sessions.find((session) => session.id === parentId);
-  if (!parent?.planRun || parent.planRun.status !== "running" || !parent.lineup || !lineupIsTerminal(parent.lineup)) {
+  const children = sessions.filter((session) => session.parentId === parentId);
+  if (!parent?.planRun || parent.planRun.status !== "running" || !parent.lineup || !lineupIsTerminal(parent.lineup, children)) {
     return { sessions };
   }
   const isAuditor = (id: string) =>

@@ -1,7 +1,8 @@
 import { OBJECTIVE_ASK_RULE } from "./ask-default";
 import { enqueuePrompt } from "./chats";
 import { uid } from "./id";
-import { boundWorkerReport, crewHasParentTakeover, normalizeMissionIteration, normalizePathAllowlist, normalizeWorkerFindings, parseWorkerFindings, withSubagentStatus, workerNameFromTitle, workerTaskTitle } from "./subagents";
+import { crewHasOpenTools, crewTurnInFlight } from "./crew-live";
+import { boundWorkerReport, crewHasParentTakeover, normalizeMissionIteration, normalizePathAllowlist, normalizeWorkerFindings, parseWorkerFindings, reportLeavesWorkOpen, withSubagentStatus, workerMissionOutcome, workerNameFromTitle, workerTaskTitle } from "./subagents";
 import type { AgentRun, ChatMessage, DeskLineup, DeskLineupRow, DeskLineupRowStatus, MissionIteration, Session, WorkerFinding } from "./types";
 import { isVendorRateLimitError } from "./vendor-bridge";
 
@@ -23,7 +24,12 @@ export function lineupFinishedNotice(lineup: DeskLineup | undefined): string {
   const cancelled = count("cancelled");
   const interrupted = count("interrupted");
   const unknown = count("unknown");
-  if (failed + timedOut + cancelled + interrupted + unknown === 0) return LINEUP_FINISHED_NOTICE;
+  if (failed + timedOut + cancelled + interrupted + unknown === 0) {
+    const verdict = adaptiveMissionVerdict(lineup);
+    if (verdict === "unmet") return "Workers finished this pass · acceptance unmet.";
+    if (verdict === "failed") return "Workers finished this pass · mission failed.";
+    return LINEUP_FINISHED_NOTICE;
+  }
   const say = (n: number, word: string) => (n > 0 ? `${n} ${word}` : "");
   const parts = [
     say(failed, "failed"),
@@ -177,9 +183,16 @@ export function setLineupRowStatus(
   };
 }
 
-export function lineupIsTerminal(lineup: DeskLineup | undefined): boolean {
+export function lineupIsTerminal(
+  lineup: DeskLineup | undefined,
+  children: Array<Pick<Session, "id" | "status" | "agentRun"> & { messages?: ChatMessage[] }> = [],
+): boolean {
   if (!lineup || lineup.rows.length === 0) return false;
-  return lineup.rows.every((row) => row.status !== "queued" && row.status !== "running");
+  const byId = new Map(children.map((child) => [child.id, child]));
+  return lineup.rows.every((row) => {
+    const status = missionRowStatus(row, byId.get(row.childId));
+    return status !== "queued" && status !== "running";
+  });
 }
 
 /** Parent is still on a turn — a join would steal the composer and dump reports. */
@@ -206,22 +219,30 @@ export function shouldJoinAfterChildSettle(
   return status !== "cancelled";
 }
 
-export function lineupSnapshot(lineup: DeskLineup | undefined): {
+export function lineupSnapshot(
+  lineup: DeskLineup | undefined,
+  children: Array<Pick<Session, "id" | "status" | "agentRun"> & { messages?: ChatMessage[] }> = [],
+): {
   id?: string;
   folder?: string;
   running: string[];
   finished: Array<{ title: string; status: string; report: string; childSessionId: string; findings?: WorkerFinding[] }>;
 } {
   if (!lineup) return { running: [], finished: [] };
+  const byId = new Map(children.map((child) => [child.id, child]));
+  const live = (row: DeskLineupRow) => {
+    const status = missionRowStatus(row, byId.get(row.childId));
+    return status === "queued" || status === "running";
+  };
   return {
     id: lineup.id,
     folder: lineup.folder,
-    running: lineup.rows.filter((row) => row.status === "queued" || row.status === "running").map((row) => row.title),
+    running: lineup.rows.filter(live).map((row) => row.title),
     finished: lineup.rows
-      .filter((row) => row.status !== "queued" && row.status !== "running")
+      .filter((row) => !live(row))
       .map((row) => ({
         title: row.title,
-        status: row.status,
+        status: missionRowStatus(row, byId.get(row.childId)),
         report: row.report ?? "",
         childSessionId: row.childId,
         ...(row.findings?.length ? { findings: row.findings } : {}),
@@ -235,7 +256,7 @@ export function markLineupNotified(lineup: DeskLineup, now = Date.now()): DeskLi
 
 export function lineupJoinPrompt(
   lineup: DeskLineup | undefined,
-  options?: { continuePlan?: boolean; parentTookOver?: boolean },
+  options?: { continuePlan?: boolean; continueMission?: boolean; parentTookOver?: boolean },
 ): string {
   const user = lineup?.userText?.trim() || "(unknown)";
   const id = lineup?.id?.trim() || "(none)";
@@ -270,6 +291,15 @@ export function lineupJoinPrompt(
       "Keep going until the plan completes or is truthfully blocked.",
       OBJECTIVE_ASK_RULE,
     );
+  } else if (options?.continueMission) {
+    const mission = lineup?.mission;
+    const workerIds = (lineup?.rows ?? []).map((row) => row.childId).filter(Boolean);
+    lines.push(
+      "This adaptive mission is not done. Acceptance is unmet and pass budget remains.",
+      "Do not tell the user the work is complete. Do not write a combined review as if the job finished.",
+      `Call workhorse_continue_mission with previousWorkerIds: ${JSON.stringify(workerIds)}, previousPass: ${mission?.iteration ?? 1}, remainingWork from the reports, and fromSessionId (this chat).`,
+      "Preserve acceptance criteria and exclusions. Do not attach a new loop object; this is the same mission.",
+    );
   } else {
     lines.push(
       "Answer the user in your own words as this chat’s bot. Write one combined review of what the crew found.",
@@ -297,6 +327,7 @@ export function awaitAgentsWaits(input: { wait?: unknown; parentStatus?: string 
 
 export function formatAwaitAgentsSnapshot(input: {
   lineup?: DeskLineup;
+  children?: Array<Pick<Session, "id" | "status" | "agentRun"> & { messages?: ChatMessage[] }>;
   reports?: Array<{
     title: string;
     status: string;
@@ -312,7 +343,7 @@ export function formatAwaitAgentsSnapshot(input: {
   }>;
   wait?: boolean;
 }): string {
-  const snapshot = lineupSnapshot(input.lineup);
+  const snapshot = lineupSnapshot(input.lineup, input.children);
   const running = snapshot.running;
   return JSON.stringify(
     {
@@ -331,6 +362,8 @@ export function formatAwaitAgentsSnapshot(input: {
         running.length === 0
           ? input.reports?.some((row) => row.executionOwner === "parent")
             ? "Workers finished, but the parent took over. Do not claim a fully Workhorse-owned completion. Join the reports and say who did the finishing work."
+            : missionPassCanContinue(input.lineup)
+              ? "This pass finished but acceptance is unmet. Call workhorse_continue_mission with previousWorkerIds, previousPass, remainingWork, and fromSessionId. Do not tell the user the mission is complete. Do not sit on this tool."
             : "All workers finished and their reports are above. Join them now for the user. Start with blockers, then the rest, and name which worker found each item. The desk will not send a separate join. Do not ask the user to pick 1/2/3."
           : "Workers are still running. Keep talking to the user. Do not ask them to pick. Do not sit on this tool.",
     },
@@ -397,6 +430,9 @@ export function applyChildIdleSync(
   const now = extra?.now ?? Date.now();
   const child = sessions.find((session) => session.id === childId);
   if (extra?.correlationId && child?.agentRun?.correlationId !== extra.correlationId) return sessions;
+  // A premature host "done" while tools are still open is not a finish.
+  // Cursor Composer and Grok both burst tools after sitting session.status idle.
+  if (crewHasOpenTools(child?.messages)) return sessions;
   const report = (extra?.report ?? childReportText(child)).trim();
   const findings = childFindings(child);
   const nextStatus = agentStatusForRow(status);
@@ -436,11 +472,9 @@ export function reconcileIdleChildren(sessions: Session[], parentId: string, now
   let next = sessions;
   for (const session of sessions) {
     if (session.parentId !== parentId) continue;
-    if (session.status === "running") continue;
-    // ACP/Grok workers sit at session.status idle between tool rounds while
-    // agentRun stays running. Treating that as "stuck" made await-agents join
-    // a still-working slice and sat the sidebar horse down.
-    if (session.agentRun?.status === "running") continue;
+    // ACP/Grok and Cursor Composer sit session.status idle between tool
+    // rounds. Open tools or a still-running agentRun are the live turn.
+    if (crewTurnInFlight(session)) continue;
     const row = sessions.find((item) => item.id === parentId)?.lineup?.rows.find((item) => item.childId === session.id);
     const rowOpen = row && (row.status === "queued" || row.status === "running");
     if (!rowOpen) continue;
@@ -460,7 +494,7 @@ export function reconcilePersistedLineups(sessions: Session[], now = Date.now())
   const indexes = new Map(next.map((session, index) => [session.id, index]));
   let changed = false;
   for (const child of sessions) {
-    if (!child.parentId || !child.agentRun || child.agentRun.status === "running") continue;
+    if (!child.parentId || !child.agentRun || crewTurnInFlight(child)) continue;
     const parentIndex = indexes.get(child.parentId);
     const childIndex = indexes.get(child.id);
     if (parentIndex === undefined || childIndex === undefined) continue;
@@ -514,7 +548,10 @@ export function reconcilePersistedLineups(sessions: Session[], now = Date.now())
   for (let index = 0; index < next.length; index += 1) {
     const parent = next[index]!;
     if (!parent.lineup) continue;
-    const reconciled = maybeEnqueueLineupJoin([parent], parent.id, now)[0]!;
+    const children = next.filter((session) => session.parentId === parent.id);
+    const settled = settleAdaptiveMission(parent.lineup, children);
+    const withSettled = settled && settled !== parent.lineup ? { ...parent, lineup: settled } : parent;
+    const reconciled = maybeEnqueueLineupJoin([withSettled], parent.id, now)[0]!;
     if (reconciled !== parent) {
       next[index] = reconciled;
       changed = true;
@@ -640,16 +677,19 @@ export function applyJoinRateLimitRetry(
 
 export function maybeEnqueueLineupJoin(sessions: Session[], parentId: string, now = Date.now()): Session[] {
   const parent = sessions.find((session) => session.id === parentId);
-  if (!parent?.lineup || parent.lineup.notifiedAt || !lineupIsTerminal(parent.lineup)) return sessions;
+  const children = sessions.filter((session) => session.parentId === parentId);
+  if (!parent?.lineup || parent.lineup.notifiedAt || !lineupIsTerminal(parent.lineup, children)) return sessions;
   if (lineupJoinParentIsLive(parent.status) || !lineupJoinHasActionableRow(parent.lineup)) return sessions;
   if (parent.lineup.joinOwner === "external-runtime") {
     return handOverLineup(sessions, parentId, now);
   }
   const broken = applyLineupTurnBreak(sessions, parentId, now);
   const delay = joinDelayMs(parent.lineup);
+  const continuePlan = parent.planRun?.status === "running";
   const queued = enqueuePrompt(broken, parentId, {
     text: lineupJoinPrompt(parent.lineup, {
-      continuePlan: parent.planRun?.status === "running",
+      continuePlan,
+      continueMission: !continuePlan && missionPassCanContinue(parent.lineup, children),
       parentTookOver: crewHasParentTakeover(sessions, parentId),
     }),
     hideUser: true,
@@ -669,7 +709,8 @@ export function maybeEnqueueLineupJoin(sessions: Session[], parentId: string, no
  */
 export function handOverLineup(sessions: Session[], parentId: string, now = Date.now()): Session[] {
   const parent = sessions.find((session) => session.id === parentId);
-  if (!parent?.lineup || !lineupIsTerminal(parent.lineup)) return sessions;
+  const children = sessions.filter((session) => session.parentId === parentId);
+  if (!parent?.lineup || !lineupIsTerminal(parent.lineup, children)) return sessions;
   return applyLineupTurnBreak(sessions, parentId, now).map((session) => {
     if (session.id !== parentId || !session.lineup) return session;
     const queue = (session.queue ?? []).filter((item) => item.joinAttempt == null);
@@ -682,6 +723,9 @@ export function handOverLineup(sessions: Session[], parentId: string, now = Date
 }
 
 export function applyLineupTurnBreak(sessions: Session[], parentId: string, now = Date.now()): Session[] {
+  const parent = sessions.find((session) => session.id === parentId);
+  const children = sessions.filter((session) => session.parentId === parentId);
+  if (parent?.lineup && !lineupIsTerminal(parent.lineup, children)) return sessions;
   return sessions.map((session) => {
     if (session.id !== parentId) return session;
     // One notice per lineup, not per chat: a second lineup in the same chat
@@ -732,7 +776,9 @@ export function applyLineupChildFinish(
       finishedAt: now,
       correlationId,
     });
-    return lineup ? { ...session, lineup } : session;
+    if (!lineup) return session;
+    const children = sessions.filter((item) => item.parentId === parentId);
+    return { ...session, lineup: settleAdaptiveMission(lineup, children) ?? lineup };
   });
 }
 
@@ -785,10 +831,9 @@ export type MissionState = {
 
 export function missionRowStatus(
   row: DeskLineupRow,
-  child: Pick<Session, "id" | "status" | "agentRun"> | undefined,
+  child: (Pick<Session, "id" | "status" | "agentRun"> & { messages?: ChatMessage[] }) | undefined,
 ): DeskLineupRowStatus {
-  const childRuns = child?.status === "running" || child?.agentRun?.status === "running";
-  if (childRuns) return "running";
+  if (child && crewTurnInFlight(child)) return "running";
   const run = child?.agentRun?.status;
   // A cancelled or interrupted worker wins over a stale running/failed row so
   // the parent does not keep saying Working… or 1 failed after a stop.
@@ -840,6 +885,60 @@ export function missionState(
     tone = "quiet";
   }
   return { ...counts, running: counts.live > 0, ...(word ? { word } : {}), ...(tone ? { tone } : {}) };
+}
+
+/**
+ * What a finished adaptive wave means on the parent.
+ *
+ * A completed report (or a clean terminal wave with no continue/blocked line)
+ * ends the mission. Failed, blocked, or a last pass that never completed is
+ * failed. Continue / cancelled / interrupted with budget left is unmet — the
+ * bar must say so rather than sitting on Scout with nothing running.
+ */
+export type AdaptiveMissionVerdict = "running" | "complete" | "failed" | "unmet";
+
+export function adaptiveMissionVerdict(
+  lineup: DeskLineup | undefined,
+  children: Array<Pick<Session, "id" | "status" | "agentRun">> = [],
+): AdaptiveMissionVerdict | undefined {
+  const mission = lineup?.mission;
+  if (!mission) return undefined;
+  const state = missionState(lineup, children);
+  if (!state) return undefined;
+  if (state.running) return "running";
+  const outcomes = (lineup?.rows ?? []).map((row) => workerMissionOutcome(row.report));
+  const leftover = (lineup?.rows ?? []).some((row) => reportLeavesWorkOpen(row.report));
+  const hasComplete = outcomes.includes("complete");
+  const hasBlocked = outcomes.includes("blocked");
+  const hasContinue = outcomes.includes("continue");
+  const atCap = mission.iteration >= mission.maxIterations;
+  if (hasComplete && !hasBlocked && state.failed === 0 && !leftover) return "complete";
+  if (state.failed > 0 || hasBlocked || state.timedOut > 0) return "failed";
+  if (atCap) return "failed";
+  if (leftover || hasContinue || state.cancelled > 0 || state.interrupted > 0 || state.unknown > 0) return "unmet";
+  if (state.done > 0 && state.done === (lineup?.rows.length ?? 0)) return "complete";
+  return "unmet";
+}
+
+/** Unmet adaptive pass with budget left: the parent must continue, not join as done. */
+export function missionPassCanContinue(
+  lineup: DeskLineup | undefined,
+  children: Array<Pick<Session, "id" | "status" | "agentRun">> = [],
+): boolean {
+  const mission = lineup?.mission;
+  if (!mission) return false;
+  return adaptiveMissionVerdict(lineup, children) === "unmet" && mission.iteration < mission.maxIterations;
+}
+
+/** Drop a completed adaptive mission from the parent lineup so Mission-Scout cannot linger. */
+export function settleAdaptiveMission(
+  lineup: DeskLineup | undefined,
+  children: Array<Pick<Session, "id" | "status" | "agentRun">> = [],
+): DeskLineup | undefined {
+  if (!lineup?.mission) return lineup;
+  if (adaptiveMissionVerdict(lineup, children) !== "complete") return lineup;
+  const { mission: _completed, ...rest } = lineup;
+  return rest;
 }
 
 /** Who drove this wave, as a person reads it. Undefined for the desk's own work. */

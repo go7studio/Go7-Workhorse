@@ -1,4 +1,5 @@
 import { hasLineBreak, pathFromToolText, splitToolLine, stripPathSizeSuffix } from "./grok-events";
+import { stripWritePathPayload } from "./subagents";
 
 export { stripPathSizeSuffix };
 import type { ProviderId, Session } from "./types";
@@ -238,12 +239,13 @@ export function looksLikeSourceFile(value: string): boolean {
 /** Path from a completed write/edit tool event (title, detail, or write:path id). */
 export function writePathFromToolEvent(title: string, detail = "", toolCallId = ""): string {
   const fromId = toolCallId.match(/^(?:edit|write):(.+)$/i)?.[1] ?? "";
-  const line = detail ? `${title} — ${detail}` : title;
-  return (
+  const cleanDetail = stripWritePathPayload(detail);
+  const line = cleanDetail ? `${title} — ${cleanDetail}` : title;
+  return stripWritePathPayload(
     pathFromWriteTool(line) ||
-    pathFromWriteTool(detail) ||
-    pathFromWriteTool(title) ||
-    (looksLikePath(fromId) ? fromId : "")
+      pathFromWriteTool(cleanDetail) ||
+      pathFromWriteTool(title) ||
+      (looksLikePath(fromId) ? fromId : ""),
   );
 }
 

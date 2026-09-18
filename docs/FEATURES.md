@@ -388,14 +388,14 @@ transcript rather than as a path.
   restrict the worker or pick a different vendor from the builder; name the
   builder in `exclude` for that. Plan admission spawns its own auditor and
   picks a vendor the builders did not use.
-- **Composer + menu** — Orchestrate and Mission pin on the chat, together if
-  you want both; one Attach item at the bottom takes files or a folder. A
+- **Composer + menu** — Orchestrate, Mission, and Debug pin on the chat in any
+  combination; one Attach item at the bottom takes files or a folder. A
   dropped or picked folder stays linked on that chat (the agent can list it)
   and still carries the files inside it. A `.blend` or any other file the
   desk does not inline is linked by its path the same way. On Windows the picker asks files or
   folder first, because that dialog cannot take both at once. Each
-  pin stays as a chip next to + until you clear it. Two pins collapse to +2 on
-  the bar; click it to expand them. With neither pin on, this chat works alone:
+  pin stays as a chip next to + until you clear it. Multiple pins collapse to a count on
+  the bar; click it to expand them. Without Orchestrate or Mission, this chat works alone:
   the seated bot uses its own tools and does not spawn desk workers or ask to
   resume one. Ordinary words like look into, investigate, or agent do not turn
   on hiring. Orchestrate tells this chat it is the orchestrator and must spawn
@@ -410,6 +410,12 @@ transcript rather than as a path.
   The chat then shows that loop as a compact chip above the composer; click it
   to open the usual board. With both on, the chat spawns as orchestrator and
   then continues unmet work as a mission.
+  Debug makes the seated bot establish expected versus observed behavior,
+  reproduce before editing, identify the actual source and runtime under test,
+  preserve unrelated work, and verify the real artifact when packaging or
+  rendering matters. Combined with Orchestrate or Mission, the desk adds that
+  same protocol to every worker brief so the parent does not have to remember
+  to repeat it.
 - **Routing** — your own chat keeps the model you picked until you set it to
   **Auto**; Auto picks the bot and effort for each message. Auto does not pick
   Cursor Auto; that stays a named chat pick. When the prompt asks to generate

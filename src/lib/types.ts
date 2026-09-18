@@ -67,8 +67,8 @@ export type SessionEnvironment =
 
 export type EffortLevel = "off" | "adaptive" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" | "ultra";
 
-/** Pinned on a chat from the composer + menu. Orchestrate spawns; Mission loops. */
-export type CrewMode = "orchestrate" | "mission";
+/** Pinned on a chat from the composer + menu. Orchestrate spawns; Mission loops; Debug proves before changing. */
+export type CrewMode = "orchestrate" | "mission" | "debug";
 
 export type Theme = "system" | "light" | "dark" | "workhorse";
 

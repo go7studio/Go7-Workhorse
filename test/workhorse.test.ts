@@ -75,7 +75,7 @@ import { startWorkhorseBridge } from "../electron/workhorse-bridge";
 import { mediaFileCandidates } from "../electron/media-src";
 import { estimateChatContext, parseSessionContext } from "../src/lib/context-stats";
 import { buildSessionPreface, buildVendorPreface, composeVendorPrompt, withVendorPreface } from "../src/lib/context-preface";
-import { CREW_STATUS_HINT, CURSOR_SESSION_RULES, CUSTOM_HTTP_SESSION_RULES, DESK_BOT_TURN_HINT, LOOSE_DELETE_HINT, MISSION_MODE_HINT, ORCHESTRATE_MODE_HINT, SPAWN_TURN_HINT, SOLO_SEATED_LAW, WORKER_SESSION_RULES, WORKHORSE_SOLO_SESSION_RULES, crewModeLabel, looksLikeCrewImpatience, looksLikeDeskBotRequest, looksLikeGoalCommand, looksLikeLooseDeleteRequest, looksLikePermissionQuestion, looksLikePreviewQuestion, looksLikeSpawnRequest, looksLikeWorkerBrief, orchestrationEnabled, orderedCrewModes, sameCrewModes, PERMISSION_TURN_HINT, PREVIEW_TURN_HINT, toggleCrewMode, withCrewModeHint, withCrewStatusHint, withDeskBotHint, withLooseDeleteHint, withPermissionHint, withSpawnHint, withCustomPeerHint, CUSTOM_HTTP_PEER_HINT, CUSTOM_HTTP_WORKER_RULES } from "../src/lib/workhorse-rules";
+import { CREW_STATUS_HINT, CURSOR_SESSION_RULES, CUSTOM_HTTP_SESSION_RULES, DEBUG_MODE_HINT, DESK_BOT_TURN_HINT, LOOSE_DELETE_HINT, MISSION_MODE_HINT, ORCHESTRATE_MODE_HINT, SPAWN_TURN_HINT, SOLO_SEATED_LAW, WORKER_SESSION_RULES, WORKHORSE_SOLO_SESSION_RULES, crewModeLabel, looksLikeCrewImpatience, looksLikeDeskBotRequest, looksLikeGoalCommand, looksLikeLooseDeleteRequest, looksLikePermissionQuestion, looksLikePreviewQuestion, looksLikeSpawnRequest, looksLikeWorkerBrief, orchestrationEnabled, orderedCrewModes, sameCrewModes, PERMISSION_TURN_HINT, PREVIEW_TURN_HINT, toggleCrewMode, withCrewModeHint, withCrewStatusHint, withDeskBotHint, withLooseDeleteHint, withPermissionHint, withSpawnHint, withCustomPeerHint, CUSTOM_HTTP_PEER_HINT, CUSTOM_HTTP_WORKER_RULES } from "../src/lib/workhorse-rules";
 import { applySessionElevation, applySessionModelChange, applySessionPolicyChange, brainCaption, brainStamp, formatChatSidebar, isSessionIntro, messageBrain, normalizeMessage, normalizeSession, parsePermissionMode, stampUnstampedMessages, vendorSessionForSend } from "../src/lib/session";
 import { workerSidebarLabel } from "../src/ui/ChatRow";
 import { attachmentPromptBlock, buildAcpPrompt, droppedFromPickerFile, folderChipLabel, folderPathsFromAttachments, groupAttachments, imageMime, normalizeImages, shouldSkipDropDir } from "../src/lib/images";
@@ -109,6 +109,7 @@ import {
   subagentTurns,
   toolsForDeskRole,
   UNBOUND_SPAWN_ERROR,
+  vendorTextForSpawn,
   assertAgentPathWrite,
   withSubagentStatus,
   workerReportedBlocked,
@@ -9091,14 +9092,17 @@ test("desk-bot requests get a turn hint instead of a source dive", () => {
   assert.match(previewAsk, new RegExp(PREVIEW_TURN_HINT.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
 });
 
-test("composer + pins Orchestrate and Mission and those modes inject the bible", () => {
+test("composer + pins Orchestrate, Mission, and Debug and those modes inject their protocol", () => {
   assert.equal(crewModeLabel("orchestrate"), "Orchestrate");
   assert.equal(crewModeLabel("mission"), "Mission");
+  assert.equal(crewModeLabel("debug"), "Debug");
   assert.deepEqual(toggleCrewMode(undefined, "orchestrate"), ["orchestrate"]);
   assert.equal(toggleCrewMode(["orchestrate"], "orchestrate"), undefined);
   assert.deepEqual(toggleCrewMode(["orchestrate"], "mission"), ["orchestrate", "mission"]);
   assert.deepEqual(toggleCrewMode(["orchestrate", "mission"], "mission"), ["orchestrate"]);
+  assert.deepEqual(toggleCrewMode(["orchestrate", "mission"], "debug"), ["orchestrate", "mission", "debug"]);
   assert.deepEqual(orderedCrewModes(["mission", "orchestrate"]), ["orchestrate", "mission"]);
+  assert.deepEqual(orderedCrewModes(["debug", "mission", "orchestrate"]), ["orchestrate", "mission", "debug"]);
   assert.equal(orderedCrewModes(undefined), orderedCrewModes([]));
   assert.equal(orderedCrewModes(undefined), orderedCrewModes(undefined));
   assert.equal(sameCrewModes(["orchestrate"], ["orchestrate"]), true);
@@ -9155,11 +9159,33 @@ test("composer + pins Orchestrate and Mission and those modes inject the bible",
   });
   assert.match(composedBoth, /You are the orchestrator this turn/);
   assert.match(composedBoth, /workhorse_continue_mission/);
+  const debugged = withCrewModeHint(review, "debug");
+  assert.ok(debugged.startsWith(DEBUG_MODE_HINT));
+  assert.match(debugged, /expected versus observed/);
+  assert.match(debugged, /version label as proof of source identity/);
+  assert.doesNotMatch(debugged, /workhorse_spawn_agent/);
+  const debugWorker = formatWorkerPrompt({
+    fromTitle: "Parent",
+    text: "Find and fix the stale result.",
+    folder: "/repo",
+    debug: true,
+  });
+  assert.match(debugWorker, /DEBUG EXECUTION:/);
+  assert.match(debugWorker, /BASELINE, REPRODUCTION, CAUSE, CHANGE, VERIFICATION, HEAD, and STATUS/);
+  const debugAuditor = vendorTextForSpawn({
+    role: "auditor",
+    fromTitle: "Parent",
+    text: "npm test",
+    folder: "/repo",
+    debug: true,
+  });
+  assert.match(debugAuditor, /Fail instead of grading the wrong source/);
   const plain = composeVendorPrompt(review, WORKHORSE_SOLO_SESSION_RULES, "session/load");
   assert.doesNotMatch(plain, new RegExp(ORCHESTRATE_MODE_HINT.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   assert.doesNotMatch(plain, /workhorse_continue_mission/);
   assert.doesNotMatch(plain, new RegExp(SPAWN_TURN_HINT.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   assert.equal(orchestrationEnabled(undefined), false);
+  assert.equal(orchestrationEnabled(["debug"]), false);
   assert.equal(orchestrationEnabled(["orchestrate"]), true);
   assert.equal(orchestrationEnabled(["mission"]), true);
 
@@ -9167,10 +9193,12 @@ test("composer + pins Orchestrate and Mission and those modes inject the bible",
   assert.match(composer, /composer-plus-menu/);
   assert.match(composer, /Orchestrate/);
   assert.match(composer, /Mission/);
+  assert.match(composer, /Debug/);
   assert.match(composer, /Attach/);
   assert.match(composer, /Files or folders/);
   assert.match(composer, /plus-icon orchestrate/);
   assert.match(composer, /plus-icon mission/);
+  assert.match(composer, /plus-icon debug/);
   assert.match(composer, /plus-icon attach/);
   assert.match(composer, /plus-copy/);
   assert.match(composer, /plus-row orchestrate/);
@@ -9212,10 +9240,12 @@ test("composer + pins Orchestrate and Mission and those modes inject the bible",
   assert.match(css, /\.composer-plus-menu/);
   assert.match(css, /\.plus-icon\.orchestrate/);
   assert.match(css, /\.plus-icon\.mission/);
+  assert.match(css, /\.plus-icon\.debug/);
   assert.match(css, /\.plus-icon\.attach/);
   assert.match(css, /\.plus-copy/);
   assert.match(css, /\.plus-row\.orchestrate\[aria-checked="true"\]/);
   assert.match(css, /\.plus-row\.mission\[aria-checked="true"\]/);
+  assert.match(css, /\.plus-row\.debug\[aria-checked="true"\]/);
   assert.match(css, /\.composer-crew-chip\.more/);
   assert.match(css, /\.crew-more-count/);
   assert.match(css, /\.composer-crew \{[\s\S]*transition:\s*width/);
@@ -9229,6 +9259,7 @@ test("composer + pins Orchestrate and Mission and those modes inject the bible",
   assert.match(store, /crewModes: session\.crewModes/);
   assert.match(store, /setCrewMode/);
   assert.match(store, /setSpawnAllowlist/);
+  assert.match(store, /debug: parent\.crewModes\?\.includes\("debug"\) === true/);
   assert.match(store, /linkSessionFolder/);
   assert.match(store, /unlinkSessionFolder/);
   assert.match(readFileSync(path.join(ROOT, "electron", "grok-host.ts"), "utf8"), /crewMode: input\.crewModes/);

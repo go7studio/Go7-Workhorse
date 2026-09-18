@@ -161,7 +161,7 @@ export function applyPlanAuditorSpawn(
   if (!pick) return { sessions };
   const folder = parent.lineup.folder;
   const gate = parent.planRun.gate?.trim() || "npm test";
-  const brief = formatAuditorPrompt({ folder, gate });
+  const brief = formatAuditorPrompt({ folder, gate, debug: parent.crewModes?.includes("debug") === true });
   const taken = sessions.flatMap((session) => (session.workerName ? [session.workerName] : []));
   const workerName = ids.workerName ?? nextWorkerName(taken);
   const child: Session = {

@@ -231,6 +231,7 @@ test("auditor tools and rules forbid spawn; admitSpawn refuses an auditor parent
   });
   assert.equal(refused.ok, false);
   assert.match(formatAuditorPrompt({ folder: "/repo", gate: "npm test" }), /ROLE: auditor/);
+  assert.match(formatAuditorPrompt({ folder: "/repo", gate: "npm test", debug: true }), /Fail instead of grading the wrong source/);
   assert.match(vendorTextForSpawn({
     role: "auditor",
     fromTitle: "Orch",

@@ -79,7 +79,7 @@ import { startWorkhorseBridge } from "../electron/workhorse-bridge";
 import { mediaFileCandidates } from "../electron/media-src";
 import { estimateChatContext, parseSessionContext } from "../src/lib/context-stats";
 import { buildSessionPreface, buildVendorPreface, composeVendorPrompt, withVendorPreface } from "../src/lib/context-preface";
-import { CREW_STATUS_HINT, CURSOR_SESSION_RULES, DESK_SPAWN_LAW, CUSTOM_HTTP_SESSION_RULES, DESK_BOT_TURN_HINT, LOOSE_DELETE_HINT, MISSION_MODE_HINT, ORCHESTRATE_MODE_HINT, SPAWN_TURN_HINT, WORKER_SESSION_RULES, crewModeLabel, looksLikeCrewImpatience, looksLikeDeskBotRequest, looksLikeGoalCommand, looksLikeLooseDeleteRequest, looksLikePermissionQuestion, looksLikePreviewQuestion, looksLikeSpawnRequest, looksLikeWorkerBrief, orderedCrewModes, PERMISSION_TURN_HINT, PREVIEW_TURN_HINT, toggleCrewMode, withCrewModeHint, withCrewStatusHint, withDeskBotHint, withLooseDeleteHint, withPermissionHint, withSpawnHint, withCustomPeerHint, CUSTOM_HTTP_PEER_HINT, CUSTOM_HTTP_WORKER_RULES } from "../src/lib/workhorse-rules";
+import { CREW_STATUS_HINT, CURSOR_SESSION_RULES, DEBUG_MODE_HINT, DESK_SPAWN_LAW, CUSTOM_HTTP_SESSION_RULES, DESK_BOT_TURN_HINT, LOOSE_DELETE_HINT, MISSION_MODE_HINT, ORCHESTRATE_MODE_HINT, SPAWN_TURN_HINT, WORKER_SESSION_RULES, crewModeLabel, looksLikeCrewImpatience, looksLikeDeskBotRequest, looksLikeGoalCommand, looksLikeLooseDeleteRequest, looksLikePermissionQuestion, looksLikePreviewQuestion, looksLikeSpawnRequest, looksLikeWorkerBrief, orchestrationEnabled, orderedCrewModes, PERMISSION_TURN_HINT, PREVIEW_TURN_HINT, toggleCrewMode, withCrewModeHint, withCrewStatusHint, withDeskBotHint, withLooseDeleteHint, withPermissionHint, withSpawnHint, withCustomPeerHint, CUSTOM_HTTP_PEER_HINT, CUSTOM_HTTP_WORKER_RULES } from "../src/lib/workhorse-rules";
 import { applySessionElevation, applySessionModelChange, applySessionPolicyChange, brainCaption, brainStamp, formatChatSidebar, isSessionIntro, messageBrain, normalizeMessage, normalizeSession, stampUnstampedMessages, vendorSessionForSend } from "../src/lib/session";
 import { workerSidebarLabel } from "../src/ui/ChatRow";
 import { buildAcpPrompt, droppedFromPickerFile, groupAttachments, imageMime, normalizeImages, shouldSkipDropDir } from "../src/lib/images";
@@ -113,6 +113,7 @@ import {
   subagentTurns,
   toolsForDeskRole,
   UNBOUND_SPAWN_ERROR,
+  vendorTextForSpawn,
   assertAgentPathWrite,
   withSubagentStatus,
   workerReportedBlocked,
@@ -147,6 +148,7 @@ import {
   WORKHORSE_DEV_APP_ID,
   WORKHORSE_DEV_USER_DATA_DIR,
   WORKHORSE_USER_DATA_DIR,
+  installedWorkhorseBuildChannel,
   parseWorkhorseBuildChannel,
   tryInstallWouldReplaceProduction,
   workhorseInstallTarget,
@@ -348,6 +350,10 @@ test("isolated user data accepts an env or explicit launch flag", () => {
   assert.equal(parseWorkhorseBuildChannel('{"channel":"release"}'), "release");
   assert.equal(parseWorkhorseBuildChannel("broken"), "release");
   assert.equal(WORKHORSE_BUILD_MARKER, "workhorse-build.json");
+  assert.equal(installedWorkhorseBuildChannel("development", "C:\\Apps\\Go7 Workhorse Dev\\Go7 Workhorse.exe", "win32"), "development");
+  assert.equal(installedWorkhorseBuildChannel("development", "C:\\Apps\\Go7 Workhorse\\Go7 Workhorse.exe", "win32"), "release");
+  assert.equal(installedWorkhorseBuildChannel("development", "/Applications/Go7 Workhorse Dev.app/Contents/MacOS/Go7 Workhorse", "darwin"), "development");
+  assert.equal(installedWorkhorseBuildChannel("development", "/Applications/Go7 Workhorse.app/Contents/MacOS/Go7 Workhorse", "darwin"), "release");
   assert.equal(WORKHORSE_APP_ID, "com.go7studio.workhorse");
   const apps = path.join("C:", "Apps");
   const development = workhorseInstallTarget({ channel: "development", applicationsDir: apps, platform: "darwin" });
@@ -718,7 +724,7 @@ test("selectSurface and titlebarLabel follow the draft chrome rules", () => {
   assert.match(main, /titleBarStyle:\s*"hidden"/);
   assert.match(main, /titleBarOverlay/);
   assert.match(main, /setMenu\(null\)/);
-  assert.match(main, /workhorseRuntimeIdentity\(app\.isPackaged, packagedBuildChannel\(\)\)/);
+  assert.match(main, /installedWorkhorseBuildChannel\(packagedBuildChannel\(\), process\.execPath\)/);
   assert.match(main, /WORKHORSE_DEV_APP_ID/);
   assert.match(main, /setAppUserModelId\(windowsAppUserModelId\)/);
   assert.match(main, /if \(!app\.isPackaged\) return "development"/);
@@ -9396,14 +9402,16 @@ test("desk-bot requests get a turn hint instead of a source dive", () => {
   assert.match(previewAsk, new RegExp(PREVIEW_TURN_HINT.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
 });
 
-test("composer + pins Orchestrate and Mission and those modes inject the bible", () => {
+test("composer + pins Orchestrate, Mission, and Debug and those modes inject their protocol", () => {
   assert.equal(crewModeLabel("orchestrate"), "Orchestrate");
   assert.equal(crewModeLabel("mission"), "Mission");
+  assert.equal(crewModeLabel("debug"), "Debug");
   assert.deepEqual(toggleCrewMode(undefined, "orchestrate"), ["orchestrate"]);
   assert.equal(toggleCrewMode(["orchestrate"], "orchestrate"), undefined);
   assert.deepEqual(toggleCrewMode(["orchestrate"], "mission"), ["orchestrate", "mission"]);
   assert.deepEqual(toggleCrewMode(["orchestrate", "mission"], "mission"), ["orchestrate"]);
   assert.deepEqual(orderedCrewModes(["mission", "orchestrate"]), ["orchestrate", "mission"]);
+  assert.deepEqual(orderedCrewModes(["debug", "mission", "orchestrate"]), ["orchestrate", "mission", "debug"]);
 
   const review = "Review this folder and ship the report";
   assert.equal(withCrewModeHint(review), review);
@@ -9454,6 +9462,17 @@ test("composer + pins Orchestrate and Mission and those modes inject the bible",
   });
   assert.match(composedBoth, /You are the orchestrator this turn/);
   assert.match(composedBoth, /workhorse_continue_mission/);
+  const debugged = withCrewModeHint(review, "debug");
+  assert.ok(debugged.startsWith(DEBUG_MODE_HINT));
+  assert.match(debugged, /expected versus observed/);
+  assert.doesNotMatch(debugged, /workhorse_spawn_agent/);
+  assert.equal(orchestrationEnabled(["debug"]), false);
+  assert.equal(orchestrationEnabled(["orchestrate"]), true);
+  const debugWorker = formatWorkerPrompt({ fromTitle: "Parent", text: "Fix stale output", folder: "/repo", debug: true });
+  assert.match(debugWorker, /DEBUG EXECUTION:/);
+  assert.match(debugWorker, /BASELINE, REPRODUCTION, CAUSE, CHANGE, VERIFICATION, HEAD, and STATUS/);
+  const debugAuditor = vendorTextForSpawn({ role: "auditor", fromTitle: "Parent", text: "npm test", folder: "/repo", debug: true });
+  assert.match(debugAuditor, /Fail instead of grading the wrong source/);
   const plain = composeVendorPrompt(review, WORKHORSE_SESSION_RULES, "session/load");
   assert.doesNotMatch(plain, new RegExp(ORCHESTRATE_MODE_HINT.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   assert.doesNotMatch(plain, /workhorse_continue_mission/);
@@ -9462,10 +9481,12 @@ test("composer + pins Orchestrate and Mission and those modes inject the bible",
   assert.match(composer, /composer-plus-menu/);
   assert.match(composer, /Orchestrate/);
   assert.match(composer, /Mission/);
+  assert.match(composer, /Debug/);
   assert.match(composer, /Attach/);
   assert.match(composer, /Files or folders/);
   assert.match(composer, /plus-icon orchestrate/);
   assert.match(composer, /plus-icon mission/);
+  assert.match(composer, /plus-icon debug/);
   assert.match(composer, /plus-icon attach/);
   assert.match(composer, /plus-copy/);
   assert.match(composer, /plus-row orchestrate/);
@@ -9485,7 +9506,7 @@ test("composer + pins Orchestrate and Mission and those modes inject the bible",
   assert.doesNotMatch(composer, /webkitdirectory/);
   assert.match(
     composer,
-    /pickCrewMode\("orchestrate"\)[\s\S]*pickCrewMode\("mission"\)[\s\S]*attachFromMenu\(\)/,
+    /pickCrewMode\("orchestrate"\)[\s\S]*pickCrewMode\("mission"\)[\s\S]*pickCrewMode\("debug"\)[\s\S]*attachFromMenu\(\)/,
   );
   assert.match(readFileSync(path.join(ROOT, "electron", "main.ts"), "utf8"), /attach:pick/);
   assert.match(readFileSync(path.join(ROOT, "electron", "preload.ts"), "utf8"), /pickAttach/);
@@ -9495,10 +9516,12 @@ test("composer + pins Orchestrate and Mission and those modes inject the bible",
   assert.match(css, /\.composer-plus-menu/);
   assert.match(css, /\.plus-icon\.orchestrate/);
   assert.match(css, /\.plus-icon\.mission/);
+  assert.match(css, /\.plus-icon\.debug/);
   assert.match(css, /\.plus-icon\.attach/);
   assert.match(css, /\.plus-copy/);
   assert.match(css, /\.plus-row\.orchestrate\[aria-checked="true"\]/);
   assert.match(css, /\.plus-row\.mission\[aria-checked="true"\]/);
+  assert.match(css, /\.plus-row\.debug\[aria-checked="true"\]/);
   assert.match(css, /\.composer-crew-chip\.more/);
   assert.match(css, /\.crew-more-count/);
   assert.match(css, /\.composer-crew \{[\s\S]*transition:\s*width/);
@@ -9511,6 +9534,7 @@ test("composer + pins Orchestrate and Mission and those modes inject the bible",
   const store = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
   assert.match(store, /crewModes: session\.crewModes/);
   assert.match(store, /setCrewMode/);
+  assert.match(store, /debug: parent\.crewModes\?\.includes\("debug"\) === true/);
   assert.match(readFileSync(path.join(ROOT, "electron", "grok-host.ts"), "utf8"), /crewMode: input\.crewModes/);
   assert.match(readFileSync(path.join(ROOT, "electron", "claude-host.ts"), "utf8"), /crewMode: input\.crewModes/);
   assert.match(readFileSync(path.join(ROOT, "electron", "codex-host.ts"), "utf8"), /crewMode: input\.crewModes/);

@@ -275,7 +275,7 @@ export function turnCarriesSpawnLaw(input: {
   const { role, text } = input;
   if (role === "worker" || role === "auditor" || role === "helper") return false;
   if (looksLikeWorkerBrief(text)) return false;
-  if (normalizeCrewModes(input.crewMode).length > 0) return true;
+  if (orchestrationEnabled(input.crewMode)) return true;
   return looksLikeSpawnRequest(text);
 }
 
@@ -290,15 +290,24 @@ export const ORCHESTRATE_MODE_HINT =
 export const MISSION_MODE_HINT =
   "The user selected Mission on this chat. That is adaptive sequential mission-board tracking, not a request to spawn or summon agents. Do the user's actual request. Ordinary one-shot delegation is one wave; this chat continues unmet work across passes. When this work needs desk workers, spawn a wave with workhorse_spawn_agent. After workers report, assess remaining work and call workhorse_continue_mission with previousWorkerIds, previousPass, remainingWork, and fromSessionId (this chat). Preserve acceptance criteria and exclusions. Enable loop. A terminal incomplete pass may continue; each new pass keeps this pass's coordinating vendor, model, and effort unless you set initialBrain or route. Do not sit on workhorse_await_agents. The desk joins reports later.";
 
+/** Repository-agnostic debugging discipline. The desk adds the worker form itself on every spawn. */
+export const DEBUG_EXECUTION_PROTOCOL =
+  "Debug protocol: establish evidence before changing anything. State expected versus observed behavior and reproduce the problem. Identify the actual source and runtime under test; in a Git checkout record the full HEAD, branch, working-tree state, and intended comparison base, and never use a version label as proof of source identity. If source, runtime, or base does not match the task, stop with the mismatch instead of debugging a different build. Preserve unrelated work. Isolate the cause, make the smallest authorized fix only when a fix was requested, then run the direct regression and relevant neighboring checks. Verify the real artifact or runtime when packaging, rendering, generated assets, or environment can change the result; visual work requires inspection of the rendered result. Report BASELINE, REPRODUCTION, CAUSE, CHANGE, VERIFICATION, HEAD, and STATUS. STATUS is complete only when the requested behavior is verified; otherwise it is blocked with concrete remaining work.";
+
+export const DEBUG_MODE_HINT =
+  `The user selected Debug on this chat. Follow this protocol for the whole turn. ${DEBUG_EXECUTION_PROTOCOL}`;
+
 export function crewModeLabel(mode: CrewMode): string {
-  return mode === "mission" ? "Mission" : "Orchestrate";
+  if (mode === "mission") return "Mission";
+  if (mode === "debug") return "Debug";
+  return "Orchestrate";
 }
 
 export function normalizeCrewModes(raw: unknown): CrewMode[] {
   const list = Array.isArray(raw) ? raw : raw == null || raw === "" ? [] : [raw];
   const modes: CrewMode[] = [];
   for (const item of list) {
-    if ((item === "orchestrate" || item === "mission") && !modes.includes(item)) modes.push(item);
+    if ((item === "orchestrate" || item === "mission" || item === "debug") && !modes.includes(item)) modes.push(item);
   }
   return modes;
 }
@@ -308,7 +317,12 @@ export function hasCrewMode(current: CrewMode[] | undefined, mode: CrewMode): bo
 }
 
 export function orderedCrewModes(current: CrewMode[] | undefined): CrewMode[] {
-  return (["orchestrate", "mission"] as const).filter((mode) => current?.includes(mode));
+  return (["orchestrate", "mission", "debug"] as const).filter((mode) => current?.includes(mode));
+}
+
+export function orchestrationEnabled(crewMode?: CrewMode | CrewMode[]): boolean {
+  const modes = normalizeCrewModes(crewMode);
+  return modes.includes("orchestrate") || modes.includes("mission");
 }
 
 export function toggleCrewMode(current: CrewMode[] | undefined, next: CrewMode): CrewMode[] | undefined {
@@ -322,10 +336,8 @@ function withSpawnBible(text: string): string {
 }
 
 /**
- * Either pin injects the spawn law, because neither chat can do its job
- * without it and the core no longer carries it. Mission also gets its own
- * mission-board copy. Mission used to take the spawn law for free, from the
- * bible every desk chat opened with; now it asks for it by name.
+ * Orchestrate and Mission inject the spawn law; Debug adds evidence discipline
+ * without enabling delegation by itself.
  */
 export function withCrewModeHint(
   text: string,
@@ -334,8 +346,11 @@ export function withCrewModeHint(
   spawnNames?: string[],
 ): string {
   const modes = normalizeCrewModes(crewMode);
-  if (modes.length === 0 || !turnCarriesSpawnLaw({ text, crewMode: modes, role })) return text;
-  let next = withSpawnBible(text);
+  if (role === "worker" || role === "auditor" || role === "helper" || looksLikeWorkerBrief(text) || modes.length === 0) return text;
+  let next = orchestrationEnabled(modes) ? withSpawnBible(text) : text;
+  if (modes.includes("debug") && !next.startsWith(DEBUG_MODE_HINT)) {
+    next = `${DEBUG_MODE_HINT}\n\n${next}`;
+  }
   if (modes.includes("mission") && !next.startsWith(MISSION_MODE_HINT)) {
     next = `${MISSION_MODE_HINT}\n\n${next}`;
   }

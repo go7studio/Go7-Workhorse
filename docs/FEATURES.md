@@ -208,8 +208,9 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
 
 ## Missions and workers
 
-- **Composer + menu** Orchestrate and Mission pin on the chat, together if you
-  want. Each pin is a chip next to +; two collapse to +2 you can expand.
+- **Composer + menu** Orchestrate, Mission, and Debug pin on the chat in any
+  combination. Each pin is a chip next to +; multiple pins collapse to a count
+  you can expand.
 - Orchestrate makes this chat the orchestrator, and it must spawn desk workers.
   Auto ranks, fan-out only when asked.
 - Either pin also hands the chat the spawn rules. An unpinned chat gets them
@@ -229,6 +230,11 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
   Spawn a wave, then continue the rest with `workhorse_continue_mission`.
 - With both pins on, the chat spawns as orchestrator, then continues unmet work
   as a mission.
+- Debug makes the seated bot establish expected versus observed behavior,
+  reproduce before editing, identify the actual source and runtime under test,
+  preserve unrelated work, and verify the real artifact when packaging or
+  rendering matters. Combined with Orchestrate or Mission, the desk adds the
+  same protocol to every worker brief and plan auditor.
 - Set a cost cap or a token cap under Mission, and the desk stops the mission
   before the next pass once the crew's spend reaches it, never mid-turn.
 - Your field is a ceiling and never a default: where a call names its own cap

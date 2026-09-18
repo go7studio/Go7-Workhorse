@@ -90,6 +90,14 @@ function CrewModeIcon({ mode, size = 12 }: { mode: CrewMode; size?: number }) {
       </svg>
     );
   }
+  if (mode === "debug") {
+    return (
+      <svg width={size} height={size} viewBox="0 0 16 16" fill="none">
+        <circle cx="6.7" cy="6.7" r="3.8" stroke="currentColor" strokeWidth="1.5" />
+        <path d="m9.5 9.5 3.4 3.4M4.7 6.7h4M6.7 4.7v4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+      </svg>
+    );
+  }
   return (
     <svg width={size} height={size} viewBox="0 0 16 16" fill="none">
       <circle cx="8" cy="3.4" r="1.7" fill="currentColor" />
@@ -660,6 +668,21 @@ export const Composer = memo(function Composer({
               <span className="plus-copy">
                 <strong>Mission</strong>
                 <em>Adaptive waves until done</em>
+              </span>
+            </button>
+            <button
+              type="button"
+              className="plus-row debug"
+              role="menuitemcheckbox"
+              aria-checked={hasCrewMode(session?.crewModes, "debug")}
+              onClick={() => pickCrewMode("debug")}
+            >
+              <span className="plus-icon debug" aria-hidden="true">
+                <CrewModeIcon mode="debug" size={16} />
+              </span>
+              <span className="plus-copy">
+                <strong>Debug</strong>
+                <em>Reproduce, isolate, verify</em>
               </span>
             </button>
             {hasCrewMode(session?.crewModes, "mission") ? (

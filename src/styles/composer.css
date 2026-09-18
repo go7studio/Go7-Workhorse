@@ -89,6 +89,10 @@
   color: var(--warn);
 }
 
+.plus-icon.debug {
+  color: var(--accent);
+}
+
 .plus-icon.attach {
   color: var(--accent);
 }
@@ -105,12 +109,20 @@
   background: color-mix(in srgb, var(--warn) 14%, transparent);
 }
 
+.plus-row.debug[aria-checked="true"] {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
 .plus-row.orchestrate[aria-checked="true"]:hover {
   background: color-mix(in srgb, var(--peer) 22%, transparent);
 }
 
 .plus-row.mission[aria-checked="true"]:hover {
   background: color-mix(in srgb, var(--warn) 22%, transparent);
+}
+
+.plus-row.debug[aria-checked="true"]:hover {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
 }
 
 .composer-plus-menu hr {

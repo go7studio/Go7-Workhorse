@@ -6363,6 +6363,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                     paths: assignedPaths,
                     mission: payload.mission === true,
                     missionIteration: spawnMission,
+                    debug: parent.crewModes?.includes("debug") === true,
                   }),
                   latest.settings.mcpServers,
                   spawnImages,

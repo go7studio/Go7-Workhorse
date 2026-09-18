@@ -121,6 +121,7 @@ import {
   WORKHORSE_DEV_APP_ID,
   WORKHORSE_DEV_USER_DATA_DIR,
   WORKHORSE_USER_DATA_DIR,
+  installedWorkhorseBuildChannel,
   parseWorkhorseBuildChannel,
   workhorseRuntimeIdentity,
 } from "../src/lib/app-identity";
@@ -209,7 +210,10 @@ function packagedBuildChannel() {
 // Development shells and ad-hoc packages must never request Keychain access.
 // The name keeps their other app data separate, while memory-only credentials
 // make agent-driven tests independent of each local build's code requirement.
-const runtimeIdentity = workhorseRuntimeIdentity(app.isPackaged, packagedBuildChannel());
+const runtimeIdentity = workhorseRuntimeIdentity(
+  app.isPackaged,
+  installedWorkhorseBuildChannel(packagedBuildChannel(), process.execPath),
+);
 app.setName(runtimeIdentity.name);
 const windowsAppUserModelId =
   runtimeIdentity.userDataDirectory === WORKHORSE_DEV_USER_DATA_DIR ? WORKHORSE_DEV_APP_ID : WORKHORSE_APP_ID;

@@ -1315,6 +1315,8 @@ export type WorkerBriefInput = {
   capabilities?: string[];
   mission?: boolean;
   missionIteration?: MissionIteration;
+  /** Parent Debug pin. The desk injects this; the orchestrator need not remember it. */
+  debug?: boolean;
 };
 
 export function stripSpawnPreamble(text: string): string {
@@ -1391,10 +1393,10 @@ export function formatFreshHandoffPrompt(handoff: WorkerHandoff): string {
   return lines.join("\n");
 }
 
-export function formatAuditorPrompt(input: { folder: string; gate: string }): string {
+export function formatAuditorPrompt(input: { folder: string; gate: string; debug?: boolean }): string {
   const folder = input.folder.trim() || "(none — stop and say so)";
   const gate = input.gate.trim() || "npm test";
-  return [
+  const lines = [
     "ROLE: auditor",
     "SEED: fresh",
     "You have no parent conversation and no builder transcript.",
@@ -1408,7 +1410,14 @@ export function formatAuditorPrompt(input: { folder: string; gate: string }): st
     "LAST: <the gate's literal last line>",
     "STATUS: pass",
     "or STATUS: fail",
-  ].join("\n");
+  ];
+  if (input.debug) {
+    lines.splice(6, 0,
+      "Debug verification: before GATE, identify the actual source and runtime under test. In Git verify full HEAD, branch, working-tree state, and intended comparison base. A version label is not source identity.",
+      "Fail instead of grading the wrong source, runtime, or artifact. For packaged, generated, or visual behavior, GATE must inspect the real artifact or rendered result.",
+    );
+  }
+  return lines.join("\n");
 }
 
 /** Text the vendor actually sees. Fresh seed is the handoff only — never the parent brief. */
@@ -1416,7 +1425,7 @@ export function vendorTextForSpawn(
   input: WorkerBriefInput & { seed?: WorkerSeed; handoff?: WorkerHandoff; role?: DeskRole; gate?: string },
 ): string {
   if (input.role === "auditor") {
-    return formatAuditorPrompt({ folder: input.folder, gate: input.gate ?? input.text });
+    return formatAuditorPrompt({ folder: input.folder, gate: input.gate ?? input.text, debug: input.debug });
   }
   if (input.seed === "fresh") {
     const handoff =
@@ -1511,6 +1520,15 @@ export function formatWorkerPrompt(input: WorkerBriefInput): string {
     lines.push("Required follow-up belongs to the parent mission loop. A leaf helper is only an optional bounded check.");
     lines.push("If that helper stops or leaves work incomplete, report continue with the remaining work; do not claim completion.");
     lines.push("Verify the acceptance criteria after the work. End with Mission status: complete, continue, or blocked, plus evidence or remaining work.");
+  }
+  if (input.debug) {
+    lines.push("DEBUG EXECUTION:");
+    lines.push("Establish evidence before edits. State expected versus observed behavior and reproduce the problem.");
+    lines.push("Identify the actual source and runtime under test. In Git, report full HEAD, branch, working-tree state, and intended comparison base; a version label is not source identity.");
+    lines.push("If source, runtime, or base is wrong, stop blocked with that mismatch. Preserve unrelated work.");
+    lines.push("Isolate the cause, make the smallest authorized fix, then run the direct regression and relevant neighboring checks.");
+    lines.push("Verify the real artifact or runtime when packaging, rendering, generated assets, or environment matters. Visually inspect rendered UI work.");
+    lines.push("End with BASELINE, REPRODUCTION, CAUSE, CHANGE, VERIFICATION, HEAD, and STATUS. Complete requires verified requested behavior; otherwise report blocked with remaining work.");
   }
   lines.push("Do this slice only. Use list_dir / read_file on FOLDER. Quote real files.");
   if (input.skills?.length) lines.push("Read every listed SKILL.md fully before acting.");

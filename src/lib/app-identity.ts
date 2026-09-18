@@ -19,6 +19,22 @@ export function parseWorkhorseBuildChannel(value: string | undefined): Workhorse
   }
 }
 
+/** A development marker is authoritative only inside the development install. */
+export function installedWorkhorseBuildChannel(
+  markerChannel: WorkhorseBuildChannel,
+  execPath: string,
+  platform: NodeJS.Platform = process.platform,
+): WorkhorseBuildChannel {
+  if (markerChannel !== "development") return "release";
+  if (platform === "win32") {
+    return path.win32.basename(path.win32.dirname(execPath)) === WORKHORSE_DEV_APP_NAME ? "development" : "release";
+  }
+  if (platform === "darwin") {
+    return execPath.split(/[\\/]/).includes(`${WORKHORSE_DEV_APP_NAME}.app`) ? "development" : "release";
+  }
+  return markerChannel;
+}
+
 export function workhorseRuntimeIdentity(
   isPackaged: boolean,
   packagedChannel: WorkhorseBuildChannel = "release",

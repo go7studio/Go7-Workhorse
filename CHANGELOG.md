@@ -8,6 +8,75 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.6.87](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.86...v0.6.87) (2026-09-17)
+
+### Bug Fixes
+
+* **desk:** a last Mission status: complete ends the worker even when the diary said Next I'll
+* **desk:** Stop closes leftover tools, treats a finished report as completed, and wakes the parent when the wave is done
+* **ui:** billed in + out is the Usage total; cached is named last so the line adds up
+* **codex:** harvest token_usage_record and keep the request sum when a smaller turn snapshot arrives
+
+## [0.6.86](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.85...v0.6.86) (2026-09-16)
+
+### Bug Fixes
+
+* **desk:** the parent does not say All workers finished while any child is still on the job; a stale banner hides when a new worker starts
+* **desk:** steering or stopping a worker before verification is a cancel, not No worker finished · 1 failed
+* **ui:** an orchestration parent rests when its own turn ends; workers keep Working on their own rows
+
+## [0.6.85](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.84...v0.6.85) (2026-09-16)
+
+### Bug Fixes
+
+* **desk:** incomplete worker replies continue locally before reporting to the head; stale replies no longer replace the latest result
+* **desk:** new chats use this desk's access defaults instead of another app's CLI defaults
+* **ui:** chat settings scroll above a tall composer, with a clickable close button
+
+## [0.6.84](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.83...v0.6.84) (2026-09-16)
+
+### Features
+
+* **desk:** strip Grok SearchReplace path glue before path-ownership
+* **desk:** sandbox Off skips path-ownership lease denies; workspace and strict still lease
+
+### Bug Fixes
+
+* **desk:** leftover mission prose continues instead of settling complete
+* **ui:** work fold says Working while tools are still open
+
+## [0.6.83](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.82...v0.6.83) (2026-09-16)
+
+### Features
+
+* **ui:** fold the 0.6.80 desk UI onto the spend-watch tree: DGX Spark, Mission cost cap, 64px week pies, orchestrator seat on workers
+* **eval:** packaged Windows builds guard those release features
+
+### Bug Fixes
+
+* **usage:** leftover rings show the percent; On marks and stretch cells are circles again
+
+## [0.6.82](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.81...v0.6.82) (2026-09-15)
+
+### Features
+
+* **ui:** restore sidebar Horse Status and the Crew tray
+* **ui:** each chat row and crew worker wears a tiled mascot in that bot's colour
+
+### Bug Fixes
+
+* **desk:** await-agents does not complete a worker whose agentRun is still running
+* **mcp:** spawn caller crewModes is CrewMode[]
+* **eval:** config expectedVersion matches the package version
+
+## [0.6.81](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.80...v0.6.81) (2026-09-15)
+
+### Features
+
+* **composer:** Orchestrate and Mission are off by default; the seated bot works solo until + pins a hire mode
+* **usage:** chat spend watch on the transcript header and context pop; Usage 5h/Weekly plan window tabs
+* **usage:** vendor leftover rings stay plan totals; CPU and bot usage surfaces render without empty-range crashes
+
 ## [0.6.80](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.79...v0.6.80) (2026-09-14)
 
 

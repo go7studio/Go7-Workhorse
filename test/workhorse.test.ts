@@ -144,6 +144,7 @@ import {
   WORKHORSE_DEV_APP_ID,
   WORKHORSE_DEV_USER_DATA_DIR,
   WORKHORSE_USER_DATA_DIR,
+  installedWorkhorseBuildChannel,
   parseWorkhorseBuildChannel,
   tryInstallWouldReplaceProduction,
   workhorseInstallTarget,
@@ -347,6 +348,38 @@ test("isolated user data accepts an env or explicit launch flag", () => {
   assert.equal(parseWorkhorseBuildChannel('{"channel":"release"}'), "release");
   assert.equal(parseWorkhorseBuildChannel("broken"), "release");
   assert.equal(WORKHORSE_BUILD_MARKER, "workhorse-build.json");
+  assert.equal(
+    installedWorkhorseBuildChannel(
+      "development",
+      "C:\\Users\\desk\\AppData\\Local\\Programs\\Go7 Workhorse Dev\\Go7 Workhorse.exe",
+      "win32",
+    ),
+    "development",
+  );
+  assert.equal(
+    installedWorkhorseBuildChannel(
+      "development",
+      "C:\\Users\\desk\\AppData\\Local\\Programs\\Go7 Workhorse\\Go7 Workhorse.exe",
+      "win32",
+    ),
+    "release",
+  );
+  assert.equal(
+    installedWorkhorseBuildChannel(
+      "development",
+      "/Applications/Go7 Workhorse Dev.app/Contents/MacOS/Go7 Workhorse",
+      "darwin",
+    ),
+    "development",
+  );
+  assert.equal(
+    installedWorkhorseBuildChannel(
+      "development",
+      "/Applications/Go7 Workhorse.app/Contents/MacOS/Go7 Workhorse",
+      "darwin",
+    ),
+    "release",
+  );
   assert.equal(WORKHORSE_APP_ID, "com.go7studio.workhorse");
   const apps = path.join("C:", "Apps");
   const development = workhorseInstallTarget({ channel: "development", applicationsDir: apps, platform: "darwin" });
@@ -734,7 +767,7 @@ test("selectSurface and titlebarLabel follow the draft chrome rules", () => {
   assert.match(main, /titleBarStyle:\s*"hidden"/);
   assert.match(main, /titleBarOverlay/);
   assert.match(main, /setMenu\(null\)/);
-  assert.match(main, /workhorseRuntimeIdentity\(app\.isPackaged, packagedBuildChannel\(\)\)/);
+  assert.match(main, /installedWorkhorseBuildChannel\(packagedBuildChannel\(\), process\.execPath\)/);
   assert.match(main, /WORKHORSE_DEV_APP_ID/);
   assert.match(main, /setAppUserModelId\(windowsAppUserModelId\)/);
   assert.match(main, /if \(!app\.isPackaged\) return "development"/);

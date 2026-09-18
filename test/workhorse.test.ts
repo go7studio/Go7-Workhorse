@@ -169,7 +169,7 @@ import {
   stripOutputFromThought,
   wrapMarkdown,
 } from "../src/lib/markdown";
-import { applyPermissionAnswer, autoAllowPermission, classifyPermissionTool, classifyElevation, deskClampNote, describeElevation, elevationForBlock, enqueuePermission, grantedPolicyAnswer, inboundAccess, isQuietDeskTool, lineageGrant, looksLikeDelegationTool, looksLikeSearchOnly, looksLikeShellTool, looksLikeWriteTool, parseElevationInput, pathOwnerMode, permissionGrantKey, permissionPolicyAnswer, permissionResumeStatus, promptOwner, workerAccess, workerGrant, workerTightening } from "../src/lib/permissions";
+import { applyPermissionAnswer, autoAllowPermission, classifyPermissionTool, classifyElevation, deskClampNote, describeElevation, elevationForBlock, enqueuePermission, grantedPolicyAnswer, inboundAccess, isQuietDeskTool, lineageGrant, looksLikeDelegationTool, looksLikeSearchOnly, looksLikeShellTool, looksLikeWriteTool, parseElevationInput, pathOwnerMode, permissionGrantKey, permissionPolicyAnswer, permissionResumeStatus, promptOwner, vendorLaunchMode, workerAccess, workerGrant, workerTightening } from "../src/lib/permissions";
 import { detectClaudeAccessDefaults, detectCursorAccessDefaults, detectGrokAccessDefaults } from "../electron/vendor-access";
 import { normalizePermissionGrants } from "../src/lib/permission-grants";
 import { appendUserMessage, applyComposerDrafts, applyDeleteDeskChat, applyDeleteLooseDeskChats, applyRenameDeskChat, archiveChat, autoRenameChat, canPlaceInProject, composerDraftsFromSessions, composerStateForSession, deleteChat, deleteChatGuard, deleteWorkerChats, dropDrafts, dropQueuedPrompt, enqueuePrompt, findListedChat, forkChat, omitQueuedUserMessages, forkTitle, formatLastTalked, hasComposerDraft, hiddenProjectChatCount, isDraftChat, isLooseDeleteScope, lastProjectChat, lastTalkedAt, lastUserMessage, listedChats, defaultInboundParentId, messagesThrough, moveChat, openDraft, activeProjectChat, pinnedCollapsedChat, PROJECT_CHAT_LIMIT, renameChat, resolveListedChat, rewindToUserMessage, shiftQueuedPrompt, snapComposerDraft, visibleProjectChats, withComposerDrafts, workersFoldOpen } from "../src/lib/chats";
@@ -3823,7 +3823,7 @@ test("parseGrokPlanUsage reads weekly SuperGrok pool remaining", () => {
   assert.equal(plan?.leftPercent, 83);
   assert.equal(plan?.period, "weekly");
   assert.equal(plan?.products[0]?.label, "Build");
-  assert.match(readFileSync(path.join(ROOT, "src", "ui", "UsagePane.tsx"), "utf8"), /% left/);
+  assert.match(readFileSync(path.join(ROOT, "src", "ui", "UsagePane.tsx"), "utf8"), /plan\.leftPercent/);
 
   const spent = parseGrokPlanUsage({
     config: {
@@ -5971,7 +5971,7 @@ test("UsagePane ships the Figma fuel-ring overview, not the old token line", asy
   assert.match(pane, /setClaudeWindow/);
   assert.match(pane, /setUsagePlanWindow/);
   assert.match(pane, /preference: planWindow/);
-  assert.match(pane, /showCodexLeftover \? "left" : "used"/);
+  assert.match(pane, /showCodexLeftover \? Math\.max\(0, 100 - selectedUsagePercent\) : selectedUsagePercent/);
   assert.match(pane, /Unlimited/);
   assert.match(pane, /ContextMeter/);
   assert.match(pane, /referenceOnly/);
@@ -6075,7 +6075,7 @@ test("UsagePane ships the Figma fuel-ring overview, not the old token line", asy
   assert.match(css, /--stretch-cols: 7/);
   assert.match(css, /repeat\(var\(--stretch-cols\), minmax\(0, 1fr\)\)/);
   assert.match(css, /aspect-ratio: 1/);
-  assert.match(css, /\.usage-dots\.week \.usage-dot \{[\s\S]*aspect-ratio: auto[\s\S]*height: 36px/);
+  assert.match(css, /\.usage-dots\.week \.usage-dot \{[\s\S]*width: min\(100%, 64px\)[\s\S]*aspect-ratio: 1/);
   assert.match(pane, /--stretch-cols/);
   assert.match(pane, /startViewTransition/);
   assert.match(pane, /view\.startViewTransition\(apply\)/);
@@ -6738,7 +6738,7 @@ test("transcript groups tools and thoughts above the final reply", () => {
   assert.match(popout, /groupWorkRows/);
   assert.match(popout, /isActiveWorkRow/);
   assert.match(popout, /reveal=\{row\.type !== "thought" && tailIndex === packed\.tail\.length - 1\}/);
-  assert.match(popout, /cancelled" \|\| marker\.toolStatus === "cancelled"/);
+  assert.match(popout, /runWasStopped\(marker\.toolStatus\)/);
   assert.match(popout, /stopped/);
   assert.match(popout, /useForcedDetailsOpen/);
   assert.match(popout, /Never assign el\.open/);
@@ -10665,12 +10665,12 @@ test("hydrate strips gated-era campaign rows and lets their parents run", () => 
   assert.doesNotMatch(source, /clearCampaignPhase/, "nothing grants campaign clearance");
 });
 
-test("a path-owned worker launches at Ask and the desk answers its in-path writes", () => {
+test("a path-owned worker shows its inherited seat but launches at Ask", () => {
   const desk: DeskAccess = { mode: "always-approve", sandbox: "off" };
-  // Dial one: the vendor session. Always would launch approval_policy="never"
-  // and no write event would reach the ownership preflight, so a path-owned
-  // worker is clamped to Ask however permissive the desk is.
-  assert.deepEqual(workerAccess({ inherited: desk, owned: true }), { mode: "ask", sandbox: "off" });
+  // The chat displays the orchestrator's inherited seat. The vendor-only
+  // launch clamp keeps write events visible to the ownership preflight.
+  assert.deepEqual(workerAccess({ inherited: desk, owned: true }), desk);
+  assert.equal(vendorLaunchMode({ mode: desk.mode, hidden: true, agentRun: { paths: ["src/app.ts"] } }), "ask");
   assert.deepEqual(workerAccess({ inherited: desk, owned: false, readOnly: true }), {
     mode: "always-approve",
     sandbox: "read-only",
@@ -10680,9 +10680,12 @@ test("a path-owned worker launches at Ask and the desk answers its in-path write
   assert.equal(pathOwnerMode("accept-edits"), "ask");
   assert.equal(pathOwnerMode("plan"), "plan");
   assert.equal(pathOwnerMode("ask"), "ask");
-  // A clamped worker still prompts on its own Permission. That is what keeps
-  // the preflight in play.
-  const owned = workerAccess({ inherited: desk, owned: true });
+  // The vendor launch prompts on its own Permission. The desk handles that
+  // prompt from the carried grant after path preflight.
+  const owned = {
+    ...workerAccess({ inherited: desk, owned: true }),
+    mode: vendorLaunchMode({ mode: desk.mode, hidden: true, agentRun: { paths: ["src/app.ts"] } }),
+  };
   assert.equal(permissionPolicyAnswer({ ...owned, tool: "Write", detail: "src/app.ts", path: "src/app.ts" }), null);
   // Dial two: the carried grant answers that same write with no modal.
   const grant = workerGrant({ inherited: desk });

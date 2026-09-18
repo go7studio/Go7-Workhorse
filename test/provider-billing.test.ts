@@ -72,6 +72,7 @@ test("Add Bot presets keep every existing host and group billing copy", () => {
     aimlapi: "direct",
     gemini: "direct",
     "grok-bot": "local",
+    "dgx-spark": "local",
   };
   for (const preset of PROVIDER_PRESETS) {
     assert.equal(preset.billing, expectedBilling[preset.id], preset.id);
@@ -106,7 +107,7 @@ test("Add Bot presets keep every existing host and group billing copy", () => {
   );
   assert.deepEqual(
     groups.find((item) => item.group.id === "local")?.presets.map((item) => item.id),
-    ["grok-bot"],
+    ["grok-bot", "dgx-spark"],
   );
 
   const form = readFileSync(path.join(ROOT, "src", "ui", "BotForm.tsx"), "utf8");

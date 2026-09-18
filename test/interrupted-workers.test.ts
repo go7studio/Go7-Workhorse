@@ -150,7 +150,7 @@ test("resume puts the worker back to running and re-sends its brief", () => {
 test("the desk says interrupted where it used to say failed, and offers a way back", () => {
   const row = read("src/ui/ChatRow.tsx");
   assert.match(row, /run === "interrupted"/);
-  assert.match(row, /agentRun\?\.status === "cancelled" \? "Cancelled"/);
+  assert.match(row, /sessionLooksCancelled\(session\) \? "Cancelled"/);
   const popout = read("src/ui/WorkPopout.tsx");
   assert.match(popout, /agentRun\?\.status === "interrupted"\s*\?\s*"interrupted"/);
   assert.match(popout, /store\.resumeAgentRun\(child\.id\)/);

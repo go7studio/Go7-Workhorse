@@ -11,6 +11,7 @@ import type { PermissionAnswer } from "../src/lib/permissions";
 import { hydrateChatImages } from "./attachment-store";
 import { buildAcpPrompt } from "../src/lib/images";
 import { describePeerTool, prettyToolTitle } from "../src/lib/tool-labels";
+import { explicitToolPath, isToolPath } from "../src/lib/tool-path";
 import type { ChatImage, Command } from "../src/lib/types";
 import { isCursorInnerTask } from "../src/lib/cursor-lane";
 export { applyCompactUsage } from "../src/lib/grok-events";
@@ -746,6 +747,7 @@ export function extractToolEvent(update: Record<string, unknown>): GrokToolEvent
   const statusRaw = update.status ?? nested.status ?? (name === "tool_call_update" ? "updated" : "in_progress");
   const status = typeof statusRaw === "string" && statusRaw.trim() ? statusRaw.trim() : "in_progress";
   const locator =
+    explicitToolPath(update.rawInput ?? nested.rawInput) ||
     locationPath(update.locations) ||
     locationPath(nested.locations) ||
     firstPath(update.path ?? nested.path) ||
@@ -951,15 +953,16 @@ function toolDetail(params: Record<string, unknown>): string {
   return "needs approval";
 }
 
-function toolPath(params: Record<string, unknown>): string | undefined {
+export function toolPath(params: Record<string, unknown>): string | undefined {
   const toolCall = asRecord(params.toolCall);
+  const target = explicitToolPath(toolCall.rawInput) || explicitToolPath(params.rawInput);
+  if (target) return target;
   const locations = Array.isArray(toolCall.locations) ? toolCall.locations : [];
-  const first = locations[0];
-  if (first && typeof first === "object") {
-    const loc = first as Record<string, unknown>;
-    if (typeof loc.path === "string") return loc.path;
+  for (const location of locations) {
+    const target = explicitToolPath(location);
+    if (target) return target;
   }
-  if (typeof toolCall.path === "string") return toolCall.path;
+  if (typeof toolCall.path === "string" && isToolPath(toolCall.path)) return toolCall.path.trim();
   return undefined;
 }
 

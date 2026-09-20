@@ -1,4 +1,5 @@
 import { execFile, execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -42,7 +43,20 @@ export type FileDiffInput = {
   recordInstance?: boolean;
 };
 
-export type GitChange = { path: string; status: string };
+export type GitChange = { path: string; status: string; fingerprint?: string };
+
+function changeFingerprint(file: string): string | undefined {
+  try {
+    const stat = fs.lstatSync(file);
+    if (stat.isSymbolicLink()) return `link:${fs.readlinkSync(file)}`;
+    // Unknown/large entries stay in the completion check; do not stall the
+    // desktop hashing an untracked build artifact or open a device/FIFO.
+    if (!stat.isFile() || stat.size > 16 * 1024 * 1024) return undefined;
+    return `${stat.mode}:${createHash("sha256").update(fs.readFileSync(file)).digest("hex")}`;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "ENOENT" ? "missing" : undefined;
+  }
+}
 
 const SKIP_WALK = new Set([
   "node_modules",
@@ -168,6 +182,7 @@ export function listGitChanges(cwd: string, baseRef?: string): GitChange[] {
         const status = fields[index] ?? "M";
         let relative = fields[index + 1] ?? "";
         if (/^[RC]/.test(status)) {
+          if (status.startsWith("R")) changes.push({ path: relative.replaceAll("\\", "/"), status: "D" });
           relative = fields[index + 2] ?? relative;
           index += 1;
         }
@@ -199,7 +214,7 @@ export function listGitChanges(cwd: string, baseRef?: string): GitChange[] {
       }
     }
     const unique = new Map(changes.map((change) => [change.path.toLowerCase(), change]));
-    return [...unique.values()];
+    return [...unique.values()].map((change) => ({ ...change, fingerprint: changeFingerprint(path.resolve(root, change.path)) }));
   } catch {
     return [];
   }

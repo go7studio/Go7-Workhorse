@@ -129,7 +129,7 @@ import {
   projectFolderPaths,
   projectForSpawn,
 } from "./project";
-import { isParentTakeoverTool, isWriteToolTitle, projectEdits, writePathFromToolEvent } from "./project-edits";
+import { isParentTakeoverTool, isWriteToolTitle, projectEdits, workerChangedFiles, writePathFromToolEvent } from "./project-edits";
 import { isProviderId, providerById } from "./providers";
 import { sameDeskSkills, skillsForAutoLoad } from "./skills-catalog";
 import { withSkillDiscoveryHint } from "./skill-suggestions";
@@ -6344,6 +6344,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               const spawnHead = window.workhorse?.gitHead && childCwd
                 ? await window.workhorse.gitHead(childCwd)
                 : "";
+              const spawnChanges = window.workhorse?.listGitChanges && childCwd
+                ? await window.workhorse.listGitChanges(childCwd, spawnHead || undefined)
+                : [];
               let reply = "";
               try {
                 reply = await promptVendor(
@@ -6412,7 +6415,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               const afterChanges = window.workhorse?.listGitChanges && childCwd
                 ? await window.workhorse.listGitChanges(childCwd, spawnHead || undefined)
                 : [];
-              const changedFiles = afterChanges.map((change) => change.path);
+              const changedFiles = workerChangedFiles(spawnChanges, afterChanges);
               const unauthorizedFiles = assignedPaths.length > 0
                 ? changedFiles.filter((file) => !assignedPaths.some((owned) => owned.toLowerCase() === file.replaceAll("\\", "/").toLowerCase()))
                 : [];

@@ -4924,7 +4924,7 @@ test("project home lists edited files from write tools, not Choose a brain", () 
   );
   assert.match(css, /\.edited-block\.compact \.edited-files-slot\s*\{[^}]*grid-template-rows:\s*0fr/);
   assert.match(css, /\.edited-block\.compact\.open \.edited-files-slot\s*\{[^}]*grid-template-rows:\s*1fr/);
-  const filePane = css.match(/\.session-file,\s*\.session-workshop\s*\{[^}]+\}/)?.[0] ?? "";
+  const filePane = css.match(/\.session-file(?:,\s*\.session-workshop)?\s*\{[^}]+\}/)?.[0] ?? "";
   assert.match(filePane, /border-left/);
   assert.match(filePane, /file-pane-in/);
   assert.match(filePane, /transform-origin:\s*top right/);

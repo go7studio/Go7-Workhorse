@@ -129,6 +129,7 @@
   min-height: 44px;
   padding: 6px 22px;
   border-bottom: 0;
+  flex-wrap: nowrap;
 }
 
 .session-header.slim .context-meter-wrap,
@@ -2197,9 +2198,39 @@
   }
 }
 
+.session.has-workshop { position: relative; }
+.session-workshop {
+  position: absolute;
+  inset: 44px 0 0 auto;
+  z-index: var(--z-popover);
+  max-width: 100%;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--line);
+  background: var(--bg-solid);
+  box-shadow: var(--shadow);
+  animation: workshop-pane-in 200ms var(--ease) both;
+}
+.session-workshop.out {
+  pointer-events: none;
+  animation: workshop-pane-out 200ms var(--ease) both;
+}
+@keyframes workshop-pane-in {
+  from { opacity: 0; transform: translateX(100%); }
+  to { opacity: 1; transform: translateX(0); }
+}
+@keyframes workshop-pane-out {
+  from { opacity: 1; transform: translateX(0); }
+  to { opacity: 0; transform: translateX(100%); }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .session-file,
-  .session-file.out {
+  .session-file.out,
+  .session-workshop,
+  .session-workshop.out {
     animation: none;
   }
 }
@@ -2508,6 +2539,7 @@
   display: flex;
   align-items: center;
   gap: 6px;
+  flex: 0 0 auto;
 }
 
 .terminal-pane {

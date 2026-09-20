@@ -21,7 +21,7 @@ import {
   transcriptPaintStart,
   type TranscriptBlock,
 } from "../lib/turns";
-import { clampPaneWidth, FILE_PANE } from "../lib/pane";
+import { clampPaneWidth, FILE_PANE, WORKSHOP_PANE } from "../lib/pane";
 import { useStoreSelector } from "../lib/store";
 import { sameSessionPaneDesk, selectSessionPaneDesk } from "../lib/store-select";
 import { Composer } from "./Composer";
@@ -44,6 +44,7 @@ import { TurnActions } from "./TurnActions";
 import { UserTurn } from "./UserTurn";
 import { WorkPopout } from "./WorkPopout";
 import { TerminalPane } from "./TerminalPane";
+import { WorkshopPanel } from "./WorkshopPanel";
 import { pinNoticesDock } from "../lib/session-dock";
 import {
   countTurnsAboveViewport,
@@ -167,6 +168,10 @@ export function SessionPane() {
   const [fileWidth, setFileWidth] = useState(() => FILE_PANE.fallback);
   const [extraEdits, setExtraEdits] = useState<ProjectEdit[]>([]);
   const [terminalOpen, setTerminalOpen] = useState(false);
+  const [workshopOpen, setWorkshopOpen] = useState(false);
+  const [workshopOut, setWorkshopOut] = useState(false);
+  const workshopToggle = useRef<HTMLButtonElement>(null);
+  const [workshopWidth, setWorkshopWidth] = useState(() => WORKSHOP_PANE.fallback);
   const [hiddenByChat, setHiddenByChat] = useState<Record<string, string[]>>({});
   const [stats, setStats] = useState<Record<string, { added: number; deleted: number }>>({});
   const fetchedStats = useRef<Record<string, string>>({});
@@ -245,6 +250,8 @@ export function SessionPane() {
     setFileOut(false);
     setExtraEdits([]);
     setTerminalOpen(false);
+    setWorkshopOpen(false);
+    setWorkshopOut(false);
     setHeldEdits([]);
     setEditsBarOpen(false);
     setStats({});
@@ -258,6 +265,15 @@ export function SessionPane() {
     filling.current = false;
     setPaint({ id: sessionId, from: transcriptPaintStart(blocks.length) });
   }, [sessionId]);
+
+  useEffect(() => {
+    if (!workshopOut) return;
+    const exit = window.setTimeout(() => {
+      setWorkshopOpen(false);
+      setWorkshopOut(false);
+    }, 240);
+    return () => window.clearTimeout(exit);
+  }, [workshopOut]);
 
   useEffect(() => {
     fetchedStats.current = {};
@@ -387,6 +403,31 @@ export function SessionPane() {
     }
     setFileOut(true);
   };
+  const closeWorkshopPane = () => {
+    if (!workshopOpen || workshopOut) return;
+    workshopToggle.current?.focus();
+    if (typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      setWorkshopOpen(false);
+      setWorkshopOut(false);
+      return;
+    }
+    setWorkshopOut(true);
+  };
+  const openWorkshopPane = () => {
+    if (open) {
+      setOpen(null);
+      setFileOut(false);
+    }
+    setWorkshopOut(false);
+    setWorkshopOpen(true);
+  };
+  const toggleWorkshopPane = () => {
+    if (workshopOpen && !workshopOut) {
+      closeWorkshopPane();
+      return;
+    }
+    openWorkshopPane();
+  };
   const dismissFile = (file: ProjectEdit) => {
     setHiddenByChat((current) => {
       const existing = current[session.id] ?? [];
@@ -400,6 +441,8 @@ export function SessionPane() {
       closeFilePane();
       return;
     }
+    setWorkshopOpen(false);
+    setWorkshopOut(false);
     setFileOut(false);
     setOpen(file);
   };
@@ -420,15 +463,21 @@ export function SessionPane() {
           closeFilePane();
           return;
         }
+        setWorkshopOpen(false);
+        setWorkshopOut(false);
         setFileOut(false);
         setOpen(next);
       }}
     >
     <MediaPaintProvider resetKey={session.id}>
     <section
-      className={`session${open ? " has-file" : ""}`}
+      className={`session${open ? " has-file" : ""}${workshopOpen ? " has-workshop" : ""}`}
       ref={pane}
-      style={open ? { ["--file-pane" as string]: `${fileWidth}px` } : undefined}
+      style={
+        open
+          ? { ["--file-pane" as string]: `${fileWidth}px` }
+          : undefined
+      }
     >
       <div className="session-col">
       <header className="session-header slim">
@@ -460,6 +509,8 @@ export function SessionPane() {
                     }));
                     setExtraEdits((current) => mergeEdits(current, found));
                     if (found[0]) {
+                      setWorkshopOpen(false);
+                      setWorkshopOut(false);
                       setFileOut(false);
                       setOpen(found[0]);
                     }
@@ -473,6 +524,15 @@ export function SessionPane() {
               </button>
             </>
           ) : null}
+          <button
+            ref={workshopToggle}
+            className={`tiny${workshopOpen && !workshopOut ? " active-kind" : ""}`}
+            type="button"
+            aria-pressed={workshopOpen && !workshopOut}
+            onClick={toggleWorkshopPane}
+          >
+            Workshop
+          </button>
           <ContextMeter />
         </div>
       </header>
@@ -613,6 +673,31 @@ export function SessionPane() {
             label="Resize file pane"
           />
           <FileViewer file={liveOpen ?? open} roots={fileRoots} onClose={closeFilePane} />
+        </aside>
+      ) : null}
+      {workshopOpen ? (
+        <aside
+          className={`session-workshop${workshopOut ? " out" : ""}`}
+          style={{ width: workshopWidth }}
+          aria-label="Workshop"
+          inert={workshopOut}
+          onKeyDown={(event) => { if (event.key === "Escape") { event.stopPropagation(); closeWorkshopPane(); } }}
+          onAnimationEnd={(event) => {
+            if (event.target !== event.currentTarget || event.animationName !== "workshop-pane-out" || !workshopOut) return;
+            setWorkshopOpen(false);
+            setWorkshopOut(false);
+          }}
+        >
+          <SplitHandle
+            value={workshopWidth}
+            onChange={(next) => setWorkshopWidth(clampPaneWidth(next, WORKSHOP_PANE))}
+            min={WORKSHOP_PANE.min}
+            max={WORKSHOP_PANE.max}
+            reset={WORKSHOP_PANE.fallback}
+            invert
+            label="Resize workshop pane"
+          />
+          <WorkshopPanel onClose={closeWorkshopPane} />
         </aside>
       ) : null}
     </section>

@@ -1,6 +1,7 @@
 export const SIDEBAR_PANE = { min: 252, max: 420, fallback: 268 };
 export const THREAD_PANE = { min: 260, max: 560, fallback: 360 };
 export const FILE_PANE = { min: 280, max: 640, fallback: 400 };
+export const WORKSHOP_PANE = { min: 300, max: 720, fallback: 420 };
 
 export function clampPaneWidth(
   value: unknown,

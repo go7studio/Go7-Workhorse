@@ -3,6 +3,7 @@ import {
   collapseToolText,
   mergeThoughtText,
   splitToolLine,
+  thoughtGrows,
   toolIsFinished,
   upsertCompactMessage,
   upsertThoughtMessage,
@@ -253,7 +254,7 @@ export function displayWorkSteps(
     if (last?.type === "thought") {
       const merged = mergeThoughtText(last.text, text);
       if (merged === last.text) return;
-      if (thoughtCovers(last.text, text)) return;
+      if (!thoughtGrows(last.text, text) && thoughtCovers(last.text, text)) return;
       out[out.length - 1] = { type: "thought", id: last.id, text: merged };
       return;
     }

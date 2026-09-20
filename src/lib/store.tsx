@@ -211,6 +211,7 @@ import {
   applyFailedPeerAsk,
   failPeerAskMessages,
   finishOpenToolMessages,
+  mergeThoughtText,
   toolIsFinished,
   upsertCompactMessage,
   upsertThoughtMessage,
@@ -7012,8 +7013,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       }
       if (event.type === "thought") {
         if (!event.text) return;
-        grokThoughtQueue.current[event.sessionId] =
-          (grokThoughtQueue.current[event.sessionId] ?? "") + event.text;
+        grokThoughtQueue.current[event.sessionId] = mergeThoughtText(
+          grokThoughtQueue.current[event.sessionId] ?? "", event.text,
+        );
         noteTrailingTurnActivity(event.sessionId);
         streamCommits.request();
         return;

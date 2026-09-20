@@ -156,7 +156,7 @@ import {
 } from "../src/lib/app-identity";
 import { applyWorkhorseToggle, isTheme, nextTheme, resolvedTheme, SETTINGS_THEME_CHOICES } from "../src/lib/theme";
 import { listVendorModels, parseCodexModelsCache, parseCursorModelsOutput, parseGrokModelsCache, reconcileCursorModels } from "../electron/vendor-models";
-import { applyFailedPeerAsk, collapseThoughtDisplay, collapseToolText, failPeerAskMessages, finishOpenToolMessages, formatToolLine, mergeThoughtText, shortDisplayPath, toolIsFinished, upsertCompactMessage, upsertThoughtMessage, upsertToolMessage } from "../src/lib/grok-events";
+import { applyFailedPeerAsk, collapseThoughtDisplay, collapseToolText, failPeerAskMessages, finishOpenToolMessages, formatToolLine, mergeThoughtText, shortDisplayPath, stripRepeatedThought, thoughtGrows, toolIsFinished, upsertCompactMessage, upsertThoughtMessage, upsertToolMessage } from "../src/lib/grok-events";
 import {
   joinChatText,
   parseChatMarkdown,
@@ -186,7 +186,7 @@ import { findSourceFile, isAbsolutePath, readFileDiff } from "../electron/projec
 import { citedAbsolutePaths, editSearchRoots, fileFolderFromPath, formatEditWhen, harvestFilePath, holdEditStats, isDirectoryEditPath, isWriteToolTitle, looksLikeSourceFile, markStatsFetched, mergeEdits, pathFromNearbyWrite, pathFromWriteTool, pathsNeedingStats, planEditStatsHarvest, projectEdits, projectFileChanges, projectWritesKey, sameEditPath, startEditStatsHarvest, statForPath, stripPathSizeSuffix, takeEditStatsChunk, writeChangeKind } from "../src/lib/project-edits";
 import { autoTitleForSend, isWorkhorseInstructionTitle, looksLikeIntentTitle, looksLikePing, looksLikePromptSlice, suggestedTitleForSession, titleAcceptsVendor, titleFromIntent, titleFromPrompt, titleNeedsUpgrade } from "../src/lib/titles";
 import { isVendorRateLimitError, vendorFailedMessage } from "../src/lib/vendor-bridge";
-import { clampPaneWidth, FILE_PANE, SIDEBAR_PANE, THREAD_PANE } from "../src/lib/pane";
+import { clampPaneWidth, FILE_PANE, SIDEBAR_PANE, THREAD_PANE, WORKSHOP_PANE } from "../src/lib/pane";
 import { composerMaxHeightPx, fitComposerField, isComposerTypeToFocus, pinComposerInput } from "../src/ui/Composer";
 import { selectSurface, titlebarLabel } from "../src/lib/surface";
 import {
@@ -4760,8 +4760,12 @@ test("project home lists edited files from write tools, not Choose a brain", () 
   assert.match(pane, /fileOut/);
   assert.match(pane, /closeFilePane/);
   assert.match(pane, /has-file/);
+  assert.match(pane, /has-workshop/);
   assert.match(pane, /FILE_PANE/);
+  assert.match(pane, /WORKSHOP_PANE/);
   assert.match(pane, /Resize file pane/);
+  assert.match(pane, /Resize workshop pane/);
+  assert.match(pane, /session-workshop/);
   assert.match(pane, /projectEdits\(\[session\]/);
   assert.match(pane, /customBotId: session.customBotId/);
   assert.match(pane, /sameEditPath/);
@@ -4852,7 +4856,9 @@ test("project home lists edited files from write tools, not Choose a brain", () 
   assert.match(pane, /fileRootKey/);
   assert.match(deskCss(), /\.diff-line\.add/);
   assert.match(deskCss(), /\.session-file/);
+  assert.match(deskCss(), /\.session-workshop/);
   assert.match(deskCss(), /\.session\.has-file/);
+  assert.match(deskCss(), /\.session\.has-workshop/);
   const css = deskCss();
   const sessionEdits = css.match(/\.session-edits\s*\{[^}]+\}/)?.[0] ?? "";
   const composerWrap = css.match(/\.composer-wrap\s*\{[^}]+\}/)?.[0] ?? "";
@@ -4918,7 +4924,7 @@ test("project home lists edited files from write tools, not Choose a brain", () 
   );
   assert.match(css, /\.edited-block\.compact \.edited-files-slot\s*\{[^}]*grid-template-rows:\s*0fr/);
   assert.match(css, /\.edited-block\.compact\.open \.edited-files-slot\s*\{[^}]*grid-template-rows:\s*1fr/);
-  const filePane = css.match(/\.session-file\s*\{[^}]+\}/)?.[0] ?? "";
+  const filePane = css.match(/\.session-file,\s*\.session-workshop\s*\{[^}]+\}/)?.[0] ?? "";
   assert.match(filePane, /border-left/);
   assert.match(filePane, /file-pane-in/);
   assert.match(filePane, /transform-origin:\s*top right/);
@@ -8667,6 +8673,44 @@ test("thought snapshots replace instead of stacking the same draft", () => {
   assert.doesNotMatch(shownTools, /asking what tools I have[\s\S]*asking what tools I have/);
 });
 
+test("later thinking does not shove an earlier hop down the live box", () => {
+  const earlier =
+    "I'll start by checking the Workhorse skills and chats, then look at how Review and Terminal are wired so we can add a clickable Workshop panel.";
+  const later =
+    "I have enough context. Let me implement: Got it — I've got the full plan locked in. I'll start by updating pane.ts to add the new WORKSHOP_PANE constant.";
+  const grown =
+    `${later} Once those are in place, I'll run the tests and update the docs as you outlined. Let me kick things off with the pane.ts change.`;
+  assert.equal(stripRepeatedThought(`${later} ${earlier}`, earlier).includes("enough context"), true);
+  assert.doesNotMatch(stripRepeatedThought(`${later} ${earlier}`, earlier), /checking the Workhorse skills/);
+  assert.equal(thoughtGrows(later, grown), true);
+  assert.equal(thoughtGrows(later, earlier), false);
+
+  const replayed = playWorkEvents([
+    { kind: "thought", text: earlier },
+    { kind: "tool", tool: { toolCallId: "r1", title: "Read", status: "completed", detail: "pane.ts" } },
+    { kind: "tool", tool: { toolCallId: "r2", title: "Read", status: "completed", detail: "SessionPane.tsx" } },
+    { kind: "tool", tool: { toolCallId: "r3", title: "Read", status: "completed", detail: "WorkshopPanel.tsx" } },
+    { kind: "tool", tool: { toolCallId: "r4", title: "Read", status: "completed", detail: "app.css" } },
+    { kind: "thought", text: `${later} ${earlier}` },
+    { kind: "thought", text: `${grown} ${earlier}` },
+    {
+      kind: "message",
+      text: `${earlier}\n\nNext I'll list the workshop skill and live chats, then inspect how Review and Terminal open so Workshop can follow the same pattern.`,
+    },
+  ]);
+  const live = replyWork(replayed, true);
+  const thoughts = live.display.filter((step) => step.type === "thought");
+  assert.equal(thoughts.length, 2);
+  assert.match(thoughts[0]?.type === "thought" ? thoughts[0].text : "", /checking the Workhorse skills/);
+  assert.match(thoughts[1]?.type === "thought" ? thoughts[1].text : "", /enough context/);
+  assert.match(thoughts[1]?.type === "thought" ? thoughts[1].text : "", /Once those are in place/);
+  assert.doesNotMatch(thoughts[1]?.type === "thought" ? thoughts[1].text : "", /checking the Workhorse skills/);
+
+  const storeSrc = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
+  assert.match(storeSrc, /grokThoughtQueue\.current\[event\.sessionId\] = mergeThoughtText\(/);
+  assert.doesNotMatch(storeSrc, /grokThoughtQueue\.current\[event\.sessionId\]\s*=\s*\n?\s*\(grokThoughtQueue[\s\S]*\+ event\.text/);
+});
+
 test("thought rows stay distinct from assistant text", () => {
   const withBoth = upsertThoughtMessage(
     [{ id: "a", role: "assistant", text: "Hello", createdAt: 1 }],
@@ -10659,6 +10703,9 @@ test("side panes clamp and persist so you can drag them to size", () => {
   assert.equal(clampPaneWidth(400, FILE_PANE), 400);
   assert.equal(clampPaneWidth(100, FILE_PANE), FILE_PANE.min);
   assert.equal(clampPaneWidth(800, FILE_PANE), FILE_PANE.max);
+  assert.equal(clampPaneWidth(420, WORKSHOP_PANE), 420);
+  assert.equal(clampPaneWidth(100, WORKSHOP_PANE), WORKSHOP_PANE.min);
+  assert.equal(clampPaneWidth(900, WORKSHOP_PANE), WORKSHOP_PANE.max);
 
   const store = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
   assert.match(store, /sidebarWidth: clampPaneWidth/);

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
+import { deskCss } from "./desk-css";
 import { isSettingsSection, normalizeSettings } from "../src/lib/settings";
 import { DEFAULT_WORKSHOP_SETTINGS, fingerprintsForSources, type PackListing, type PackSource } from "../src/lib/workshop-pack";
 import {
@@ -197,4 +198,28 @@ test("nextPacks appends a pack the live list does not know yet", () => {
   const rows = nextPacks([box], { id: "job-log", on: true, hostId: "spark", sources: ["feed"], sourceFingerprints: fps });
   assert.equal(rows.length, 2);
   assert.deepEqual(rows[1], { id: "job-log", on: true, hostId: "spark", sources: ["feed"], sourceFingerprints: fps, version: undefined, contract: undefined });
+});
+test("Workshop is a chat basic beside Review and Terminal", () => {
+  const pane = readFileSync(path.join(ROOT, "src", "ui", "SessionPane.tsx"), "utf8");
+  assert.match(pane, /const \[workshopOpen, setWorkshopOpen\] = useState\(false\)/);
+  assert.match(pane, />\s*Workshop\s*</);
+  assert.match(pane, /<WorkshopPanel onClose=\{closeWorkshopPane\}/);
+  assert.match(pane, /session-workshop/);
+  assert.match(pane, /has-workshop/);
+  assert.match(pane, /WORKSHOP_PANE/);
+  assert.match(pane, /Resize workshop pane/);
+  assert.match(pane, /setTerminalOpen\(false\);\s+setWorkshopOpen\(false\);/);
+  assert.match(pane, /setWorkshopOpen\(false\);\s+setWorkshopOut\(false\);\s+setFileOut\(false\);/);
+
+  const css = deskCss();
+  assert.match(css, /\.session\.has-workshop/);
+  assert.match(css, /\.session-workshop/);
+  assert.match(css, /\.session-header\.slim\s*\{[^}]*flex-wrap:\s*nowrap/s);
+
+  const panel = readFileSync(path.join(ROOT, "src", "ui", "WorkshopPanel.tsx"), "utf8");
+  assert.match(panel, /useWorkshopLive/);
+  assert.match(panel, /surface="sheet"/);
+  assert.doesNotMatch(panel, /Turn off|updateWorkshop|job\.start|job\.stop|ssh/);
+  assert.doesNotMatch(panel, /\blease\w*\(|\broute\w*\(|\bstart\w*\(|\bstop\w*\(/);
+  assert.doesNotMatch(panel, /dangerouslySetInnerHTML|<iframe|<webview|eval\(|new Function/);
 });

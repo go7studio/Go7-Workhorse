@@ -501,7 +501,8 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
   is memory-only.
 - **Workshop** an optional, read-only rail on the right edge. Settings →
   Workshop is the install and grant home, and **Manage** on the rail opens the
-  same panel.
+  same panel. **Workshop** in a chat header, beside Review and Terminal, opens
+  a window on the right — the same slot as Review.
 - Skills is not the Workshop home, and there is no dock row.
 - Add a pack from that sheet: catalog Install, a public GitHub repo URL (the
   highest tagged release downloads), or a folder.
@@ -511,7 +512,8 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
 - Turn a pack on, pick the Local Compute host it reads through, and confirm the
   exact URLs, cadence and byte cap it will GET.
 - The rail paints cards collapsed to a 76px strip, or expanded. With no packs on
-  it is hidden, and Install and Turn on live in Settings → Workshop.
+  it is hidden, and Install and Turn on live in Settings → Workshop, the rail's
+  Manage sheet, and the chat Workshop panel.
 - Packs stack as modules and fold on their own.
 - Update re-reads the repo's tags. When a pack's sources change, those packs
   turn off before polling restarts and you confirm again, because grants are

@@ -726,7 +726,7 @@
     },
     {
       "id": "REG-081",
-      "behavior": "Grok Build remains a client rather than a model, legacy grok-build normalizes to Grok 4.6, and explicit worker provider, model, custom connection, effort, and routing evidence must match the worker that actually launches; overlapping bot names and negative prompt mentions cannot hijack identity.",
+      "behavior": "Grok Build remains a client rather than a model, legacy grok-build normalizes to Grok 4.7, and explicit worker provider, model, custom connection, effort, and routing evidence must match the worker that actually launches; overlapping bot names and negative prompt mentions cannot hijack identity.",
       "profiles": ["grok-acp", "custom-openai", "custom-kimi", "custom-anthropic"],
       "scenarios": ["MOD-S1", "MOD-S3", "ORC-S2", "ORC-S8"],
       "rubric": ["MOD-01", "MOD-02", "MOD-04", "MOD-06", "ORC-02", "ORC-03", "ORC-16"],

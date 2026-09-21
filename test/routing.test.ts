@@ -823,7 +823,7 @@ test("Grok 4.6 is ACP Grok; Auto workers never allocate grok-bot", () => {
     [{ id: "bot_grokbot", name: "Grok Bot", model: "grok-bot" }],
   );
   assert.equal(unnamedFromBot.provider, "grok");
-  assert.equal(unnamedFromBot.model, "grok-4.6");
+  assert.equal(unnamedFromBot.model, "grok-4.7");
   assert.equal(unnamedFromBot.customBotId, undefined);
 });
 

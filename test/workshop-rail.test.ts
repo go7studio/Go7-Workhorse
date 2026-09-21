@@ -418,15 +418,15 @@ test("rail source exposes Manage on collapsed/expanded; empty hides the rail; sh
   assert.match(css, /workshop-sources-label/);
 });
 
-test("WorkshopBlock sheet hides link-head; On this desk/Available accordion; Retry only on failure; Advanced peer Add", () => {
+test("WorkshopBlock sheet hides link-head; Installed/Available accordion; Retry only on failure; Advanced peer Add", () => {
   const block = readFileSync(path.join(ROOT, "src", "ui", "WorkshopBlock.tsx"), "utf8");
   // surface=sheet skips link-head / Workshop title (Manage packs is the one title).
   assert.match(block, /inSheet \? \(/);
   assert.match(block, /link-head/);
   assert.match(block, /Install a pack, then Turn on\./);
-  assert.match(block, /id="workshop-on-this-desk"/);
+  assert.match(block, /id="workshop-installed"/);
   assert.match(block, /id="workshop-available"/);
-  assert.match(block, />\s*On this desk\s*</);
+  assert.match(block, />\s*Installed\s*</);
   assert.match(block, />\s*Available\s*</);
   assert.match(block, /expandedId/);
   assert.match(block, /toggleExpanded/);
@@ -480,12 +480,12 @@ test("ADV A–F: all-Off honesty, Remove confirm, Available name, sheet Detach h
   assert.match(rail, /catalogRefreshNonce/);
 });
 
-test("simple rows: On this desk/Available accordion, no default essays, hide same-version, URL title, Detach while Manage, rail clamp", () => {
+test("simple rows: Installed/Available accordion, no default essays, hide same-version, URL title, Detach while Manage, rail clamp", () => {
   const block = readFileSync(path.join(ROOT, "src", "ui", "WorkshopBlock.tsx"), "utf8");
   const railSrc = readFileSync(path.join(ROOT, "src", "ui", "WorkshopRail.tsx"), "utf8");
   const css = deskCss();
   const paint = readFileSync(path.join(ROOT, "src", "ui", "workshop-paint.tsx"), "utf8");
-  // 1: Collapsed On this desk/Available = mark + title + one-liner (catalog summary / pack.description, clamped).
+  // 1: Collapsed Installed/Available = mark + title + one-liner (catalog summary / pack.description, clamped).
   assert.match(block, /workshop-pack-mark/);
   assert.match(block, /workshop-row-title/);
   assert.match(block, /workshop-row-one-liner/);
@@ -495,12 +495,11 @@ test("simple rows: On this desk/Available accordion, no default essays, hide sam
   assert.match(block, /ROW_ONE_LINER_MAX/);
   assert.match(block, /expandedId/);
   assert.doesNotMatch(block, /workshop-pack-desc/);
-  assert.doesNotMatch(block, />Installed</);
   assert.doesNotMatch(block, />\s*Active\s*</);
   assert.doesNotMatch(block, />\s*Pending\s*</);
-  assert.match(block, />\s*On this desk\s*</);
+  assert.match(block, />\s*Installed\s*</);
   assert.match(block, />\s*Available\s*</);
-  assert.match(block, /Packs on this desk/);
+  assert.match(block, /Installed packs/);
   // Expand stays host · sources + actions — no essay dump of summary/description.
   assert.doesNotMatch(block, /workshop-pack-summary workshop-pack-blurb/);
   // 2: Collector · Reveal only under quiet More (not default expand essay).
@@ -527,7 +526,7 @@ test("feel pass: quiet marks/headers, Refresh not between rows, Available action
   const block = readFileSync(path.join(ROOT, "src", "ui", "WorkshopBlock.tsx"), "utf8");
   const railSrc = readFileSync(path.join(ROOT, "src", "ui", "WorkshopRail.tsx"), "utf8");
   const css = deskCss();
-  // On this desk expand: host · sources + actions; no default summary / provenance essay.
+  // Installed expand: host · sources + actions; no default summary / provenance essay.
   assert.doesNotMatch(block, /from folder/);
   assert.doesNotMatch(block, /from catalog · this desk/);
   // Collapsed one-liner clamp (JS ~90 + CSS line-clamp 1).
@@ -542,7 +541,7 @@ test("feel pass: quiet marks/headers, Refresh not between rows, Available action
   // Quieter letter marks (small muted circle).
   assert.match(css, /\.workshop-pack-mark\s*\{[^}]*border-radius:\s*50%/s);
   assert.match(css, /\.workshop-pack-mark\s*\{[^}]*width:\s*20px/s);
-  // Section-label On this desk / Available headers.
+  // Section-label Installed / Available headers.
   assert.match(block, /workshop-section-title section-label/);
   assert.match(css, /workshop-section-title\.section-label/);
   // Available action column alignment; Install primary; Turn on quiet.

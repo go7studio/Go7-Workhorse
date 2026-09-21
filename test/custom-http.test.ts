@@ -2320,7 +2320,7 @@ test("explicit stock model identity cannot be hijacked by an overlapping custom 
     grokBot,
   );
   assert.equal(legacy.provider, "grok");
-  assert.equal(legacy.model, "grok-4.6");
+  assert.equal(legacy.model, "grok-4.7");
 
   assert.throws(
     () => resolveSpawnSpec(
@@ -2388,7 +2388,7 @@ test("a Grok Bot parent does not inherit grok-bot onto an unnamed worker", () =>
     grokBot,
   );
   assert.equal(unnamed.provider, "grok");
-  assert.equal(unnamed.model, "grok-4.6");
+  assert.equal(unnamed.model, "grok-4.7");
   assert.equal(unnamed.customBotId, undefined);
   const named = resolveSpawnSpec(
     {

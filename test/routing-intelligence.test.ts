@@ -92,11 +92,11 @@ test("the 1-10 table orders the mid-field the 1-5 scale collapsed", () => {
   assert.equal(intelligence("codex", "gpt-5.4-mini"), 5);
 });
 
-test("legacy Grok Build model saves normalize to the Grok 4.6 model", () => {
-  assert.equal(normalizeModelId("grok", "grok-build"), "grok-4.6");
+test("legacy Grok Build model saves normalize to the Grok 4.7 model", () => {
+  assert.equal(normalizeModelId("grok", "grok-build"), "grok-4.7");
   assert.deepEqual(
     routingProfileForModel("grok", "grok-build"),
-    routingProfileForModel("grok", "grok-4.6"),
+    routingProfileForModel("grok", "grok-4.7"),
   );
 });
 

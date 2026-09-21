@@ -53,6 +53,8 @@ import {
   pinnedToLatest,
   pinToLatest,
   shouldLoadEarlierWindow,
+  sizeTranscriptView,
+  transcriptPaddingY,
 } from "../lib/transcript-scroll";
 import type { AppState, ProviderId } from "../lib/types";
 
@@ -60,6 +62,12 @@ const SCROLL_SLACK = 96;
 
 function followLatestClass(el: HTMLElement, following: boolean) {
   el.classList.toggle("follow-latest", following);
+}
+
+function sizeThread(el: HTMLElement) {
+  const view = sizeTranscriptView(el, transcriptPaddingY(getComputedStyle(el)));
+  const stack = el.querySelector(":scope > .transcript-stack");
+  if (stack instanceof HTMLElement) stack.style.minHeight = `${view}px`;
 }
 
 /** Clean finish vs a wave that named failed/interrupted/cancelled workers. */
@@ -326,6 +334,7 @@ export function SessionPane() {
   useLayoutEffect(() => {
     const el = scroller.current;
     if (!el) return;
+    sizeThread(el);
     followLatestClass(el, followBottom.current);
     if (followBottom.current) pinToLatest(el);
     filling.current = false;
@@ -336,9 +345,10 @@ export function SessionPane() {
   useLayoutEffect(() => {
     const el = scroller.current;
     if (!el) return;
+    sizeThread(el);
     followLatestClass(el, followBottom.current);
     if (followBottom.current) pinLatest.request();
-  }, [session?.messages, session?.status, pinLatest]);
+  }, [session?.messages, session?.status, editsBarOpen, pinLatest]);
 
   useEffect(() => () => pinLatest.stop(), [pinLatest]);
 
@@ -363,11 +373,13 @@ export function SessionPane() {
       });
     };
     const pin = () => {
+      sizeThread(thread);
       if (skipPin) return;
       if (followBottom.current) pinToLatest(thread);
     };
     const observer = new ResizeObserver(pin);
     thread.addEventListener("toggle", onToggle, true);
+    observer.observe(thread);
     if (content) observer.observe(content);
     if (wrap instanceof HTMLElement) observer.observe(wrap);
     return () => {
@@ -585,6 +597,7 @@ export function SessionPane() {
         }}
       >
         <div className="transcript-stack" ref={stack}>
+        <div className="transcript-fill" aria-hidden="true" />
         {shownBlocks.map((block, offset) => {
           const index = paintFrom + offset;
           if (block.type === "user") {

@@ -9093,7 +9093,7 @@ test("vendor model caches drive the picker so Sol is first and new slugs need no
     },
   });
   assert.equal(missing.codex[0]?.id, "gpt-5.6-sol");
-  assert.deepEqual(missing.grok.map((model) => model.id), ["grok-4.6", "grok-4.5"]);
+  assert.deepEqual(missing.grok.map((model) => model.id), ["grok-4.7", "grok-4.6", "grok-4.5"]);
   assert.equal(MODEL_CATALOG.grok.some((model) => model.id === "grok-build"), false);
 
   const cursorRenamed = listVendorModels({
@@ -9145,8 +9145,8 @@ test("vendor model caches drive the picker so Sol is first and new slugs need no
       models: { "grok-build": { info: { id: "grok-build", name: "Grok Build" } } },
     }),
   });
-  assert.deepEqual(legacyGrokCache.grok.map((model) => [model.id, model.name]), [["grok-4.6", "Grok 4.6"]]);
-  assert.equal(normalizeModelId("grok", "grok-build"), "grok-4.6");
+  assert.deepEqual(legacyGrokCache.grok.map((model) => [model.id, model.name]), [["grok-4.7", "Grok 4.7"]]);
+  assert.equal(normalizeModelId("grok", "grok-build"), "grok-4.7");
 
   try {
     applyVendorCatalog(live);
@@ -10165,12 +10165,11 @@ test("desk-enforced orchestrator vs worker lineup", async () => {
   assert.match(DESK_SPAWN_LAW, /One bounded assignment is one workhorse_spawn_agent/);
   assert.match(DESK_SPAWN_LAW, /A second spawn only to independently check that worker's output/);
   assert.match(DESK_SPAWN_LAW, /Leave model unset so Auto ranks the slice/);
-  assert.match(DESK_SPAWN_LAW, /Grok 4.6 is ACP Grok or Cursor Grok, never Grok Bot/);
+  assert.match(DESK_SPAWN_LAW, /Grok 4.7 is ACP Grok or Cursor Grok, never Grok Bot/);
   assert.match(DESK_SPAWN_LAW, /Do not spawn grok-bot as a worker, builder, or auditor/);
   assert.match(DESK_SPAWN_LAW, /Grok Bot may call, analyze, and dispatch only/);
-  assert.match(DESK_SPAWN_LAW, /Naming grok-4.6 with no vendor lets the desk pick by leftover/);
-  assert.match(DESK_SPAWN_LAW, /Grok 4.6 is ACP Grok or Cursor Grok, never Grok Bot/);
-  assert.match(SPAWN_TURN_HINT, /Grok 4.6 is ACP Grok or Cursor Grok, never Grok Bot/);
+  assert.match(DESK_SPAWN_LAW, /Naming grok-4.7 or grok-4.6 with no vendor lets the desk pick by leftover/);
+  assert.match(SPAWN_TURN_HINT, /Grok 4.7 is ACP Grok or Cursor Grok, never Grok Bot/);
   assert.match(readFileSync(path.join(ROOT, "skills", "desk", "SKILL.md"), "utf8"), /Do not spawn `grok-bot` as a worker/);
   assert.match(DESK_SPAWN_LAW, /a named vendor without a model still Auto-ranks that vendor's models/);
   assert.match(DESK_SPAWN_LAW, /Do not pick a model because it is first in the list/);

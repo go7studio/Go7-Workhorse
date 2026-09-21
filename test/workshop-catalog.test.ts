@@ -346,7 +346,7 @@ test("catalog service entryForInstall blocks stale and yanked", async () => {
 
 test("UI never uses catalog prose as GitHub hero CTA", () => {
   const block = fs.readFileSync(path.join(ROOT, "src/ui/WorkshopBlock.tsx"), "utf8");
-  assert.match(block, /On this desk/);
+  assert.match(block, /Installed/);
   assert.match(block, /Available/);
   assert.match(block, /Local \(Advanced\)/);
   assert.match(block, /Catalog unreachable/);

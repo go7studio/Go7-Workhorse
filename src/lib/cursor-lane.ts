@@ -12,6 +12,8 @@ const CURSOR_MODEL_SLUGS = new Set([
   "composer-2",
   "composer-2.5",
   "composer-2-5",
+  "grok-4.7",
+  "grok-4-7",
   "grok-4.6",
   "grok-4-6",
   "grok-4.5",
@@ -48,7 +50,14 @@ export function cursorUsageLane(model?: string | null, params?: CursorLaneParams
   if (CURSOR_MODEL_SLUGS.has(base) || CURSOR_MODEL_SLUGS.has(slug) || /^composer/.test(slug)) {
     return "cursor-models";
   }
-  if (slug.includes("grok-4.6") || slug.includes("grok-4-6") || slug.includes("grok-4.5") || slug.includes("grok-4-5")) {
+  if (
+    slug.includes("grok-4.7") ||
+    slug.includes("grok-4-7") ||
+    slug.includes("grok-4.6") ||
+    slug.includes("grok-4-6") ||
+    slug.includes("grok-4.5") ||
+    slug.includes("grok-4-5")
+  ) {
     return "cursor-models";
   }
   if (/^(claude|gpt|gemini|sonnet|opus|haiku|fable|o[1-4])\b/.test(slug) || slug.includes("claude") || slug.includes("gpt-") || slug.includes("gemini")) {

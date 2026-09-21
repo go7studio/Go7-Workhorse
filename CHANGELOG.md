@@ -8,6 +8,14 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.6.89](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.88...v0.6.89) (2026-09-21)
+
+### Features
+
+* **models:** Grok 4.7 is the Grok Build default; Cursor lists it as grok-4.7-high on the Cursor Models pool
+* **workshop:** Installed packs sit under Installed (not On this desk); Turn on no longer stacks another Turn on when a Local Compute host is missing
+* **chat:** live transcript stick-to-bottom sizes the stack to the pane
+
 ## [0.6.88](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.87...v0.6.88) (2026-09-18)
 
 

@@ -263,7 +263,7 @@ export function parseGrokModelsCache(raw: string): ModelInfo[] {
     if (!id || seen.has(id)) continue;
     if (info.hidden === true) continue;
     const name = rawId.toLowerCase() === "grok-build"
-      ? "Grok 4.6"
+      ? "Grok 4.7"
       : String(info.name ?? info.display_name ?? info.system_prompt_label ?? id).trim() || id;
     const effort = info.supports_reasoning_effort !== false;
     seen.add(id);

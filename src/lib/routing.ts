@@ -150,7 +150,7 @@ export function shouldShadowRouteSessionTurn(input: {
   return input.learningEnabled && input.routingMode !== "auto" && !input.hideUser && !input.text.startsWith("/");
 }
 
-/** Custom grok-bot slot. Not ACP Grok (provider grok, grok-4.6 / 4.5 / grok-build). */
+/** Custom grok-bot slot. Not ACP Grok (provider grok, grok-4.7 / 4.6 / 4.5 / grok-build). */
 export function isGrokBotCandidate(
   candidate: Pick<RoutingCandidate, "provider" | "model"> & Partial<Pick<RoutingCandidate, "label">>,
 ): boolean {
@@ -380,7 +380,7 @@ function profile(
  * they are doubled at this one seam.
  *
  * Order is load-bearing: fable before opus, sonnet-4-6 before sonnet,
- * minimax-m3 before minimax, grok-4.6 before grok-4.5, mini/nano before
+ * minimax-m3 before minimax, grok-4.7 before grok-4.6 before grok-4.5, mini/nano before
  * gpt-5.4, gpt-6 before the 5.6 rows, sol/terra/luna before any bare gpt-5.6, kimi-k3 before kimi,
  * glm-5.3-flash and glm-4.7-flash before glm-5.2 before glm, qwen3.8 before
  * any later qwen.
@@ -411,6 +411,8 @@ export function routingProfileForModel(
     base = profile(8, 4, 3, { strengths: CODE });
   } else if (slug.includes("5.6-luna")) {
     base = profile(5, 5, 1);
+  } else if (slug.includes("grok-4.7")) {
+    base = profile(10, 2, 5, { strengths: CODE });
   } else if (slug.includes("grok-4.6")) {
     base = profile(10, 2, 5, { strengths: CODE });
   } else if (slug === "grok-bot") {
@@ -781,9 +783,9 @@ export function spawnEffortFor(input: {
 }
 
 /**
- * Same advertised brain across vendors. Cursor Grok 4.6 and Grok Build
- * Grok 4.6 share leftover competition. Grok Bot is custom and is not this
- * family. A Cursor-prefixed id is still the same brain as ACP Grok 4.6.
+ * Same advertised brain across vendors. Cursor Grok 4.7 and Grok Build
+ * Grok 4.7 share leftover competition. Grok Bot is custom and is not this
+ * family. A Cursor-prefixed id is still the same brain as ACP Grok.
  */
 export function routingModelFamily(
   candidate: Pick<RoutingCandidate, "provider" | "model">,
@@ -799,7 +801,7 @@ export function routingModelFamily(
 
 /**
  * A model name without a vendor that exists on more than one login.
- * `grok-4.6` and "Grok 4.6" qualify. `cursor-grok-4.6` is a Cursor lock.
+ * `grok-4.7` and "Grok 4.7" qualify. `cursor-grok-4.6` is a Cursor lock.
  */
 export function spawnModelFamilyKey(model: unknown): string | null {
   if (typeof model !== "string") return null;

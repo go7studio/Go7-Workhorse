@@ -662,7 +662,7 @@ export function shouldAutoRouteSpawn(input: {
   if (namedSpawnPick(input.model)) {
     const family = spawnModelFamilyKey(input.model);
     const provider = parseProviderId(typeof input.provider === "string" ? input.provider : undefined);
-    // grok-4.6 without a vendor is a family, not a Grok Build lock. Cursor
+    // grok-4.7 without a vendor is a family, not a Grok Build lock. Cursor
     // Grok and ACP Grok still compete on leftover. A named vendor keeps
     // Auto inside that login.
     if (family && !provider) return true;

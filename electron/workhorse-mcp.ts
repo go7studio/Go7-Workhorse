@@ -128,7 +128,7 @@ type JsonRpc = {
 };
 
 export const WORKHORSE_MCP_INSTRUCTIONS =
-  "Workhorse is an execution desk. When the user asks to work with Workhorse or says set a goal, first use workhorse_list_chats to choose an explicit parent, then use workhorse_delegate before doing the task directly. fromSessionId is that parent id, never a worker. Give the desk the objective, constraints, exclusions, and working folder. Leave initialBrain unset for full Auto; set it only when the user or harness chooses the first coordinating brain. That choice does not pin descendants, which still route independently unless a slice is explicitly assigned. Workhorse auto-routes from task fit and current capacity and returns its decision. Grok 4.6 is ACP Grok or Cursor Grok, never Grok Bot. Naming grok-4.6 with no vendor lets leftover pick the pool. Auto does not allocate grok-bot as an orchestration or builder worker. Set initialBrain to grok-bot only when the user chose Grok Bot as the calling, analyzing, or dispatch brain. Ordinary delegation is one wave. Enable loop only when the user asks for adaptive sequential work; then call workhorse_continue_mission with the returned worker ids when work remains. A continuation keeps that pass's coordinating vendor, model, and effort by default; set initialBrain to change it or route to opt back into automatic routing. Delegation returns a worker id promptly. Stop this turn. The desk journals the terminal report and joins it into the parent chat. Do not sit in a poll loop. Do not pass wait=true. Later, workhorse_agent_status on that worker id or asked-chat childSessionId is how you follow through: next is wait, done, or failed. When done, the report is in that payload. Named worker or live chat: workhorse_ask_chat with that row's id, then workhorse_agent_status on the returned id. If several rows share a worker name, pass id. Do not spawn a second worker for the same slice. If delegation fails, report the exact Workhorse error before any direct fallback.";
+  "Workhorse is an execution desk. When the user asks to work with Workhorse or says set a goal, first use workhorse_list_chats to choose an explicit parent, then use workhorse_delegate before doing the task directly. fromSessionId is that parent id, never a worker. Give the desk the objective, constraints, exclusions, and working folder. Leave initialBrain unset for full Auto; set it only when the user or harness chooses the first coordinating brain. That choice does not pin descendants, which still route independently unless a slice is explicitly assigned. Workhorse auto-routes from task fit and current capacity and returns its decision. Grok 4.7 is ACP Grok or Cursor Grok, never Grok Bot. Naming grok-4.7 with no vendor lets leftover pick the pool. Auto does not allocate grok-bot as an orchestration or builder worker. Set initialBrain to grok-bot only when the user chose Grok Bot as the calling, analyzing, or dispatch brain. Ordinary delegation is one wave. Enable loop only when the user asks for adaptive sequential work; then call workhorse_continue_mission with the returned worker ids when work remains. A continuation keeps that pass's coordinating vendor, model, and effort by default; set initialBrain to change it or route to opt back into automatic routing. Delegation returns a worker id promptly. Stop this turn. The desk journals the terminal report and joins it into the parent chat. Do not sit in a poll loop. Do not pass wait=true. Later, workhorse_agent_status on that worker id or asked-chat childSessionId is how you follow through: next is wait, done, or failed. When done, the report is in that payload. Named worker or live chat: workhorse_ask_chat with that row's id, then workhorse_agent_status on the returned id. If several rows share a worker name, pass id. Do not spawn a second worker for the same slice. If delegation fails, report the exact Workhorse error before any direct fallback.";
 
 export type McpFraming = "content-length" | "ndjson";
 
@@ -413,7 +413,7 @@ const TOOLS = [
         description: { type: "string", description: "Short 3–5 word label" },
         initialBrain: {
           type: "object",
-          description: "Optional first coordinating brain; descendants stay independently routed. grok / grok-4.6 is ACP Grok. grok-bot is accepted as shorthand for provider custom + model grok-bot only when the user chose Grok Bot to call, analyze, or dispatch — never for orchestration or builder work.",
+          description: "Optional first coordinating brain; descendants stay independently routed. grok / grok-4.7 is ACP Grok. grok-bot is accepted as shorthand for provider custom + model grok-bot only when the user chose Grok Bot to call, analyze, or dispatch — never for orchestration or builder work.",
           properties: {
             provider: { type: "string", description: "First coordinator vendor: grok, claude, codex, cursor, custom, or grok-bot shorthand" },
             model: { type: "string", description: "First coordinator model" },
@@ -1949,8 +1949,8 @@ function normalizeDelegateInitialBrain(value: unknown): { provider?: string; mod
   if (providerAlias === "grok-bot" || providerAlias === "grokbot" || modelAlias === "grok-bot" || modelAlias === "grokbot") {
     return { provider: "custom", model: "grok-bot", ...(effort ? { effort } : {}) };
   }
-  if (providerAlias === "grok-4.6") {
-    return { provider: "grok", model: rawModel || "grok-4.6", ...(effort ? { effort } : {}) };
+  if (/^grok-4\.\d+$/.test(providerAlias)) {
+    return { provider: "grok", model: rawModel || providerAlias, ...(effort ? { effort } : {}) };
   }
   const provider = ["grok", "claude", "codex", "cursor", "custom"].includes(providerAlias)
     ? providerAlias

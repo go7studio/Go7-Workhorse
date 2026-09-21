@@ -122,6 +122,8 @@ test("cursorUsageLane table", () => {
   assert.equal(cursorUsageLane("composer-2.5"), "cursor-models");
   assert.equal(cursorUsageLane("composer-2.5-fast"), "cursor-models");
   assert.equal(cursorUsageLane("composer"), "cursor-models");
+  assert.equal(cursorUsageLane("grok-4.7"), "cursor-models");
+  assert.equal(cursorUsageLane("grok-4.7-high"), "cursor-models");
   assert.equal(cursorUsageLane("grok-4.6"), "cursor-models");
   assert.equal(cursorUsageLane("grok-4.5-fast"), "cursor-models");
   assert.equal(cursorUsageLane("claude-4-sonnet"), "other-models");

@@ -757,7 +757,7 @@
 }
 
 .workshop-settings { margin-bottom: 8px; }
-/* On this desk / Available: rail section-label weight, not Settings h3. */
+/* Installed / Available: rail section-label weight, not Settings h3. */
 .workshop-settings .workshop-section-title.section-label,
 .workshop-section-title.section-label {
   margin: 12px 0 4px;

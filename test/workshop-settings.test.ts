@@ -167,6 +167,9 @@ test("Turn on names the refuse instead of staying silently Off", () => {
   assert.match(block, /workshop-grant-refuse/);
   assert.match(block, /setSettingsSection\("llms"\)/);
   assert.match(block, />\s*Open LLMs\s*</);
+  assert.match(block, /grantRefuseId !== pack.id/);
+  assert.match(block, /offPacks/);
+  assert.match(block, />\s*Installed\s*</);
   assert.doesNotMatch(block.slice(block.indexOf("const beginTurnOn"), block.indexOf("const turnOff")), /openConfirm\(pack\);\s*setNote\(missingHostCopy/);
 });
 

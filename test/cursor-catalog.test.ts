@@ -79,9 +79,9 @@ function candidatesFromBases(
   return bases.map((row) => cursorCandidate(row.id, laneUsed));
 }
 
-test("the checked-in cursor-agent models fixture parses as identity, 204 ids, 200k unless a row reports a window", () => {
+test("the checked-in cursor-agent models fixture parses as identity, 212 ids, 200k unless a row reports a window", () => {
   const parsed = fixtureRows();
-  assert.equal(parsed.length, 204);
+  assert.equal(parsed.length, 212);
   const millionName = parsed.find((row) => /1M/i.test(row.name));
   assert.ok(millionName, "fixture still has a display name that says 1M");
   assert.equal(millionName?.contextWindow, CURSOR_DEFAULT_WINDOW);
@@ -127,7 +127,7 @@ test("collapse yields family bases with effort and fast as fields, not extra row
   const bases = collapseCursorCatalog(parsed);
   assert.ok(bases.length < parsed.length, `bases ${bases.length} should be under 204`);
   assert.ok(bases.length !== 204);
-  assert.equal(bases.length, 33, `bases ${bases.length} should be the fixture's family count`);
+  assert.equal(bases.length, 34, `bases ${bases.length} should be the fixture's family count`);
   const composer = bases.find((row) => row.id === "composer-2.5");
   assert.ok(composer);
   assert.ok(composer?.aliases?.includes("composer-2.5-fast"));
@@ -146,6 +146,7 @@ test("live overlay keeps families beyond the stock four; empty live still falls 
   const ids = live.map((row) => row.id);
   assert.ok(ids.includes("composer-2.5"));
   assert.ok(ids.includes("auto"));
+  assert.ok(ids.includes("grok-4.7"));
   assert.ok(ids.includes("cursor-grok-4.6"));
   assert.ok(ids.includes("cursor-grok-4.5"));
   assert.ok(ids.includes("claude-opus-5"));
@@ -157,7 +158,7 @@ test("live overlay keeps families beyond the stock four; empty live still falls 
   const empty = reconcileCursorModels([], MODEL_CATALOG.cursor);
   assert.deepEqual(
     empty.map((row) => row.id).sort(),
-    ["auto", "composer-2.5", "cursor-grok-4.5", "cursor-grok-4.6"].sort(),
+    ["auto", "composer-2.5", "cursor-grok-4.5", "cursor-grok-4.6", "grok-4.7"].sort(),
   );
 });
 
@@ -169,6 +170,7 @@ test("family profiles fill Composer, Auto, Gemini, Kimi, GLM, GPT-5.x on the 1-1
   assert.deepEqual(triple("claude-opus-5"), [10, 3, 4]);
   assert.deepEqual(triple("claude-fable-5"), [10, 2, 5]);
   assert.deepEqual(triple("gpt-5.6-sol"), [10, 2, 5]);
+  assert.deepEqual(triple("grok-4.7"), [10, 2, 5]);
   assert.deepEqual(triple("cursor-grok-4.6"), [10, 2, 5]);
   assert.deepEqual(triple("claude-sonnet-5"), [9, 3, 4]);
   assert.deepEqual(triple("gpt-5.6-terra"), [8, 4, 3]);
@@ -192,6 +194,7 @@ test("family profiles fill Composer, Auto, Gemini, Kimi, GLM, GPT-5.x on the 1-1
 
 test("Composer-family and API-family Cursor rows still map to two leftover rings", () => {
   assert.equal(cursorWatchLane("composer-2.5"), "cursor:cursor-models");
+  assert.equal(cursorWatchLane("grok-4.7"), "cursor:cursor-models");
   assert.equal(cursorWatchLane("cursor-grok-4.6"), "cursor:cursor-models");
   assert.equal(cursorWatchLane("claude-opus-5"), "cursor:other-models");
   assert.equal(cursorWatchLane("gpt-5.6-sol"), "cursor:other-models");
@@ -251,7 +254,7 @@ test("chat picker is a short subset of the same catalog Auto ranks", () => {
   const ranked = modelsFor("cursor");
   const chips = modelsForPicker("cursor");
   assert.ok(ranked.length > 4);
-  assert.ok(chips.length <= 4);
+  assert.ok(chips.length <= 5);
   assert.ok(chips.length > 0);
   for (const chip of chips) {
     assert.ok(
@@ -265,10 +268,10 @@ test("chat picker is a short subset of the same catalog Auto ranks", () => {
 
 test("collapsing the 204-id fixture cuts the ranking job to one row per family", () => {
   const rawRows = fixtureRows();
-  assert.equal(rawRows.length, 204);
+  assert.equal(rawRows.length, 212);
   const bases = collapseCursorCatalog(rawRows);
-  assert.ok(bases.length < 204);
-  assert.equal(bases.length, 33);
+  assert.ok(bases.length < 212);
+  assert.equal(bases.length, 34);
 
   const desk = normalizeSettings({ llms: { cursor: { connected: true } } });
   applyVendorCatalog({ cursor: rawRows });
@@ -372,19 +375,20 @@ test("a cold desk on the stock fallback still launches a slug Cursor accepts", (
   const listed = new Set(fixtureRows().map((row) => row.id));
   // `cursor-agent models` unread or timed out: reconcile falls back to stock.
   reconcileCursorModels([], MODEL_CATALOG.cursor);
-  for (const family of ["composer-2.5", "auto", "cursor-grok-4.6", "cursor-grok-4.5"]) {
+  for (const family of ["composer-2.5", "auto", "grok-4.7", "cursor-grok-4.6", "cursor-grok-4.5"]) {
     for (const effort of LAUNCH_EFFORTS) {
       const slug = resolveCursorModel(family, effort);
       assert.ok(listed.has(slug), `${family} at ${effort} resolved to ${slug}, which Cursor rejects`);
     }
   }
+  assert.equal(resolveCursorModel("grok-4.7", "high"), "grok-4.7-high");
   assert.equal(resolveCursorModel("cursor-grok-4.6", "medium"), "cursor-grok-4.6-high");
 });
 
 test("an unread catalog still resolves the picker families to real slugs", () => {
   const listed = new Set(fixtureRows().map((row) => row.id));
   resetCursorBases();
-  for (const family of ["composer-2.5", "auto", "cursor-grok-4.6", "cursor-grok-4.5"]) {
+  for (const family of ["composer-2.5", "auto", "grok-4.7", "cursor-grok-4.6", "cursor-grok-4.5"]) {
     const slug = resolveCursorModel(family, "medium");
     assert.ok(listed.has(slug), `${family} resolved to ${slug}, which Cursor rejects`);
   }

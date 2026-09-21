@@ -52,7 +52,7 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
 - Each vendor runs under its own login. Subscriptions, context and sandboxes are
   never pooled.
 - Client and model are separate: **Grok Build CLI** runs the model ids
-  **Grok 4.6** and **Grok 4.5**.
+  **Grok 4.7**, **Grok 4.6**, and **Grok 4.5**.
 - The CLI's live catalog is authoritative. The desk shows the model, never the
   client name.
 - The desk keeps its own Claude token so signing in here never signs out your
@@ -85,8 +85,8 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
 
 ### Grok Bot
 
-- A local OpenAI-compatible shim on 127.0.0.1, model `grok-bot`, not Grok 4.6.
-  Grok ACP (`grok-4.6`, `grok-4.5`, `grok-build`) is a separate vendor.
+- A local OpenAI-compatible shim on 127.0.0.1, model `grok-bot`, not Grok 4.7.
+  Grok ACP (`grok-4.7`, `grok-4.6`, `grok-4.5`, `grok-build`) is a separate vendor.
 - Auto does not allocate it as an orchestration or builder worker. It may call,
   analyze and dispatch.
 - Workhorse keeps the Grok Bot loopback shim on that port on Mac and Windows,
@@ -327,7 +327,7 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
 - Spawning a worker without a model, the desk ranks the slice and picks bot and
   effort.
 - A named model or bot is used as named. The exception is a model that exists on
-  more than one vendor (Grok 4.6 on Grok Build and on Cursor), which still ranks
+  more than one vendor (Grok 4.7 on Grok Build and on Cursor), which still ranks
   those vendors by leftover.
 - **Test only** on a custom model keeps it off Auto. A person picking it, or a
   named call, still reaches it. Orchestration does not score it for real work.

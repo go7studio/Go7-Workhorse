@@ -91,6 +91,7 @@ export const CODEX_EFFORTS: ReasoningLevel[] = [
 /** Last-resort list when a vendor cache is missing. Live lists overlay this. */
 export const MODEL_CATALOG: Record<ProviderId, ModelInfo[]> = {
   grok: [
+    { id: "grok-4.7", name: "Grok 4.7", effort: true, contextWindow: 500_000 },
     { id: "grok-4.6", name: "Grok 4.6", effort: true, contextWindow: 500_000 },
     { id: "grok-4.5", name: "Grok 4.5", effort: true, contextWindow: 500_000 },
   ],
@@ -115,6 +116,7 @@ export const MODEL_CATALOG: Record<ProviderId, ModelInfo[]> = {
   cursor: [
     { id: "composer-2.5", name: "Composer 2.5", effort: true, contextWindow: 200_000 },
     { id: "auto", name: "Auto (Cursor)", effort: true, contextWindow: 200_000 },
+    { id: "grok-4.7-high", name: "Cursor Grok 4.7", effort: false, contextWindow: 200_000 },
     { id: "cursor-grok-4.6-high", name: "Cursor Grok 4.6", effort: false, contextWindow: 200_000 },
     { id: "cursor-grok-4.5-high", name: "Cursor Grok 4.5", effort: false, contextWindow: 200_000 },
   ],
@@ -162,11 +164,14 @@ export const MODEL_CATALOG: Record<ProviderId, ModelInfo[]> = {
 
 const CURSOR_MODEL_ALIASES: Record<string, string> = {
   "auto-smart": "auto",
+  "grok-4.7": "grok-4.7-high",
   "grok-4.6": "cursor-grok-4.6-high",
   "grok-4.5": "cursor-grok-4.5-high",
   // The picker stores collapsed family ids. On a just-opened desk the main
   // process may launch before `cursor-agent models` has populated its variant
   // cache, so these must still resolve to slugs Cursor accepts on their own.
+  // Cursor Grok 4.7 is listed as grok-4.7-high (no cursor- prefix).
+  "cursor-grok-4.7": "grok-4.7-high",
   "cursor-grok-4.6": "cursor-grok-4.6-high",
   "cursor-grok-4.5": "cursor-grok-4.5-high",
 };
@@ -174,7 +179,7 @@ const CURSOR_MODEL_ALIASES: Record<string, string> = {
 const GROK_RETIRED_MODEL_ALIASES: Record<string, string> = {
   // Grok Build is the local CLI/client, never a model. Older Workhorse
   // versions exposed it as a model-shaped default alias.
-  "grok-build": "grok-4.6",
+  "grok-build": "grok-4.7",
 };
 
 /** Canonicalize retired or invalid model-shaped aliases at the persistence boundary. */
@@ -215,7 +220,7 @@ export function cursorModelDisplayName(modelId: string, name?: string): string {
     if (/\bcursor\b/i.test(raw)) return raw;
     return `${raw} (Cursor)`;
   }
-  if (stock?.name && (id === "grok-4.6" || id === "grok-4.5") && !/cursor/i.test(raw)) return stock.name;
+  if (stock?.name && /^grok-4\.\d/.test(id) && !/cursor/i.test(raw)) return stock.name;
   return raw || modelId;
 }
 
@@ -241,7 +246,7 @@ export function modelsFor(provider: ProviderId): ModelInfo[] {
 
 export const DEFAULT_CHOICE: ModelChoice = {
   provider: "grok",
-  model: "grok-4.6",
+  model: "grok-4.7",
   effort: "medium",
   sandbox: "off",
   mode: "ask",
@@ -268,7 +273,7 @@ export function findModel(provider: ProviderId, modelId: string): ModelInfo | un
  * Chips on the chat card. Cursor shows a short subset of the same catalog
  * rows Auto ranks — not 204 effort spellings, and not a parallel stock list.
  */
-const CURSOR_PICKER_FAMILIES = ["composer-2.5", "auto", "cursor-grok-4.6", "cursor-grok-4.5"];
+const CURSOR_PICKER_FAMILIES = ["composer-2.5", "auto", "grok-4.7", "cursor-grok-4.6", "cursor-grok-4.5"];
 
 export function modelsForPicker(provider: ProviderId): ModelInfo[] {
   const rows = modelsFor(provider);

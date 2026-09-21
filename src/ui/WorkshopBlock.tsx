@@ -160,7 +160,7 @@ function packMark(title: string): string {
   return ch ? ch.toUpperCase() : "?";
 }
 
-/** Collapsed On this desk / Available blurb — ~80–100 chars; CSS line-clamp 1 is backup. */
+/** Collapsed Installed / Available blurb — ~80–100 chars; CSS line-clamp 1 is backup. */
 const ROW_ONE_LINER_MAX = 90;
 
 function clampRowOneLiner(raw: string, max = ROW_ONE_LINER_MAX): string {
@@ -288,7 +288,12 @@ export function WorkshopBlock({
     reloadCatalog();
   }, [catalogRefreshNonce, reloadCatalog]);
 
-  // Sheet: Available-first when opened that way; otherwise On this desk.
+  // A host arriving later should restore Turn on, not leave the refuse stuck.
+  useEffect(() => {
+    if (hosts.length > 0) setGrantRefuseId(null);
+  }, [hosts.length]);
+
+  // Sheet: Available-first when opened that way; otherwise Installed.
   useEffect(() => {
     if (!inSheet) return;
     const id = window.requestAnimationFrame(() => {
@@ -516,8 +521,8 @@ export function WorkshopBlock({
 
   const hostLabel = (id: string | undefined) => store.settings.localCompute.hosts.find((host) => host.id === id)?.label ?? id ?? "";
   const catalogState = catalog;
-  const activePacks = packs.filter((pack) => pack.on);
-  const pendingInstalled = packs.filter((pack) => !pack.on);
+  const onPacks = packs.filter((pack) => pack.on);
+  const offPacks = packs.filter((pack) => !pack.on);
   const pendingCatalog =
     catalogState && catalogState.ok && !catalogState.unreachable && !catalogState.pinFailed && !catalogState.expired
       ? catalogState.packs.filter((entry) => {
@@ -582,25 +587,14 @@ export function WorkshopBlock({
   );
 
   const sheetIntro =
-    activePacks.length === 0 ? "Install a pack, then Turn on." : "Packs on this desk";
+    packs.length === 0 ? "Install a pack, then Turn on." : "Installed packs";
   const settingsIntro = "Add-ons for this desk. Catalog is shared; installs stay local. Live rail for box health, job meters, and more.";
-  const emptyOnCopy =
-    hosts.length === 0
-      ? "None on. Add a Local Compute host under LLMs, then Turn on an add-on to watch it from the desk rail."
-      : "None on. Install writes a pack Off on this machine. Turn on watches it from the desk rail.";
-  const visibleInstalled = pendingInstalled.filter((pack) =>
-    availableSearchMatch(
-      catalogQuery,
-      [pack.name, pack.id, pack.description, catalogState?.ok ? catalogState.packs.find((entry) => entry.id === pack.id)?.summary : ""]
-        .filter(Boolean)
-        .join(" "),
-    ),
-  );
+  const emptyInstalledCopy = "None installed. Install a pack from Available, then Turn on to watch it from the desk rail.";
   const visibleCatalog = pendingCatalog.filter((entry) =>
     availableSearchMatch(catalogQuery, [catalogDisplayName(entry.id), entry.id, entry.summary].filter(Boolean).join(" ")),
   );
   const catalogNoMatch =
-    Boolean(catalogQuery.trim()) && visibleInstalled.length === 0 && visibleCatalog.length === 0 && (pendingInstalled.length > 0 || pendingCatalog.length > 0);
+    Boolean(catalogQuery.trim()) && visibleCatalog.length === 0 && pendingCatalog.length > 0;
   const showCatalogRefresh =
     catalogState != null &&
     catalogState.ok &&
@@ -640,21 +634,18 @@ export function WorkshopBlock({
         <p className="row-meta workshop-sheet-intro">Catalog stale — Install disabled until refresh.</p>
       ) : null}
 
-      <h3 ref={activeRef} id="workshop-on-this-desk" className="workshop-section-title section-label" tabIndex={-1}>
-        On this desk
+      <h3 ref={activeRef} id="workshop-installed" className="workshop-section-title section-label" tabIndex={-1}>
+        Installed
       </h3>
-      {activePacks.length === 0 ? (
+      {packs.length === 0 ? (
         <div className="workshop-empty-on">
-          <p className="row-meta workshop-blurb workshop-active-empty">{emptyOnCopy}</p>
-          {hosts.length === 0 ? (
-            <button className="tiny" type="button" onClick={() => store.setSettingsSection("llms")}>
-              Open LLMs
-            </button>
-          ) : null}
+          <p className="row-meta workshop-blurb workshop-active-empty">{emptyInstalledCopy}</p>
         </div>
       ) : (
+        <>
+        {onPacks.length > 0 ? (
         <ul className="pack-list pack-card-grid">
-          {activePacks.map((pack) => {
+          {onPacks.map((pack) => {
             const update = updates[pack.id];
             const latest = update?.latest && update.latest.replace(/^v/, "") !== update.current.replace(/^v/, "") ? update.latest : undefined;
             const isRepo = pack.installed?.kind === "repo";
@@ -756,31 +747,10 @@ export function WorkshopBlock({
             );
           })}
         </ul>
-      )}
-
-      <h3 ref={pendingRef} id="workshop-available" className="workshop-section-title section-label" tabIndex={-1}>
-        Available
-      </h3>
-      {pendingInstalled.length > 0 || pendingCatalog.length > 0 || catalogQuery.trim() ? (
-        <input
-          className="settings-search workshop-catalog-search"
-          type="search"
-          value={catalogQuery}
-          placeholder="Search catalog"
-          aria-label="Search catalog"
-          onChange={(event) => setCatalogQuery(event.target.value)}
-        />
-      ) : null}
-      {packs.length === 0 && pendingCatalog.length === 0 && catalogState != null && catalogState.ok && !catalogQuery.trim() ? (
-        <p className="row-meta workshop-blurb workshop-pending-empty">Nothing available.</p>
-      ) : null}
-      {catalogNoMatch ? (
-        <p className="row-meta workshop-blurb workshop-catalog-no-match">No packs match.</p>
-      ) : null}
-
-      {visibleInstalled.length > 0 ? (
+        ) : null}
+        {offPacks.length > 0 ? (
         <ul className="pack-list pack-card-grid">
-          {visibleInstalled.map((pack) => {
+          {offPacks.map((pack) => {
             const update = updates[pack.id];
             const latest = update?.latest && update.latest.replace(/^v/, "") !== update.current.replace(/^v/, "") ? update.latest : undefined;
             const isRepo = pack.installed?.kind === "repo";
@@ -810,7 +780,7 @@ export function WorkshopBlock({
                     </span>
                   </button>
                   <span className="workshop-row-action-slot">
-                    {!expanded && !pack.refused ? (
+                    {!expanded && !pack.refused && grantRefuseId !== pack.id ? (
                       <button className="tiny primary" type="button" disabled={busy} onClick={() => beginTurnOn(pack)}>
                         Turn on
                       </button>
@@ -853,6 +823,12 @@ export function WorkshopBlock({
                             Cancel
                           </button>
                         </>
+                      ) : grantRefuseId === pack.id ? null : hosts.length === 0 ? (
+                        missingHostCopy ? (
+                          <button className="tiny" type="button" onClick={() => store.setSettingsSection("llms")}>
+                            Open LLMs
+                          </button>
+                        ) : null
                       ) : (
                         <button className="tiny workshop-turn-on-quiet" type="button" disabled={busy} onClick={() => beginTurnOn(pack)}>
                           Turn on
@@ -913,6 +889,28 @@ export function WorkshopBlock({
             );
           })}
         </ul>
+        ) : null}
+        </>
+      )}
+
+      <h3 ref={pendingRef} id="workshop-available" className="workshop-section-title section-label" tabIndex={-1}>
+        Available
+      </h3>
+      {pendingCatalog.length > 0 || catalogQuery.trim() ? (
+        <input
+          className="settings-search workshop-catalog-search"
+          type="search"
+          value={catalogQuery}
+          placeholder="Search catalog"
+          aria-label="Search catalog"
+          onChange={(event) => setCatalogQuery(event.target.value)}
+        />
+      ) : null}
+      {packs.length === 0 && pendingCatalog.length === 0 && catalogState != null && catalogState.ok && !catalogQuery.trim() ? (
+        <p className="row-meta workshop-blurb workshop-pending-empty">Nothing available.</p>
+      ) : null}
+      {catalogNoMatch ? (
+        <p className="row-meta workshop-blurb workshop-catalog-no-match">No packs match.</p>
       ) : null}
 
       {catalogState == null ? (

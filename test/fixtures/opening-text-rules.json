@@ -1297,10 +1297,33 @@
     },
     {
       "was": "If you did not call that tool this turn, you did not spawn anyone — call it.",
-      "now": "If you did not call that tool this turn, you did not spawn anyone: call it.",
+      "now": "If you did not call that tool this turn, you did not spawn anyone. Spawn only for a new authorized assignment; a report join, completed slice, cancelled assignment, or failed checker report does not authorize another worker.",
       "keeps": [
-        "If you did not call that tool this turn, you did not spawn anyone",
-        "call it"
+        "If you did not call that tool this turn, you did not spawn anyone"
+      ]
+    },
+    {
+      "was": "Grok 4.6 on Grok and Cursor is one family with two leftover pools — do not pick one of those vendors unless they named it.",
+      "now": "Grok 4.7 on Grok and Cursor is one family with two leftover pools — do not pick one of those vendors unless they named it.",
+      "keeps": [
+        "one family with two leftover pools",
+        "do not pick one of those vendors unless they named it"
+      ]
+    },
+    {
+      "was": "Grok 4.6 is ACP Grok or Cursor Grok, never Grok Bot.",
+      "now": "Grok 4.7 is ACP Grok or Cursor Grok, never Grok Bot.",
+      "keeps": [
+        "ACP Grok or Cursor Grok",
+        "never Grok Bot"
+      ]
+    },
+    {
+      "was": "Naming grok-4.6 with no vendor lets the desk pick by leftover.",
+      "now": "Naming grok-4.7 or grok-4.6 with no vendor lets the desk pick by leftover.",
+      "keeps": [
+        "grok-4.6",
+        "with no vendor lets the desk pick by leftover"
       ]
     }
   ]

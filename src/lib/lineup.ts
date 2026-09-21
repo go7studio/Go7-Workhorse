@@ -9,6 +9,25 @@ import { isVendorEmptyReply, isVendorRateLimitError, vendorEmptyReply } from "./
 
 export const LINEUP_FINISHED_NOTICE = "All workers finished.";
 
+/** A report join closes an ordinary assignment; it is not a new hiring request. */
+export function finishedAssignmentSpawnError(parent: Session): string | undefined {
+  const lineup = parent.lineup;
+  const stopped = parent.agentRun?.status === "cancelled";
+  if (!stopped && (!lineup || !lineupIsTerminal(lineup))) return undefined;
+  const endedAt = Math.max(
+    parent.agentRun?.finishedAt ?? 0,
+    lineup?.startedAt ?? 0,
+    ...(lineup?.rows.map((row) => row.finishedAt ?? 0) ?? []),
+  );
+  const newRequest = parent.messages.some((message) => message.role === "user" && message.createdAt > endedAt);
+  if (newRequest) return undefined;
+  const cancelled = stopped || lineup?.rows.some((row) => row.status === "cancelled");
+  const mission = normalizeMissionIteration(parent.agentRun?.mission ?? lineup?.mission);
+  if (!cancelled && (parent.planRun?.status === "running" || parent.crewModes?.includes("mission") ||
+    (mission && mission.iteration < mission.maxIterations))) return undefined;
+  return "This assignment has finished or was cancelled. Report its results; do not hire another checker. A new user request is required to spawn more workers.";
+}
+
 /**
  * What the transcript says when a wave ends. "All workers finished" is true of
  * a clean wave and a lie about every other kind: `lineupIsTerminal` is only
@@ -394,6 +413,7 @@ export function lineupJoinPrompt(
   } else {
     lines.push(
       "Answer the user in your own words as this chat’s bot. Write one combined review of what the crew found.",
+      "This is a report join, not a new assignment. Do not spawn another worker or checker, even when a report says FAIL. Report unresolved findings and stop unless continuing an explicitly enabled Mission within its limits.",
       "Start with blockers, then the rest. Name which worker found each item.",
       "Use the structured findings, then the prose reports for context.",
       "Do not paste worker notes, file checklists, “let me check” narration, or raw slice dumps into this chat.",

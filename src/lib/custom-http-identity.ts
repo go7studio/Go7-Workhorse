@@ -31,7 +31,7 @@ export function isGeminiApiUrl(baseUrl: string): boolean {
 /** The Grok Bot Custom HTTP preset. Other loopback hosts (Ollama, the desk bridge) are not this door. */
 export const GROK_BOT_SHIM_PORT = "8787";
 
-/** Custom slot model id. Never an ACP Grok catalog id (grok-4.6 / 4.5 / grok-build). */
+/** Custom slot model id. Never an ACP Grok catalog id (grok-4.7 / 4.6 / 4.5 / grok-build). */
 export function isGrokBotModel(model: string): boolean {
   return model.trim().toLowerCase() === "grok-bot";
 }

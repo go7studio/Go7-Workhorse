@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { crewActivity, crewIsLive, crewWorkers } from "../lib/crew-tray";
 import { effortLabel, modelName } from "../lib/models";
 import { deskInk } from "../lib/settings";
@@ -22,6 +22,8 @@ function sameCrew(a: ReturnType<typeof selectCrew>, b: ReturnType<typeof selectC
 export function CrewTray() {
   const desk = useStoreSelector(selectCrew, sameCrew);
   const [open, setOpen] = useState(false);
+  const listId = useId();
+  const toggle = useRef<HTMLButtonElement>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const dialog = useRef<HTMLDialogElement>(null);
@@ -42,24 +44,25 @@ export function CrewTray() {
   const draft = worker ? drafts[worker.id] || "" : "";
   const brain = (item: Session) => [modelName(item.provider, item.model), effortLabel(item.effort)].filter(Boolean).join(" · ");
   const horse = (item: Session) => <HorseStatus kind={crewDotKind(item)} ink={deskInk(item, desk.settings) || `var(--${item.provider})`} />;
-  return <section className={`crew-tray${open ? " open" : ""}`} aria-label="Orchestrator crew">
+  return <section className={`crew-tray${open ? " open" : ""}`} aria-label="Orchestrator crew"
+    onKeyDown={(event) => { if (event.key === "Escape" && open && !worker) { event.stopPropagation(); setOpen(false); toggle.current?.focus(); } }}>
     <div className="crew-tray-head">
-      <button type="button" className="crew-tray-toggle" aria-expanded={open} onClick={() => setOpen(!open)}>
+      <button ref={toggle} type="button" className="crew-tray-toggle" aria-expanded={open} aria-controls={listId} onClick={() => setOpen(!open)}>
         <HorseStatus kind={live.length ? "working" : "idle"} />
-        <strong>{live.length ? `Working ${live.length}` : `Crew ${desk.workers.length}`}</strong>
-        <span>{live.length ? `${desk.workers.length} workers` : "View workers"}</span>
+        <strong>{live.length ? `Working ${live.length}` : "Crew history"}</strong>
+        <span>{live.length ? `${desk.workers.length} total` : `${desk.workers.length} finished · 0 active`}</span>
         <span className="crew-tray-caret" aria-hidden="true">{open ? "⌄" : "›"}</span>
       </button>
-      {open && live.length > 0 ? <button type="button" className="tiny" onClick={() => live.forEach((item) => desk.cancelRun(item.id))}>Stop all workers</button> : null}
     </div>
-    {open ? <div className="crew-tray-list">
+    <div id={listId} className="crew-tray-list" inert={!open} aria-hidden={!open}>
+      {live.length > 0 ? <button type="button" className="tiny" onClick={() => live.forEach((item) => desk.cancelRun(item.id))}>Stop all workers</button> : null}
       {desk.workers.map((item) => <div className="crew-tray-row" key={item.id}>
         <button type="button" className="crew-tray-worker" onClick={() => setSelected(item.id)}>
           {horse(item)}<span className="crew-tray-copy"><strong>{item.title}</strong><span>{brain(item)}</span><span className="crew-tray-activity">{crewActivity(item)}</span></span>
         </button>
         {crewIsLive(item) ? <button type="button" className="tiny" aria-label={`Stop ${item.title}`} onClick={() => desk.cancelRun(item.id)}>Stop</button> : null}
       </div>)}
-    </div> : null}
+    </div>
     {worker ? <dialog ref={dialog} className="crew-conversation" aria-label={worker.title} onCancel={() => setSelected(null)} onClick={(event) => { if (event.target === event.currentTarget) setSelected(null); }}>
       <div className="crew-conversation-inner">
         <header><button className="tiny" type="button" onClick={() => setSelected(null)} aria-label="Back to crew">←</button>{horse(worker)}

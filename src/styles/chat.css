@@ -1,6 +1,7 @@
 
 .session.has-thread,
-.session.has-file {
+.session.has-file,
+.session.has-workshop {
   flex-direction: row;
   align-items: stretch;
 }

@@ -17,12 +17,13 @@ Steve UX redirect. Host / grants / read-only law unchanged. **Paint surface chan
 | Settings → Workshop | **Secondary deep-link** — same install/grant/catalog. Not the live watch surface. |
 | Desk **Workshop rail** | **Live watch** — primary soak. Hidden when no pack is On. Collapsed strip + expand when packs On. |
 | Breakout window | **Secondary detach** — same cards, optional. |
+| Chat **Workshop** basic | **In-chat surface** — beside Review and Terminal. Click opens a right-hand pane (same slot as Review). Live cards for packs that are On, and the same `WorkshopBlock` when none are. Desk-wide: no project, no folder. |
 | Skills | **Not** the Workshop home. |
 | Sidebar dock | **No** Workshop dock row. |
 
 ### Rail behavior
 
-- **Empty / all-Off:** rail is hidden. Install and Turn on live in Settings → Workshop only. No stub Turn on, no Add packs chrome on the desk.
+- **Empty / all-Off:** rail is hidden. Install and Turn on live in Settings → Workshop, the Manage sheet, and the chat Workshop right-hand pane. No stub Turn on, no Add packs chrome on the desk.
 - **Manage:** on collapsed and expanded headers; sheet title / aria-label **Manage packs**; hosts one `WorkshopBlock` (`surface="sheet"`). Focus trap while open; restore focus to opener on Escape / Close / backdrop.
 - **Collapsed strip** (when any pack On): `GPU% · watts · writer · models one-liner` (Box monitor). Job log collapsed = short “log live” / off hint.
 - **Expand**: full denser cards — Box / Models / Infer / Router / Job / Feed (same host grants; richer labels from existing feed/soak).

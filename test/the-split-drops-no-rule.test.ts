@@ -54,6 +54,16 @@ const RENAMED = [
     to: ".workshop-rail-strip .workshop-bar + .workshop-rail-kv",
     why: "`.workshop-rail-tpp` was declared and rendered nowhere, so the selector list dropped it",
   },
+  {
+    from: ".session.has-thread, .session.has-file",
+    to: ".session.has-thread, .session.has-file, .session.has-workshop",
+    why: "the Workshop pane opens beside the thread like the file pane, so it joined the row layout rather than repeating it",
+  },
+  {
+    from: "@media (prefers-reduced-motion: reduce) { .session-file, .session-file.out",
+    to: "@media (prefers-reduced-motion: reduce) { .session-file, .session-file.out, .session-workshop, .session-workshop.out",
+    why: "the Workshop pane slides in like the file pane, so it joined the same reduced-motion rule instead of animating past it",
+  },
 ];
 
 function census(): { fingerprint: string; key: string }[] {

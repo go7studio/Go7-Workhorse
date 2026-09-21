@@ -52,7 +52,7 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
 - Each vendor runs under its own login. Subscriptions, context and sandboxes are
   never pooled.
 - Client and model are separate: **Grok Build CLI** runs the model ids
-  **Grok 4.6** and **Grok 4.5**.
+  **Grok 4.7**, **Grok 4.6**, and **Grok 4.5**.
 - The CLI's live catalog is authoritative. The desk shows the model, never the
   client name.
 - The desk keeps its own Claude token so signing in here never signs out your
@@ -85,8 +85,8 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
 
 ### Grok Bot
 
-- A local OpenAI-compatible shim on 127.0.0.1, model `grok-bot`, not Grok 4.6.
-  Grok ACP (`grok-4.6`, `grok-4.5`, `grok-build`) is a separate vendor.
+- A local OpenAI-compatible shim on 127.0.0.1, model `grok-bot`, not Grok 4.7.
+  Grok ACP (`grok-4.7`, `grok-4.6`, `grok-4.5`, `grok-build`) is a separate vendor.
 - Auto does not allocate it as an orchestration or builder worker. It may call,
   analyze and dispatch.
 - Workhorse keeps the Grok Bot loopback shim on that port on Mac and Windows,
@@ -208,6 +208,9 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
 
 ## Missions and workers
 
+- Ordinary worker waves end with a report. Finished or cancelled assignments cannot hire another checker without a new user request. Explicit running plans and Mission continuations retain their own lifecycle.
+- Crew distinguishes active workers from finished history; sidebar counts include all worker chats.
+
 - **Composer + menu** Orchestrate, Mission, and Debug pin on the chat in any
   combination. Each pin is a chip next to +; multiple pins collapse to a count
   you can expand.
@@ -324,7 +327,7 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
 - Spawning a worker without a model, the desk ranks the slice and picks bot and
   effort.
 - A named model or bot is used as named. The exception is a model that exists on
-  more than one vendor (Grok 4.6 on Grok Build and on Cursor), which still ranks
+  more than one vendor (Grok 4.7 on Grok Build and on Cursor), which still ranks
   those vendors by leftover.
 - **Test only** on a custom model keeps it off Auto. A person picking it, or a
   named call, still reaches it. Orchestration does not score it for real work.
@@ -501,7 +504,8 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
   is memory-only.
 - **Workshop** an optional, read-only rail on the right edge. Settings →
   Workshop is the install and grant home, and **Manage** on the rail opens the
-  same panel.
+  same panel. **Workshop** in a chat header, beside Review and Terminal, opens
+  a window on the right — the same slot as Review.
 - Skills is not the Workshop home, and there is no dock row.
 - Add a pack from that sheet: catalog Install, a public GitHub repo URL (the
   highest tagged release downloads), or a folder.
@@ -511,7 +515,8 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
 - Turn a pack on, pick the Local Compute host it reads through, and confirm the
   exact URLs, cadence and byte cap it will GET.
 - The rail paints cards collapsed to a 76px strip, or expanded. With no packs on
-  it is hidden, and Install and Turn on live in Settings → Workshop.
+  it is hidden, and Install and Turn on live in Settings → Workshop, the rail's
+  Manage sheet, and the chat Workshop panel.
 - Packs stack as modules and fold on their own.
 - Update re-reads the repo's tags. When a pack's sources change, those packs
   turn off before polling restarts and you confirm again, because grants are

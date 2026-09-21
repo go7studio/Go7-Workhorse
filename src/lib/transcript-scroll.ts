@@ -22,6 +22,24 @@ export function pinToLatest(el: { scrollHeight: number; scrollTop: number }): vo
   el.scrollTop = el.scrollHeight;
 }
 
+/** Content-box height of the scrollport. `min-height: 100%` on the stack does not resolve there. */
+export function transcriptViewPx(clientHeight: number, paddingY: number): number {
+  return Math.max(0, Math.round(clientHeight - paddingY));
+}
+
+export function transcriptPaddingY(style: { paddingTop: string; paddingBottom: string }): number {
+  return (Number.parseFloat(style.paddingTop) || 0) + (Number.parseFloat(style.paddingBottom) || 0);
+}
+
+export function sizeTranscriptView(
+  el: { clientHeight: number; style: { setProperty: (name: string, value: string) => void } },
+  paddingY: number,
+): number {
+  const view = transcriptViewPx(el.clientHeight, paddingY);
+  el.style.setProperty("--transcript-view", `${view}px`);
+  return view;
+}
+
 export type FrameClock = {
   frame: (run: () => void) => number;
   cancelFrame: (handle: number) => void;

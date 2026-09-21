@@ -62,6 +62,7 @@ test("crew tray chip sits left of the composer and does not span the chat", () =
   assert.match(css, /\.crew-tray-caret/);
   assert.doesNotMatch(css, /margin-left:\s*auto/);
   assert.match(tray, /crew-tray-caret/);
-  assert.match(tray, /View workers/);
+  assert.match(tray, /Crew history/);
+  assert.match(tray, /finished · 0 active/);
   assert.match(tray, /setOpen\(!open\)/);
 });

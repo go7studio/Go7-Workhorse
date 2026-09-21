@@ -21,7 +21,7 @@ const HELPER_ACCESS_LAW =
   "Do not pass permission or sandbox on a helper spawn. The helper copies this chat's seat. ";
 
 const GROK_BOT_SPAWN_LAW =
-  "Grok 4.6 is ACP Grok or Cursor Grok, never Grok Bot. Do not spawn grok-bot as a worker, builder, or auditor even when canCall is true. Grok Bot may call, analyze, and dispatch only. Naming Grok locks provider grok. Naming Cursor Grok locks Cursor. Naming grok-4.6 with no vendor lets the desk pick by leftover. Never the grok-bot custom slot. ";
+  "Grok 4.7 is ACP Grok or Cursor Grok, never Grok Bot. Do not spawn grok-bot as a worker, builder, or auditor even when canCall is true. Grok Bot may call, analyze, and dispatch only. Naming Grok locks provider grok. Naming Cursor Grok locks Cursor. Naming grok-4.7 or grok-4.6 with no vendor lets the desk pick by leftover. Never the grok-bot custom slot. ";
 
 /** Same continue-vs-mint law on every orchestrator surface. Not an idle pool. */
 export const CONTINUE_NAMED_WORKER_LAW =
@@ -93,7 +93,7 @@ export const SPAWN_LAW_MISSING_ERROR =
  * the single copy both now use.
  */
 export const DESK_SPAWN_LAW =
-  "A missing linked folder does not fail this turn — search and attach one with workhorse_create_project, or pass folder. Do not spawn into an unbound working directory. Then call workhorse_list_bots. One bounded assignment is one workhorse_spawn_agent, with the full task in the prompt. A second spawn only to independently check that worker's output. Leave model unset so Auto ranks the slice by task fit, leftover, and cost. Grok 4.6 on Grok and Cursor is one family with two leftover pools — do not pick one of those vendors unless they named it. Fable is the extra pool for visual, creative, or complex work. Name a vendor only if they named one — a named vendor without a model still Auto-ranks that vendor's models. Do not pick a model because it is first in the list. " +
+  "A missing linked folder does not fail this turn — search and attach one with workhorse_create_project, or pass folder. Do not spawn into an unbound working directory. Then call workhorse_list_bots. One bounded assignment is one workhorse_spawn_agent, with the full task in the prompt. A second spawn only to independently check that worker's output. Leave model unset so Auto ranks the slice by task fit, leftover, and cost. Grok 4.7 on Grok and Cursor is one family with two leftover pools — do not pick one of those vendors unless they named it. Fable is the extra pool for visual, creative, or complex work. Name a vendor only if they named one — a named vendor without a model still Auto-ranks that vendor's models. Do not pick a model because it is first in the list. " +
   SPAWN_ACCESS_LAW +
   GROK_BOT_SPAWN_LAW +
   "Spawn only a canCall row. Codex Sol → provider codex, chat Sol. If canCall is false or the daily bank is spent, that vendor is a no-go — skip it in one line. If a vendor is not on the list, skip it and do not name it. canCall is Workhorse vendors only — OpenClaw and Hermes are harnesses; do not spawn them from that list. Fan-out only when they asked for every vendor, all bots, multiple independent reviews, or a named list — then spawn one worker per named slice on a canCall row, including custom bots and this chat’s own slot (provider custom, chat this bot’s name; the API key is already on the desk). Do not spawn several of one vendor with split tasks to fill a crew. If you are starting more than one worker, pass wait=false on each spawn so they all run at once. After the last spawn, stop. One short line of who is out is enough. Do not sit on workhorse_await_agents; without wait it is a status snapshot, and the desk joins reports later. Do not ask the user to pick 1/2/3 (re-await / scrape yourself / tighten) because workers are still running. Do not ask which vendor. Do not wait for Allow. Do not call workhorse_request_vendor. If stock vendors are a no-go, spawn one callable custom bot. Only say nothing to spawn when list_bots has zero canCall rows. Do not ask the user to do the review or the work themselves. Give each spawn the slice, never a request to summon more agents. " +
@@ -104,7 +104,7 @@ export const DESK_SPAWN_LAW =
   // the same opening text both forbade the call and ordered it. It is an
   // answer to a bot that narrates a spawn it never made, and only a turn that
   // may spawn can act on it, which is this block and no other.
-  "If you did not call that tool this turn, you did not spawn anyone: call it.";
+  "If you did not call that tool this turn, you did not spawn anyone. Spawn only for a new authorized assignment; a report join, completed slice, cancelled assignment, or failed checker report does not authorize another worker.";
 
 /**
  * What every desk chat opens with. Desk tools, permissions, files, and the

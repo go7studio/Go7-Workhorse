@@ -17,6 +17,9 @@ import {
   pinToLatest,
   restoreViewportLock,
   shouldLoadEarlierWindow,
+  sizeTranscriptView,
+  transcriptPaddingY,
+  transcriptViewPx,
 } from "../src/lib/transcript-scroll";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -40,6 +43,19 @@ test("pinToLatest writes scrollTop to the end of the thread", () => {
   const el = { scrollHeight: 2400, scrollTop: 12 };
   pinToLatest(el);
   assert.equal(el.scrollTop, 2400);
+});
+
+test("sizeTranscriptView writes the content-box height so the stack can fill the pane", () => {
+  assert.equal(transcriptViewPx(500, 48), 452);
+  assert.equal(transcriptViewPx(20, 48), 0);
+  assert.equal(transcriptPaddingY({ paddingTop: "28px", paddingBottom: "20px" }), 48);
+  assert.equal(transcriptPaddingY({ paddingTop: "28px", paddingBottom: "68px" }), 96);
+  const el = {
+    clientHeight: 500,
+    style: { value: "", setProperty(name: string, value: string) { this.value = `${name}:${value}`; } },
+  };
+  assert.equal(sizeTranscriptView(el, 48), 452);
+  assert.equal(el.style.value, "--transcript-view:452px");
 });
 
 test("earlier turns page in when fewer than five loaded turns remain above the fold", () => {
@@ -126,6 +142,11 @@ test("SessionPane follows latest on start and ignores layout scroll unpinning", 
   assert.match(pane, /onWheel/);
   assert.match(pane, /observer\.observe\(content\)/);
   assert.match(pane, /pinToLatest/);
+  assert.match(pane, /sizeThread/);
+  assert.match(pane, /sizeTranscriptView/);
+  assert.match(pane, /transcript-fill/);
+  assert.match(pane, /stack\.style\.minHeight/);
+  assert.match(pane, /observer\.observe\(thread\)/);
   assert.match(pane, /followBottom\.current = true/);
   assert.match(pane, /followLatestClass/);
   assert.match(pane, /follow-latest/);
@@ -149,6 +170,11 @@ test("SessionPane follows latest on start and ignores layout scroll unpinning", 
   assert.doesNotMatch(pane, /transcript-earlier/);
   const css = deskCss();
   assert.match(css, /\.transcript \{[^}]*overflow-anchor:\s*auto/);
+  assert.match(css, /\.transcript \{[^}]*display:\s*flex/);
+  assert.match(css, /\.transcript \{[^}]*flex-direction:\s*column/);
+  assert.match(css, /\.transcript-stack \{[^}]*margin-top:\s*auto/);
+  assert.match(css, /\.transcript-stack \{[^}]*min-height:\s*var\(--transcript-view, 100%\)/);
+  assert.match(css, /\.transcript-fill \{[^}]*flex:\s*1 0 0/);
   assert.match(css, /\.transcript\.follow-latest \{[^}]*overflow-anchor:\s*none/);
   assert.match(pane, /addEventListener\("toggle", onToggle, true\)/);
   assert.match(pane, /if \(skipPin\) return/);

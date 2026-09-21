@@ -1,4 +1,5 @@
 import { hasLineBreak, pathFromToolText, splitToolLine, stripPathSizeSuffix } from "./grok-events";
+import { explicitToolPath, isToolPath } from "./tool-path";
 
 export { stripPathSizeSuffix };
 import type { ProviderId, Session } from "./types";
@@ -17,7 +18,7 @@ export type ProjectEdit = {
 };
 
 const WRITE_TITLE =
-  /^(write|writefile|edit|strreplace|str_replace|search_replace|search-replace|apply_patch|apply-patch|applypatch|create|created|creating|save|update_file|update-file|replace|patch|insert)$/i;
+  /^(write|writefile|edit|strreplace|str_replace|searchreplace|search_replace|search-replace|apply_patch|apply-patch|applypatch|create|created|creating|save|update_file|update-file|replace|patch|insert)$/i;
 
 const WRITE_HINT =
   /\b(write|writing|wrote|edit|editing|edited|strreplace|str_replace|search_replace|apply_patch|applypatch|apply(?:ing|ed)?\s*patch|update(?:d|s|_file)?|updating|replace|patch(?:ed|ing)?|insert|save|created?|creating)\b/i;
@@ -237,6 +238,11 @@ export function looksLikeSourceFile(value: string): boolean {
 
 /** Path from a completed write/edit tool event (title, detail, or write:path id). */
 export function writePathFromToolEvent(title: string, detail = "", toolCallId = ""): string {
+  const explicit = explicitToolPath(detail);
+  if (explicit) return explicit;
+  // A JSON argument body without a target is not a path, even when replacement
+  // text happens to contain a filename. Keep the title/id fallbacks available.
+  if (/^\s*[\[{]/.test(detail) || !isToolPath(detail)) detail = "";
   const fromId = toolCallId.match(/^(?:edit|write):(.+)$/i)?.[1] ?? "";
   const line = detail ? `${title} — ${detail}` : title;
   return (
@@ -245,6 +251,20 @@ export function writePathFromToolEvent(title: string, detail = "", toolCallId = 
     pathFromWriteTool(title) ||
     (looksLikePath(fromId) ? fromId : "")
   );
+}
+
+/** Compare file contents, not dirty names: inherited edits can be edited again. */
+export function workerChangedFiles(
+  baseline: { path: string; fingerprint?: string }[],
+  current: { path: string; fingerprint?: string }[],
+): string[] {
+  const before = new Map(baseline.map((file) => [file.path, file]));
+  const after = new Map(current.map((file) => [file.path, file]));
+  const changed = current.filter((file) => !file.fingerprint || before.get(file.path)?.fingerprint !== file.fingerprint).map((file) => file.path);
+  // Reverting an inherited edit or removing an inherited untracked file also
+  // changes the worker's starting tree, even if git no longer lists the path.
+  for (const file of baseline) if (!after.has(file.path)) changed.push(file.path);
+  return changed;
 }
 
 /** Write rows may be `Write · completed — path` or `Write \`path\` · completed`. */

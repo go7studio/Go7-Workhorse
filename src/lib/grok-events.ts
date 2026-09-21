@@ -404,6 +404,23 @@ export function collapseThoughtDisplay(text: string): string {
   return collapseChainedSnapshots(merged);
 }
 
+/** Whether a snapshot extends the same thought instead of starting a new hop. */
+export function thoughtGrows(previous: string, incoming: string): boolean {
+  const have = collapseThoughtDisplay(previous).trim();
+  const add = collapseThoughtDisplay(incoming).trim();
+  return Boolean(have && add.length > have.length && add.startsWith(have));
+}
+
+/** Remove a completed hop replayed inside a later thought snapshot. */
+export function stripRepeatedThought(incoming: string, previous: string): string {
+  const have = collapseThoughtDisplay(previous).trim();
+  if (!have) return incoming;
+  if (incoming.trim() === have) return "";
+  // Short streamed fragments may legitimately recur inside another word.
+  if (have.length <= 24) return incoming;
+  return incoming.split(have).join("").trimEnd();
+}
+
 function collapseChainedSnapshots(text: string): string {
   if (text.length < 48) return text;
   const firstLine = text.split("\n")[0]?.trim() ?? "";
@@ -420,9 +437,15 @@ function collapseChainedSnapshots(text: string): string {
 }
 
 export function upsertThoughtMessage(messages: ChatMessage[], text: string, now = Date.now()): ChatMessage[] {
-  const add = text.trimEnd();
-  if (!add) return messages;
+  let add = text.trimEnd();
   const last = messages[messages.length - 1];
+  // Only earlier hops in this turn are replays; the active hop can still grow.
+  for (let i = messages.length - (last?.kind === "thought" ? 2 : 1); i >= 0; i -= 1) {
+    const message = messages[i];
+    if (message.role === "user") break;
+    if (message.kind === "thought") add = stripRepeatedThought(add, message.text);
+  }
+  if (!add.trim()) return messages;
   if (last?.kind === "thought") {
     const next = mergeThoughtText(last.text, add);
     if (next === last.text) return messages;

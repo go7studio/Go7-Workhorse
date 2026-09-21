@@ -129,7 +129,7 @@ import {
   projectFolderPaths,
   projectForSpawn,
 } from "./project";
-import { isParentTakeoverTool, isWriteToolTitle, projectEdits, writePathFromToolEvent } from "./project-edits";
+import { isParentTakeoverTool, isWriteToolTitle, projectEdits, workerChangedFiles, writePathFromToolEvent } from "./project-edits";
 import { isProviderId, providerById } from "./providers";
 import { sameDeskSkills, skillsForAutoLoad } from "./skills-catalog";
 import { withSkillDiscoveryHint } from "./skill-suggestions";
@@ -211,6 +211,7 @@ import {
   applyFailedPeerAsk,
   failPeerAskMessages,
   finishOpenToolMessages,
+  mergeThoughtText,
   toolIsFinished,
   upsertCompactMessage,
   upsertThoughtMessage,
@@ -240,6 +241,7 @@ import {
   VENDOR_ENDED_UNFINISHED,
   applyJoinRateLimitRetry,
   isJoinAssistantTurn,
+  finishedAssignmentSpawnError,
   JOIN_MAX_ATTEMPTS,
   looksLikeJoinPrompt,
   handOverLineup,
@@ -5462,6 +5464,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               await replyAsk({ error: exposure === "external-runtime" ? "context_required" : "no parent chat to attach this subagent to" });
               return;
             }
+            const finishedAssignment = finishedAssignmentSpawnError(caller);
+            if (finishedAssignment) {
+              await replyAsk({ error: finishedAssignment });
+              return;
+            }
             const suppliedMission = normalizeMissionIteration(payload.missionIteration ?? caller.agentRun?.mission);
             const requestedMission = suppliedMission;
             const lineupMission = caller.lineup?.mission;
@@ -6096,6 +6103,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               }
               claimedLeases = claim.leases;
             }
+            // Folder/lease preparation awaited I/O. Cancellation may have
+            // closed the assignment while this request was preparing.
+            const currentParent = stateRef.current.sessions.find((item) => item.id === parent.id) ?? inboundHost;
+            const closedAssignment = currentParent ? finishedAssignmentSpawnError(currentParent) : "The parent chat no longer exists.";
+            if (closedAssignment) {
+              await replyAsk({ error: closedAssignment });
+              return;
+            }
             // Reserve synchronously. Concurrent HTTP spawn handlers can run
             // before React commits state; the ref closes that admission race.
             pathLeasesRef.current = claimedLeases;
@@ -6344,6 +6359,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               const spawnHead = window.workhorse?.gitHead && childCwd
                 ? await window.workhorse.gitHead(childCwd)
                 : "";
+              const spawnChanges = window.workhorse?.listGitChanges && childCwd
+                ? await window.workhorse.listGitChanges(childCwd, spawnHead || undefined)
+                : [];
               let reply = "";
               try {
                 reply = await promptVendor(
@@ -6412,7 +6430,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               const afterChanges = window.workhorse?.listGitChanges && childCwd
                 ? await window.workhorse.listGitChanges(childCwd, spawnHead || undefined)
                 : [];
-              const changedFiles = afterChanges.map((change) => change.path);
+              const changedFiles = workerChangedFiles(spawnChanges, afterChanges);
               const unauthorizedFiles = assignedPaths.length > 0
                 ? changedFiles.filter((file) => !assignedPaths.some((owned) => owned.toLowerCase() === file.replaceAll("\\", "/").toLowerCase()))
                 : [];
@@ -7009,8 +7027,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       }
       if (event.type === "thought") {
         if (!event.text) return;
-        grokThoughtQueue.current[event.sessionId] =
-          (grokThoughtQueue.current[event.sessionId] ?? "") + event.text;
+        grokThoughtQueue.current[event.sessionId] = mergeThoughtText(
+          grokThoughtQueue.current[event.sessionId] ?? "", event.text,
+        );
         noteTrailingTurnActivity(event.sessionId);
         streamCommits.request();
         return;
@@ -8889,16 +8908,18 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         if (targets.has(child.id) && active(child)) cancelVendorSession(child);
       }
       let sessions = current.sessions.map((session) => {
-        if (!targets.has(session.id) || !active(session)) return session;
+        if (!targets.has(session.id)) return session;
         return {
           ...session,
+          queue: (session.queue ?? []).filter((item) => item.joinAttempt == null),
+          lineup: session.lineup ? { ...session.lineup, notifiedAt: now } : undefined,
           status: "idle" as const,
-          agentRun: session.agentRun ? {
+          agentRun: session.agentRun && active(session) ? {
             ...session.agentRun,
             status: "cancelled" as const,
             finishedAt: now,
             error: "Cancelled with its parent lifecycle.",
-          } : undefined,
+          } : session.agentRun,
         };
       });
       for (const session of current.sessions) {

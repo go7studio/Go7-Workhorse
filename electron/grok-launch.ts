@@ -7,7 +7,7 @@ import { APP_VERSION } from "../src/lib/app-info";
 export { WORKHORSE_SESSION_RULES };
 
 /** Stock Grok models. The `grok` command is the Grok Build CLI client. */
-export const GROK_MODELS = ["grok-4.6", "grok-4.5"] as const;
+export const GROK_MODELS = ["grok-4.7", "grok-4.6", "grok-4.5"] as const;
 export const GROK_EFFORT_GATES = ["low", "medium", "high", "xhigh"] as const;
 export const GROK_EFFORT_INPUTS = ["low", "medium", "high", "extra", "xhigh"] as const;
 
@@ -180,7 +180,7 @@ export type GrokLaunchSpec = {
   };
 };
 
-const DEFAULT_MODEL = "grok-4.6";
+const DEFAULT_MODEL = "grok-4.7";
 const DEFAULT_EFFORT = "medium";
 
 export function resolveGrokModel(model: string | null | undefined): string {

@@ -104,7 +104,7 @@ export const DESK_SPAWN_LAW =
   // the same opening text both forbade the call and ordered it. It is an
   // answer to a bot that narrates a spawn it never made, and only a turn that
   // may spawn can act on it, which is this block and no other.
-  "If you did not call that tool this turn, you did not spawn anyone: call it.";
+  "If you did not call that tool this turn, you did not spawn anyone. Spawn only for a new authorized assignment; a report join, completed slice, cancelled assignment, or failed checker report does not authorize another worker.";
 
 /**
  * What every desk chat opens with. Desk tools, permissions, files, and the

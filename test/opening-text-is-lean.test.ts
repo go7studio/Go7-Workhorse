@@ -314,7 +314,8 @@ test("a chat that never got the spawn law is refused at the door", () => {
   for (const core of [WORKHORSE_SESSION_RULES, CUSTOM_HTTP_SESSION_RULES, CURSOR_SESSION_RULES]) {
     assert.doesNotMatch(core, /you did not spawn anyone/);
   }
-  assert.match(DESK_SPAWN_LAW, /If you did not call that tool this turn, you did not spawn anyone: call it\./);
+  assert.match(DESK_SPAWN_LAW, /Spawn only for a new authorized assignment/);
+  assert.match(DESK_SPAWN_LAW, /failed checker report does not authorize another worker/);
 });
 
 test("one predicate decides who gets the law and who may spawn", () => {

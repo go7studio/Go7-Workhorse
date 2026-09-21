@@ -268,13 +268,13 @@ export function ChatRow({
           type="button"
           aria-expanded={workersOpen}
           aria-label={workersOpen ? "Hide worker chats" : `Show ${workerCount} worker chats`}
-          title={workersOpen ? "Hide workers" : `${workerCount} workers`}
+          title={workersOpen ? "Hide worker history" : `${workerCount} worker chats in history (not an active count)`}
           onClick={(event) => {
             event.stopPropagation();
             onToggleWorkers();
           }}
         >
-          {workerCount}
+          {workerCount} total
         </button>
       ) : null}
 

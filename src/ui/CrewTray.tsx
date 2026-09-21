@@ -49,8 +49,8 @@ export function CrewTray() {
     <div className="crew-tray-head">
       <button ref={toggle} type="button" className="crew-tray-toggle" aria-expanded={open} aria-controls={listId} onClick={() => setOpen(!open)}>
         <HorseStatus kind={live.length ? "working" : "idle"} />
-        <strong>{live.length ? `Working ${live.length}` : `Crew ${desk.workers.length}`}</strong>
-        <span>{live.length ? `${desk.workers.length} workers` : "View workers"}</span>
+        <strong>{live.length ? `Working ${live.length}` : "Crew history"}</strong>
+        <span>{live.length ? `${desk.workers.length} total` : `${desk.workers.length} finished · 0 active`}</span>
         <span className="crew-tray-caret" aria-hidden="true">{open ? "⌄" : "›"}</span>
       </button>
     </div>

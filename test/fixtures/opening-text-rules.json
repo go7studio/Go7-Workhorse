@@ -1297,10 +1297,9 @@
     },
     {
       "was": "If you did not call that tool this turn, you did not spawn anyone — call it.",
-      "now": "If you did not call that tool this turn, you did not spawn anyone: call it.",
+      "now": "If you did not call that tool this turn, you did not spawn anyone. Spawn only for a new authorized assignment; a report join, completed slice, cancelled assignment, or failed checker report does not authorize another worker.",
       "keeps": [
-        "If you did not call that tool this turn, you did not spawn anyone",
-        "call it"
+        "If you did not call that tool this turn, you did not spawn anyone"
       ]
     }
   ]

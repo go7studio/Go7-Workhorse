@@ -208,6 +208,9 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
 
 ## Missions and workers
 
+- Ordinary worker waves end with a report. Finished or cancelled assignments cannot hire another checker without a new user request. Explicit running plans and Mission continuations retain their own lifecycle.
+- Crew distinguishes active workers from finished history; sidebar counts include all worker chats.
+
 - **Composer + menu** Orchestrate, Mission, and Debug pin on the chat in any
   combination. Each pin is a chip next to +; multiple pins collapse to a count
   you can expand.

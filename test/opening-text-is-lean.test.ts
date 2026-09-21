@@ -182,7 +182,7 @@ test("the five named laws survive word for word", () => {
   // rather than against the fixture.
   assert.match(DESK_SPAWN_LAW, /Do not pass permission or sandbox on a spawn\./);
   assert.match(DESK_SPAWN_LAW, /every worker you hire copies that seat/);
-  assert.match(DESK_SPAWN_LAW, /Grok 4\.6 is ACP Grok or Cursor Grok, never Grok Bot\./);
+  assert.match(DESK_SPAWN_LAW, /Grok 4\.7 is ACP Grok or Cursor Grok, never Grok Bot\./);
 
   for (const core of [WORKHORSE_SESSION_RULES, CUSTOM_HTTP_SESSION_RULES]) {
     assert.match(core, /workhorse_request_permission only RAISES access/);

@@ -196,7 +196,7 @@ e7a717d57938  .send:disabled
 bfc05dd5f76f  @keyframes pulse
 161840af7d6b  @keyframes bounce
 d76c99a3b41e  .session-header
-72045e730e4d  .session-header.slim
+c92bb8231fb7  .session-header.slim
 0c09c5ad1d32  .session-header.slim .context-meter-wrap, .session-header.slim .context-meter
 378e76576ae0  .session-who
 9bdcf483780e  .session-who strong
@@ -244,10 +244,10 @@ bbe464ff900b  .edited-block.compact:not(.open) .edited-files-slot
 47ff02e23755  .edited-block.compact .file-list
 b9131d1cceef  .edited-block.compact.open .file-list
 426c09a8d022  @media (prefers-reduced-motion: reduce) { .edited-block.compact .edited-files-slot, .edited-block.compact.open .edited-files-slot
-b53f88406d7f  .transcript
+d8f1d43e7336  .transcript
 b899fd97e4ec  .transcript.has-changes
 d84741c5bc68  .transcript.follow-latest
-076b3a4fe054  .transcript-stack
+dc0e95a7b643  .transcript-stack
 530e607766ca  .turn
 aac2a48830c9  .turn.live
 6ef5d525eb08  .turn.cluster
@@ -535,7 +535,7 @@ dcfbd7fc1843  .file-review-list button
 679fa90ccef3  .file-review-list strong
 abc76c3a394f  @media (max-width: 720px) { .file-review-body
 6f1abf56be99  @media (max-width: 720px) { .file-review-rail
-8da89a75a781  .session-header-tools
+c4cb78934166  .session-header-tools
 d74ef39736cd  .terminal-pane
 72f0dd861235  .terminal-pane > header
 2901653827c9  .terminal-pane > header > div:first-child

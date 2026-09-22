@@ -314,6 +314,17 @@ type WorkhorseBridge = {
     auditId?: string;
   }>;
   learningCompile?: () => Promise<import("./lib/learning-types").CompileResult>;
+  /** Score one finished mission report against its criteria. Main holds the key; the renderer never sees it. */
+  judgeReport?: (input: { criteria: string[]; report: string; truncated?: boolean; workerStatus?: string }) => Promise<{
+    verdict?: import("./lib/judge").JudgeVerdict;
+    botId?: string;
+    why?: string;
+    called?: boolean;
+    /** Billed even when no verdict came back. */
+    usage?: { inputTokens?: number; outputTokens?: number };
+  }>;
+  /** Whether the judge could run on these bots: one with jev ticked and a key main can read. Never the key. */
+  judgeReadiness?: (input: { bots: import("./lib/types").CustomBot[] }) => Promise<{ ready: boolean; botId?: string; why?: string }>;
   learningMemories?: () => Promise<import("./lib/learning-types").MemoryItem[]>;
   learningStats?: () => Promise<import("./lib/learning-types").LearningIndexStats>;
   learningApprove?: (id: string) => Promise<import("./lib/learning-types").MemoryItem | undefined>;

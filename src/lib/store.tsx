@@ -1,4 +1,19 @@
 import {
+  JUDGE_MODEL,
+  boundJudgeReport,
+  declaredStatus,
+  forgetJudgeFailures,
+  judgeBotsFor,
+  judgeFailureAfter,
+  judgeMayTry,
+  judgeRunKey,
+  normalizeJudge,
+  type JudgeOutcome,
+  type JudgeSettings,
+  type RunJudgeOutcome,
+} from "./judge";
+import { createJudgeSlots, judgeSlotKey, rearmJudgeSlots, runWithOutcome, sweepJudgeSlots, type JudgeSlot, type JudgeSlots } from "./judge-slots";
+import {
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -184,7 +199,13 @@ import {
   shouldShadowRouteSessionTurn,
   spawnEffortFor,
 } from "./routing";
-import type { AgentSystemsSettings, ChatMessage, ExternalTask, FileLease } from "./types";
+import type {
+  AgentRun,
+  AgentSystemsSettings,
+  ChatMessage,
+  ExternalTask,
+  FileLease,
+} from "./types";
 import {
   approvePlanRun,
   assignPlanStep,
@@ -256,6 +277,8 @@ import {
 import { boundLinkReply, linkLabel } from "./link-reply";
 import { applyPlanAuditorSpawn, joinAndAdmit } from "./plan-admission";
 import {
+  applyJudgeOutcomes,
+  workerReportText,
   applyCancelWorker,
   admitSpawn,
   assertAgentPathWrite,
@@ -589,6 +612,7 @@ export type Store = AppState & {
   updateRouting: (patch: Partial<RoutingSettings>) => void;
   updateSkillDiscovery: (patch: Partial<SkillDiscoverySettings>) => void;
   updateAgentSystems: (patch: Partial<AgentSystemsSettings>) => void;
+  updateJudge: (patch: Partial<JudgeSettings>) => void;
   updateLocalCompute: (settings: import("./types").LocalComputeSettings) => void;
   updateWorkshop: (settings: WorkshopSettings) => Promise<void>;
   grantPlanExternalAgents: (sessionId: string, allow: boolean) => void;
@@ -1290,6 +1314,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const pathFingerprintRefreshes = useRef(new Map<string, Promise<void>>());
   const forkFromRef = useRef<(messageId: string, sessionId?: string) => void>(() => undefined);
   const stateRef = useRef<AppState>(EMPTY);
+  // Reports being scored right now, so two payload builds in flight do not bill twice.
+  /** The judge's in-flight table. See judge-slots.ts. */
+  const judgeSlotsRef = useRef<JudgeSlots>(createJudgeSlots());
   const workerNameReservations = useRef<WorkerNameReservation[]>([]);
   const deskSkillsRef = useRef<DeskSkill[]>([]);
   const grokAssistantId = useRef<Record<string, string>>({});
@@ -4001,6 +4028,111 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  /**
+   * Score the finished mission workers among `ids` that have no score yet.
+   * Runs when a payload that carries reports is built, so the last pass and
+   * an auditor are covered the same as a pass with a continuation. Main holds
+   * the key and makes the call; this only stores what came back. Returns the
+   * fresh scores so the payload can carry them before the save lands.
+   */
+  /**
+   * Finished mission workers in `ids` with no score yet go to the judge, at
+   * most twice each. The table in judge-slots.ts holds each call while it is
+   * out and its outcome until the store shows it on the run, so a poll that
+   * lands mid-call waits on the same call and one that lands before React
+   * commits reads the outcome instead of paying for another. Every outcome,
+   * score or failure, comes back for the payload being built now. A worker
+   * reused while a call was out keeps its id and gets a new run; that run
+   * never wears the old outcome.
+   */
+  const judgeCompletedWorkers = useCallback(async (ids: Iterable<string>): Promise<Map<string, RunJudgeOutcome>> => {
+    const outcomes = new Map<string, RunJudgeOutcome>();
+    const judge = window.workhorse?.judgeReport;
+    if (!stateRef.current.settings.judge?.enabled || !judge) return outcomes;
+    const wanted = new Set(ids);
+    const now = Date.now();
+    const slots = judgeSlotsRef.current;
+    sweepJudgeSlots(slots, stateRef.current.sessions);
+    const candidates = stateRef.current.sessions.filter(
+      (session) =>
+        wanted.has(session.id) &&
+        session.agentRun?.status === "completed" &&
+        (session.agentRun.mission?.acceptanceCriteria?.length ?? 0) > 0,
+    );
+    const judgeOne = async (session: Session, run: AgentRun, generation: number): Promise<RunJudgeOutcome> => {
+      const runKey = judgeRunKey(run);
+      const fail = (why: string, called: boolean): JudgeOutcome => ({ failed: judgeFailureAfter(run.judgeFailed, why, called, Date.now()) });
+      const attempt = async (): Promise<JudgeOutcome> => {
+        const report = workerReportText(session);
+        if (!report) return fail("the worker left no report to score", false);
+        // Cut here, before the text crosses IPC; main refuses anything past the cut.
+        const bounded = boundJudgeReport(report);
+        const result = await judge({
+          criteria: run.mission!.acceptanceCriteria,
+          report: bounded.text,
+          truncated: bounded.truncated,
+          workerStatus: declaredStatus(report),
+        });
+        // The judge's tokens are this worker's spend, on the bot whose key it
+        // borrowed, whether or not a verdict came back: a 200 with nothing
+        // usable in it was billed all the same.
+        const usage = result?.verdict?.usage ?? result?.usage;
+        if (usage && result?.botId) {
+          recordUsage({
+            provider: "custom",
+            model: JUDGE_MODEL,
+            customBotId: result.botId,
+            sessionId: session.id,
+            projectId: session.projectId ?? undefined,
+            inputTokens: usage.inputTokens ?? 0,
+            outputTokens: usage.outputTokens ?? 0,
+            source: "request",
+          });
+        }
+        if (!result?.verdict) return fail(result?.why ?? "no verdict", result?.called === true);
+        return { verdict: result.verdict };
+      };
+      const outcome = await attempt().catch((error: unknown) => fail(`desk error: ${error instanceof Error ? error.message : String(error)}`, false));
+      // A failure from a call that started before the person re-armed the
+      // judge is not written: the store just cleared that run, and this
+      // failure counted tries the person has asked to forget. A score is a
+      // score whenever it lands.
+      const stale = "failed" in outcome && generation !== judgeSlotsRef.current.generation;
+      if (!stale) {
+        setState((current) => ({
+          ...current,
+          sessions: current.sessions.map((item) =>
+            item.id === session.id && item.agentRun && judgeRunKey(item.agentRun) === runKey && !item.agentRun.verdict
+              ? { ...item, agentRun: "verdict" in outcome ? { ...item.agentRun, verdict: outcome.verdict } : { ...item.agentRun, judgeFailed: outcome.failed } }
+              : item,
+          ),
+        }));
+      }
+      return { ...outcome, runKey };
+    };
+    await Promise.all(
+      candidates.map(async (session) => {
+        const key = judgeSlotKey(session.id, session.agentRun!);
+        const slot = slots.map.get(key);
+        if (slot && !slot.settled) {
+          outcomes.set(session.id, await slot.task);
+          return;
+        }
+        // Settled, and after the sweep that means not yet on the run in
+        // state: the payload carries it, and the try count reads from it.
+        const run = slot?.settled ? runWithOutcome(session.agentRun!, slot.settled) : session.agentRun!;
+        if (slot?.settled) outcomes.set(session.id, slot.settled);
+        if (!judgeMayTry(run, now)) return;
+        const fresh: JudgeSlot = { task: judgeOne(session, run, slots.generation), generation: slots.generation };
+        slots.map.set(key, fresh);
+        const outcome = await fresh.task;
+        fresh.settled = outcome;
+        outcomes.set(session.id, outcome);
+      }),
+    );
+    return outcomes;
+  }, [recordUsage]);
+
   useEffect(() => {
     if (!window.workhorse?.onPeerAsk) return;
     return window.workhorse.onPeerAsk((payload) => {
@@ -5191,11 +5323,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             }
             if (action === "agent-status") {
               const id = (payload.name || payload.message || "").trim();
+              const outcomes = await judgeCompletedWorkers([id]);
+              // Read the desk again after the wait: a worker deleted meanwhile is gone.
+              const now = stateRef.current;
               const resolved = resolveAgentStatus({
                 id,
                 fromSessionId: payload.fromSessionId,
-                sessions: latest.sessions,
-                externalTask: normalizeTaskStore(latest.externalTasks).byId[id],
+                sessions: applyJudgeOutcomes(now.sessions, outcomes),
+                externalTask: normalizeTaskStore(now.externalTasks).byId[id],
+                judge: now.settings.judge?.enabled === true,
               });
               if (!resolved.ok) {
                 await replyAsk({ error: "unknown" });
@@ -5367,8 +5503,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 sessions = handOverLineup(sessions, parentId);
                 return sessions === current.sessions ? current : { ...current, sessions };
               });
-              const parentNow = stateRef.current.sessions.find((item) => item.id === parentId);
-              const reports = collectChildAgentReports(stateRef.current.sessions, parentId, waveIdSet);
+              const outcomes = await judgeCompletedWorkers(waveIds);
+              const sessionsNow = applyJudgeOutcomes(stateRef.current.sessions, outcomes);
+              const parentNow = sessionsNow.find((item) => item.id === parentId);
+              const reports = collectChildAgentReports(sessionsNow, parentId, waveIdSet, {
+                judge: stateRef.current.settings.judge?.enabled === true,
+              });
               const scopedLineup = parentNow?.lineup
                 ? { ...parentNow.lineup, rows: parentNow.lineup.rows.filter((row) => waveIdSet.has(row.childId)) }
                 : undefined;
@@ -6224,6 +6364,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               agentRun: {
                 status: "running",
                 startedAt,
+                runId: uid("run"),
                 isolation,
                 executionOwner: "workhorse",
                 ...assignmentBudget,
@@ -8335,10 +8476,21 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   );
 
   const updateCustomBot = useCallback((id: string, patch: Partial<CustomBot>) => {
+    // A new key, host, model list or on-switch on a bot the judge could borrow
+    // is the person asking for the reports it gave up on to be tried again. A
+    // name or a routing edit, or any edit to another bot, is not. The judge's
+    // table moves on first, so a failure it still holds is not read back.
+    const after = applyUpdateCustomBot(stateRef.current.settings.customBots, id, patch).find((item) => item.id === id);
+    const rearmsJudge =
+      after !== undefined &&
+      judgeBotsFor([after]).length > 0 &&
+      (["apiKey", "credentialId", "baseUrl", "models", "model", "enabled"] as const).some((field) => field in patch);
+    if (rearmsJudge) rearmJudgeSlots(judgeSlotsRef.current);
     setState((current) => {
       const customBots = applyUpdateCustomBot(current.settings.customBots, id, patch);
       const bot = customBots.find((item) => item.id === id);
       const repairModel = (model: string) => bot && customBotServes(bot, model) ? model : bot?.model ?? model;
+      const repaired = current.sessions.map((session) => (session.customBotId === id ? { ...session, model: repairModel(session.model) } : session));
       return {
         ...current,
         settings: { ...current.settings, customBots },
@@ -8346,9 +8498,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           current.lastModel.customBotId === id
             ? { ...current.lastModel, model: repairModel(current.lastModel.model) }
             : current.lastModel,
-        sessions: current.sessions.map((session) =>
-          session.customBotId === id ? { ...session, model: repairModel(session.model) } : session,
-        ),
+        // The failures go, the scores stay.
+        sessions: rearmsJudge ? forgetJudgeFailures(repaired) : repaired,
       };
     });
     // A new key or a new host is somebody asking for this bot to be tried now.
@@ -8707,6 +8858,21 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         ...current.settings,
         skills: normalizeSkillDiscovery({ ...current.settings.skills, ...patch }),
       },
+    }));
+  }, []);
+
+  const updateJudge = useCallback((patch: Partial<JudgeSettings>) => {
+    // Switching the judge on again is asking for another try at the reports
+    // it gave up on. The table moves on first, so a failure it still holds is
+    // not read back onto a run the store just cleared.
+    if (patch.enabled === true) rearmJudgeSlots(judgeSlotsRef.current);
+    setState((current) => ({
+      ...current,
+      settings: {
+        ...current.settings,
+        judge: normalizeJudge({ ...(current.settings.judge ?? {}), ...patch }),
+      },
+      sessions: patch.enabled === true ? forgetJudgeFailures(current.sessions) : current.sessions,
     }));
   }, []);
 
@@ -9124,6 +9290,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       updateRouting,
       updateSkillDiscovery,
       updateAgentSystems,
+      updateJudge,
       updateLocalCompute,
       updateWorkshop,
       grantPlanExternalAgents,
@@ -9266,6 +9433,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       updateRouting,
       updateSkillDiscovery,
       updateAgentSystems,
+      updateJudge,
       updateLocalCompute,
       updateWorkshop,
       grantPlanExternalAgents,

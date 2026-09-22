@@ -1,3 +1,4 @@
+import { judgeBlockLines, waveGaps, type ReportSays } from "../src/lib/judge";
 import fs from "node:fs";
 import { offloadChatImage } from "./attachment-store";
 import { loadLinkState, readLinkState, runWithLinkState, type LinkDeskState } from "./link-state";
@@ -2578,6 +2579,8 @@ function missionRaiseFromArgs(args: Record<string, unknown>): MissionCaps | unde
 
 type AwaitMissionReport = {
   title?: string;
+  /** The report's text scored against the mission's criteria, or a note that it was not. */
+  reportSays?: ReportSays;
   status?: string;
   text?: string;
   childSessionId?: string;
@@ -2631,6 +2634,11 @@ function missionContinuationPrompt(input: {
     const body = (report.text ?? "").trim().slice(0, Math.min(8_000, remaining));
     lines.push(`### ${label || report.childSessionId || "Worker"}`, body || "(no report)");
     remaining -= body.length;
+  }
+  // The judge adds to the list above; it never shortens it. A pass with the
+  // judge on but no scores says so here, so a failed call cannot read as clean.
+  if (input.reports.some((report) => report.reportSays)) {
+    lines.push("", ...judgeBlockLines(waveGaps(input.mission.acceptanceCriteria, input.reports.map((report) => report.reportSays))));
   }
   lines.push("", "Do only the unmet work. Preserve valid prior changes, verify the whole mission, and report complete, continue, or blocked.");
   return lines.join("\n");

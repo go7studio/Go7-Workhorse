@@ -233,6 +233,18 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
   Spawn a wave, then continue the rest with `workhorse_continue_mission`.
 - With both pins on, the chat spawns as orchestrator, then continues unmet work
   as a mission.
+- **Judge** (Settings → Routing, off by default). With it on, each finished
+  mission report is scored by TypeSafe's Jev through your Vercel AI Gateway
+  bot, with `typesafe-ai/jev` ticked on that bot: per acceptance criterion,
+  shown, not shown, or unclear, from the report's own text. The score rides
+  on `workhorse_agent_status` and `workhorse_await_agents` as `reportSays`,
+  and the next pass is told what no report showed. It ran nothing and
+  verified nothing, never removes a criterion, and a pass it could not score
+  says so, with why. A report goes to the judge at most twice an hour;
+  a new key, host or model list on the Vercel bot, or switching the judge
+  back on, lets it be tried again. A call never waits past the status
+  reply's own deadline. Its tokens are on the usage ledger under that bot,
+  verdict or not; spend shows on that bot's credits.
 - Debug makes the seated bot establish expected versus observed behavior,
   reproduce before editing, identify the actual source and runtime under test,
   preserve unrelated work, and verify the real artifact when packaging or

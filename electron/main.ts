@@ -98,6 +98,7 @@ import {
   rememberFolderBookmark,
 } from "./folder-access";
 import { normalizeSettings } from "../src/lib/settings";
+import { judgeReadiness, judgeReport } from "./judge-desk";
 import { customBotEnabled, customBotModels } from "../src/lib/custom-bots";
 import { routingProfileForModel } from "../src/lib/routing";
 import type { AdaptiveCandidate } from "../src/lib/learning-policy";
@@ -2048,6 +2049,8 @@ app.whenReady().then(async () => {
   ipcMain.handle("custom:models", async (_event, config: { baseUrl: string; apiKey: string }) => {
     return fetchCustomModels(config);
   });
+  // The judge: score one finished mission report against its criteria. The
+  // key stays here; the renderer sends text and gets a verdict or a reason.
   ipcMain.handle("custom:probe", async (_event, config: { baseUrl: string; apiKey: string; model: string; api?: "anthropic-messages" | "openai-completions" }) => {
     return probeCustomHttp(config);
   });
@@ -2059,10 +2062,7 @@ app.whenReady().then(async () => {
    * secret in and return nothing secret out. Vault first, then the shell key an
    * OpenClaw install already holds for that host.
    */
-  const customBotCredential = (raw: unknown): { bot: CustomBot; apiKey: string } | undefined => {
-    const botId = typeof raw === "string" ? raw.trim() : "";
-    const bot = botId ? liveSettings.customBots.find((item) => item.id === botId) : undefined;
-    if (!bot) return undefined;
+  const botApiKey = (bot: Pick<CustomBot, "apiKey" | "credentialId" | "baseUrl">): string => {
     let apiKey = bot.apiKey?.trim() ?? "";
     if (!apiKey && bot.credentialId) {
       try {
@@ -2078,8 +2078,53 @@ app.whenReady().then(async () => {
         apiKey = "";
       }
     }
-    return { bot, apiKey };
+    return apiKey;
   };
+  const customBotCredential = (raw: unknown): { bot: CustomBot; apiKey: string } | undefined => {
+    const botId = typeof raw === "string" ? raw.trim() : "";
+    const bot = botId ? liveSettings.customBots.find((item) => item.id === botId) : undefined;
+    if (!bot) return undefined;
+    return { bot, apiKey: botApiKey(bot) };
+  };
+
+  /*
+   * The judge borrows the Vercel bot's key the way a chat on it does: the
+   * same resolution, here, and nothing secret goes back. Readiness answers
+   * the Settings switch; report scores one finished mission report.
+   */
+  const judgeReadyNow = (enabled: boolean, bots: CustomBot[] = liveSettings.customBots) =>
+    judgeReadiness({ enabled, bots, readKey: botApiKey });
+  // The pane sends the bots it shows: this process learns of a saved bot only
+  // after the persistence debounce, and a switch must not lag a save.
+  ipcMain.handle("judge:readiness", async (_event, raw: { bots?: unknown }) => {
+    const sent = Array.isArray(raw?.bots)
+      ? raw.bots.filter(
+          (item): item is CustomBot =>
+            Boolean(item) && typeof item === "object" && typeof (item as CustomBot).id === "string" && typeof (item as CustomBot).baseUrl === "string" && typeof (item as CustomBot).model === "string",
+        )
+      : undefined;
+    const ready = judgeReadyNow(true, sent ?? liveSettings.customBots);
+    return ready.ready ? { ready: true, botId: ready.botId } : { ready: false, why: ready.why };
+  });
+  ipcMain.handle("judge:report", async (_event, raw: { criteria?: unknown; report?: unknown; truncated?: unknown; workerStatus?: unknown }) => {
+    const criteria = Array.isArray(raw?.criteria)
+      ? raw.criteria.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+      : [];
+    const report = typeof raw?.report === "string" ? raw.report : "";
+    const workerStatus = typeof raw?.workerStatus === "string" ? raw.workerStatus : undefined;
+    const ready = judgeReadyNow(liveSettings.judge?.enabled === true);
+    if (!ready.ready) return { why: ready.why, called: false };
+    const outcome = await judgeReport({
+      criteria,
+      report,
+      truncated: raw?.truncated === true,
+      workerStatus,
+      endpoint: ready.endpoint,
+      log: (line) => mainLog.record("judge", line),
+    });
+    // The bot rides back either way: a call that gave no score may still have been billed.
+    return { ...outcome, botId: ready.botId };
+  });
 
   /*
    * Both handlers below reach a third-party host with a real credential, so

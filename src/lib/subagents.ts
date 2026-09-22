@@ -1,3 +1,4 @@
+import { JUDGE_NOTE, judgeRunKey, normalizeJudgeFailure, normalizeJudgeVerdict, reportSaysFor, type ReportSays, type RunJudgeOutcome } from "./judge";
 import { isExternalAgentAddress } from "./agent-runtime";
 import { crewTurnInFlight } from "./crew-live";
 import { isGrokBotModel, isGrokBotName } from "./custom-http-identity";
@@ -738,6 +739,7 @@ export function collectChildAgentReports(
   sessions: Session[],
   parentId: string,
   childIds?: ReadonlySet<string>,
+  opts?: { judge?: boolean },
 ): Array<{
   title: string;
   status: string;
@@ -746,6 +748,7 @@ export function collectChildAgentReports(
   provider: Session["provider"];
   model: string;
   effort: Session["effort"];
+  reportSays?: ReportSays;
   exclusions?: string[];
   mission?: MissionIteration;
   findings?: WorkerFinding[];
@@ -756,6 +759,7 @@ export function collectChildAgentReports(
       const reply = [...session.messages]
         .reverse()
         .find((message) => message.role === "assistant" && message.text.trim());
+      const reportSays = reportSaysFor(session.agentRun, opts?.judge === true);
       const findings = normalizeWorkerFindings(session.agentRun?.findings)
         ?? (reply ? parseWorkerFindings(reply.text) : undefined);
       return {
@@ -767,6 +771,7 @@ export function collectChildAgentReports(
         model: session.model,
         effort: session.effort,
         ...(session.agentRun?.exclusions?.length ? { exclusions: session.agentRun.exclusions } : {}),
+        ...(reportSays ? { reportSays } : {}),
         ...(session.agentRun?.mission ? { mission: session.agentRun.mission } : {}),
         ...(findings?.length ? { findings } : {}),
       };
@@ -853,10 +858,48 @@ const CHECK_MARKERS: Array<[RegExp, string]> = [
   [/\beslint\b|\bnpm run lint\b/i, "lint"],
 ];
 
-function lastAssistantReport(messages: ChatMessage[] | undefined): ChatMessage | undefined {
+/** The whole last reply, or the shortened copy a retired worker kept. The judge reads this, never the bounded copy. */
+/**
+ * The text the judge scores: this run's last reply. A reused worker keeps
+ * its earlier replies, so a run that ended on tool rows alone has no
+ * report, not the previous pass's. A retired worker's messages are gone
+ * and its retained report stands in.
+ */
+export function workerReportText(session: Pick<Session, "messages" | "retainedReport" | "agentRun">): string {
+  const since = session.agentRun?.startedAt;
+  const reply = lastAssistantReport(session.messages, since)?.text.trim();
+  if (reply) return reply;
+  const anyReply = (session.messages ?? []).some((message) => message.role === "assistant");
+  return anyReply ? "" : session.retainedReport?.trim() || "";
+}
+
+/**
+ * Sessions with fresh judge outcomes set on their runs, for a payload built
+ * before the store has saved them. An outcome fits only the run it scored: a
+ * worker reused meanwhile keeps its id but not its run.
+ */
+export function applyJudgeOutcomes(sessions: Session[], outcomes: Map<string, RunJudgeOutcome>): Session[] {
+  if (outcomes.size === 0) return sessions;
+  return sessions.map((session) => {
+    const outcome = outcomes.get(session.id);
+    if (!outcome || !session.agentRun || judgeRunKey(session.agentRun) !== outcome.runKey) return session;
+    return "verdict" in outcome
+      ? { ...session, agentRun: { ...session.agentRun, verdict: outcome.verdict } }
+      : { ...session, agentRun: { ...session.agentRun, judgeFailed: outcome.failed } };
+  });
+}
+
+function lastAssistantReport(messages: ChatMessage[] | undefined, since?: number): ChatMessage | undefined {
   return [...(messages ?? [])]
     .reverse()
-    .find((message) => message.role === "assistant" && message.kind !== "tool" && message.kind !== "thought" && message.text.trim());
+    .find(
+      (message) =>
+        message.role === "assistant" &&
+        message.kind !== "tool" &&
+        message.kind !== "thought" &&
+        (since === undefined || message.createdAt >= since) &&
+        message.text.trim(),
+    );
 }
 
 export function boundWorkerReport(
@@ -1189,6 +1232,8 @@ export type AgentStatusLookup = {
   externalTask?: (Record<string, unknown> & { id: string; status: string }) | null;
   /** Desk usage ledger. Pass it and a worker's status carries `spend`. */
   usage?: UsageEvent[];
+  /** Judge on: a finished mission worker with no score is marked not-scored. */
+  judge?: boolean;
 };
 
 export type AgentStatusResult =
@@ -1207,7 +1252,7 @@ export function resolveAgentStatus(input: AgentStatusLookup): AgentStatusResult 
   if (session) {
     const isWorker = Boolean(session.parentId);
     const descendantOk = isWorker && (!from || descendantSessionIds(input.sessions, from).includes(session.id));
-    if (descendantOk) return { ok: true, snapshot: workerStatusSnapshot(session, { usage: input.usage }) };
+    if (descendantOk) return { ok: true, snapshot: workerStatusSnapshot(session, { usage: input.usage, judge: input.judge }) };
     const asked = askedChatStatusSnapshot(session, from || undefined, input.sessions);
     if (asked) return { ok: true, snapshot: asked };
     return { ok: false, error: "unknown" };
@@ -1226,7 +1271,7 @@ export function resolveAgentStatus(input: AgentStatusLookup): AgentStatusResult 
 export function workerStatusSnapshot(
   worker: Pick<Session, "id" | "title" | "workerName" | "parentId" | "status" | "provider" | "model" | "effort" | "agentRun" | "routingMode" | "routingDecision" | "messages"> &
     Pick<Partial<Session>, "retainedReport">,
-  opts?: { usage?: UsageEvent[] },
+  opts?: { usage?: UsageEvent[]; judge?: boolean },
 ): Record<string, unknown> {
   const spend = sessionSpend(opts?.usage, worker.id);
   const last = lastAssistantReport(worker.messages);
@@ -1248,7 +1293,8 @@ export function workerStatusSnapshot(
     parentId: worker.parentId,
     status,
     next: follow.next,
-    how: follow.how,
+    // A score on the payload says what it is, right where a caller reads it.
+    how: reportSaysFor(worker.agentRun, opts?.judge === true) ? `${follow.how} ${JUDGE_NOTE}` : follow.how,
     provider: worker.provider,
     model: worker.model,
     effort: worker.effort,
@@ -1258,6 +1304,8 @@ export function workerStatusSnapshot(
     ...(worker.agentRun?.exclusions?.length ? { exclusions: worker.agentRun.exclusions } : {}),
     ...(worker.agentRun?.changedFiles?.length ? { changedFiles: worker.agentRun.changedFiles } : {}),
     ...(worker.agentRun?.mission ? { mission: worker.agentRun.mission } : {}),
+    // The report scored against the mission's criteria: evidence in the report, not a check of the work.
+    ...(reportSaysFor(worker.agentRun, opts?.judge === true) ? { reportSays: reportSaysFor(worker.agentRun, opts?.judge === true) } : {}),
     ...(worker.agentRun?.executionOwner ? { executionOwner: worker.agentRun.executionOwner } : {}),
     ...(worker.agentRun?.takeoverReason ? { takeoverReason: worker.agentRun.takeoverReason } : {}),
     // Two token counts, never a sum. usedTokens is the budget meter and bills
@@ -1655,7 +1703,11 @@ export function subagentLabel(provider: ProviderId, model: string, description?:
   return short && short !== model ? `${vendor} · ${short}` : vendor;
 }
 
-/** Keep the original slice clock when a checkpoint hits a still-running worker. */
+/**
+ * Keep the original slice clock when a checkpoint hits a still-running
+ * worker. A finished worker sent on is a new run: a new id, and no score or
+ * judge failure carried from the report it has yet to write.
+ */
 export function continueWorkerRun(
   run: AgentRun,
   input: { now: number; correlationId?: string },
@@ -1671,6 +1723,9 @@ export function continueWorkerRun(
     ...(keepClock
       ? {}
       : {
+          runId: uid("run"),
+          verdict: undefined,
+          judgeFailed: undefined,
           tokenBudget: undefined,
           usedTokens: undefined,
           budgetBaseline: undefined,
@@ -2759,10 +2814,13 @@ export function normalizeAgentRun(
     (row.status === "running" && !stillRunning) ||
     (row.status === "failed" && (row.error ?? "").trim() === LEGACY_INTERRUPTED_ERROR);
   const mission = normalizeMissionIteration(row.mission);
+  const verdict = normalizeJudgeVerdict(row.verdict);
+  const judgeFailed = normalizeJudgeFailure(row.judgeFailed);
   const findings = normalizeWorkerFindings(row.findings);
   return {
     status: interrupted ? "interrupted" : row.status as AgentRun["status"],
     startedAt: row.startedAt,
+    ...(typeof row.runId === "string" && row.runId ? { runId: row.runId } : {}),
     isolation: resolveWorkerIsolation({ isolation: row.isolation }),
     ...(row.seed === "fresh" ? { seed: "fresh" as const } : {}),
     ...(row.role === "auditor" || row.role === "helper" ? { role: row.role } : {}),
@@ -2805,6 +2863,8 @@ export function normalizeAgentRun(
     ...(findings ? { findings } : {}),
     ...(typeof row.correlationId === "string" && row.correlationId.trim() ? { correlationId: row.correlationId.trim() } : {}),
     ...(mission ? { mission } : {}),
+    ...(verdict ? { verdict } : {}),
+    ...(judgeFailed ? { judgeFailed } : {}),
   };
 }
 

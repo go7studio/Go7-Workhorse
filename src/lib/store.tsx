@@ -281,7 +281,9 @@ import {
   workerReportText,
   applyCancelWorker,
   admitSpawn,
+  alwaysSkipsPathAllowlist,
   assertAgentPathWrite,
+  pathOwnershipViolation,
   campaignGateError,
   claimSharedFiles,
   collectChildAgentReports,
@@ -6579,7 +6581,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 : [];
               const changedFiles = workerChangedFiles(spawnChanges, afterChanges);
               const unauthorizedFiles = assignedPaths.length > 0
-                ? changedFiles.filter((file) => !assignedPaths.some((owned) => owned.toLowerCase() === file.replaceAll("\\", "/").toLowerCase()))
+                ? changedFiles.filter((file) => pathOwnershipViolation({
+                    file,
+                    owned: assignedPaths,
+                    root: childCwd,
+                    mode: liveChild?.mode,
+                    sandbox: liveChild?.sandbox,
+                  }))
                 : [];
               const ownershipError = unauthorizedFiles.length > 0
                 ? `Path ownership blocked completion: worker changed ${unauthorizedFiles.join(", ")}.`
@@ -7394,6 +7402,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         // ACP write/edit requests are the only pre-write path chokepoint the
         // renderer receives. Path-owned workers run in Ask mode so these are
         // checked against the desk lease before normal permission policy.
+        // Always with Sandbox Off or Workspace skips that allowlist. Ask,
+        // accept-edits, read-only, and strict still match the slice list.
         // An opaque shell command has no reliable target path; changed-file
         // review remains the backstop for vendors that report only the shell.
         if (owner && ownedPaths.length > 0 && isWriteToolTitle(event.tool)) {
@@ -7421,15 +7431,27 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 ),
               }));
             };
-            if (!writePath || !window.workhorse?.readSourceFile) {
-              deny("Path ownership blocked a write whose target path could not be verified.");
-              return;
-            }
             const project = stateRef.current.projects.find((item) => item.id === owner.projectId);
             const root = sessionExecutionCwd(
               owner.environment,
               project ? primaryFolder(project, folderExists)?.path ?? "" : "",
             );
+            if (alwaysSkipsPathAllowlist({
+              mode: owner.mode,
+              sandbox: owner.sandbox,
+            })) {
+              if (writePath) {
+                const pending = approvedPathWrites.current.get(owner.id) ?? [];
+                approvedPathWrites.current.set(owner.id, [...pending, { path: writePath, root }]);
+              }
+              pathPermissionPreflight.current.add(event.requestId);
+              apply(event);
+              return;
+            }
+            if (!writePath || !window.workhorse?.readSourceFile) {
+              deny("Path ownership blocked a write whose target path could not be verified.");
+              return;
+            }
             const refreshKey = `${owner.id}:${leasePathForWrite(writePath, root).toLowerCase()}`;
             const pendingRefresh = pathFingerprintRefreshes.current.get(refreshKey) ?? Promise.resolve();
             void pendingRefresh.then(() => window.workhorse!.readSourceFile!(writePath, root ? [root] : [])).then((source) => {
@@ -7441,6 +7463,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 root,
                 currentFingerprint: fileContentsFingerprint(source?.text ?? ""),
                 role: owner.agentRun?.role,
+                mode: owner.mode,
                 sandbox: owner.sandbox,
               });
               if (!decision.ok) {

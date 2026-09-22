@@ -57,7 +57,7 @@ test("the copy no longer claims helpers are read-only by design", () => {
 test("both write gates receive the seat that will actually apply", () => {
   const store = read("src/lib/store.tsx");
   assert.match(store, /sandbox: callAccess\.granted\.sandbox,/, "the lease claim sees the seat the worker will run under");
-  assert.match(store, /role: owner\.agentRun\?\.role,\s*sandbox: owner\.sandbox,/, "the path write sees the worker's own sandbox");
+  assert.match(store, /role: owner\.agentRun\?\.role,\s*mode: owner\.mode,\s*sandbox: owner\.sandbox,/, "the path write sees the worker's own seat");
   const sub = read("src/lib/subagents.ts");
   assert.match(sub, /sandbox: input\.sandbox,\s*path,/, "the allowlist gate passes it on");
 });

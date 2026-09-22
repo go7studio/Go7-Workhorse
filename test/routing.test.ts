@@ -488,18 +488,35 @@ test("a pool not worth finishing loses to an on-pace twin of the same brain", ()
   const onPace = { ...cursor, capacity: { ...cursor.capacity, usedPercent: 30 } };
   const ranked = rankRoutingCandidates([grok, onPace], { prompt: "Review this pull request adversarially", tier: "deep", now }, settings);
   assert.equal(ranked[0]?.provider, "cursor", `the twin with capacity wins, got ${ranked.map((r) => `${r.provider}:${r.score}`).join(" ")}`);
-  // Days from its reset the same nearly-empty pool is not demoted: Watch still
-  // calls it, the reserve penalty already prices it, and it must not lose to a
-  // model under the deep bar. Third gate's case.
-  const daysOut = grokFamily(now, { grokUsed: 99.2, grokResetMs: 3 * DAY });
+  // The twins round to the same score and the label tiebreak already favours
+  // Cursor, so that alone does not prove the demotion (fourth gate). Against a
+  // model under the deep bar only a row sorted last can lose.
   const underBar = candidate("claude-haiku-4-5", 20, {
     provider: "claude",
     label: "Haiku 4.5",
     profile: routingProfileForModel("claude", "claude-haiku-4-5"),
     capacity: { usedPercent: 20, resetsAt: new Date(now + 10 * DAY).toISOString(), period: "weekly", observedAt: new Date(now - 60_000).toISOString() },
   });
-  const deep = rankRoutingCandidates([daysOut.grok, underBar], { prompt: "Review this pull request adversarially", tier: "deep", now }, settings);
+  const request = { prompt: "Review this pull request adversarially", tier: "deep" as const, now };
+  const demoted = rankRoutingCandidates([grok, underBar], request, settings);
+  assert.equal(demoted[0]?.provider, "claude", `inside the window a pool not worth finishing sorts last, got ${demoted.map((r) => `${r.model}:${r.score}`).join(" ")}`);
+  // Days from its reset the same nearly-empty pool is not demoted: Watch still
+  // calls it, the reserve penalty already prices it, and it must not lose to a
+  // model under the deep bar. Third gate's case.
+  const daysOut = grokFamily(now, { grokUsed: 99.2, grokResetMs: 3 * DAY });
+  const deep = rankRoutingCandidates([daysOut.grok, underBar], request, settings);
   assert.equal(deep[0]?.provider, "grok", `a callable pool days from reset is ranked on its score, got ${deep.map((r) => `${r.model}:${r.score}`).join(" ")}`);
+  // With no reset known there is nothing to wait for either: a spent prepaid
+  // balance stays spent. Fourth gate's case: the reserve hit left it at about
+  // 22, still ahead of the model under the bar, and a chat Auto send took it.
+  const noReset = candidate("grok-4.7", 100, {
+    provider: "grok",
+    label: "Grok 4.7",
+    profile: routingProfileForModel("grok", "grok-4.7"),
+    capacity: { usedPercent: 100, period: "weekly", observedAt: new Date(now - 60_000).toISOString() },
+  });
+  const unknownReset = rankRoutingCandidates([noReset, underBar], request, settings);
+  assert.equal(unknownReset[0]?.provider, "claude", `a spent pool with no reset known sorts last, got ${unknownReset.map((r) => `${r.model}:${r.score}`).join(" ")}`);
   // With five percent left the same pool is worth finishing, and it wins.
   const worth = grokFamily(now, { grokUsed: 95, grokResetMs: 1 * HOUR });
   const rankedWorth = rankRoutingCandidates([worth.grok, { ...worth.cursor, capacity: { ...worth.cursor.capacity, usedPercent: 30 } }], { prompt: "Review this pull request adversarially", tier: "deep", now }, settings);

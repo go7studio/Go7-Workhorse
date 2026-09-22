@@ -913,13 +913,15 @@ export const EXPIRY_METER_STALE_MS = 6 * 60 * 60 * 1000;
 export const EXPIRY_FINISHABLE_PERCENT = 5;
 /**
  * Leftover at or under which a pool is not worth finishing: no credit, and
- * when its reset is also inside the window it sorts behind every live row.
- * A sliver of credit was still enough to beat an on-pace twin of the same
- * brain, whose equal profile left the capacity term as the whole decision,
- * and a pool with half a percent left cannot absorb a task however close its
- * reset. Days from a reset the same pool is not demoted: the reserve penalty
- * already prices it, and a third gate showed the blanket sort burying a
- * callable pool at 99.2% behind a model under the deep bar.
+ * unless a known reset is more than a day away it sorts behind every live
+ * row. A sliver of credit was still enough to beat an on-pace twin of the
+ * same brain, whose equal profile left the capacity term as the whole
+ * decision, and a pool with half a percent left cannot absorb a task however
+ * close its reset. Days from a reset the same pool is not demoted: the
+ * reserve penalty already prices it, and a third gate showed the blanket
+ * sort burying a callable pool at 99.2% behind a model under the deep bar.
+ * A fourth gate showed the other edge: with no reset known the row must
+ * still sort last, or a spent prepaid balance goes first.
  */
 export const EXPIRY_UNFINISHABLE_PERCENT = 1;
 
@@ -980,15 +982,16 @@ export function candidateExpiryCredit(capacity: RoutingCapacity | undefined, now
 }
 
 /**
- * A row that is both nearly empty and about to reset sorts behind every live
- * row: it cannot absorb the work, and nothing is lost by leaving it. An
- * unknown gauge is not an empty one, and a nearly empty pool days from its
- * reset is ranked on its score, where the reserve penalty already sits.
+ * A nearly empty row ranks on its score only when a known reset is more than
+ * a day away: the reserve penalty prices it and Watch may still call it.
+ * Inside the window, past the reset, or with no reset known, it sorts behind
+ * every live row: it cannot absorb the work, and nothing is lost by leaving
+ * it. An unknown gauge is not an empty one.
  */
 function routingRowLive(row: { usedPercent?: number; capacity?: RoutingCapacity }, now: number): boolean {
   if (row.usedPercent === undefined || row.usedPercent < 100 - EXPIRY_UNFINISHABLE_PERCENT) return true;
   const resetMs = routingResetMs(row.capacity, now);
-  return !(Number.isFinite(resetMs) && resetMs <= EXPIRY_WINDOW_MS);
+  return Number.isFinite(resetMs) && resetMs > EXPIRY_WINDOW_MS;
 }
 
 function sameRoutingIdentity(
@@ -1338,10 +1341,11 @@ export function rankRoutingCandidates(
       usedPercent: draw.usedPercent,
     });
   }
-  // A pool that is spent and about to reset never goes first, however its
-  // score came out: the reserve taper hands a pool inside its last day no
-  // penalty at all, so a pool at 100% resetting in an hour could otherwise
-  // outscore a live one.
+  // A spent pool with no reset more than a day away never goes first,
+  // however its score came out: the reserve taper hands a pool inside its
+  // last day no penalty at all, so a pool at 100% resetting in an hour could
+  // otherwise outscore a live one, and a spent balance with no reset at all
+  // keeps a score above a model under the bar.
   const sortNow = request.now ?? Date.now();
   return ranked.sort((a, b) => {
     const aLive = routingRowLive(a, sortNow);

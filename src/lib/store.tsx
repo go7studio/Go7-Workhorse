@@ -3731,7 +3731,43 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }));
     // hideUser: the brief is already the first thing in this chat. Showing it
     // again would read as the user asking twice.
-    send(brief, { sessionId: child.id, hideUser: true });
+    const resume = () => send(brief, { sessionId: child.id, hideUser: true });
+    // The sweep may have let this worker's folder go once it kept the work at a
+    // rescue ref. Main answers with the folder as it is, or rebuilt from that
+    // ref. A folder it cannot give back, or a call that fails outright, leaves
+    // the worker interrupted and saying why; the turn never starts without it.
+    const environment = child.environment;
+    if (environment?.kind === "worktree" && environment.gitRoot && window.workhorse?.ensureWorktree) {
+      const interrupt = (error: string) => {
+        const finishedAt = Date.now();
+        setState((current) => ({
+          ...current,
+          sessions: current.sessions.map((item) => {
+            if (item.id === child.id && item.agentRun) {
+              return { ...item, agentRun: { ...item.agentRun, status: "interrupted" as const, finishedAt, error } };
+            }
+            if (item.id === child.parentId && item.lineup) {
+              return {
+                ...item,
+                lineup: {
+                  ...item.lineup,
+                  rows: item.lineup.rows.map((row) =>
+                    row.childId === child.id ? { ...row, status: "interrupted" as const, finishedAt } : row,
+                  ),
+                },
+              };
+            }
+            return item;
+          }),
+        }));
+      };
+      void window.workhorse.ensureWorktree({ sessionId: child.id, root: environment.gitRoot }).then(
+        (result) => (result.ok ? resume() : interrupt(result.message)),
+        (error: unknown) => interrupt(`Could not get the worker's folder back: ${error instanceof Error ? error.message : String(error)}`),
+      );
+    } else {
+      resume();
+    }
     return { ok: true, message: "Resumed." };
   }, [send]);
 
@@ -6249,6 +6285,21 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               // not cut a new worktree under the same name.
               environment = priorWorker.environment ?? { kind: "local" };
               isolation = environment.kind === "worktree" ? "worktree" : "shared";
+              // The sweep may have let that folder go after keeping its work at
+              // a rescue ref. Ask for it back before the new slice starts there.
+              if (environment.kind === "worktree" && environment.gitRoot && window.workhorse?.ensureWorktree) {
+                const again = await window.workhorse
+                  .ensureWorktree({ sessionId: priorWorker.id, root: environment.gitRoot })
+                  .catch((error: unknown) => ({
+                    ok: false as const,
+                    message: `Could not get the worker's folder back: ${error instanceof Error ? error.message : String(error)}`,
+                  }));
+                if (!again.ok) {
+                  await replyAsk({ error: again.message });
+                  return;
+                }
+                environment = { kind: "worktree", path: again.path, gitRoot: again.gitRoot, head: again.head };
+              }
             } else if (isolation === "worktree") {
               if (!root || !window.workhorse?.ensureWorktree) {
                 await replyAsk({ error: "Worktree isolation is unavailable for this folder." });

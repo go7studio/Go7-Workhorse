@@ -4,7 +4,12 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { folderLeftBehind, pruneOrphanWorktrees } from "../electron/worktree-host";
+import {
+  RESCUE_REF_PREFIX,
+  folderLeftBehind,
+  pruneOrphanWorktrees,
+} from "../electron/worktree-host";
+import { durable, git, repoWithWorktree } from "./worktree-fixtures";
 import { sweepStaleUserData } from "../electron/user-data-hygiene";
 
 test("sweepStaleUserData drops leftover update installers and oversized Chromium caches", () => {
@@ -101,74 +106,47 @@ test("pruneOrphanWorktrees refuses to force-remove a folder that lost its .git b
   fs.rmSync(root, { recursive: true, force: true });
 });
 
-/**
- * A managed worktree is where a worker's generated output lives, and that output is
- * untracked: it belongs to no commit, and no diff would carry it. Sweeping the
- * directory with `fs.rmSync` destroyed it. These pin the refusal instead.
- */
-function repoWithWorktree(
-  label: string,
-  /** Committed in the repository before the worktree exists, so HEAD stays reachable. */
-  tracked: Record<string, string> = {},
-): { root: string; repo: string; managed: string; wt: string; remote: string } {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), `workhorse-prune-${label}-`));
-  const repo = path.join(root, "repo");
-  const managed = path.join(root, "worktrees");
-  const remote = path.join(root, "remote.git");
-  fs.mkdirSync(repo);
-  fs.mkdirSync(managed);
-  const git = (args: string[], cwd = repo) =>
-    execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
-  git(["init", "-q", "--bare", remote], root);
-  git(["init", "-q", "."]);
-  fs.writeFileSync(path.join(repo, "tracked.txt"), "original\n");
-  for (const [name, body] of Object.entries(tracked)) {
-    fs.mkdirSync(path.dirname(path.join(repo, name)), { recursive: true });
-    fs.writeFileSync(path.join(repo, name), body);
-  }
-  git(["add", "-A"]);
-  git(["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "base"]);
-  // The base commit goes to a remote, so a tree sitting on it is saved
-  // somewhere other than this disk. Without that, every tree here would be
-  // held as unpushed and none of these tests would reach what it aims at.
-  git(["remote", "add", "origin", remote]);
-  git(["push", "-q", "origin", "HEAD:refs/heads/main"]);
-  git(["fetch", "-q", "origin"]);
-  const wt = path.join(managed, "sess_gone");
-  git(["worktree", "add", "--quiet", "--detach", wt]);
-  // A folder made in the last hour is never swept; these trees stand in for
-  // ones a finished worker left long ago.
-  const earlier = new Date(Date.now() - 2 * 60 * 60 * 1000);
-  fs.utimesSync(path.join(wt, ".git"), earlier, earlier);
-  return { root, repo, managed, wt, remote };
-}
-
-test("pruneOrphanWorktrees keeps a worktree holding untracked work", () => {
+test("pruneOrphanWorktrees keeps untracked work at a rescue ref, then lets the folder go", () => {
   const { root, repo, managed, wt } = repoWithWorktree("untracked");
   fs.mkdirSync(path.join(wt, "art"));
   fs.writeFileSync(path.join(wt, "art", "hero.blend"), "generated art in no commit");
 
-  const pruned = pruneOrphanWorktrees(managed, []);
+  const pruned = pruneOrphanWorktrees(managed, [], durable(root));
 
-  assert.deepEqual(pruned.removed, [], "an untracked file must stop the removal");
-  assert.equal(pruned.kept.length, 1);
-  assert.match(pruned.kept[0].reason, /untracked/i);
-  assert.ok(fs.existsSync(path.join(wt, "art", "hero.blend")), "the art must survive");
-  const listed = execFileSync("git", ["worktree", "list"], { cwd: repo, encoding: "utf8" });
-  assert.ok(listed.includes("sess_gone"), "a kept worktree stays registered");
+  assert.deepEqual(pruned.removed, ["sess_gone"]);
+  assert.deepEqual(pruned.rescued, [{ name: "sess_gone", ref: `${RESCUE_REF_PREFIX}sess_gone` }]);
+  assert.equal(git(repo, ["show", `${RESCUE_REF_PREFIX}sess_gone:art/hero.blend`]), "generated art in no commit", "the art is in git, byte for byte");
+  assert.ok(!fs.existsSync(wt));
+  assert.ok(!git(repo, ["worktree", "list"]).includes("sess_gone"), "git forgets the folder it removed");
+  assert.equal(git(repo, ["branch", "--list", "*rescue*"]), "", "a rescue is never a branch a push would carry");
   fs.rmSync(root, { recursive: true, force: true });
 });
 
-test("pruneOrphanWorktrees keeps a worktree holding uncommitted edits", () => {
-  const { root, managed, wt } = repoWithWorktree("dirty");
-  fs.writeFileSync(path.join(wt, "tracked.txt"), "edited, never committed\n");
+test("pruneOrphanWorktrees keeps untracked work in place when its repository lives in the temporary folder", () => {
+  const { root, managed, wt } = repoWithWorktree("untracked-temp");
+  fs.writeFileSync(path.join(wt, "hero.blend"), "the only copy");
 
   const pruned = pruneOrphanWorktrees(managed, []);
 
   assert.deepEqual(pruned.removed, []);
-  assert.match(pruned.kept[0].reason, /uncommitted changes/);
-  assert.match(pruned.kept[0].reason, /tracked\.txt/, "the refusal must name what it is protecting");
-  assert.equal(fs.readFileSync(path.join(wt, "tracked.txt"), "utf8"), "edited, never committed\n");
+  assert.match(pruned.kept[0].reason, /temporary folder/);
+  assert.ok(fs.existsSync(path.join(wt, "hero.blend")));
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test("pruneOrphanWorktrees keeps uncommitted edits at a rescue ref, then lets the folder go", () => {
+  const { root, repo, managed, wt } = repoWithWorktree("dirty");
+  fs.writeFileSync(path.join(wt, "tracked.txt"), "edited, never committed\n");
+  const head = git(wt, ["rev-parse", "HEAD"]);
+
+  const pruned = pruneOrphanWorktrees(managed, [], durable(root));
+
+  assert.deepEqual(pruned.removed, ["sess_gone"]);
+  const ref = `${RESCUE_REF_PREFIX}sess_gone`;
+  assert.equal(git(repo, ["show", `${ref}:tracked.txt`]), "edited, never committed");
+  assert.equal(git(repo, ["rev-parse", `${ref}^`]), head, "the snapshot sits on the commit the worker started from");
+  assert.match(git(repo, ["log", "-1", "--format=%B", ref]), /Workhorse-Rescue: folder/);
+  assert.match(git(repo, ["log", "-1", "--format=%B", ref]), /Workhorse-Session: sess_gone/, "the rescue names whose work it holds");
   fs.rmSync(root, { recursive: true, force: true });
 });
 
@@ -187,6 +165,7 @@ test("pruneOrphanWorktrees keeps a worktree holding uncommitted edits", () => {
  * worker's commits are on no remote branch at all, and the first half alone
  * would hold every one of those trees for ever.
  */
+
 function commitInWorktree(wt: string, body: string): string {
   fs.writeFileSync(path.join(wt, "tracked.txt"), body);
   execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-aqm", "worker work"], { cwd: wt });
@@ -198,6 +177,7 @@ function commitInWorktree(wt: string, body: string): string {
  * the default branch carrying the branch's tree and none of its commits, and
  * then the branch is deleted. Returns the squash commit.
  */
+
 function squashMergeToMain(repo: string, head: string): string {
   const git = (args: string[]) => execFileSync("git", args, { cwd: repo, encoding: "utf8" }).trim();
   const tree = git(["rev-parse", `${head}^{tree}`]);
@@ -220,19 +200,17 @@ function squashMergeToMain(repo: string, head: string): string {
   return squash;
 }
 
-test("pruneOrphanWorktrees keeps a clean tree whose commit no remote branch has", () => {
+test("pruneOrphanWorktrees keeps a commit no remote branch has at a rescue ref, then lets the folder go", () => {
   const { root, repo, managed, wt } = repoWithWorktree("unpushed");
   const head = commitInWorktree(wt, "the worker's only commit\n");
-  // Reachable locally, so this is not the unreachable-commit refusal doing the
-  // work. A local branch stops garbage collection; it does not survive a disk.
-  execFileSync("git", ["branch", "saved", head], { cwd: repo });
-  assert.equal(execFileSync("git", ["status", "--porcelain"], { cwd: wt, encoding: "utf8" }).trim(), "");
+  assert.equal(git(wt, ["status", "--porcelain"]), "");
 
-  const pruned = pruneOrphanWorktrees(managed, []);
+  const pruned = pruneOrphanWorktrees(managed, [], durable(root));
 
-  assert.deepEqual(pruned.removed, []);
-  assert.match(pruned.kept[0].reason, /no remote branch has/);
-  assert.ok(fs.existsSync(wt));
+  assert.deepEqual(pruned.removed, ["sess_gone"]);
+  const ref = `${RESCUE_REF_PREFIX}sess_gone`;
+  assert.equal(git(repo, ["rev-parse", `${ref}^1`]), head, "a clean folder is kept on its commit");
+  assert.equal(git(repo, ["rev-parse", `${ref}^{tree}`]), git(repo, ["rev-parse", `${head}^{tree}`]), "holding exactly that commit's files");
   fs.rmSync(root, { recursive: true, force: true });
 });
 
@@ -264,7 +242,7 @@ test("pruneOrphanWorktrees drops a tree whose branch was squash merged and delet
   fs.rmSync(root, { recursive: true, force: true });
 });
 
-test("pruneOrphanWorktrees keeps a squash merged tree the worker went on committing to", () => {
+test("pruneOrphanWorktrees keeps a squash merged tree's later commit at a rescue ref", () => {
   // Merged, and then the worker did one more piece of work that never left this
   // disk. The merged half must not vouch for the half that never landed.
   const { root, repo, managed, wt } = repoWithWorktree("squashed-plus");
@@ -285,11 +263,11 @@ test("pruneOrphanWorktrees keeps a squash merged tree the worker went on committ
     "the merged file matches main; only the later one does not",
   );
 
-  const pruned = pruneOrphanWorktrees(managed, []);
+  const pruned = pruneOrphanWorktrees(managed, [], durable(root));
 
-  assert.deepEqual(pruned.removed, [], "one path missing from main holds the whole tree");
-  assert.match(pruned.kept[0].reason, /no remote branch has/);
-  assert.equal(fs.readFileSync(path.join(wt, "notes.md"), "utf8"), "the part that never landed\n");
+  assert.deepEqual(pruned.removed, ["sess_gone"], "one path missing from main is kept in git, not in the folder");
+  assert.equal(git(repo, ["rev-parse", `${RESCUE_REF_PREFIX}sess_gone^1`]), head);
+  assert.equal(git(repo, ["show", `${RESCUE_REF_PREFIX}sess_gone:notes.md`]), "the part that never landed");
   fs.rmSync(root, { recursive: true, force: true });
 });
 
@@ -328,6 +306,7 @@ test("pruneOrphanWorktrees drops a clean worktree and leaves no stale registrati
  * remove` allows it without `--force`, and Git deletes both. The old comment
  * declared this limit and lived with it. These pin the refusal.
  */
+
 test("pruneOrphanWorktrees keeps a worktree holding ignored files git would delete", () => {
   const { root, managed, wt } = repoWithWorktree("ignored", { ".gitignore": "*.blend1\nrendered/\n" });
   fs.writeFileSync(path.join(wt, "hero.blend1"), "an afternoon of work, autosaved");
@@ -420,7 +399,7 @@ test("pruneOrphanWorktrees still drops a live chat's worktree never", () => {
   fs.rmSync(root, { recursive: true, force: true });
 });
 
-test("pruneOrphanWorktrees keeps a worktree whose commit no ref can reach", () => {
+test("pruneOrphanWorktrees keeps a commit no ref can reach at a rescue ref before the folder goes", () => {
   const { root, repo, managed, wt } = repoWithWorktree("unreachable");
   fs.writeFileSync(path.join(wt, "tracked.txt"), "the worker's only commit\n");
   execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-aqm", "worker work"], { cwd: wt });
@@ -429,11 +408,12 @@ test("pruneOrphanWorktrees keeps a worktree whose commit no ref can reach", () =
   assert.equal(refs, "", "the commit must start out unreachable, or this test proves nothing");
   assert.equal(execFileSync("git", ["status", "--porcelain"], { cwd: wt, encoding: "utf8" }).trim(), "", "and the tree must be clean");
 
-  const pruned = pruneOrphanWorktrees(managed, []);
+  const pruned = pruneOrphanWorktrees(managed, [], durable(root));
 
-  assert.deepEqual(pruned.removed, [], "a clean tree can still hold the only copy of a commit");
-  assert.match(pruned.kept[0].reason, /no branch or tag can reach/i);
-  assert.ok(fs.existsSync(wt));
+  // A clean tree can hold the only copy of a commit; the ref now holds it too.
+  assert.deepEqual(pruned.removed, ["sess_gone"]);
+  assert.equal(git(repo, ["rev-parse", `${RESCUE_REF_PREFIX}sess_gone^1`]), head);
+  assert.notEqual(git(repo, ["for-each-ref", "--contains", head]), "", "the commit is reachable again");
   fs.rmSync(root, { recursive: true, force: true });
 });
 
@@ -567,7 +547,9 @@ test("attachment write temps older than a day are swept; fresh ones and blobs ar
  * `imported/` and `editor/` going with the tree when only folder names were
  * read, and those probes are pinned here.
  */
+
 const HASH = "5f3a9c0e1b2d4f6a8c0e2b4d6f8a0c1e";
+
 function godotTree(label: string) {
   const made = repoWithWorktree(label, {
     ".gitignore": ".godot/\n",

@@ -128,6 +128,9 @@ function repoWithWorktree(
     execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
   git(["init", "-q", "--bare", remote], root);
   git(["init", "-q", "."]);
+  // Windows runners convert line endings on checkout. These tests compare
+  // bytes, so the repositories they build say plainly that nothing converts.
+  git(["config", "core.autocrlf", "false"]);
   fs.writeFileSync(path.join(repo, "tracked.txt"), "original\n");
   for (const [name, body] of Object.entries(tracked)) {
     fs.mkdirSync(path.dirname(path.join(repo, name)), { recursive: true });

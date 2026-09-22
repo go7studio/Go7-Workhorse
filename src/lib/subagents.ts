@@ -1,4 +1,4 @@
-import { JUDGE_NOTE, normalizeJudgeFailure, normalizeJudgeVerdict, reportSaysFor, type JudgeOutcome, type ReportSays } from "./judge";
+import { JUDGE_NOTE, normalizeJudgeFailure, normalizeJudgeVerdict, reportSaysFor, type ReportSays, type RunJudgeOutcome } from "./judge";
 import { isExternalAgentAddress } from "./agent-runtime";
 import { crewTurnInFlight } from "./crew-live";
 import { isGrokBotModel, isGrokBotName } from "./custom-http-identity";
@@ -873,12 +873,16 @@ export function workerReportText(session: Pick<Session, "messages" | "retainedRe
   return anyReply ? "" : session.retainedReport?.trim() || "";
 }
 
-/** Sessions with fresh judge outcomes set on their runs, for a payload built before the store has saved them. */
-export function applyJudgeOutcomes(sessions: Session[], outcomes: Map<string, JudgeOutcome>): Session[] {
+/**
+ * Sessions with fresh judge outcomes set on their runs, for a payload built
+ * before the store has saved them. An outcome fits only the run it scored: a
+ * worker reused meanwhile keeps its id but not its run.
+ */
+export function applyJudgeOutcomes(sessions: Session[], outcomes: Map<string, RunJudgeOutcome>): Session[] {
   if (outcomes.size === 0) return sessions;
   return sessions.map((session) => {
     const outcome = outcomes.get(session.id);
-    if (!outcome || !session.agentRun) return session;
+    if (!outcome || !session.agentRun || session.agentRun.startedAt !== outcome.runStartedAt) return session;
     return "verdict" in outcome
       ? { ...session, agentRun: { ...session.agentRun, verdict: outcome.verdict } }
       : { ...session, agentRun: { ...session.agentRun, judgeFailed: outcome.failed } };

@@ -18,8 +18,10 @@ test("the judge is off by default and lives under Routing, not a new tab; the sw
   assert.doesNotMatch(settings, /id: "judge"/);
   const pane = read("src", "ui", "RoutingPane.tsx");
   assert.match(pane, /label="Judge reports"/);
-  // Only main can read the vault, so the pane asks it; a switch already on can always be turned off.
+  // Only main can read the vault, so the pane asks it, with the bots it shows, since main learns of a
+  // saved bot only after the persistence debounce; a switch already on can always be turned off.
   assert.match(pane, /window\.workhorse\?\.judgeReadiness/);
+  assert.match(pane, /ask\(\{ bots \}\)/);
   assert.match(pane, /disabled=\{!judgeReady && !judgeOn\}/);
   assert.match(pane, /On, but it cannot score/);
   assert.match(pane, /It ran nothing/);
@@ -31,12 +33,19 @@ test("scores ride as reportSays on both payloads, computed once at the payload, 
   // Both places a caller reads a report: agent-status and await-agents.
   assert.equal((store.match(/await judgeCompletedWorkers\(/g) ?? []).length, 2);
   assert.match(store, /judgeMayTry\(session\.agentRun, now\)/);
-  // A poll that lands mid-call waits on that call instead of starting another.
-  assert.match(store, /judgingRef\.current\.get\(session\.id\)/);
+  // A poll that lands mid-call waits on that call instead of starting another; the call is keyed by
+  // session and run start, and its outcome fits only that run, so a worker reused meanwhile never wears it.
+  assert.match(store, /const key = `\$\{session\.id\}:\$\{session\.agentRun!\.startedAt\}`/);
+  assert.match(store, /judgingRef\.current\.get\(key\)/);
+  assert.match(store, /item\.agentRun\.startedAt === runStartedAt && !item\.agentRun\.verdict/);
+  assert.match(store, /return \{ \.\.\.outcome, runStartedAt \}/);
+  // Saving a bot or switching the judge back on forgets the failures it gave up on.
+  assert.ok((store.match(/forgetJudgeFailures\(/g) ?? []).length >= 2);
   assert.match(store, /workerReportText\(session\)/);
   // The renderer cuts the report before IPC.
   assert.match(store, /truncated: bounded\.truncated/);
-  // The judge's tokens go on the ledger under the bot whose key it borrowed.
+  // The judge's tokens go on the ledger under the bot whose key it borrowed, verdict or not.
+  assert.match(store, /const usage = result\?\.verdict\?\.usage \?\? result\?\.usage/);
   assert.match(store, /recordUsage\(\{\s*provider: "custom",\s*model: JUDGE_MODEL,\s*customBotId: result\.botId/);
   // agent-status resolves against the desk as it is after the wait, not before.
   assert.match(store, /applyJudgeOutcomes\(now\.sessions, outcomes\)/);
@@ -46,12 +55,15 @@ test("scores ride as reportSays on both payloads, computed once at the payload, 
   assert.doesNotMatch(store, /ai-gateway\.vercel\.sh/);
   const preload = read("electron", "preload.ts");
   assert.match(preload, /judgeReport: \(input: unknown\) => ipcRenderer\.invoke\("judge:report", input\)/);
-  assert.match(preload, /judgeReadiness: \(\) => ipcRenderer\.invoke\("judge:readiness"\)/);
+  assert.match(preload, /judgeReadiness: \(input: unknown\) => ipcRenderer\.invoke\("judge:readiness", input\)/);
   const main = read("electron", "main.ts");
   assert.match(main, /ipcMain\.handle\("judge:report"/);
-  assert.match(main, /ipcMain\.handle\("judge:readiness"/);
-  // The judge borrows the bot's key the way a chat on it does.
-  assert.match(main, /readKey: \(bot\) => customBotCredential\(bot\.id\)\?\.apiKey/);
+  assert.match(main, /ipcMain\.handle\("judge:readiness", async \(_event, raw: \{ bots\?: unknown \}\)/);
+  // The judge borrows a bot's key the way a chat on it does: the one resolver, in main.
+  assert.match(main, /readKey: botApiKey/);
+  assert.match(main, /return \{ bot, apiKey: botApiKey\(bot\) \};/);
+  // The bot rides back on a failure too, so a billed call with no verdict still reaches the ledger.
+  assert.match(main, /return \{ \.\.\.outcome, botId: ready\.botId \};/);
   const subagents = read("src", "lib", "subagents.ts");
   assert.match(subagents, /reportSaysFor\(session\.agentRun, opts\?\.judge === true\)/);
   assert.match(subagents, /reportSaysFor\(worker\.agentRun, opts\?\.judge === true\)/);
@@ -91,5 +103,6 @@ test("the judge never touches permissions, and the law names what a score is", (
   assert.match(features, /\*\*Judge\*\* \(Settings → Routing, off by default\)/);
   assert.match(features, /reportSays/);
   assert.match(features, /It ran nothing and\s+verified nothing/);
-  assert.match(features, /at most twice/);
+  assert.match(features, /at most twice an hour/);
+  assert.match(features, /verdict or not/);
 });

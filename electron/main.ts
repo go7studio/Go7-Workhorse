@@ -2062,10 +2062,7 @@ app.whenReady().then(async () => {
    * secret in and return nothing secret out. Vault first, then the shell key an
    * OpenClaw install already holds for that host.
    */
-  const customBotCredential = (raw: unknown): { bot: CustomBot; apiKey: string } | undefined => {
-    const botId = typeof raw === "string" ? raw.trim() : "";
-    const bot = botId ? liveSettings.customBots.find((item) => item.id === botId) : undefined;
-    if (!bot) return undefined;
+  const botApiKey = (bot: Pick<CustomBot, "apiKey" | "credentialId" | "baseUrl">): string => {
     let apiKey = bot.apiKey?.trim() ?? "";
     if (!apiKey && bot.credentialId) {
       try {
@@ -2081,7 +2078,13 @@ app.whenReady().then(async () => {
         apiKey = "";
       }
     }
-    return { bot, apiKey };
+    return apiKey;
+  };
+  const customBotCredential = (raw: unknown): { bot: CustomBot; apiKey: string } | undefined => {
+    const botId = typeof raw === "string" ? raw.trim() : "";
+    const bot = botId ? liveSettings.customBots.find((item) => item.id === botId) : undefined;
+    if (!bot) return undefined;
+    return { bot, apiKey: botApiKey(bot) };
   };
 
   /*
@@ -2089,14 +2092,18 @@ app.whenReady().then(async () => {
    * same resolution, here, and nothing secret goes back. Readiness answers
    * the Settings switch; report scores one finished mission report.
    */
-  const judgeReadyNow = (enabled: boolean) =>
-    judgeReadiness({
-      enabled,
-      bots: liveSettings.customBots,
-      readKey: (bot) => customBotCredential(bot.id)?.apiKey,
-    });
-  ipcMain.handle("judge:readiness", async () => {
-    const ready = judgeReadyNow(true);
+  const judgeReadyNow = (enabled: boolean, bots: CustomBot[] = liveSettings.customBots) =>
+    judgeReadiness({ enabled, bots, readKey: botApiKey });
+  // The pane sends the bots it shows: this process learns of a saved bot only
+  // after the persistence debounce, and a switch must not lag a save.
+  ipcMain.handle("judge:readiness", async (_event, raw: { bots?: unknown }) => {
+    const sent = Array.isArray(raw?.bots)
+      ? raw.bots.filter(
+          (item): item is CustomBot =>
+            Boolean(item) && typeof item === "object" && typeof (item as CustomBot).id === "string" && typeof (item as CustomBot).baseUrl === "string" && typeof (item as CustomBot).model === "string",
+        )
+      : undefined;
+    const ready = judgeReadyNow(true, sent ?? liveSettings.customBots);
     return ready.ready ? { ready: true, botId: ready.botId } : { ready: false, why: ready.why };
   });
   ipcMain.handle("judge:report", async (_event, raw: { criteria?: unknown; report?: unknown; truncated?: unknown; workerStatus?: unknown }) => {
@@ -2115,7 +2122,8 @@ app.whenReady().then(async () => {
       endpoint: ready.endpoint,
       log: (line) => mainLog.record("judge", line),
     });
-    return "verdict" in outcome ? { verdict: outcome.verdict, botId: ready.botId } : outcome;
+    // The bot rides back either way: a call that gave no score may still have been billed.
+    return { ...outcome, botId: ready.botId };
   });
 
   /*

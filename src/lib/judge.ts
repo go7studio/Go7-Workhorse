@@ -46,6 +46,8 @@ export const JUDGE_REPORT_CHARS = REPORT_HEAD_CHARS + REPORT_TAIL_CHARS + 120;
  */
 export const JUDGE_MAX_TRIES = 2;
 export const JUDGE_RETRY_AFTER_MS = 30_000;
+/** After this long a run's failures are forgotten and it gets two tries again. */
+export const JUDGE_FORGET_AFTER_MS = 60 * 60_000;
 
 export type JudgeSettings = {
   enabled: boolean;
@@ -105,6 +107,13 @@ export type JudgeVerdict = {
 export type JudgeFailure = { at: number; why: string; tries: number };
 
 export type JudgeOutcome = { verdict: JudgeVerdict } | { failed: JudgeFailure };
+
+/**
+ * An outcome pinned to the run it scored. A worker keeps its session id when
+ * it is reused for a new run, so an outcome that landed late must not be
+ * worn by the run that replaced the one it judged.
+ */
+export type RunJudgeOutcome = JudgeOutcome & { runStartedAt: number };
 
 /** What rides on a status or await payload beside the report. */
 export type ReportSays =
@@ -301,18 +310,38 @@ export function normalizeJudgeFailure(raw: unknown): JudgeFailure | undefined {
   return { at: row.at, why: row.why, tries: Math.max(0, Math.floor(row.tries)) };
 }
 
-/** Whether a finished run goes to the judge now: no score yet, a try left, and the retry gap past. */
+/**
+ * Whether a finished run goes to the judge now: no score yet, a try left,
+ * and the retry gap past. Failures older than an hour are forgotten, so a
+ * gateway that was down does not close a report for good.
+ */
 export function judgeMayTry(run: { verdict?: JudgeVerdict; judgeFailed?: JudgeFailure } | undefined, now: number): boolean {
   if (!run || run.verdict) return false;
   const failed = run.judgeFailed;
   if (!failed) return true;
+  if (now - failed.at >= JUDGE_FORGET_AFTER_MS) return true;
   if (failed.tries >= JUDGE_MAX_TRIES) return false;
   return now - failed.at >= JUDGE_RETRY_AFTER_MS;
 }
 
-/** The failure to keep after a call that gave no score. Only a call that reached the gateway counts as a try. */
+/** The failure to keep after a call that gave no score. Only a call that reached the gateway counts as a try; tries older than an hour do not carry. */
 export function judgeFailureAfter(previous: JudgeFailure | undefined, why: string, called: boolean, at: number): JudgeFailure {
-  return { at, why, tries: (previous?.tries ?? 0) + (called ? 1 : 0) };
+  const carried = previous && at - previous.at < JUDGE_FORGET_AFTER_MS ? previous.tries : 0;
+  return { at, why, tries: carried + (called ? 1 : 0) };
+}
+
+/**
+ * Runs with their failures forgotten: the person saved a bot or switched the
+ * judge back on, which is them asking for another try. Scores stay.
+ */
+export function forgetJudgeFailures<T extends { agentRun?: { judgeFailed?: JudgeFailure } }>(sessions: T[]): T[] {
+  if (!sessions.some((session) => session.agentRun?.judgeFailed)) return sessions;
+  return sessions.map((session) => {
+    if (!session.agentRun?.judgeFailed) return session;
+    const run = { ...session.agentRun };
+    delete run.judgeFailed;
+    return { ...session, agentRun: run };
+  });
 }
 
 const GATEWAY_HOST = /(^|\.)ai-gateway\.vercel\.sh$/i;
@@ -323,10 +352,10 @@ const GATEWAY_HOST = /(^|\.)ai-gateway\.vercel\.sh$/i;
  * The judge has no key of its own, no ring, and no model the person did not
  * approve; its spend shows on that bot's credits.
  */
-export function judgeBotFor<T extends { baseUrl: string; model: string; models?: string[]; apiKey?: string; credentialId?: string; enabled?: boolean }>(
+export function judgeBotsFor<T extends { baseUrl: string; model: string; models?: string[]; apiKey?: string; credentialId?: string; enabled?: boolean }>(
   bots: T[],
-): T | undefined {
-  return bots.find((bot) => {
+): T[] {
+  return bots.filter((bot) => {
     if (bot.enabled === false) return false;
     // A key just typed sits on the bot until the vault hands back its id.
     if (!bot.apiKey?.trim() && !bot.credentialId) return false;
@@ -337,6 +366,13 @@ export function judgeBotFor<T extends { baseUrl: string; model: string; models?:
       return false;
     }
   });
+}
+
+/** The first bot the judge could borrow. Main walks all of them, since only main can tell whose key is real. */
+export function judgeBotFor<T extends { baseUrl: string; model: string; models?: string[]; apiKey?: string; credentialId?: string; enabled?: boolean }>(
+  bots: T[],
+): T | undefined {
+  return judgeBotsFor(bots)[0];
 }
 
 /**

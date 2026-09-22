@@ -1,4 +1,15 @@
-import { JUDGE_MODEL, boundJudgeReport, declaredStatus, judgeFailureAfter, judgeMayTry, normalizeJudge, type JudgeOutcome, type JudgeSettings } from "./judge";
+import {
+  JUDGE_MODEL,
+  boundJudgeReport,
+  declaredStatus,
+  forgetJudgeFailures,
+  judgeFailureAfter,
+  judgeMayTry,
+  normalizeJudge,
+  type JudgeOutcome,
+  type JudgeSettings,
+  type RunJudgeOutcome,
+} from "./judge";
 import {
   useCallback,
   useEffect,
@@ -1294,7 +1305,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const forkFromRef = useRef<(messageId: string, sessionId?: string) => void>(() => undefined);
   const stateRef = useRef<AppState>(EMPTY);
   // Reports being scored right now, so two payload builds in flight do not bill twice.
-  const judgingRef = useRef<Map<string, Promise<JudgeOutcome>>>(new Map());
+  const judgingRef = useRef<Map<string, Promise<RunJudgeOutcome>>>(new Map());
   const workerNameReservations = useRef<WorkerNameReservation[]>([]);
   const deskSkillsRef = useRef<DeskSkill[]>([]);
   const grokAssistantId = useRef<Record<string, string>>({});
@@ -4012,10 +4023,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
    * Finished mission workers in `ids` with no score yet go to the judge, at
    * most twice each. A poll that lands mid-call waits on that same call, so
    * two payload builds never bill twice. Every outcome, score or failure,
-   * lands on the run and comes back for the payload being built now.
+   * lands on the run it scored, by session and run start, and comes back for
+   * the payload being built now. A worker reused while a call was out keeps
+   * its id and gets a new run; that run never wears the old outcome.
    */
-  const judgeCompletedWorkers = useCallback(async (ids: Iterable<string>): Promise<Map<string, JudgeOutcome>> => {
-    const outcomes = new Map<string, JudgeOutcome>();
+  const judgeCompletedWorkers = useCallback(async (ids: Iterable<string>): Promise<Map<string, RunJudgeOutcome>> => {
+    const outcomes = new Map<string, RunJudgeOutcome>();
     const judge = window.workhorse?.judgeReport;
     if (!stateRef.current.settings.judge?.enabled || !judge) return outcomes;
     const wanted = new Set(ids);
@@ -4027,8 +4040,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         (session.agentRun.mission?.acceptanceCriteria?.length ?? 0) > 0 &&
         judgeMayTry(session.agentRun, now),
     );
-    const judgeOne = async (session: Session): Promise<JudgeOutcome> => {
+    const judgeOne = async (session: Session): Promise<RunJudgeOutcome> => {
       const run = session.agentRun!;
+      const runStartedAt = run.startedAt;
       const fail = (why: string, called: boolean): JudgeOutcome => ({ failed: judgeFailureAfter(run.judgeFailed, why, called, Date.now()) });
       const attempt = async (): Promise<JudgeOutcome> => {
         const report = workerReportText(session);
@@ -4041,38 +4055,42 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           truncated: bounded.truncated,
           workerStatus: declaredStatus(report),
         });
-        if (!result?.verdict) return fail(result?.why ?? "no verdict", result?.called === true);
-        // The judge's tokens are this worker's spend, on the bot whose key it borrowed.
-        if (result.verdict.usage && result.botId) {
+        // The judge's tokens are this worker's spend, on the bot whose key it
+        // borrowed, whether or not a verdict came back: a 200 with nothing
+        // usable in it was billed all the same.
+        const usage = result?.verdict?.usage ?? result?.usage;
+        if (usage && result?.botId) {
           recordUsage({
             provider: "custom",
             model: JUDGE_MODEL,
             customBotId: result.botId,
             sessionId: session.id,
             projectId: session.projectId ?? undefined,
-            inputTokens: result.verdict.usage.inputTokens ?? 0,
-            outputTokens: result.verdict.usage.outputTokens ?? 0,
+            inputTokens: usage.inputTokens ?? 0,
+            outputTokens: usage.outputTokens ?? 0,
             source: "request",
           });
         }
+        if (!result?.verdict) return fail(result?.why ?? "no verdict", result?.called === true);
         return { verdict: result.verdict };
       };
       const outcome = await attempt().catch((error: unknown) => fail(`desk error: ${error instanceof Error ? error.message : String(error)}`, false));
       setState((current) => ({
         ...current,
         sessions: current.sessions.map((item) =>
-          item.id === session.id && item.agentRun && !item.agentRun.verdict
+          item.id === session.id && item.agentRun && item.agentRun.startedAt === runStartedAt && !item.agentRun.verdict
             ? { ...item, agentRun: "verdict" in outcome ? { ...item.agentRun, verdict: outcome.verdict } : { ...item.agentRun, judgeFailed: outcome.failed } }
             : item,
         ),
       }));
-      return outcome;
+      return { ...outcome, runStartedAt };
     };
     await Promise.all(
       targets.map(async (session) => {
-        const inflight = judgingRef.current.get(session.id);
-        const task = inflight ?? judgeOne(session).finally(() => judgingRef.current.delete(session.id));
-        if (!inflight) judgingRef.current.set(session.id, task);
+        const key = `${session.id}:${session.agentRun!.startedAt}`;
+        const inflight = judgingRef.current.get(key);
+        const task = inflight ?? judgeOne(session).finally(() => judgingRef.current.delete(key));
+        if (!inflight) judgingRef.current.set(key, task);
         outcomes.set(session.id, await task);
       }),
     );
@@ -8432,8 +8450,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           current.lastModel.customBotId === id
             ? { ...current.lastModel, model: repairModel(current.lastModel.model) }
             : current.lastModel,
-        sessions: current.sessions.map((session) =>
-          session.customBotId === id ? { ...session, model: repairModel(session.model) } : session,
+        // A saved bot is also the person asking for reports the judge gave up
+        // on to be tried again; the failures go, the scores stay.
+        sessions: forgetJudgeFailures(
+          current.sessions.map((session) => (session.customBotId === id ? { ...session, model: repairModel(session.model) } : session)),
         ),
       };
     });
@@ -8785,6 +8805,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         ...current.settings,
         judge: normalizeJudge({ ...(current.settings.judge ?? {}), ...patch }),
       },
+      // Switching the judge on again is asking for another try at the reports it gave up on.
+      sessions: patch.enabled === true ? forgetJudgeFailures(current.sessions) : current.sessions,
     }));
   }, []);
 

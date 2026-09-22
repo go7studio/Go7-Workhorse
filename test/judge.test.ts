@@ -4,6 +4,7 @@ import {
   CLAIM_KEY,
   DEFAULT_JUDGE,
   JUDGE_CRITERION_CHARS,
+  JUDGE_FORGET_AFTER_MS,
   JUDGE_MAX_CRITERIA,
   JUDGE_MAX_TRIES,
   JUDGE_MODEL,
@@ -15,8 +16,10 @@ import {
   SPECIFICITY_KEY,
   boundJudgeReport,
   declaredStatus,
+  forgetJudgeFailures,
   judgeBlockLines,
   judgeBotFor,
+  judgeBotsFor,
   judgeCriteriaProblem,
   judgeFailureAfter,
   judgeMayTry,
@@ -63,6 +66,8 @@ test("the judge borrows the Vercel bot's key only when jev is ticked like any ot
   ];
   assert.equal(judgeBotFor(bots)?.id, "c");
   assert.equal(judgeBotFor(bots.filter((bot) => bot.id !== "c")), undefined);
+  // Every candidate, in order: main walks them, since only main can tell whose key is real.
+  assert.deepEqual(judgeBotsFor([...bots, { id: "f", baseUrl: VERCEL, model: JUDGE_MODEL, credentialId: "k6" }]).map((bot) => bot.id), ["c", "f"]);
   assert.equal(judgeBotFor([{ baseUrl: "not a url", model: JUDGE_MODEL, credentialId: "k" }]), undefined);
   // A key just typed sits on the bot until the vault hands back its id. That bot is ready; a blank key is not.
   assert.equal(judgeBotFor([{ baseUrl: VERCEL, model: JUDGE_MODEL, apiKey: "vck_fresh" }])?.apiKey, "vck_fresh");
@@ -178,11 +183,21 @@ test("a report goes to the judge at most twice, never twice within the retry gap
   assert.equal(judgeMayTry({ judgeFailed: first }, 1_000 + JUDGE_RETRY_AFTER_MS), true);
   const second = judgeFailureAfter(first, "403: no", true, 60_000);
   assert.equal(second.tries, JUDGE_MAX_TRIES);
-  assert.equal(judgeMayTry({ judgeFailed: second }, 1e9), false);
+  // Exhausted for the rest of the hour.
+  assert.equal(judgeMayTry({ judgeFailed: second }, 60_000 + JUDGE_FORGET_AFTER_MS - 1), false);
   // No bot, no key, nothing to send: the desk answered without the gateway. That is not a try.
   const cheap = judgeFailureAfter(undefined, "no-key", false, 5);
   assert.equal(cheap.tries, 0);
   assert.equal(judgeMayTry({ judgeFailed: cheap }, 5 + JUDGE_RETRY_AFTER_MS), true);
+  // An hour on, the failures are forgotten: two tries again, counted from zero.
+  assert.equal(judgeMayTry({ judgeFailed: second }, 60_000 + JUDGE_FORGET_AFTER_MS), true);
+  assert.equal(judgeFailureAfter(second, "503: gone", true, 60_000 + JUDGE_FORGET_AFTER_MS).tries, 1);
+  // Saving a bot or switching the judge back on forgets them now. Scores stay.
+  const sessions = [{ id: "a", agentRun: { judgeFailed: second } }, { id: "b", agentRun: { verdict } }, { id: "c" }];
+  const forgotten = forgetJudgeFailures(sessions);
+  assert.equal("judgeFailed" in forgotten[0].agentRun!, false);
+  assert.deepEqual(forgotten[1], sessions[1]);
+  assert.equal(forgetJudgeFailures(forgotten), forgotten);
 });
 
 test("wave: a criterion shown by any report is not listed; not shown only when every scored report says so", () => {
@@ -251,6 +266,12 @@ test("client: posts the model in the body to <base>/evaluate and keeps only well
   }
   // The judge answers inside a status reply, and the Link's bridge waits 8 seconds for one.
   assert.ok(JUDGE_TIMEOUT_MS < 8_000);
+  // A 200 with nothing usable was billed all the same: the failure carries the bill and says the gateway was reached.
+  const billed = await callJudge(endpoint, {}, questions, { fetchImpl: fakeFetch(200, { answers: { claim: { type: "choice", choice: "consistent" } }, usage: { inputTokens: 100, outputTokens: 5 } }) });
+  assert.deepEqual([billed.ok, (billed as { reached: boolean }).reached, (billed as { usage?: unknown }).usage], [false, true, { inputTokens: 100, outputTokens: 5 }]);
+  // A request that never left is no try: DNS, TLS, no network.
+  const offline = await callJudge(endpoint, {}, questions, { fetchImpl: async () => { throw new TypeError("fetch failed"); } });
+  assert.deepEqual([offline.ok, (offline as { reason: string }).reason, (offline as { reached: boolean }).reached], [false, "fetch failed", false]);
 });
 
 test("client: never throws; a 400, a 403, a non-JSON body and a timeout come back as ok:false", async () => {
@@ -267,6 +288,8 @@ test("client: never throws; a 400, a 403, a non-JSON body and a timeout come bac
     fetchImpl: (_url, init) => new Promise((_resolve, reject) => init.signal?.addEventListener("abort", () => reject(Object.assign(new Error("aborted"), { name: "AbortError" })))),
   });
   assert.match((slow as { reason: string }).reason, /timed out after 20 ms/);
+  // A timeout may have been billed on the far side; it counts as reached.
+  assert.equal((slow as { reached: boolean }).reached, true);
 });
 
 test("bounds: too many or too long criteria, or a report past the cut, never reach the gateway", async () => {
@@ -301,6 +324,11 @@ test("desk: readiness names why the judge would not run, reads the key the way a
   // A fresh bot holds its key in memory until the vault hands back an id; the caller's own resolution reads it.
   const fresh = [{ id: "f", name: "Vercel", color: "#000", baseUrl: VERCEL, model: JUDGE_MODEL, apiKey: "vck_fresh" }] as never;
   assert.equal(judgeReadiness({ enabled: true, bots: fresh, readKey: (bot) => bot.apiKey }).ready, true);
+  // One stale slot does not hide a good one: every jev bot is tried, the first with a real key wins.
+  const stale = { id: "s", name: "Old", color: "#000", baseUrl: VERCEL, model: JUDGE_MODEL, credentialId: "gone" };
+  const two = judgeReadiness({ enabled: true, bots: [stale, ...(bots as never[])] as never, readKey: (bot) => (bot.credentialId === "cred" ? "vck_x" : null) });
+  assert.equal(two.ready && two.botId, "v");
+  assert.deepEqual(judgeReadiness({ enabled: true, bots: [stale] as never, readKey: () => null }), { ready: false, why: "no-key" });
   const lines: string[] = [];
   const outcome = await judgeReport({
     criteria: CRITERIA,
@@ -324,6 +352,17 @@ test("desk: readiness names why the judge would not run, reads the key the way a
     { why: "403: no", called: true },
   );
   assert.match(failed[0], /judge: no verdict \(403: no\)/);
+  // No verdict, but billed: the outcome carries the bill so the ledger still gets it.
+  const billed = await judgeReport({
+    criteria: CRITERIA,
+    report: "x",
+    endpoint: ready.endpoint,
+    fetchImpl: fakeFetch(200, { answers: { claim: { type: "choice", choice: "consistent" } }, usage: { inputTokens: 100, outputTokens: 5 } }),
+  });
+  assert.deepEqual(billed, { why: "200: no criterion answers in response", called: true, usage: { inputTokens: 100, outputTokens: 5 } });
+  // A request that never left is not a try.
+  const offline = await judgeReport({ criteria: CRITERIA, report: "x", endpoint: ready.endpoint, fetchImpl: async () => { throw new TypeError("fetch failed"); } });
+  assert.deepEqual(offline, { why: "fetch failed", called: false });
 });
 
 test("the judge reads this run's reply, not a reused worker's earlier pass; outcomes land on the run", () => {
@@ -343,10 +382,20 @@ test("the judge reads this run's reply, not a reused worker's earlier pass; outc
   assert.equal(workerReportText({ messages: [earlier], retainedReport: "kept", agentRun: run }), "");
   const verdict = verdictFromAnswers(CRITERIA, LIVE_ANSWERS, { at: 1 });
   const failed = { at: 2, why: "timed out after 4000 ms", tries: 1 };
-  const sessions = [{ id: "a", agentRun: run }, { id: "b", agentRun: run }, { id: "c" }] as unknown as Session[];
-  const applied = applyJudgeOutcomes(sessions, new Map([["a", { verdict }], ["b", { failed }], ["c", { failed }]]));
+  const sessions = [{ id: "a", agentRun: run }, { id: "b", agentRun: run }, { id: "c" }, { id: "d", agentRun: run }] as unknown as Session[];
+  const applied = applyJudgeOutcomes(
+    sessions,
+    new Map([
+      ["a", { verdict, runStartedAt: 100 }],
+      ["b", { failed, runStartedAt: 100 }],
+      ["c", { failed, runStartedAt: 100 }],
+      // Scored run 5; the worker was reused and now runs 100. That outcome is not this run's.
+      ["d", { verdict, runStartedAt: 5 }],
+    ]),
+  );
   assert.deepEqual(applied[0].agentRun?.verdict, verdict);
   assert.deepEqual(applied[1].agentRun?.judgeFailed, failed);
   assert.equal(applied[2].agentRun, undefined);
+  assert.equal(applied[3], sessions[3]);
   assert.equal(applyJudgeOutcomes(sessions, new Map()), sessions);
 });

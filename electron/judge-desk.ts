@@ -6,7 +6,7 @@ import { callJudge, type FetchLike, type JudgeEndpoint } from "./judge-client";
 import {
   JUDGE_MODEL,
   JUDGE_REPORT_CHARS,
-  judgeBotFor,
+  judgeBotsFor,
   judgeCriteriaProblem,
   judgeQuestions,
   judgeState,
@@ -22,7 +22,8 @@ export type JudgeReadiness =
 /**
  * Why the judge would not run, or the endpoint it runs on. `readKey` is the
  * caller's own resolution for a bot's key, so the judge borrows it the way a
- * chat on that bot does.
+ * chat on that bot does. Every bot with jev ticked is tried; the first with
+ * a real key wins, so one stale slot does not hide a good one.
  */
 export function judgeReadiness(input: {
   enabled: boolean;
@@ -30,11 +31,13 @@ export function judgeReadiness(input: {
   readKey: (bot: CustomBot) => string | null | undefined;
 }): JudgeReadiness {
   if (!input.enabled) return { ready: false, why: "off" };
-  const bot = judgeBotFor(input.bots);
-  if (!bot) return { ready: false, why: "no-bot" };
-  const apiKey = input.readKey(bot)?.trim();
-  if (!apiKey) return { ready: false, why: "no-key" };
-  return { ready: true, endpoint: { baseUrl: bot.baseUrl, apiKey, model: JUDGE_MODEL }, botId: bot.id };
+  const candidates = judgeBotsFor(input.bots);
+  if (candidates.length === 0) return { ready: false, why: "no-bot" };
+  for (const bot of candidates) {
+    const apiKey = input.readKey(bot)?.trim();
+    if (apiKey) return { ready: true, endpoint: { baseUrl: bot.baseUrl, apiKey, model: JUDGE_MODEL }, botId: bot.id };
+  }
+  return { ready: false, why: "no-key" };
 }
 
 export type JudgeReportInput = {
@@ -49,8 +52,11 @@ export type JudgeReportInput = {
   now?: () => number;
 };
 
-/** One report, one outcome. No score says why, and whether the call reached the gateway, so the desk can count tries. */
-export type JudgeReportOutcome = { verdict: JudgeVerdict } | { why: string; called: boolean };
+/**
+ * One report, one outcome. No score says why, whether the call reached the
+ * gateway (so the desk can count tries), and what was billed anyway.
+ */
+export type JudgeReportOutcome = { verdict: JudgeVerdict } | { why: string; called: boolean; usage?: JudgeVerdict["usage"] };
 
 /**
  * Nothing to judge (no criteria, no report) is not an error; it is no
@@ -74,7 +80,7 @@ export async function judgeReport(input: JudgeReportInput): Promise<JudgeReportO
   const result = await callJudge(input.endpoint, state, questions, { fetchImpl: input.fetchImpl });
   if (!result.ok) {
     input.log?.(`judge: no verdict (${result.status ?? "network"}: ${result.reason}) after ${result.elapsedMs} ms`);
-    return { why: result.status ? `${result.status}: ${result.reason}` : result.reason, called: true };
+    return { why: result.status ? `${result.status}: ${result.reason}` : result.reason, called: result.reached, ...(result.usage ? { usage: result.usage } : {}) };
   }
   const verdict = verdictFromAnswers(criteria, result.answers, {
     model: result.model,

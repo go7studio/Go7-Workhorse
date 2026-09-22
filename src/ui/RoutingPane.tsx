@@ -59,7 +59,7 @@ export function RoutingPane() {
     let live = true;
     const ask = window.workhorse?.judgeReadiness;
     if (!ask) return;
-    ask()
+    ask({ bots })
       .then((result) => {
         if (live) setJudgeCheck(result);
       })

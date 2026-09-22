@@ -23,7 +23,16 @@ export type JudgeCallResult =
       usage?: { inputTokens?: number; outputTokens?: number };
       elapsedMs: number;
     }
-  | { ok: false; reason: string; status?: number; elapsedMs: number };
+  | {
+      ok: false;
+      reason: string;
+      status?: number;
+      elapsedMs: number;
+      /** False only when the request never left: DNS, TLS, no network. A timeout may have been billed and counts as reached. */
+      reached: boolean;
+      /** What the gateway billed for an answer that gave no verdict. */
+      usage?: { inputTokens?: number; outputTokens?: number };
+    };
 
 export type FetchLike = (input: string, init: RequestInit) => Promise<Response>;
 
@@ -47,6 +56,16 @@ function readNumber(value: unknown): number | undefined {
 function readUnit(value: unknown): number | undefined {
   const number = readNumber(value);
   return number !== undefined && number >= 0 && number <= 1 ? number : undefined;
+}
+
+function readUsage(raw: unknown): { inputTokens?: number; outputTokens?: number } | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const record = raw as { inputTokens?: unknown; outputTokens?: unknown };
+  const usage = {
+    ...(readNumber(record.inputTokens) !== undefined ? { inputTokens: readNumber(record.inputTokens) } : {}),
+    ...(readNumber(record.outputTokens) !== undefined ? { outputTokens: readNumber(record.outputTokens) } : {}),
+  };
+  return Object.keys(usage).length > 0 ? usage : undefined;
 }
 
 /** Keeps only answers whose type matches the question it answers and whose numbers are on the question's scale. */
@@ -120,34 +139,35 @@ export async function callJudge(
         typeof (body as { error: { message?: unknown } }).error.message === "string"
           ? (body as { error: { message: string } }).error.message
           : `HTTP ${response.status}`;
-      return { ok: false, reason: message, status: response.status, elapsedMs };
+      return { ok: false, reason: message, status: response.status, elapsedMs, reached: true };
     }
-    if (!body || typeof body !== "object") return { ok: false, reason: "empty or non-JSON response", status: response.status, elapsedMs };
-    const record = body as { model?: unknown; answers?: unknown; usage?: { inputTokens?: unknown; outputTokens?: unknown } };
+    if (!body || typeof body !== "object") return { ok: false, reason: "empty or non-JSON response", status: response.status, elapsedMs, reached: true };
+    const record = body as { model?: unknown; answers?: unknown; usage?: unknown };
+    // Read the bill before judging the answers: a 200 with nothing usable was still billed.
+    const usage = readUsage(record.usage);
     const answers = readAnswers(record.answers, questions);
     // A verdict needs at least one criterion scored. The claim and the
     // specificity alone would persist as a scored report with every
     // criterion unclear, which reads as a verdict and is none.
     if (!Object.values(answers).some((answer) => answer.type === "boolean")) {
-      return { ok: false, reason: "no criterion answers in response", status: response.status, elapsedMs };
+      return { ok: false, reason: "no criterion answers in response", status: response.status, elapsedMs, reached: true, ...(usage ? { usage } : {}) };
     }
-    const usage = record.usage && typeof record.usage === "object"
-      ? {
-          ...(readNumber(record.usage.inputTokens) !== undefined ? { inputTokens: readNumber(record.usage.inputTokens) } : {}),
-          ...(readNumber(record.usage.outputTokens) !== undefined ? { outputTokens: readNumber(record.usage.outputTokens) } : {}),
-        }
-      : undefined;
     return {
       ok: true,
       model: typeof record.model === "string" && record.model ? record.model : endpoint.model ?? JUDGE_MODEL,
       answers,
-      ...(usage && Object.keys(usage).length > 0 ? { usage } : {}),
+      ...(usage ? { usage } : {}),
       elapsedMs,
     };
   } catch (error) {
     const elapsedMs = Date.now() - started;
     const aborted = error instanceof Error && error.name === "AbortError";
-    return { ok: false, reason: aborted ? `timed out after ${options.timeoutMs ?? JUDGE_TIMEOUT_MS} ms` : error instanceof Error ? error.message : String(error), elapsedMs };
+    return {
+      ok: false,
+      reason: aborted ? `timed out after ${options.timeoutMs ?? JUDGE_TIMEOUT_MS} ms` : error instanceof Error ? error.message : String(error),
+      elapsedMs,
+      reached: aborted,
+    };
   } finally {
     clearTimeout(timer);
   }

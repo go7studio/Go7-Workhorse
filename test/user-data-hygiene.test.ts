@@ -608,6 +608,11 @@ test("pruneOrphanWorktrees keeps a .godot holding anything Godot did not write",
     ["editor/secrets.cfg", "a cfg the person wrote"],
     ["shader_cache/only-copy.cache", "a cache-shaped name that is not a shader"],
     [`shader_cache/CanvasShaderRD/a1b2c3d4e5f60718/notes.cache`, "not a hash name"],
+    // Round three: suffixes and tokens wider than Godot's own.
+    ["editor/favorites.txt", "a note named like a list"],
+    ["editor/create_recent.notes", "a note named like a list"],
+    ["editor/favorites.cfg", "a cfg named like a list"],
+    [`shader_cache/CanvasShaderRD/a1b2c3d4e5f60718/0f1e2d3c4b5a6978.notes.cache`, "not a driver"],
   ];
   for (const [relative, body] of probes) {
     const { root, managed, cache } = godotTree(`godot-${relative.replace(/[^a-z]/gi, "")}`);
@@ -642,7 +647,7 @@ test("pruneOrphanWorktrees keeps a .godot folder with no project.godot beside it
 });
 
 test("pruneOrphanWorktrees drops a TypeScript build record beside its tsconfig, and nothing that only borrows the name", () => {
-  const record = JSON.stringify({ program: { fileNames: ["./a.ts"] }, version: "5.6.2" });
+  const record = JSON.stringify({ program: { fileNames: ["../node_modules/typescript/lib/lib.d.ts", "./a.ts"] }, version: "5.4.5" });
   const beside = repoWithWorktree("tsbuildinfo", { ".gitignore": "*.tsbuildinfo\n", "tsconfig.json": "{}\n" });
   fs.writeFileSync(path.join(beside.wt, "tsconfig.tsbuildinfo"), record);
   assert.deepEqual(pruneOrphanWorktrees(beside.managed, []).removed, ["sess_gone"]);
@@ -654,6 +659,8 @@ test("pruneOrphanWorktrees drops a TypeScript build record beside its tsconfig, 
     ["ts-noversion", "app.tsbuildinfo", JSON.stringify({ program: {} }), { "tsconfig.json": "{}\n" }],
     ["ts-fake", "diary.tsbuildinfo", JSON.stringify({ version: "not a compiler", program: "the only copy of the chapter" }), { "tsconfig.json": "{}\n" }],
     ["ts-prose-program", "diary.tsbuildinfo", JSON.stringify({ version: "5.6.2", program: "the only copy of the chapter" }), { "tsconfig.json": "{}\n" }],
+    ["ts-prose-object", "diary.tsbuildinfo", JSON.stringify({ version: "5.6.2", program: { text: "the only copy of the chapter" } }), { "tsconfig.json": "{}\n" }],
+    ["ts-prose-root", "diary.tsbuildinfo", JSON.stringify({ version: "5.6.2", root: ["the only copy of the chapter"] }), { "tsconfig.json": "{}\n" }],
   ] as Array<[string, string, string, Record<string, string>]>) {
     const made = repoWithWorktree(label, { ".gitignore": "*.tsbuildinfo\n", ...files });
     fs.writeFileSync(path.join(made.wt, name), body);

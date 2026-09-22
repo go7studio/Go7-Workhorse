@@ -356,13 +356,13 @@ const GODOT_TOP_FILES = new Set(["uid_cache.bin", "global_script_class_cache.cfg
  */
 const GODOT_IMPORTED =
   /^.+-[0-9a-f]{32}(\.(s3tc|etc|etc2|bptc|astc))?\.(md5|ctex|ctexarray|ccube|ccubearray|ctex3d|stex|sample|oggvorbisstr|mp3str|fontdata|scn|res|mesh|image)$/;
-/** The editor's own files, by the names it gives them. */
+/** The editor's own files, by the names it gives them. `favorites` and `create_recent` carry a class name. */
 const GODOT_EDITOR =
-  /^(editor_layout\.cfg|project_metadata\.cfg|script_editor_cache\.cfg|shader_editor_cache\.cfg|.+-(folding|editstate)-[0-9a-f]{32}\.cfg|filesystem_cache\d+|filesystem_update\d+|recent_dirs|create_recent\.[A-Za-z0-9_]+|favorites\.[A-Za-z0-9_]+)$/;
+  /^(editor_layout\.cfg|project_metadata\.cfg|script_editor_cache\.cfg|shader_editor_cache\.cfg|.+-(folding|editstate)-[0-9a-f]{32}\.cfg|filesystem_cache\d+|filesystem_update\d+|recent_dirs|create_recent\.[A-Z][A-Za-z0-9]*|favorites\.[A-Z][A-Za-z0-9]*)$/;
 /** `shader_cache/<Name>Shader.../<hash>/<hash>[.<driver>].cache`. */
 const GODOT_SHADER_GROUP = /^[A-Za-z0-9_]*Shader[A-Za-z0-9_]*$/;
 const GODOT_SHADER_HASH = /^[0-9a-f]{16,64}$/;
-const GODOT_SHADER_FILE = /^[0-9a-f]{16,64}(\.[a-z0-9]+)?\.cache$/;
+const GODOT_SHADER_FILE = /^[0-9a-f]{16,64}(\.(vulkan|metal|d3d12|opengl3|gles3|spirv))?\.cache$/;
 const GODOT_WALK_LIMIT = 20_000;
 
 function godotCacheOnly(dir: string): boolean {
@@ -424,8 +424,12 @@ function godotRebuilds(target: string, listed: string): boolean {
 
 /**
  * TypeScript's incremental build record, in the folder whose tsconfig rebuilds
- * it, and only when it reads as one: JSON naming the compiler version and a
- * program or its roots. A file that only borrows the name keeps the tree.
+ * it, and only when it reads as one: JSON naming a compiler version and the
+ * code files the compiler recorded (`program.fileNames`, `fileNames`, or `root`
+ * as code paths or file ids). A file that only borrows the name keeps the tree.
+ * A file built to copy that shape exactly would pass; nothing short of running
+ * the compiler tells the two apart, and nothing a person writes by hand looks
+ * like this.
  */
 function tsBuildInfoRebuilds(target: string, listed: string): boolean {
   if (!listed.endsWith(".tsbuildinfo")) return false;
@@ -435,11 +439,24 @@ function tsBuildInfoRebuilds(target: string, listed: string): boolean {
     const stat = fs.lstatSync(file);
     if (!stat.isFile() || stat.size > 64 * 1024 * 1024) return false;
     const record = JSON.parse(fs.readFileSync(file, "utf8")) as Record<string, unknown>;
-    // A compiler version, and the program the compiler recorded (an object) or
-    // the roots it builds from (a list). Prose under those names is not one.
     const version = typeof record.version === "string" && /^\d+\.\d+\.\d+/.test(record.version);
-    const program = record.program !== null && typeof record.program === "object" && !Array.isArray(record.program);
-    return version && (program || Array.isArray(record.root));
+    const code = (item: unknown) => typeof item === "string" && /\.(d\.)?[cm]?[jt]sx?$|\.json$/.test(item);
+    const codeFiles = (list: unknown) => Array.isArray(list) && list.length > 0 && list.every(code);
+    const program =
+      record.program !== null && typeof record.program === "object" && !Array.isArray(record.program)
+        ? (record.program as Record<string, unknown>)
+        : null;
+    // `root` holds code paths, or file ids and id ranges, never prose.
+    const roots =
+      Array.isArray(record.root) &&
+      record.root.length > 0 &&
+      record.root.every(
+        (item) =>
+          code(item) ||
+          (typeof item === "number" && Number.isInteger(item)) ||
+          (Array.isArray(item) && item.length === 2 && item.every((n) => typeof n === "number" && Number.isInteger(n))),
+      );
+    return version && (codeFiles(program?.fileNames) || codeFiles(record.fileNames) || roots);
   } catch {
     return false;
   }

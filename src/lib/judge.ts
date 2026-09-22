@@ -113,7 +113,16 @@ export type JudgeOutcome = { verdict: JudgeVerdict } | { failed: JudgeFailure };
  * it is reused for a new run, so an outcome that landed late must not be
  * worn by the run that replaced the one it judged.
  */
-export type RunJudgeOutcome = JudgeOutcome & { runStartedAt: number };
+export type RunJudgeOutcome = JudgeOutcome & { runKey: string };
+
+/**
+ * The run an outcome belongs to. `runId` is minted per run and never carries
+ * to the next; runs saved by older desks have none and fall back to their
+ * start, which is a clock, not an identity, but all those runs have.
+ */
+export function judgeRunKey(run: { runId?: string; startedAt: number }): string {
+  return run.runId ? `run:${run.runId}` : `start:${run.startedAt}`;
+}
 
 /** What rides on a status or await payload beside the report. */
 export type ReportSays =

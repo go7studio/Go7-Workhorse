@@ -3,8 +3,10 @@ import {
   boundJudgeReport,
   declaredStatus,
   forgetJudgeFailures,
+  judgeBotsFor,
   judgeFailureAfter,
   judgeMayTry,
+  judgeRunKey,
   normalizeJudge,
   type JudgeOutcome,
   type JudgeSettings,
@@ -196,7 +198,13 @@ import {
   shouldShadowRouteSessionTurn,
   spawnEffortFor,
 } from "./routing";
-import type { AgentSystemsSettings, ChatMessage, ExternalTask, FileLease } from "./types";
+import type {
+  AgentRun,
+  AgentSystemsSettings,
+  ChatMessage,
+  ExternalTask,
+  FileLease,
+} from "./types";
 import {
   approvePlanRun,
   assignPlanStep,
@@ -1305,7 +1313,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const forkFromRef = useRef<(messageId: string, sessionId?: string) => void>(() => undefined);
   const stateRef = useRef<AppState>(EMPTY);
   // Reports being scored right now, so two payload builds in flight do not bill twice.
-  const judgingRef = useRef<Map<string, Promise<RunJudgeOutcome>>>(new Map());
+  /**
+   * One slot per run the judge has been asked about, by session and run key.
+   * A slot holds the call while it is out and its outcome once it settles;
+   * the outcome stays until the store shows it on the run, because a poll
+   * that lands between the call settling and React committing must not
+   * start another call.
+   */
+  const judgingRef = useRef<Map<string, { task: Promise<RunJudgeOutcome>; settled?: RunJudgeOutcome }>>(new Map());
   const workerNameReservations = useRef<WorkerNameReservation[]>([]);
   const deskSkillsRef = useRef<DeskSkill[]>([]);
   const grokAssistantId = useRef<Record<string, string>>({});
@@ -4033,16 +4048,31 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     if (!stateRef.current.settings.judge?.enabled || !judge) return outcomes;
     const wanted = new Set(ids);
     const now = Date.now();
+    const slotKey = (session: Session) => `${session.id}:${judgeRunKey(session.agentRun!)}`;
+    // The run as the store will show it once React commits. A slot whose
+    // outcome the run already carries is done with and goes.
+    const runNow = (session: Session): AgentRun => {
+      const run = session.agentRun!;
+      const slot = judgingRef.current.get(slotKey(session));
+      if (!slot?.settled) return run;
+      const settled = slot.settled;
+      const shown = "verdict" in settled ? Boolean(run.verdict) : run.judgeFailed?.at === settled.failed.at;
+      if (shown) {
+        judgingRef.current.delete(slotKey(session));
+        return run;
+      }
+      return "verdict" in settled ? { ...run, verdict: settled.verdict } : { ...run, judgeFailed: settled.failed };
+    };
     const targets = stateRef.current.sessions.filter(
       (session) =>
         wanted.has(session.id) &&
         session.agentRun?.status === "completed" &&
         (session.agentRun.mission?.acceptanceCriteria?.length ?? 0) > 0 &&
-        judgeMayTry(session.agentRun, now),
+        judgeMayTry(runNow(session), now),
     );
     const judgeOne = async (session: Session): Promise<RunJudgeOutcome> => {
-      const run = session.agentRun!;
-      const runStartedAt = run.startedAt;
+      const run = runNow(session);
+      const runKey = judgeRunKey(run);
       const fail = (why: string, called: boolean): JudgeOutcome => ({ failed: judgeFailureAfter(run.judgeFailed, why, called, Date.now()) });
       const attempt = async (): Promise<JudgeOutcome> => {
         const report = workerReportText(session);
@@ -4078,20 +4108,26 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       setState((current) => ({
         ...current,
         sessions: current.sessions.map((item) =>
-          item.id === session.id && item.agentRun && item.agentRun.startedAt === runStartedAt && !item.agentRun.verdict
+          item.id === session.id && item.agentRun && judgeRunKey(item.agentRun) === runKey && !item.agentRun.verdict
             ? { ...item, agentRun: "verdict" in outcome ? { ...item.agentRun, verdict: outcome.verdict } : { ...item.agentRun, judgeFailed: outcome.failed } }
             : item,
         ),
       }));
-      return { ...outcome, runStartedAt };
+      return { ...outcome, runKey };
     };
     await Promise.all(
       targets.map(async (session) => {
-        const key = `${session.id}:${session.agentRun!.startedAt}`;
+        const key = slotKey(session);
         const inflight = judgingRef.current.get(key);
-        const task = inflight ?? judgeOne(session).finally(() => judgingRef.current.delete(key));
-        if (!inflight) judgingRef.current.set(key, task);
-        outcomes.set(session.id, await task);
+        if (inflight && !inflight.settled) {
+          outcomes.set(session.id, await inflight.task);
+          return;
+        }
+        const slot = { task: judgeOne(session) } as { task: Promise<RunJudgeOutcome>; settled?: RunJudgeOutcome };
+        judgingRef.current.set(key, slot);
+        const outcome = await slot.task;
+        slot.settled = outcome;
+        outcomes.set(session.id, outcome);
       }),
     );
     return outcomes;
@@ -6328,6 +6364,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               agentRun: {
                 status: "running",
                 startedAt,
+                runId: uid("run"),
                 isolation,
                 executionOwner: "workhorse",
                 ...assignmentBudget,
@@ -8443,6 +8480,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const customBots = applyUpdateCustomBot(current.settings.customBots, id, patch);
       const bot = customBots.find((item) => item.id === id);
       const repairModel = (model: string) => bot && customBotServes(bot, model) ? model : bot?.model ?? model;
+      const repaired = current.sessions.map((session) => (session.customBotId === id ? { ...session, model: repairModel(session.model) } : session));
+      const rearmsJudge =
+        bot !== undefined &&
+        judgeBotsFor([bot]).length > 0 &&
+        (["apiKey", "credentialId", "baseUrl", "models", "model", "enabled"] as const).some((field) => field in patch);
       return {
         ...current,
         settings: { ...current.settings, customBots },
@@ -8450,11 +8492,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           current.lastModel.customBotId === id
             ? { ...current.lastModel, model: repairModel(current.lastModel.model) }
             : current.lastModel,
-        // A saved bot is also the person asking for reports the judge gave up
-        // on to be tried again; the failures go, the scores stay.
-        sessions: forgetJudgeFailures(
-          current.sessions.map((session) => (session.customBotId === id ? { ...session, model: repairModel(session.model) } : session)),
-        ),
+        // A new key, host, model list or on-switch on a bot the judge could
+        // borrow is the person asking for the reports it gave up on to be
+        // tried again; the failures go, the scores stay. A name or a routing
+        // edit, or any edit to another bot, is not.
+        sessions: rearmsJudge
+          ? forgetJudgeFailures(repaired)
+          : repaired,
       };
     });
     // A new key or a new host is somebody asking for this bot to be tried now.

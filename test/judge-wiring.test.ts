@@ -32,15 +32,24 @@ test("scores ride as reportSays on both payloads, computed once at the payload, 
   const store = read("src", "lib", "store.tsx");
   // Both places a caller reads a report: agent-status and await-agents.
   assert.equal((store.match(/await judgeCompletedWorkers\(/g) ?? []).length, 2);
-  assert.match(store, /judgeMayTry\(session\.agentRun, now\)/);
-  // A poll that lands mid-call waits on that call instead of starting another; the call is keyed by
-  // session and run start, and its outcome fits only that run, so a worker reused meanwhile never wears it.
-  assert.match(store, /const key = `\$\{session\.id\}:\$\{session\.agentRun!\.startedAt\}`/);
-  assert.match(store, /judgingRef\.current\.get\(key\)/);
-  assert.match(store, /item\.agentRun\.startedAt === runStartedAt && !item\.agentRun\.verdict/);
-  assert.match(store, /return \{ \.\.\.outcome, runStartedAt \}/);
-  // Saving a bot or switching the judge back on forgets the failures it gave up on.
+  // A poll that lands mid-call waits on that call instead of starting another; a poll that lands after
+  // the call settled but before React committed reads the settled outcome from the slot, not the stale
+  // run. The slot is keyed by session and run id, and its outcome fits only that run, so a worker reused
+  // meanwhile never wears it.
+  assert.match(store, /const slotKey = \(session: Session\) => `\$\{session\.id\}:\$\{judgeRunKey\(session\.agentRun!\)\}`/);
+  assert.match(store, /if \(inflight && !inflight\.settled\)/);
+  assert.match(store, /slot\.settled = outcome/);
+  assert.match(store, /judgeMayTry\(runNow\(session\), now\)/);
+  assert.match(store, /judgeRunKey\(item\.agentRun\) === runKey && !item\.agentRun\.verdict/);
+  assert.match(store, /return \{ \.\.\.outcome, runKey \}/);
+  // Every run gets its own id at spawn; a continuation of a finished worker mints another and drops the score.
+  assert.match(store, /startedAt,\s*runId: uid\("run"\),/);
+  const subagentsSrc = read("src", "lib", "subagents.ts");
+  assert.match(subagentsSrc, /runId: uid\("run"\),\s*verdict: undefined,\s*judgeFailed: undefined,/);
+  // Switching the judge back on forgets the failures it gave up on; so does a key, host, model or
+  // on-switch edit on a bot the judge could borrow. A name edit, or an edit to another bot, does not.
   assert.ok((store.match(/forgetJudgeFailures\(/g) ?? []).length >= 2);
+  assert.match(store, /judgeBotsFor\(\[bot\]\)\.length > 0 &&\s*\(\["apiKey", "credentialId", "baseUrl", "models", "model", "enabled"\] as const\)\.some/);
   assert.match(store, /workerReportText\(session\)/);
   // The renderer cuts the report before IPC.
   assert.match(store, /truncated: bounded\.truncated/);

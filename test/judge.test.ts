@@ -24,6 +24,7 @@ import {
   judgeFailureAfter,
   judgeMayTry,
   judgeQuestions,
+  judgeRunKey,
   judgeState,
   normalizeJudge,
   normalizeJudgeFailure,
@@ -35,7 +36,7 @@ import {
 } from "../src/lib/judge";
 import { JUDGE_TIMEOUT_MS, callJudge, judgeUrl } from "../electron/judge-client";
 import { judgeReadiness, judgeReport } from "../electron/judge-desk";
-import { applyJudgeOutcomes, normalizeAgentRun, workerReportText } from "../src/lib/subagents";
+import { applyJudgeOutcomes, continueWorkerRun, normalizeAgentRun, workerReportText } from "../src/lib/subagents";
 import type { Session } from "../src/lib/types";
 
 const CRITERIA = ["All 807 tests pass", "The README mentions the new setting"];
@@ -272,6 +273,11 @@ test("client: posts the model in the body to <base>/evaluate and keeps only well
   // A request that never left is no try: DNS, TLS, no network.
   const offline = await callJudge(endpoint, {}, questions, { fetchImpl: async () => { throw new TypeError("fetch failed"); } });
   assert.deepEqual([offline.ok, (offline as { reason: string }).reason, (offline as { reached: boolean }).reached], [false, "fetch failed", false]);
+  // A response whose body fails to read was still handled, and maybe billed: it reached.
+  const torn = await callJudge(endpoint, {}, questions, {
+    fetchImpl: async () => ({ ok: true, status: 200, text: async () => { throw new Error("body reset"); } }) as unknown as Response,
+  });
+  assert.deepEqual([torn.ok, (torn as { reason: string }).reason, (torn as { reached: boolean }).reached], [false, "body reset", true]);
 });
 
 test("client: never throws; a 400, a 403, a non-JSON body and a timeout come back as ok:false", async () => {
@@ -382,15 +388,20 @@ test("the judge reads this run's reply, not a reused worker's earlier pass; outc
   assert.equal(workerReportText({ messages: [earlier], retainedReport: "kept", agentRun: run }), "");
   const verdict = verdictFromAnswers(CRITERIA, LIVE_ANSWERS, { at: 1 });
   const failed = { at: 2, why: "timed out after 4000 ms", tries: 1 };
-  const sessions = [{ id: "a", agentRun: run }, { id: "b", agentRun: run }, { id: "c" }, { id: "d", agentRun: run }] as unknown as Session[];
+  // A run's key is its own id; a run saved by an older desk has only its start.
+  assert.equal(judgeRunKey(run), "start:100");
+  const withId = normalizeAgentRun({ status: "completed", startedAt: 100, isolation: "shared", runId: "run_1" } as never, undefined)!;
+  assert.equal(withId.runId, "run_1");
+  assert.equal(judgeRunKey(withId), "run:run_1");
+  const sessions = [{ id: "a", agentRun: run }, { id: "b", agentRun: run }, { id: "c" }, { id: "d", agentRun: withId }] as unknown as Session[];
   const applied = applyJudgeOutcomes(
     sessions,
     new Map([
-      ["a", { verdict, runStartedAt: 100 }],
-      ["b", { failed, runStartedAt: 100 }],
-      ["c", { failed, runStartedAt: 100 }],
-      // Scored run 5; the worker was reused and now runs 100. That outcome is not this run's.
-      ["d", { verdict, runStartedAt: 5 }],
+      ["a", { verdict, runKey: "start:100" }],
+      ["b", { failed, runKey: "start:100" }],
+      ["c", { failed, runKey: "start:100" }],
+      // Scored the run before this one: the worker was reused with the same start. That outcome is not this run's.
+      ["d", { verdict, runKey: "start:100" }],
     ]),
   );
   assert.deepEqual(applied[0].agentRun?.verdict, verdict);
@@ -398,4 +409,14 @@ test("the judge reads this run's reply, not a reused worker's earlier pass; outc
   assert.equal(applied[2].agentRun, undefined);
   assert.equal(applied[3], sessions[3]);
   assert.equal(applyJudgeOutcomes(sessions, new Map()), sessions);
+  // A finished worker sent on is a new run: new id, no score and no failure carried; a checkpoint on a live one keeps all three.
+  const done = normalizeAgentRun({ status: "completed", startedAt: 100, isolation: "shared", runId: "run_1", verdict, judgeFailed: failed } as never, undefined)!;
+  const next = continueWorkerRun(done, { now: 200 });
+  assert.ok(next.runId && next.runId !== "run_1");
+  assert.equal(next.verdict, undefined);
+  assert.equal(next.judgeFailed, undefined);
+  const live = normalizeAgentRun({ status: "running", startedAt: 100, isolation: "shared", runId: "run_1", verdict } as never, undefined, true)!;
+  const kept = continueWorkerRun(live, { now: 200 });
+  assert.equal(kept.runId, "run_1");
+  assert.deepEqual(kept.verdict, verdict);
 });

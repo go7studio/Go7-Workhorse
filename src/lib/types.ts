@@ -353,6 +353,8 @@ export type AgentRun = {
    */
   status: "running" | "completed" | "failed" | "cancelled" | "timed-out" | "budget-exceeded" | "interrupted";
   startedAt: number;
+  /** Unique to this run. A worker keeps its session id across runs; this does not carry, and neither does a score. */
+  runId?: string;
   finishedAt?: number;
   timeoutMs?: number;
   /** Persisted from older desks. The live path never writes or enforces a ceiling. */

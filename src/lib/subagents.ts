@@ -1,4 +1,4 @@
-import { JUDGE_NOTE, normalizeJudgeFailure, normalizeJudgeVerdict, reportSaysFor, type ReportSays, type RunJudgeOutcome } from "./judge";
+import { JUDGE_NOTE, judgeRunKey, normalizeJudgeFailure, normalizeJudgeVerdict, reportSaysFor, type ReportSays, type RunJudgeOutcome } from "./judge";
 import { isExternalAgentAddress } from "./agent-runtime";
 import { crewTurnInFlight } from "./crew-live";
 import { isGrokBotModel, isGrokBotName } from "./custom-http-identity";
@@ -882,7 +882,7 @@ export function applyJudgeOutcomes(sessions: Session[], outcomes: Map<string, Ru
   if (outcomes.size === 0) return sessions;
   return sessions.map((session) => {
     const outcome = outcomes.get(session.id);
-    if (!outcome || !session.agentRun || session.agentRun.startedAt !== outcome.runStartedAt) return session;
+    if (!outcome || !session.agentRun || judgeRunKey(session.agentRun) !== outcome.runKey) return session;
     return "verdict" in outcome
       ? { ...session, agentRun: { ...session.agentRun, verdict: outcome.verdict } }
       : { ...session, agentRun: { ...session.agentRun, judgeFailed: outcome.failed } };
@@ -1703,7 +1703,11 @@ export function subagentLabel(provider: ProviderId, model: string, description?:
   return short && short !== model ? `${vendor} · ${short}` : vendor;
 }
 
-/** Keep the original slice clock when a checkpoint hits a still-running worker. */
+/**
+ * Keep the original slice clock when a checkpoint hits a still-running
+ * worker. A finished worker sent on is a new run: a new id, and no score or
+ * judge failure carried from the report it has yet to write.
+ */
 export function continueWorkerRun(
   run: AgentRun,
   input: { now: number; correlationId?: string },
@@ -1719,6 +1723,9 @@ export function continueWorkerRun(
     ...(keepClock
       ? {}
       : {
+          runId: uid("run"),
+          verdict: undefined,
+          judgeFailed: undefined,
           tokenBudget: undefined,
           usedTokens: undefined,
           budgetBaseline: undefined,
@@ -2813,6 +2820,7 @@ export function normalizeAgentRun(
   return {
     status: interrupted ? "interrupted" : row.status as AgentRun["status"],
     startedAt: row.startedAt,
+    ...(typeof row.runId === "string" && row.runId ? { runId: row.runId } : {}),
     isolation: resolveWorkerIsolation({ isolation: row.isolation }),
     ...(row.seed === "fresh" ? { seed: "fresh" as const } : {}),
     ...(row.role === "auditor" || row.role === "helper" ? { role: row.role } : {}),

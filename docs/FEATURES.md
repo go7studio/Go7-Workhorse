@@ -241,10 +241,10 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
   and the next pass is told what no report showed. It ran nothing and
   verified nothing, never removes a criterion, and a pass it could not score
   says so, with why. A report goes to the judge at most twice an hour;
-  saving a bot or switching the judge back on lets it be tried again. A call
-  never waits past the status reply's own deadline. Its tokens are on the
-  usage ledger under that bot, verdict or not; spend shows on that bot's
-  credits.
+  a new key, host or model list on the Vercel bot, or switching the judge
+  back on, lets it be tried again. A call never waits past the status
+  reply's own deadline. Its tokens are on the usage ledger under that bot,
+  verdict or not; spend shows on that bot's credits.
 - Debug makes the seated bot establish expected versus observed behavior,
   reproduce before editing, identify the actual source and runtime under test,
   preserve unrelated work, and verify the real artifact when packaging or

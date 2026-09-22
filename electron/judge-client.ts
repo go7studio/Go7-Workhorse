@@ -115,6 +115,9 @@ export async function callJudge(
   const fetchImpl = options.fetchImpl ?? (fetch as unknown as FetchLike);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), options.timeoutMs ?? JUDGE_TIMEOUT_MS);
+  // Set the moment a response arrives: a body that fails to read afterwards
+  // was still a request the gateway handled, and may have billed.
+  let reached = false;
   try {
     const response = await fetchImpl(judgeUrl(endpoint.baseUrl), {
       method: "POST",
@@ -125,6 +128,7 @@ export async function callJudge(
       body: JSON.stringify({ model: endpoint.model ?? JUDGE_MODEL, state, questions }),
       signal: controller.signal,
     });
+    reached = true;
     const text = await response.text();
     let body: unknown = undefined;
     try {
@@ -166,7 +170,7 @@ export async function callJudge(
       ok: false,
       reason: aborted ? `timed out after ${options.timeoutMs ?? JUDGE_TIMEOUT_MS} ms` : error instanceof Error ? error.message : String(error),
       elapsedMs,
-      reached: aborted,
+      reached: aborted || reached,
     };
   } finally {
     clearTimeout(timer);

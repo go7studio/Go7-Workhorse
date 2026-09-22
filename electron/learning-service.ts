@@ -542,7 +542,13 @@ export class LearningService {
           this.noteFailure();
         return { ran: false, skipped: "empty-explicit-brief", runId, ...route };
         }
-        if (lane === AGENT_INTELLIGENCE_LANE && parsed.intent.length > 0) {
+        // Agent evidence never becomes intent, in either list. An intent-class
+        // item filed under operations used to be stored, and automatic mode
+        // makes intent active on sight.
+        if (
+          lane === AGENT_INTELLIGENCE_LANE &&
+          (parsed.intent.length > 0 || parsed.operations.some((proposal) => proposal.memoryClass === "intent"))
+        ) {
           this.options.store.putCompilerRun({
             ...(this.options.store.getCompilerRun(runId) ?? { id: runId, intelligenceLane: lane, status: "running", attempt, inputHash }),
             status: "failed",

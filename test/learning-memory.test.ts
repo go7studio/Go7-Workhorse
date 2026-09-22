@@ -1008,6 +1008,9 @@ test("agent and mismatch compiler prompts keep their source lanes explicit", () 
   assert.doesNotMatch(agentPrompt, /Intent must always be empty/i);
   assert.doesNotMatch(agentPrompt, /intent empty/i);
   assert.doesNotMatch(agentPrompt, /missing verification|missing latency|missing token|missing title/i);
+  // No sentence says intent stays empty any more, so the exact shape the
+  // model copies is what carries it; the service refuses agent intent anyway.
+  assert.match(agentPrompt, /"intent":\[\]/);
   assert.match(agentPrompt, /lev_agent_prompt/);
   const records = [
     {
@@ -1599,6 +1602,104 @@ test("a mixed agent batch drops a proposal that cites only a completed envelope"
   assert.equal(memories.length, 1);
   assert.equal(memories[0]?.statement, "Read failed on a missing file");
   assert.deepEqual(memories[0]?.sourceEventIds, ["lev_fail_tool"]);
+});
+
+test("a rate-limited model call queued for retry still compiles; a call that only started does not", async () => {
+  // The shape the desk records for a rate-limited join (store.tsx): an
+  // execution event with status "retry", not a tool, first attempt 1.
+  const retry = eventDraft("lev_exec_retry", {
+    kind: "execution",
+    actorClass: "agent",
+    provider: "claude",
+    payload: { summary: "Model call rate-limited; retry queued", status: "retry", attempt: 1, error: "429 rate_limit" },
+  });
+  const started = eventDraft("lev_exec_started", {
+    kind: "execution",
+    actorClass: "agent",
+    provider: "claude",
+    payload: { summary: "claude claude-opus-5 model call started", status: "started" },
+  });
+  assert.equal(eventsRequireAgentMemory([retry]), true, "a retry is a memory");
+  assert.equal(eventsRequireAgentMemory([started]), false, "a call that only started is not");
+  const store = new InMemoryStore(":memory:");
+  let calls = 0;
+  const service = new LearningService({
+    store,
+    settings: () => ({
+      mode: "automatic",
+      autoRetrieve: false,
+      compilerProvider: "custom",
+      compilerModel: "fixture",
+      compilerCustomBotId: "bot_desk",
+    }),
+    allowStub: false,
+    caller: async () => {
+      calls += 1;
+      return {
+        text: JSON.stringify({
+          intent: [],
+          operations: [
+            {
+              action: "add",
+              memoryClass: "operations",
+              scope: "project",
+              statement: "Claude join was rate-limited and queued a retry",
+              sourceEventIds: ["lev_exec_retry"],
+            },
+          ],
+        }),
+        createdWorkhorseChat: false,
+        leftoverVendorThread: false,
+      };
+    },
+    candidates: () => [
+      { provider: "custom", model: "fixture", customBotId: "bot_desk", connected: true, ephemeral: true, intelligence: 4, speed: 4, cost: 1 },
+    ],
+  });
+  service.record(retry);
+  const compiled = await service.compile();
+  assert.equal(calls, 1, "the compiler is asked about a retry");
+  assert.equal(compiled.memories, 1);
+});
+
+test("the agent lane refuses intent however the prompt is worded", async () => {
+  // Intent in its own list, or an intent-class item filed under operations.
+  const briefs = [
+    { intent: [{ action: "add", memoryClass: "intent", scope: "project", statement: "The user wants tests first", sourceEventIds: ["lev_fail_for_intent"] }], operations: [] },
+    { intent: [], operations: [{ action: "add", memoryClass: "intent", scope: "project", statement: "The user wants tests first", sourceEventIds: ["lev_fail_for_intent"] }] },
+  ];
+  for (const brief of briefs) {
+    const store = new InMemoryStore(":memory:");
+    const service = new LearningService({
+      store,
+      settings: () => ({
+        mode: "automatic",
+        autoRetrieve: false,
+        compilerProvider: "custom",
+        compilerModel: "fixture",
+        compilerCustomBotId: "bot_desk",
+      }),
+      allowStub: false,
+      caller: async () => ({
+        text: JSON.stringify(brief),
+        createdWorkhorseChat: false,
+        leftoverVendorThread: false,
+      }),
+      candidates: () => [
+        { provider: "custom", model: "fixture", customBotId: "bot_desk", connected: true, ephemeral: true, intelligence: 4, speed: 4, cost: 1 },
+      ],
+    });
+    service.record(eventDraft("lev_fail_for_intent", {
+      kind: "tool",
+      actorClass: "agent",
+      provider: "codex",
+      payload: { summary: "Tests failed", status: "failed" },
+    }));
+    const compiled = await service.compile();
+    assert.equal(compiled.ran, false);
+    assert.equal(compiled.skipped, "cross-lane-output", JSON.stringify(brief));
+    assert.equal(store.listMemories({}).length, 0, "no intent memory from agent evidence");
+  }
 });
 
 test("failed tools, retries, errors, and unverified outcome claims still compile", async () => {

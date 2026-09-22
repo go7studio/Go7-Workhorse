@@ -599,14 +599,20 @@ export function eventsRequireMemory(events: LearningEvent[]): boolean {
 
 const COMPLETED_TOOL_STATUSES = new Set(["completed", "complete", "ok", "success", "succeeded"]);
 
-function agentToolStatus(event: LearningEvent): string {
+function agentEventStatus(event: LearningEvent): string {
   return String(event.payload.status ?? event.payload.outcome ?? "").trim().toLowerCase();
 }
 
-/** A failed tool, a retry, or an error. A finished success status is none of these. */
-export function agentToolNeedsMemory(event: LearningEvent): boolean {
-  if (event.actorClass !== "agent" || event.kind !== "tool") return false;
-  const status = agentToolStatus(event);
+/**
+ * A failed call, a retry, or an error, on a tool or on a model call. The desk
+ * records a rate-limited model call as an execution event with status "retry",
+ * never as a tool, so a rule that read tools alone let the batch skip the
+ * compiler and the retry left no memory. A finished success status is none of
+ * these, and neither is a call that only started.
+ */
+export function agentEventNeedsMemory(event: LearningEvent): boolean {
+  if (event.actorClass !== "agent" || (event.kind !== "tool" && event.kind !== "execution")) return false;
+  const status = agentEventStatus(event);
   if (/fail|error|denied|cancel|forbidden|\bretry(?:ing|ed)?\b/.test(status)) return true;
   if (event.payload.retry === true) return true;
   if (typeof event.payload.error === "string" && event.payload.error.trim().length > 0) return true;
@@ -620,8 +626,8 @@ export function agentToolNeedsMemory(event: LearningEvent): boolean {
  */
 export function completedToolEnvelope(event: LearningEvent): boolean {
   if (event.actorClass !== "agent" || event.kind !== "tool") return false;
-  if (agentToolNeedsMemory(event)) return false;
-  return COMPLETED_TOOL_STATUSES.has(agentToolStatus(event));
+  if (agentEventNeedsMemory(event)) return false;
+  return COMPLETED_TOOL_STATUSES.has(agentEventStatus(event));
 }
 
 export function proposalCitesOnlyCompletedEnvelopes(sourceEventIds: string[], events: LearningEvent[]): boolean {
@@ -638,7 +644,7 @@ export function eventsRequireAgentMemory(events: LearningEvent[]): boolean {
     if (event.actorClass !== "agent") return false;
     if (completedToolEnvelope(event)) return false;
     if (event.kind === "outcome") return true;
-    return agentToolNeedsMemory(event);
+    return agentEventNeedsMemory(event);
   });
 }
 

@@ -1621,6 +1621,9 @@ test("a rate-limited model call queued for retry still compiles; a call that onl
   });
   assert.equal(eventsRequireAgentMemory([retry]), true, "a retry is a memory");
   assert.equal(eventsRequireAgentMemory([started]), false, "a call that only started is not");
+  // The deterministic compiler, used when no model is eligible, agrees.
+  assert.deepEqual(stubCompileAgent([retry]).operations.map((item) => item.sourceEventIds), [["lev_exec_retry"]]);
+  assert.equal(stubCompileAgent([started]).operations.length, 0);
   const store = new InMemoryStore(":memory:");
   let calls = 0;
   const service = new LearningService({

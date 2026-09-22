@@ -30,7 +30,9 @@ export function stubCompileAgent(events: LearningEvent[], _memories: MemoryItem[
   const operations: LearningBrief["operations"] = [];
   for (const event of events) {
     if (event.tombstone || event.purged || event.actorClass !== "agent") continue;
-    if (event.kind === "tool") {
+    // A tool or a model call earns a row only when it failed, retried or erred;
+    // the model path applies the same rule, so both answer a retry alike.
+    if (event.kind === "tool" || event.kind === "execution") {
       if (!eventsRequireAgentMemory([event])) continue;
     } else if (event.kind !== "outcome") continue;
     const status = String(event.payload.status ?? event.payload.outcome ?? "").trim();

@@ -603,6 +603,11 @@ test("pruneOrphanWorktrees keeps a .godot holding anything Godot did not write",
     ["imported/only-copy.txt", "a person's note"],
     ["editor/only-copy.scn", "a person's scene"],
     ["editor/recovery/scene.tscn", "a scene in a folder Godot does not make"],
+    // Round two: names that only look like what Godot writes.
+    [`imported/notes-${HASH}.txt`, "a note wearing an importer's name"],
+    ["editor/secrets.cfg", "a cfg the person wrote"],
+    ["shader_cache/only-copy.cache", "a cache-shaped name that is not a shader"],
+    [`shader_cache/CanvasShaderRD/a1b2c3d4e5f60718/notes.cache`, "not a hash name"],
   ];
   for (const [relative, body] of probes) {
     const { root, managed, cache } = godotTree(`godot-${relative.replace(/[^a-z]/gi, "")}`);
@@ -647,6 +652,8 @@ test("pruneOrphanWorktrees drops a TypeScript build record beside its tsconfig, 
     ["ts-alone", "app.tsbuildinfo", record, {}],
     ["ts-prose", "chapter.tsbuildinfo", "the only copy of the chapter, not a build record", { "tsconfig.json": "{}\n" }],
     ["ts-noversion", "app.tsbuildinfo", JSON.stringify({ program: {} }), { "tsconfig.json": "{}\n" }],
+    ["ts-fake", "diary.tsbuildinfo", JSON.stringify({ version: "not a compiler", program: "the only copy of the chapter" }), { "tsconfig.json": "{}\n" }],
+    ["ts-prose-program", "diary.tsbuildinfo", JSON.stringify({ version: "5.6.2", program: "the only copy of the chapter" }), { "tsconfig.json": "{}\n" }],
   ] as Array<[string, string, string, Record<string, string>]>) {
     const made = repoWithWorktree(label, { ".gitignore": "*.tsbuildinfo\n", ...files });
     fs.writeFileSync(path.join(made.wt, name), body);

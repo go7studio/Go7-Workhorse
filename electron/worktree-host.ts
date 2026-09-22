@@ -350,17 +350,24 @@ const REBUILDABLE_FROM_MANIFEST: Array<{ segment: string; manifests: string[] }>
  * details, so it is not on the list.
  */
 const GODOT_TOP_FILES = new Set(["uid_cache.bin", "global_script_class_cache.cfg", "extension_list.cfg", ".gdignore"]);
-/** `<source name>-<32 hex>.<ext>`: an imported asset and its checksum. */
-const GODOT_IMPORTED = /^.+-[0-9a-f]{32}\.[a-z0-9_]+$/i;
-/** Editor state: layouts, folding and edit state per scene, recent lists, the filesystem cache. */
-const GODOT_EDITOR = /^(.+\.cfg|filesystem_cache\d+|filesystem_update\d+|recent_dirs|create_recent\.[A-Za-z0-9_]+|favorites\.[A-Za-z0-9_]+)$/;
-/** Compiled shaders: folders and files named by hash, or `.cache` files. */
-const GODOT_SHADER = /^([0-9a-f]{8,}(\.[a-z]+)?|[A-Za-z0-9_]+Shader[A-Za-z0-9_]*|.+\.cache)$/;
+/**
+ * `<source name>-<32 hex>[.<compression>].<importer extension>`: an imported
+ * asset and its checksum, in the extensions Godot's importers write.
+ */
+const GODOT_IMPORTED =
+  /^.+-[0-9a-f]{32}(\.(s3tc|etc|etc2|bptc|astc))?\.(md5|ctex|ctexarray|ccube|ccubearray|ctex3d|stex|sample|oggvorbisstr|mp3str|fontdata|scn|res|mesh|image)$/;
+/** The editor's own files, by the names it gives them. */
+const GODOT_EDITOR =
+  /^(editor_layout\.cfg|project_metadata\.cfg|script_editor_cache\.cfg|shader_editor_cache\.cfg|.+-(folding|editstate)-[0-9a-f]{32}\.cfg|filesystem_cache\d+|filesystem_update\d+|recent_dirs|create_recent\.[A-Za-z0-9_]+|favorites\.[A-Za-z0-9_]+)$/;
+/** `shader_cache/<Name>Shader.../<hash>/<hash>[.<driver>].cache`. */
+const GODOT_SHADER_GROUP = /^[A-Za-z0-9_]*Shader[A-Za-z0-9_]*$/;
+const GODOT_SHADER_HASH = /^[0-9a-f]{16,64}$/;
+const GODOT_SHADER_FILE = /^[0-9a-f]{16,64}(\.[a-z0-9]+)?\.cache$/;
 const GODOT_WALK_LIMIT = 20_000;
 
 function godotCacheOnly(dir: string): boolean {
   let seen = 0;
-  const walk = (folder: string, zone: "top" | "imported" | "editor" | "shader"): boolean => {
+  const walk = (folder: string, zone: "top" | "imported" | "editor" | "shader" | "shader-group" | "shader-hash"): boolean => {
     let entries: fs.Dirent[];
     try {
       entries = fs.readdirSync(folder, { withFileTypes: true });
@@ -377,8 +384,12 @@ function godotCacheOnly(dir: string): boolean {
           if (!walk(path.join(folder, name), "imported")) return false;
         } else if (zone === "top" && name === "editor") {
           if (!walk(path.join(folder, name), "editor")) return false;
-        } else if ((zone === "top" && name === "shader_cache") || (zone === "shader" && GODOT_SHADER.test(name))) {
+        } else if (zone === "top" && name === "shader_cache") {
           if (!walk(path.join(folder, name), "shader")) return false;
+        } else if (zone === "shader" && GODOT_SHADER_GROUP.test(name)) {
+          if (!walk(path.join(folder, name), "shader-group")) return false;
+        } else if (zone === "shader-group" && GODOT_SHADER_HASH.test(name)) {
+          if (!walk(path.join(folder, name), "shader-hash")) return false;
         } else {
           return false;
         }
@@ -389,7 +400,8 @@ function godotCacheOnly(dir: string): boolean {
         zone === "top" ? GODOT_TOP_FILES.has(name)
         : zone === "imported" ? GODOT_IMPORTED.test(name)
         : zone === "editor" ? GODOT_EDITOR.test(name)
-        : GODOT_SHADER.test(name);
+        : zone === "shader-hash" ? GODOT_SHADER_FILE.test(name)
+        : false;
       if (!fits) return false;
     }
     return true;
@@ -423,7 +435,11 @@ function tsBuildInfoRebuilds(target: string, listed: string): boolean {
     const stat = fs.lstatSync(file);
     if (!stat.isFile() || stat.size > 64 * 1024 * 1024) return false;
     const record = JSON.parse(fs.readFileSync(file, "utf8")) as Record<string, unknown>;
-    return typeof record.version === "string" && ("program" in record || "root" in record);
+    // A compiler version, and the program the compiler recorded (an object) or
+    // the roots it builds from (a list). Prose under those names is not one.
+    const version = typeof record.version === "string" && /^\d+\.\d+\.\d+/.test(record.version);
+    const program = record.program !== null && typeof record.program === "object" && !Array.isArray(record.program);
+    return version && (program || Array.isArray(record.root));
   } catch {
     return false;
   }

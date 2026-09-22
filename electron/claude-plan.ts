@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { planObservedNow } from "../src/lib/usage";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import https from "node:https";
@@ -437,7 +438,7 @@ export async function fetchClaudePlanUsage(input?: ClaudePlanTokenInput & {
         return undefined;
       }
       judgeClaudeRingStatus(response.status, token);
-      return parseClaudePlanUsage(await response.json());
+      return planObservedNow(parseClaudePlanUsage(await response.json()));
     }
     // A real fetch with a cached undefined from a previous call would silently
     // shadow every retry for 180s and strand the ring on "unknown" while the
@@ -455,7 +456,7 @@ export async function fetchClaudePlanUsage(input?: ClaudePlanTokenInput & {
     if (status === 429 && cached && now - cached.at < CACHE_MS) return cached.plan;
     judgeClaudeRingStatus(status, token);
     if (status < 200 || status >= 300) return undefined;
-    const plan = parseClaudePlanUsage(json);
+    const plan = planObservedNow(parseClaudePlanUsage(json));
     if (plan) cachedPlans[cacheKey] = { at: now, plan };
     return plan;
   } catch {

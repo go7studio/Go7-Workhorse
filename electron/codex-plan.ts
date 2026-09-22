@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { planObservedNow } from "../src/lib/usage";
 import os from "node:os";
 import path from "node:path";
 import type { GrokPlanUsage } from "../src/lib/types";
@@ -160,7 +161,7 @@ export async function fetchCodexPlanUsage(input?: {
     const fetchImpl = input?.fetchImpl ?? fetch;
     const response = await fetchImpl("https://chatgpt.com/backend-api/wham/usage", { headers });
     if (!response.ok) return undefined;
-    return parseCodexPlanUsage(await response.json());
+    return planObservedNow(parseCodexPlanUsage(await response.json()));
   } catch {
     return undefined;
   }

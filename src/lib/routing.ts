@@ -239,7 +239,10 @@ export function routingCandidatesForDesk(
         model: model.id,
         label: model.name,
         ...launchGate,
-        connected: !capacity?.holding,
+        // Cursor is two rings. A hold on the API ring must take the API models
+        // out and leave Composer's in, and the other way round. A ring with no
+        // status is a ring with no hold; it must not borrow the other ring's.
+        connected: !laneCapacity?.holding,
         contextWindow: contextWindowFor(provider, model.id),
         profile: routingProfileForModel(provider, model.id),
         capacity: {
@@ -333,11 +336,12 @@ function customBotCapacity(
   status: WatchVendorStatus | undefined,
 ): RoutingCapacity {
   const period = plan?.period ?? status?.period;
+  const observed = plan?.observedAt ? { observedAt: plan.observedAt } : {};
   if (product) {
-    return { usedPercent: product.usagePercent, resetsAt: product.resetsAt, period };
+    return { usedPercent: product.usagePercent, resetsAt: product.resetsAt, period, ...observed };
   }
   if (plan && Number.isFinite(plan.usedPercent)) {
-    return { usedPercent: plan.usedPercent, resetsAt: plan.resetsAt, period };
+    return { usedPercent: plan.usedPercent, resetsAt: plan.resetsAt, period, ...observed };
   }
   // Still no gauge anywhere: unknown stays unknown, never a guessed 0.
   return { usedPercent: status?.usedPercent, resetsAt: status?.resetsAt, period };
@@ -905,6 +909,8 @@ export const EXPIRY_PEAK = 48;
 export const EXPIRY_SPENT_REMAINING = 0.5;
 /** A meter older than this cannot say what is left, so it earns nothing. */
 export const EXPIRY_METER_STALE_MS = 6 * 60 * 60 * 1000;
+/** Leftover at which the credit is whole. Below it the credit shrinks in step: half a percent cannot absorb a task. */
+export const EXPIRY_FINISHABLE_PERCENT = 5;
 
 /**
  * How much a pool is worth for being about to reset.
@@ -940,7 +946,12 @@ export function expiryCredit(input: {
   const closeness = 1 - resetMs / EXPIRY_WINDOW_MS;
   const base = EXPIRY_FLOOR + (EXPIRY_PEAK - EXPIRY_FLOOR) * closeness;
   const pile = Math.min(remaining, 50) * 0.15 * (0.5 + 0.5 * closeness);
-  return base + pile;
+  // A pool with 0.6% left an hour from reset earned the same credit as one
+  // with 6% left, and on quick work that outscored an on-pace cheap model
+  // that could actually do the job. The credit is for finishing what is
+  // there; when there is nearly nothing, it is nearly nothing.
+  const finishable = Math.min(1, remaining / EXPIRY_FINISHABLE_PERCENT);
+  return (base + pile) * finishable;
 }
 
 /** The credit a candidate earns now, read off its own capacity. */
@@ -1281,10 +1292,11 @@ export function rankRoutingCandidates(
       // the reset. The credit replaces a negative pace term for that row only,
       // because "behind pace" is exactly the state of a pool worth finishing.
       const expiry = candidateExpiryCredit(candidate.capacity, request.now ?? Date.now());
-      if (expiry > 0) {
-        score += expiry * capacityWeight;
-        if (settings.preferExcess && draw.delta > 0) score += clamp(draw.delta, 0, 50) * 0.8 * capacityWeight;
-      } else if (settings.preferExcess) score += clamp(draw.delta, -50, 50) * 0.8 * capacityWeight;
+      // The credit stands in for the pace term, not beside it. Inside the last
+      // day, expected use is near 100%, so a positive delta mostly says "more
+      // left", which the credit's own leftover term already counts.
+      if (expiry > 0) score += expiry * capacityWeight;
+      else if (settings.preferExcess) score += clamp(draw.delta, -50, 50) * 0.8 * capacityWeight;
       else if (draw.delta < 0) score += clamp(draw.delta, -50, 0) * 0.45 * capacityWeight;
       // Hoarding a quota that resets within hours is waste. The flat -70
       // assumes a weekly window and a vendor with days of runway left; here

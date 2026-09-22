@@ -8650,7 +8650,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
    */
   useEffect(() => {
     if (!ready) return;
-    const timer = window.setInterval(() => refreshPlansForRouting(plansRef.current), PLAN_BEAT_MS);
+    const timer = window.setInterval(() => {
+      if (document.hidden) return;
+      refreshPlansForRouting(plansRef.current);
+    }, PLAN_BEAT_MS);
     return () => window.clearInterval(timer);
   }, [ready, refreshPlansForRouting]);
   // Declared far above, beside plansRef, because the routing paths run before

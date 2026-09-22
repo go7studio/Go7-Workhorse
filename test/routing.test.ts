@@ -33,6 +33,9 @@ import {
   EXPIRY_PEAK,
   EXPIRY_WINDOW_MS,
 } from "../src/lib/routing";
+import { DEFAULT_SETTINGS } from "../src/lib/settings";
+import type { CustomBot } from "../src/lib/types";
+import { planObservedNow } from "../src/lib/usage";
 import { applyVendorCatalog, modelsFor, parseEffortFromText, resetVendorCatalog } from "../src/lib/models";
 import { normalizeSettings } from "../src/lib/settings";
 import type { RoutingSettings } from "../src/lib/types";
@@ -444,6 +447,100 @@ test("the decision and the log both say the pool is being finished", () => {
   assert.equal(expiryHoursLabel(36 * HOUR), "1.5d");
 });
 
+test("a pool with half a percent left earns almost nothing, however close its reset", () => {
+  // Gate on the first round: a 99.4% used Opus an hour from reset took the
+  // same credit as one with 6% left, and on quick work that outscored an
+  // on-pace Haiku that could actually do the job.
+  const now = Date.parse("2026-09-22T11:53:00Z");
+  const fresh = new Date(now - 60_000).toISOString();
+  const inAnHour = new Date(now + HOUR).toISOString();
+  const nearlyEmpty = candidate("claude-opus-5", 99.4, {
+    provider: "claude",
+    label: "Opus 5",
+    profile: routingProfileForModel("claude", "claude-opus-5"),
+    capacity: { usedPercent: 99.4, resetsAt: inAnHour, period: "weekly", observedAt: fresh },
+  });
+  const cheapOnPace = candidate("claude-haiku-4-5", 20, {
+    provider: "claude",
+    label: "Haiku 4.5",
+    profile: routingProfileForModel("claude", "claude-haiku-4-5"),
+    capacity: { usedPercent: 20, resetsAt: new Date(now + 10 * DAY).toISOString(), period: "weekly", observedAt: fresh },
+  });
+  const quick = rankRoutingCandidates([nearlyEmpty, cheapOnPace], { prompt: "Quick: classify this", tier: "quick", now }, settings);
+  assert.equal(quick[0]?.model, "claude-haiku-4-5", `half a percent cannot absorb a task, got ${quick.map((r) => `${r.model}:${r.score}`).join(" ")}`);
+  const at = (usedPercent: number) => candidateExpiryCredit({ ...nearlyEmpty.capacity, usedPercent }, now);
+  const whole = at(95);
+  assert.ok(whole >= EXPIRY_FLOOR, `at five percent left the credit is whole: ${whole}`);
+  assert.ok(at(94) > whole && at(94) < whole * 1.05, "above five percent only the small leftover term grows");
+  assert.ok(at(97.5) > whole * 0.45 && at(97.5) < whole * 0.55, `half the finishable leftover earns about half: ${at(97.5)} of ${whole}`);
+  const sliver = at(99.4);
+  assert.ok(sliver > 0 && sliver < whole / 4, `0.6% left earns a sliver of what 5% earns: ${sliver} vs ${whole}`);
+});
+
+test("the credit stands in for the pace term rather than stacking on it", () => {
+  const routing = readFileSync(path.join(ROOT, "src", "lib", "routing.ts"), "utf8");
+  assert.match(
+    routing,
+    /if \(expiry > 0\) score \+= expiry \* capacityWeight;\s*\n\s*else if \(settings\.preferExcess\) score \+= clamp\(draw\.delta, -50, 50\)/,
+    "an expiring row takes the credit and no pace term, positive or negative",
+  );
+});
+
+test("every vendor's candidate carries the clock its plan was read at", () => {
+  // The first round armed the credit for ACP Grok only: nothing else stamped
+  // observedAt, and the Cursor lane split and the custom-bot path dropped it.
+  const now = Date.parse("2026-09-22T11:53:00Z");
+  const observedAt = new Date(now - 60_000).toISOString();
+  const reset = new Date(now + 2 * HOUR).toISOString();
+  const bot = { ...DEFAULT_SETTINGS.customBots[0], id: "bot_k", name: "Kimi", baseUrl: "https://api.example.test/v1", apiKey: "k", model: "kimi-k3", api: "openai-completions" } as CustomBot;
+  const settingsWithBot = {
+    ...DEFAULT_SETTINGS,
+    llms: { ...DEFAULT_SETTINGS.llms, grok: { ...DEFAULT_SETTINGS.llms.grok, connected: true }, cursor: { ...DEFAULT_SETTINGS.llms.cursor, connected: true } },
+    customBots: [bot],
+  };
+  const plan = (usedPercent: number, products: Array<{ product: string; label: string; usagePercent: number; resetsAt: string }>) => ({
+    usedPercent, leftPercent: 100 - usedPercent, period: "weekly" as const, resetsAt: reset, observedAt, prepaidBalance: 0, products,
+  });
+  const plans = {
+    grok: plan(94, [{ product: "weekly", label: "Weekly", usagePercent: 94, resetsAt: reset }]),
+    cursor: { ...plan(50, [{ product: "cursor-models", label: "Cursor Models", usagePercent: 21, resetsAt: reset }, { product: "other-models", label: "Other Models", usagePercent: 79, resetsAt: reset }]), period: "monthly" as const },
+    custom: { bot_k: plan(60, [{ product: "weekly", label: "Weekly", usagePercent: 60, resetsAt: reset }]) },
+  };
+  const rows = routingCandidatesForDesk(settingsWithBot as never, [], plans as never);
+  const grok = rows.find((row) => row.provider === "grok" && row.model === "grok-4.7");
+  const composer = rows.find((row) => row.provider === "cursor" && row.model === "grok-4.7-high");
+  const kimi = rows.find((row) => row.customBotId === "bot_k");
+  assert.equal(grok?.capacity?.observedAt, observedAt, "Grok's candidate carries the clock");
+  assert.equal(composer?.capacity?.observedAt, observedAt, "a Cursor ring's candidate carries the clock the split used to drop");
+  assert.equal(kimi?.capacity?.observedAt, observedAt, "a custom bot's candidate carries the clock its plan stamped");
+  assert.equal(planObservedNow({ usedPercent: 1, leftPercent: 99 } as { observedAt?: string }, now)?.observedAt, new Date(now).toISOString(), "a fresh parse is stamped now");
+  assert.equal(planObservedNow({ usedPercent: 1, leftPercent: 99, observedAt } as { observedAt?: string }, now)?.observedAt, observedAt, "a plan that has its clock keeps it");
+  assert.equal(planObservedNow(undefined, now), undefined);
+});
+
+test("a hold on one Cursor ring takes that ring's models out and leaves the other's in", () => {
+  const settingsCursor = {
+    ...DEFAULT_SETTINGS,
+    llms: { ...DEFAULT_SETTINGS.llms, cursor: { ...DEFAULT_SETTINGS.llms.cursor, connected: true } },
+  };
+  const holding = (key: string) => ({ key, provider: "cursor", holding: true, label: key } as never);
+  // The stock Cursor catalog holds only the Cursor Models ring; API-ring
+  // models arrive from the live `cursor-agent models` list.
+  applyVendorCatalog({
+    cursor: [...modelsFor("cursor"), { id: "claude-opus-5", name: "Claude Opus 5", effort: true, contextWindow: 200_000 }],
+  });
+  try {
+    const apiHeld = routingCandidatesForDesk(settingsCursor as never, [holding("cursor:other-models")], {});
+    assert.equal(apiHeld.find((row) => row.model === "grok-4.7-high")?.connected, true, "the Composer ring is not held");
+    assert.equal(apiHeld.find((row) => row.model === "claude-opus-5")?.connected, false, "the API ring is held, so its models are out");
+    const composerHeld = routingCandidatesForDesk(settingsCursor as never, [holding("cursor:cursor-models")], {});
+    assert.equal(composerHeld.find((row) => row.model === "grok-4.7-high")?.connected, false);
+    assert.equal(composerHeld.find((row) => row.model === "claude-opus-5")?.connected, true, "and the other way round");
+  } finally {
+    resetVendorCatalog();
+  }
+});
+
 test("the desk asks its meters again after a worker settles and on a beat", () => {
   // A desk with routing set by hand and Usage closed served its launch reading
   // for sixteen hours. Leftover the desk cannot see is leftover it cannot finish.
@@ -455,9 +552,10 @@ test("the desk asks its meters again after a worker settles and on a beat", () =
   );
   assert.match(
     store,
-    /window\.setInterval\(\(\) => refreshPlansForRouting\(plansRef\.current\), PLAN_BEAT_MS\)/,
-    "an open desk asks again on a beat, and only for plans past the stale age",
+    /window\.setInterval\(\(\) => \{\s*\n\s*if \(document\.hidden\) return;\s*\n\s*refreshPlansForRouting\(plansRef\.current\);\s*\n\s*\}, PLAN_BEAT_MS\)/,
+    "an open desk asks again on a beat, rests while hidden, and only for plans past the stale age",
   );
+
 });
 
 test("a vendor inside 24h of reset does not take the full flat -70 reserve", () => {

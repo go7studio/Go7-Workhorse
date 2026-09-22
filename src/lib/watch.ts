@@ -1406,6 +1406,9 @@ function officialCapacityMeter(input: {
   const reset = input.resetsAt ? Date.parse(input.resetsAt) : NaN;
   const hoursToReset =
     Number.isFinite(reset) && reset > now ? Math.round(((reset - now) / 3_600_000) * 10) / 10 : undefined;
+  // A row with no clock is judged by the snapshot's own age below. Every
+  // vendor plan now carries its clock from the parse, so this is the desk-row
+  // path only, and it keeps the answer the six-hour test has always pinned.
   const observed = input.observedAt ? Date.parse(input.observedAt) : NaN;
   const stale = Number.isFinite(observed) && now - observed > CAPACITY_STALE_AFTER_MS;
   return {

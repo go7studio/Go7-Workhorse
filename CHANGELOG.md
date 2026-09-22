@@ -8,6 +8,13 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.6.92](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.91...v0.6.92) (2026-09-22)
+
+### Bug Fixes
+
+* **learning:** a completed tool call, a Workhorse Link call included, files no memory; a batch of only completed calls finishes without asking a model, while failed tools, retries (a rate-limited model call included), errors and outcome claims still compile
+* **learning:** agent evidence never files intent: an agent-lane brief with an intent-class item in either list is refused
+
 ## [0.6.91](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.90...v0.6.91) (2026-09-22)
 
 ### Features

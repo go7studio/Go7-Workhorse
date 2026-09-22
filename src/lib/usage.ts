@@ -906,9 +906,23 @@ export function cursorLanePlan(plan: GrokPlanUsage | undefined, key: CursorWatch
     leftPercent: Math.max(0, 100 - product.usagePercent),
     period: "monthly",
     resetsAt: product.resetsAt ?? plan.resetsAt,
+    ...(plan.observedAt ? { observedAt: plan.observedAt } : {}),
     prepaidBalance: 0,
     products: [product],
   };
+}
+
+/**
+ * The moment a plan was read, stamped where it was read.
+ *
+ * Only the Grok fetcher stamped `observedAt`, so the expiry credit and the
+ * stale mark were armed for one vendor of five. A plan handed back from a
+ * cache keeps the stamp it was cached with; only a fresh parse gets now.
+ */
+export function planObservedNow<T extends { observedAt?: string }>(plan: T | undefined, now = Date.now()): T | undefined {
+  if (!plan) return plan;
+  if (plan.observedAt) return plan;
+  return { ...plan, observedAt: new Date(now).toISOString() };
 }
 
 const TIME_WINDOW = /^(session|weekly(_all|_scoped)?|primary|interval|five_hour|5h)$/i;

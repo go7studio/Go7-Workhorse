@@ -3,6 +3,7 @@ import path from "node:path";
 import { readFile } from "node:fs/promises";
 import { customMeterForUrl, customPlanRemainsUrl } from "../src/lib/custom-meters";
 import { customHttpIdentityHeaders, isGrokBotUrl } from "../src/lib/custom-http-identity";
+import { planObservedNow } from "../src/lib/usage";
 import type { GrokPlanUsage } from "../src/lib/types";
 
 export type CustomPlanUsage = GrokPlanUsage;
@@ -440,7 +441,7 @@ export async function fetchCustomPlanUsage(input: {
         },
       });
       if (!response.ok) return undefined;
-      return parseCustomPlanUsage(await response.json(), input.model, meter?.id);
+      return planObservedNow(parseCustomPlanUsage(await response.json(), input.model, meter?.id));
     }
     // Electron's Chromium fetch can strip User-Agent and 429/empty these hosts.
     const { status, json } = await new Promise<{ status: number; json: unknown }>((resolve, reject) => {
@@ -472,7 +473,7 @@ export async function fetchCustomPlanUsage(input: {
       req.on("error", reject);
     });
     if (status < 200 || status >= 300) return undefined;
-    return parseCustomPlanUsage(json, input.model, meter?.id);
+    return planObservedNow(parseCustomPlanUsage(json, input.model, meter?.id));
   } catch {
     return undefined;
   }

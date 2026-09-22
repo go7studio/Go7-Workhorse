@@ -8,6 +8,14 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.6.90](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.89...v0.6.90) (2026-09-22)
+
+### Features
+
+* **routing:** a pool inside 24 hours of its reset is spent first: an expiry credit of 24 to 48 points stands in for the pace term, and is zero for a stale meter, a spent pool, or one not worth finishing; the decision says "finishing leftover (2h to reset)"
+* **usage:** every vendor's plan carries the clock it was read at; a meter older than six hours reads stale, the snapshot says so, and each row carries its hours to reset
+* **desk:** meters refresh after a worker settles and on a 15-minute beat while the window is visible
+
 ## [0.6.89](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.88...v0.6.89) (2026-09-21)
 
 ### Features

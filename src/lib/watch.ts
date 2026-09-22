@@ -1082,7 +1082,8 @@ export function formatDeskRoster(rows: DeskCallRow[]): string {
       leftoverMeans: "Plan remaining for that vendor across all chats, not this spawn or prompt.",
       summary: lines.join("\n"),
       bots: attached.map((row) => ({ ...row, strengths: routingStrengths(row) })),
-      routingRule: "Workhorse chooses from callable bots by task fit and capacity. Explicit user assignments win.",
+      routingRule:
+        "Workhorse chooses from callable bots by task fit and capacity. A pool inside 24 hours of its reset is spent first, because leftover that expires is free. Explicit user assignments win.",
     },
     null,
     2,
@@ -1115,6 +1116,8 @@ export function planAfterRefresh(
 
 /** A plan a spawn or an Auto turn is about to route on must be newer than this. */
 export const ROUTING_PLAN_STALE_AFTER_MS = 15 * 60_000;
+/** How often an open desk asks its meters again. Same clock as the stale age, so a reading is never more than one beat behind. */
+export const PLAN_BEAT_MS = ROUTING_PLAN_STALE_AFTER_MS;
 /** One fetch per burst. A wave of spawns must not become a wave of meter calls. */
 export const ROUTING_PLAN_REFRESH_DEBOUNCE_MS = 60_000;
 
@@ -1343,6 +1346,10 @@ export type CapacityMeter = {
   usedPercent?: number;
   resetsAt?: string;
   observedAt?: string;
+  /** Hours until `resetsAt`, one decimal, only when it parses and is ahead. A harness applies the same finish-first rule the desk does. */
+  hoursToReset?: number;
+  /** True when `observedAt` is older than the six-hour cache age: the numbers are a reading, not the state of the pool. */
+  stale?: true;
 };
 
 export type CapacityRow = {
@@ -1389,18 +1396,47 @@ function officialCapacityMeter(input: {
   resetsAt?: string;
   observedAt?: string;
   unmetered?: boolean;
+  now?: number;
 }): CapacityMeter {
   if (input.unmetered) return { status: "unmetered" };
   const remaining = finitePercent(input.leftover);
   const used = finitePercent(input.used);
   if (remaining == null && used == null) return { status: "unknown" };
+  const now = input.now ?? Date.now();
+  const reset = input.resetsAt ? Date.parse(input.resetsAt) : NaN;
+  const hoursToReset =
+    Number.isFinite(reset) && reset > now ? Math.round(((reset - now) / 3_600_000) * 10) / 10 : undefined;
+  // A row with no clock is judged by the snapshot's own age below. Every
+  // vendor plan now carries its clock from the parse, so this is the desk-row
+  // path only, and it keeps the answer the six-hour test has always pinned.
+  const observed = input.observedAt ? Date.parse(input.observedAt) : NaN;
+  const stale = Number.isFinite(observed) && now - observed > CAPACITY_STALE_AFTER_MS;
   return {
     status: "known",
     ...(remaining != null ? { remainingPercent: remaining } : {}),
     ...(used != null ? { usedPercent: used } : {}),
     ...(input.resetsAt ? { resetsAt: input.resetsAt } : {}),
     ...(input.observedAt ? { observedAt: input.observedAt } : {}),
+    ...(hoursToReset !== undefined ? { hoursToReset } : {}),
+    ...(stale ? { stale: true } : {}),
   };
+}
+
+/**
+ * Fresh only when every known meter was read inside the cache age.
+ *
+ * `fetchedAt` is when the snapshot was assembled, and a snapshot can be
+ * assembled this second from a plan the desk read sixteen hours ago. On
+ * 2026-09-22 the desk served the Grok meter at "6% left, observed 20:00 the
+ * previous evening" as fresh at 07:44 while four workers spent the pool, and
+ * routing cannot finish a pool it cannot see.
+ */
+function snapshotFreshness(now: number, fetchedAt: number | undefined, rows: CapacityRow[]): CapacityFreshness {
+  if (fetchedAt != null && now - fetchedAt > CAPACITY_STALE_AFTER_MS) return "stale";
+  const known = rows.filter((row) => row.meter.status === "known");
+  if (known.length === 0) return "unknown";
+  if (known.some((row) => row.meter.stale)) return "stale";
+  return "fresh";
 }
 
 function rowMatchesCapacityProvider(row: DeskCallRow, provider: string): boolean {
@@ -1423,6 +1459,7 @@ export function capacityMeterForRow(
   row: DeskCallRow,
   plans?: WatchPlans,
   settings?: { customBots: CustomBot[] },
+  now: number = Date.now(),
 ): CapacityMeter {
   if (plans && settings) {
     const leftover = leftoverPercentForKey(row.id, plans, settings);
@@ -1442,19 +1479,15 @@ export function capacityMeterForRow(
       resetsAt: row.resetsAt ?? plan?.resetsAt,
       observedAt: plan?.observedAt,
       unmetered,
+      now,
     });
   }
   return officialCapacityMeter({
     leftover: row.leftoverPercent,
     used: row.usedPercent,
     resetsAt: row.resetsAt,
+    now,
   });
-}
-
-function snapshotFreshness(now: number, fetchedAt: number | undefined, rows: CapacityRow[]): CapacityFreshness {
-  if (fetchedAt != null && now - fetchedAt > CAPACITY_STALE_AFTER_MS) return "stale";
-  if (rows.some((row) => row.meter.status === "known")) return "fresh";
-  return "unknown";
 }
 
 /**
@@ -1485,7 +1518,7 @@ export function projectCapacitySnapshot(rows: DeskCallRow[], query: CapacitySnap
         status,
         ...(reasonCode ? { reasonCode } : {}),
       },
-      meter: capacityMeterForRow(row, query.plans, query.settings),
+      meter: capacityMeterForRow(row, query.plans, query.settings, now),
     });
   }
   return {

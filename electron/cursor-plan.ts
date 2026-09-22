@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { planObservedNow } from "../src/lib/usage";
 import os from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -515,7 +516,7 @@ export async function fetchCursorPlanUsage(input?: {
   try {
     const raw = await readOfficial();
     if (raw == null) return undefined;
-    return parseCursorPlanUsage(raw);
+    return planObservedNow(parseCursorPlanUsage(raw));
   } catch {
     return undefined;
   }

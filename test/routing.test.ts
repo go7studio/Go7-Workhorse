@@ -25,7 +25,17 @@ import {
   routingModelFamily,
   spawnModelFamilyKey,
   type RoutingCandidate,
+  expiryCredit,
+  candidateExpiryCredit,
+  expiryHoursLabel,
+  routingDecisionLogDetail,
+  EXPIRY_FLOOR,
+  EXPIRY_PEAK,
+  EXPIRY_WINDOW_MS,
 } from "../src/lib/routing";
+import { DEFAULT_SETTINGS } from "../src/lib/settings";
+import type { CustomBot } from "../src/lib/types";
+import { planObservedNow } from "../src/lib/usage";
 import { applyVendorCatalog, modelsFor, parseEffortFromText, resetVendorCatalog } from "../src/lib/models";
 import { normalizeSettings } from "../src/lib/settings";
 import type { RoutingSettings } from "../src/lib/types";
@@ -334,6 +344,278 @@ test("a monthly Cursor window is not scored as a 7-day one", () => {
   const draw = weeklyDrawState({ usedPercent: 8, resetsAt: reset }, now);
   assert.ok((draw.expectedUsedPercent ?? 0) > 8, `expected used should beat 8%, got ${draw.expectedUsedPercent}`);
   assert.ok((draw.delta ?? 0) > 0, `monthly Cursor must look inside budget, got delta ${draw.delta}`);
+});
+
+/*
+ * 2026-09-22. The desk's operator sent a review to Cursor Grok 4.7 to spare a
+ * Grok pool at 6% that reset in hours, which spent Cursor's monthly ring and
+ * let the Grok leftover expire unused. The owner's rule: the final 24 hours
+ * before a reset, finish that pool. Unused leftover evaporates; it is free.
+ */
+
+const HOUR = 60 * 60 * 1000;
+const DAY = 24 * HOUR;
+
+function grokFamily(now: number, patch: { grokUsed?: number; grokResetMs?: number; grokObserved?: string; cursorObserved?: string } = {}) {
+  const fresh = new Date(now - 60_000).toISOString();
+  const grok = candidate("grok-4.7", patch.grokUsed ?? 94, {
+    provider: "grok",
+    label: "Grok 4.7",
+    profile: routingProfileForModel("grok", "grok-4.7"),
+    capacity: {
+      usedPercent: patch.grokUsed ?? 94,
+      resetsAt: new Date(now + (patch.grokResetMs ?? 2 * HOUR)).toISOString(),
+      period: "weekly",
+      observedAt: patch.grokObserved ?? fresh,
+    },
+  });
+  const cursor = candidate("grok-4.7-high", 21, {
+    provider: "cursor",
+    label: "Cursor Grok 4.7",
+    profile: routingProfileForModel("cursor", "grok-4.7-high"),
+    capacity: {
+      usedPercent: 21,
+      resetsAt: new Date(now + 21 * DAY).toISOString(),
+      period: "monthly",
+      observedAt: patch.cursorObserved ?? fresh,
+    },
+  });
+  return { grok, cursor };
+}
+
+test("a pool at 6% resetting in two hours outranks a pool at 79% resetting in three weeks", () => {
+  const now = Date.parse("2026-09-22T11:53:00Z");
+  const { grok, cursor } = grokFamily(now);
+  const request = { prompt: "Review this pull request adversarially", tier: "deep" as const, now };
+  const ranked = rankRoutingCandidates([grok, cursor], request, settings);
+  assert.equal(ranked[0]?.provider, "grok", `the expiring pool goes first, got ${ranked.map((r) => `${r.provider}:${r.score}`).join(" ")}`);
+  // The same pair a day and a half out: the credit is gone and pace decides, as it did before.
+  const far = grokFamily(now, { grokResetMs: 36 * HOUR });
+  const later = rankRoutingCandidates([far.grok, far.cursor], request, settings);
+  assert.equal(later[0]?.provider, "cursor", "outside the last day the far pool's better pace still wins");
+});
+
+test("a spent pool is never picked however close its reset", () => {
+  const now = Date.parse("2026-09-22T11:53:00Z");
+  const { grok, cursor } = grokFamily(now, { grokUsed: 100, grokResetMs: 1 * HOUR });
+  const ranked = rankRoutingCandidates([grok, cursor], { prompt: "Review this pull request", tier: "deep", now }, settings);
+  assert.equal(ranked[0]?.provider, "cursor", "nothing left is nothing to finish");
+  assert.equal(candidateExpiryCredit(grok.capacity, now), 0);
+  // 99.6% used is not worth finishing either: at or under one percent left the credit is zero.
+  const nearlySpent = grokFamily(now, { grokUsed: 99.6, grokResetMs: 1 * HOUR });
+  assert.equal(candidateExpiryCredit(nearlySpent.grok.capacity, now), 0);
+});
+
+test("a stale meter earns no expiry credit", () => {
+  // The desk served "6% left, observed 20:00 yesterday" at 07:44 the next
+  // morning. A reading sixteen hours old cannot say what is left to finish.
+  const now = Date.parse("2026-09-22T11:53:00Z");
+  const stale = grokFamily(now, { grokObserved: new Date(now - 16 * HOUR).toISOString() });
+  assert.equal(candidateExpiryCredit(stale.grok.capacity, now), 0);
+  const ranked = rankRoutingCandidates([stale.grok, stale.cursor], { prompt: "Review this pull request", tier: "deep", now }, settings);
+  assert.equal(ranked[0]?.provider, "cursor", "an unreadable pool is ranked as it was before, not finished on faith");
+  // No clock at all is the same as an old one.
+  const clockless = { ...stale.grok.capacity, observedAt: undefined };
+  assert.equal(candidateExpiryCredit(clockless, now), 0);
+});
+
+test("the credit rises toward the reset and stays inside its bounds", () => {
+  const now = 1_000_000_000_000;
+  const at = (resetMs: number, used = 94) => expiryCredit({ resetMs, usedPercent: used, observedAtMs: now - 1000, now });
+  assert.equal(at(EXPIRY_WINDOW_MS + 1), 0, "a day and a second out earns nothing");
+  assert.equal(at(0), 0, "a reset that has passed earns nothing");
+  assert.equal(at(-HOUR), 0);
+  const edge = at(EXPIRY_WINDOW_MS);
+  const close = at(HOUR);
+  assert.ok(edge >= EXPIRY_FLOOR && edge < close, `edge ${edge} rises toward ${close}`);
+  assert.ok(close <= EXPIRY_PEAK + 7.5, `never past the peak plus the small leftover term, got ${close}`);
+  assert.ok(at(HOUR, 50) > at(HOUR, 94), "in the same hour, more left to finish ranks higher");
+  assert.equal(expiryCredit({ resetMs: HOUR, usedPercent: undefined, observedAtMs: now, now }), 0, "no gauge, no credit");
+});
+
+test("the decision and the log both say the pool is being finished", () => {
+  const now = Date.parse("2026-09-22T11:53:00Z");
+  const { grok, cursor } = grokFamily(now);
+  const request = { prompt: "Review this pull request adversarially", tier: "deep" as const, now };
+  const decision = chooseRoutingDecision([grok, cursor], request, settings);
+  assert.equal(decision?.provider, "grok");
+  assert.match(decision?.reason ?? "", /finishing leftover \(2h to reset\)/, decision?.reason);
+  const line = routingDecisionLogDetail({ source: "spawn", candidates: [grok, cursor], request, settings });
+  assert.match(line, /finishing=grok\/grok-4\.7@2h/, line);
+  assert.equal(expiryHoursLabel(90 * 60_000), "1.5h");
+  assert.equal(expiryHoursLabel(20 * 60_000), "20m");
+  assert.equal(expiryHoursLabel(36 * HOUR), "1.5d");
+});
+
+test("a pool with half a percent left earns almost nothing, however close its reset", () => {
+  // Gate on the first round: a 99.4% used Opus an hour from reset took the
+  // same credit as one with 6% left, and on quick work that outscored an
+  // on-pace Haiku that could actually do the job.
+  const now = Date.parse("2026-09-22T11:53:00Z");
+  const fresh = new Date(now - 60_000).toISOString();
+  const inAnHour = new Date(now + HOUR).toISOString();
+  const nearlyEmpty = candidate("claude-opus-5", 99.4, {
+    provider: "claude",
+    label: "Opus 5",
+    profile: routingProfileForModel("claude", "claude-opus-5"),
+    capacity: { usedPercent: 99.4, resetsAt: inAnHour, period: "weekly", observedAt: fresh },
+  });
+  const cheapOnPace = candidate("claude-haiku-4-5", 20, {
+    provider: "claude",
+    label: "Haiku 4.5",
+    profile: routingProfileForModel("claude", "claude-haiku-4-5"),
+    capacity: { usedPercent: 20, resetsAt: new Date(now + 10 * DAY).toISOString(), period: "weekly", observedAt: fresh },
+  });
+  const quick = rankRoutingCandidates([nearlyEmpty, cheapOnPace], { prompt: "Quick: classify this", tier: "quick", now }, settings);
+  assert.equal(quick[0]?.model, "claude-haiku-4-5", `half a percent cannot absorb a task, got ${quick.map((r) => `${r.model}:${r.score}`).join(" ")}`);
+  const at = (usedPercent: number) => candidateExpiryCredit({ ...nearlyEmpty.capacity, usedPercent }, now);
+  const whole = at(95);
+  assert.ok(whole >= EXPIRY_FLOOR, `at five percent left the credit is whole: ${whole}`);
+  assert.ok(at(94) > whole && at(94) < whole * 1.05, "above five percent only the small leftover term grows");
+  assert.ok(at(97) > whole * 0.45 && at(97) < whole * 0.55, `three percent left, midway between the two lines, earns about half: ${at(97)} of ${whole}`);
+  assert.equal(at(99.4), 0, "0.6% left earns nothing: it is not worth finishing");
+  assert.equal(at(99), 0, "the unfinishable line itself earns nothing");
+  assert.ok(at(98.9) > 0 && at(98.9) < whole * 0.05, "just above it, a sliver");
+});
+
+test("a pool not worth finishing loses to an on-pace twin of the same brain", () => {
+  // Second gate: with equal profiles the capacity term is the whole decision,
+  // so even a sliver of credit put ACP Grok 4.7 at 0.6% left ahead of an
+  // on-pace Cursor Grok 4.7. Now it earns nothing and sorts behind every live
+  // row, so the twin with real capacity gets the work.
+  const now = Date.parse("2026-09-22T11:53:00Z");
+  const { grok, cursor } = grokFamily(now, { grokUsed: 99.4, grokResetMs: 1 * HOUR });
+  const onPace = { ...cursor, capacity: { ...cursor.capacity, usedPercent: 30 } };
+  const ranked = rankRoutingCandidates([grok, onPace], { prompt: "Review this pull request adversarially", tier: "deep", now }, settings);
+  assert.equal(ranked[0]?.provider, "cursor", `the twin with capacity wins, got ${ranked.map((r) => `${r.provider}:${r.score}`).join(" ")}`);
+  // The twins round to the same score and the label tiebreak already favours
+  // Cursor, so that alone does not prove the demotion (fourth gate). Against a
+  // model under the deep bar only a row sorted last can lose.
+  const underBar = candidate("claude-haiku-4-5", 20, {
+    provider: "claude",
+    label: "Haiku 4.5",
+    profile: routingProfileForModel("claude", "claude-haiku-4-5"),
+    capacity: { usedPercent: 20, resetsAt: new Date(now + 10 * DAY).toISOString(), period: "weekly", observedAt: new Date(now - 60_000).toISOString() },
+  });
+  const request = { prompt: "Review this pull request adversarially", tier: "deep" as const, now };
+  const demoted = rankRoutingCandidates([grok, underBar], request, settings);
+  assert.equal(demoted[0]?.provider, "claude", `inside the window a pool not worth finishing sorts last, got ${demoted.map((r) => `${r.model}:${r.score}`).join(" ")}`);
+  // Days from its reset the same nearly-empty pool is not demoted: Watch still
+  // calls it, the reserve penalty already prices it, and it must not lose to a
+  // model under the deep bar. Third gate's case.
+  const daysOut = grokFamily(now, { grokUsed: 99.2, grokResetMs: 3 * DAY });
+  const deep = rankRoutingCandidates([daysOut.grok, underBar], request, settings);
+  assert.equal(deep[0]?.provider, "grok", `a callable pool days from reset is ranked on its score, got ${deep.map((r) => `${r.model}:${r.score}`).join(" ")}`);
+  // With no reset known there is nothing to wait for either: a spent prepaid
+  // balance stays spent. Fourth gate's case: the reserve hit left it at about
+  // 22, still ahead of the model under the bar, and a chat Auto send took it.
+  const noReset = candidate("grok-4.7", 100, {
+    provider: "grok",
+    label: "Grok 4.7",
+    profile: routingProfileForModel("grok", "grok-4.7"),
+    capacity: { usedPercent: 100, period: "weekly", observedAt: new Date(now - 60_000).toISOString() },
+  });
+  const unknownReset = rankRoutingCandidates([noReset, underBar], request, settings);
+  assert.equal(unknownReset[0]?.provider, "claude", `a spent pool with no reset known sorts last, got ${unknownReset.map((r) => `${r.model}:${r.score}`).join(" ")}`);
+  // With five percent left the same pool is worth finishing, and it wins.
+  const worth = grokFamily(now, { grokUsed: 95, grokResetMs: 1 * HOUR });
+  const rankedWorth = rankRoutingCandidates([worth.grok, { ...worth.cursor, capacity: { ...worth.cursor.capacity, usedPercent: 30 } }], { prompt: "Review this pull request adversarially", tier: "deep", now }, settings);
+  assert.equal(rankedWorth[0]?.provider, "grok");
+});
+
+test("the credit stands in for the pace term rather than stacking on it", () => {
+  const routing = readFileSync(path.join(ROOT, "src", "lib", "routing.ts"), "utf8");
+  assert.match(
+    routing,
+    /if \(expiry > 0\) score \+= expiry \* capacityWeight;\s*\n\s*else if \(settings\.preferExcess\) score \+= clamp\(draw\.delta, -50, 50\)/,
+    "an expiring row takes the credit and no pace term, positive or negative",
+  );
+});
+
+test("every vendor's candidate carries the clock its plan was read at", () => {
+  // The first round armed the credit for ACP Grok only: nothing else stamped
+  // observedAt, and the Cursor lane split and the custom-bot path dropped it.
+  const now = Date.parse("2026-09-22T11:53:00Z");
+  const observedAt = new Date(now - 60_000).toISOString();
+  const reset = new Date(now + 2 * HOUR).toISOString();
+  const bot = { ...DEFAULT_SETTINGS.customBots[0], id: "bot_k", name: "Kimi", baseUrl: "https://api.example.test/v1", apiKey: "k", model: "kimi-k3", api: "openai-completions" } as CustomBot;
+  const settingsWithBot = {
+    ...DEFAULT_SETTINGS,
+    llms: { ...DEFAULT_SETTINGS.llms, grok: { ...DEFAULT_SETTINGS.llms.grok, connected: true }, cursor: { ...DEFAULT_SETTINGS.llms.cursor, connected: true } },
+    customBots: [bot],
+  };
+  const plan = (usedPercent: number, products: Array<{ product: string; label: string; usagePercent: number; resetsAt: string }>) => ({
+    usedPercent, leftPercent: 100 - usedPercent, period: "weekly" as const, resetsAt: reset, observedAt, prepaidBalance: 0, products,
+  });
+  const plans = {
+    grok: plan(94, [{ product: "weekly", label: "Weekly", usagePercent: 94, resetsAt: reset }]),
+    cursor: { ...plan(50, [{ product: "cursor-models", label: "Cursor Models", usagePercent: 21, resetsAt: reset }, { product: "other-models", label: "Other Models", usagePercent: 79, resetsAt: reset }]), period: "monthly" as const },
+    custom: { bot_k: plan(60, [{ product: "weekly", label: "Weekly", usagePercent: 60, resetsAt: reset }]) },
+  };
+  const rows = routingCandidatesForDesk(settingsWithBot as never, [], plans as never);
+  const grok = rows.find((row) => row.provider === "grok" && row.model === "grok-4.7");
+  const composer = rows.find((row) => row.provider === "cursor" && row.model === "grok-4.7-high");
+  const kimi = rows.find((row) => row.customBotId === "bot_k");
+  assert.equal(grok?.capacity?.observedAt, observedAt, "Grok's candidate carries the clock");
+  assert.equal(composer?.capacity?.observedAt, observedAt, "a Cursor ring's candidate carries the clock the split used to drop");
+  assert.equal(kimi?.capacity?.observedAt, observedAt, "a custom bot's candidate carries the clock its plan stamped");
+  assert.equal(planObservedNow({ usedPercent: 1, leftPercent: 99 } as { observedAt?: string }, now)?.observedAt, new Date(now).toISOString(), "a fresh parse is stamped now");
+  assert.equal(planObservedNow({ usedPercent: 1, leftPercent: 99, observedAt } as { observedAt?: string }, now)?.observedAt, observedAt, "a plan that has its clock keeps it");
+  assert.equal(planObservedNow(undefined, now), undefined);
+  // The stamp is applied where each vendor's plan is parsed, so a plan that
+  // reaches routing has its clock whichever door it came through. Grok Bot's
+  // file carries its own `asOf` and is not restamped.
+  for (const file of ["claude-plan.ts", "codex-plan.ts", "cursor-plan.ts", "custom-plan.ts"]) {
+    const source = readFileSync(path.join(ROOT, "electron", file), "utf8");
+    const parses = source.match(/parse[A-Z][A-Za-z]*PlanUsage\(/g)?.filter((call) => !call.startsWith("parseGrokBot")) ?? [];
+    const stamped = source.match(/planObservedNow\(parse[A-Z][A-Za-z]*PlanUsage\(/g) ?? [];
+    // Every call of the parser that hands a plan back is wrapped; the
+    // definition itself is not a call. A third gate found the custom fetch
+    // has two return paths and only the test-injected one was stamped.
+    const calls = parses.length - 1;
+    assert.ok(calls >= 1, `${file} parses a plan somewhere`);
+    assert.equal(stamped.length, calls, `${file}: ${calls} parse call(s), ${stamped.length} stamped`);
+  }
+});
+
+test("a hold on one Cursor ring takes that ring's models out and leaves the other's in", () => {
+  const settingsCursor = {
+    ...DEFAULT_SETTINGS,
+    llms: { ...DEFAULT_SETTINGS.llms, cursor: { ...DEFAULT_SETTINGS.llms.cursor, connected: true } },
+  };
+  const holding = (key: string) => ({ key, provider: "cursor", holding: true, label: key } as never);
+  // The stock Cursor catalog holds only the Cursor Models ring; API-ring
+  // models arrive from the live `cursor-agent models` list.
+  applyVendorCatalog({
+    cursor: [...modelsFor("cursor"), { id: "claude-opus-5", name: "Claude Opus 5", effort: true, contextWindow: 200_000 }],
+  });
+  try {
+    const apiHeld = routingCandidatesForDesk(settingsCursor as never, [holding("cursor:other-models")], {});
+    assert.equal(apiHeld.find((row) => row.model === "grok-4.7-high")?.connected, true, "the Composer ring is not held");
+    assert.equal(apiHeld.find((row) => row.model === "claude-opus-5")?.connected, false, "the API ring is held, so its models are out");
+    const composerHeld = routingCandidatesForDesk(settingsCursor as never, [holding("cursor:cursor-models")], {});
+    assert.equal(composerHeld.find((row) => row.model === "grok-4.7-high")?.connected, false);
+    assert.equal(composerHeld.find((row) => row.model === "claude-opus-5")?.connected, true, "and the other way round");
+  } finally {
+    resetVendorCatalog();
+  }
+});
+
+test("the desk asks its meters again after a worker settles and on a beat", () => {
+  // A desk with routing set by hand and Usage closed served its launch reading
+  // for sixteen hours. Leftover the desk cannot see is leftover it cannot finish.
+  const store = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
+  assert.match(
+    store,
+    /settledPending\.current = true;\s*\n(\s*\/\/[^\n]*\n)*\s*if \(settledPending\.current\) refreshPlansForRouting\(plansRef\.current\);/,
+    "a settled worker just spent a pool; the meter should say so before the next routing call",
+  );
+  assert.match(
+    store,
+    /window\.setInterval\(\(\) => \{\s*\n\s*if \(document\.hidden\) return;\s*\n\s*refreshPlansForRouting\(plansRef\.current\);\s*\n\s*\}, PLAN_BEAT_MS\)/,
+    "an open desk asks again on a beat, rests while hidden, and only for plans past the stale age",
+  );
+
 });
 
 test("a vendor inside 24h of reset does not take the full flat -70 reserve", () => {

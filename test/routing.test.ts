@@ -488,6 +488,18 @@ test("a pool not worth finishing loses to an on-pace twin of the same brain", ()
   const onPace = { ...cursor, capacity: { ...cursor.capacity, usedPercent: 30 } };
   const ranked = rankRoutingCandidates([grok, onPace], { prompt: "Review this pull request adversarially", tier: "deep", now }, settings);
   assert.equal(ranked[0]?.provider, "cursor", `the twin with capacity wins, got ${ranked.map((r) => `${r.provider}:${r.score}`).join(" ")}`);
+  // Days from its reset the same nearly-empty pool is not demoted: Watch still
+  // calls it, the reserve penalty already prices it, and it must not lose to a
+  // model under the deep bar. Third gate's case.
+  const daysOut = grokFamily(now, { grokUsed: 99.2, grokResetMs: 3 * DAY });
+  const underBar = candidate("claude-haiku-4-5", 20, {
+    provider: "claude",
+    label: "Haiku 4.5",
+    profile: routingProfileForModel("claude", "claude-haiku-4-5"),
+    capacity: { usedPercent: 20, resetsAt: new Date(now + 10 * DAY).toISOString(), period: "weekly", observedAt: new Date(now - 60_000).toISOString() },
+  });
+  const deep = rankRoutingCandidates([daysOut.grok, underBar], { prompt: "Review this pull request adversarially", tier: "deep", now }, settings);
+  assert.equal(deep[0]?.provider, "grok", `a callable pool days from reset is ranked on its score, got ${deep.map((r) => `${r.model}:${r.score}`).join(" ")}`);
   // With five percent left the same pool is worth finishing, and it wins.
   const worth = grokFamily(now, { grokUsed: 95, grokResetMs: 1 * HOUR });
   const rankedWorth = rankRoutingCandidates([worth.grok, { ...worth.cursor, capacity: { ...worth.cursor.capacity, usedPercent: 30 } }], { prompt: "Review this pull request adversarially", tier: "deep", now }, settings);
@@ -538,7 +550,14 @@ test("every vendor's candidate carries the clock its plan was read at", () => {
   // file carries its own `asOf` and is not restamped.
   for (const file of ["claude-plan.ts", "codex-plan.ts", "cursor-plan.ts", "custom-plan.ts"]) {
     const source = readFileSync(path.join(ROOT, "electron", file), "utf8");
-    assert.match(source, /planObservedNow\(parse[A-Z][A-Za-z]*PlanUsage\(/, `${file} stamps the plan at the parse`);
+    const parses = source.match(/parse[A-Z][A-Za-z]*PlanUsage\(/g)?.filter((call) => !call.startsWith("parseGrokBot")) ?? [];
+    const stamped = source.match(/planObservedNow\(parse[A-Z][A-Za-z]*PlanUsage\(/g) ?? [];
+    // Every call of the parser that hands a plan back is wrapped; the
+    // definition itself is not a call. A third gate found the custom fetch
+    // has two return paths and only the test-injected one was stamped.
+    const calls = parses.length - 1;
+    assert.ok(calls >= 1, `${file} parses a plan somewhere`);
+    assert.equal(stamped.length, calls, `${file}: ${calls} parse call(s), ${stamped.length} stamped`);
   }
 });
 

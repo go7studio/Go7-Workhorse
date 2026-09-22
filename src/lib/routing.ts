@@ -912,11 +912,14 @@ export const EXPIRY_METER_STALE_MS = 6 * 60 * 60 * 1000;
 /** Leftover at which the credit is whole. */
 export const EXPIRY_FINISHABLE_PERCENT = 5;
 /**
- * Leftover at or under which a pool is not worth finishing: no credit, and it
- * sorts behind every live row. A sliver of credit was still enough to beat an
- * on-pace twin of the same brain, whose equal profile left the capacity term
- * as the whole decision, and a pool with half a percent left cannot absorb a
- * task however close its reset.
+ * Leftover at or under which a pool is not worth finishing: no credit, and
+ * when its reset is also inside the window it sorts behind every live row.
+ * A sliver of credit was still enough to beat an on-pace twin of the same
+ * brain, whose equal profile left the capacity term as the whole decision,
+ * and a pool with half a percent left cannot absorb a task however close its
+ * reset. Days from a reset the same pool is not demoted: the reserve penalty
+ * already prices it, and a third gate showed the blanket sort burying a
+ * callable pool at 99.2% behind a model under the deep bar.
  */
 export const EXPIRY_UNFINISHABLE_PERCENT = 1;
 
@@ -976,9 +979,16 @@ export function candidateExpiryCredit(capacity: RoutingCapacity | undefined, now
   });
 }
 
-/** Rows with nothing worth finishing sort behind every live row, however close their reset. An unknown gauge is not an empty one. */
-function routingRowLive(row: { usedPercent?: number }): boolean {
-  return row.usedPercent === undefined || row.usedPercent < 100 - EXPIRY_UNFINISHABLE_PERCENT;
+/**
+ * A row that is both nearly empty and about to reset sorts behind every live
+ * row: it cannot absorb the work, and nothing is lost by leaving it. An
+ * unknown gauge is not an empty one, and a nearly empty pool days from its
+ * reset is ranked on its score, where the reserve penalty already sits.
+ */
+function routingRowLive(row: { usedPercent?: number; capacity?: RoutingCapacity }, now: number): boolean {
+  if (row.usedPercent === undefined || row.usedPercent < 100 - EXPIRY_UNFINISHABLE_PERCENT) return true;
+  const resetMs = routingResetMs(row.capacity, now);
+  return !(Number.isFinite(resetMs) && resetMs <= EXPIRY_WINDOW_MS);
 }
 
 function sameRoutingIdentity(
@@ -1328,12 +1338,14 @@ export function rankRoutingCandidates(
       usedPercent: draw.usedPercent,
     });
   }
-  // A spent pool never goes first, however its score came out: the reserve
-  // taper hands a pool inside its last day no penalty at all, so a pool at
-  // 100% resetting in an hour could otherwise outscore a live one.
+  // A pool that is spent and about to reset never goes first, however its
+  // score came out: the reserve taper hands a pool inside its last day no
+  // penalty at all, so a pool at 100% resetting in an hour could otherwise
+  // outscore a live one.
+  const sortNow = request.now ?? Date.now();
   return ranked.sort((a, b) => {
-    const aLive = routingRowLive(a);
-    const bLive = routingRowLive(b);
+    const aLive = routingRowLive(a, sortNow);
+    const bLive = routingRowLive(b, sortNow);
     if (aLive !== bLive) return aLive ? -1 : 1;
     return b.score - a.score || a.label.localeCompare(b.label);
   });

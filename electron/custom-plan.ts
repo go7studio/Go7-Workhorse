@@ -473,7 +473,7 @@ export async function fetchCustomPlanUsage(input: {
       req.on("error", reject);
     });
     if (status < 200 || status >= 300) return undefined;
-    return parseCustomPlanUsage(json, input.model, meter?.id);
+    return planObservedNow(parseCustomPlanUsage(json, input.model, meter?.id));
   } catch {
     return undefined;
   }

@@ -1738,6 +1738,7 @@ export function continueWorkerRun(
           budgetHandoffAt: undefined,
           missionTokenBudget: undefined,
           findings: undefined,
+          leftInFolder: undefined,
         }),
     ...(input.correlationId ? { correlationId: input.correlationId } : {}),
   };

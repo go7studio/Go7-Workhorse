@@ -794,6 +794,7 @@ let housekeepingScheduled = false;
  * The sweep runs half a minute after load. A worker a mission picks up in that
  * half minute is running in the saved chats and still finished in the
  * load-time list, so the sweep judges each folder by the newer of the two.
+ * Only a save that was written counts.
  */
 let latestSavedSessions: readonly unknown[] | null = null;
 
@@ -1746,7 +1747,6 @@ app.whenReady().then(async () => {
   ipcMain.handle("state:save", (_event, state: Persistable) => {
     if (!state || typeof state !== "object") return { written: false };
     const saved = (state as { sessions?: unknown }).sessions;
-    if (Array.isArray(saved)) latestSavedSessions = saved;
     if ("settings" in state) {
       const nextSettings = normalizeSettings((state as { settings?: unknown }).settings);
       const workshopChanged = JSON.stringify(liveSettings.workshop) !== JSON.stringify(nextSettings.workshop);
@@ -1764,7 +1764,12 @@ app.whenReady().then(async () => {
     }
     // The queue guards the write: writeState guards its own body, but a future
     // edit that throws before its try must not silently end every save after it.
-    return stateSaves.enqueue(state);
+    // The sweep trusts only chats the desk actually wrote. A save refused for
+    // being empty, or superseded before it landed, never becomes its keep list.
+    return stateSaves.enqueue(state).then((result) => {
+      if (result?.written && Array.isArray(saved)) latestSavedSessions = saved;
+      return result;
+    });
   });
   ipcMain.handle("state:save-drafts", (_event, drafts: unknown) => {
     if (!drafts || typeof drafts !== "object" || Array.isArray(drafts)) return;

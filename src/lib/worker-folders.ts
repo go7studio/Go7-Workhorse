@@ -33,16 +33,16 @@ export function workerLabel(session: Pick<Session, "workerName" | "title">): str
 }
 
 export function leftInFolderNote(name: string, files: number): string {
-  return `${name} left ${files} uncommitted ${files === 1 ? "file" : "files"} in its folder.`;
+  return `${name}'s folder holds ${files} uncommitted ${files === 1 ? "file" : "files"}.`;
 }
 
 /** The Settings line: how many folders, and which ones the sweep kept. */
 export function workerFoldersLine(report: WorkerFoldersReport | null, titleOf: (id: string) => string | undefined): string {
-  if (!report) return "Counted shortly after the desk opens.";
+  if (!report) return "The desk counts them shortly after it opens.";
   const count = `${report.trees} ${report.trees === 1 ? "folder" : "folders"}`;
   const over = report.overTrees ? `, over the limit of ${report.maxTrees}` : "";
-  if (report.held.length === 0) return `${count}${over}. None kept.`;
+  if (report.held.length === 0) return `${count}${over}. None stay.`;
   const names = report.held.slice(0, 3).map((row) => titleOf(row.name) ?? row.name);
   const more = report.held.length > 3 ? ` and ${report.held.length - 3} more` : "";
-  return `${count}${over}. Kept: ${names.join(", ")}${more}.`;
+  return `${count}${over}. ${report.held.length === 1 ? "One stays" : `${report.held.length} stay`}: ${names.join(", ")}${more}.`;
 }

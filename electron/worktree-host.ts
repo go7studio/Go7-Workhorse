@@ -1,5 +1,6 @@
 import { execFile, execFileSync } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { deskGitEnv } from "./desk-path";
@@ -21,7 +22,7 @@ export type EnsureWorktreeInput = {
 };
 
 export type EnsureWorktreeResult =
-  | { ok: true; path: string; gitRoot: string; head: string; reused: boolean }
+  | { ok: true; path: string; gitRoot: string; head: string; reused: boolean; restored?: string }
   | { ok: false; message: string };
 
 function safeSegment(value: string): string {
@@ -87,6 +88,14 @@ export async function ensureManagedWorktree(
       return { ok: true, path: target, gitRoot, head, reused: true };
     }
 
+    const rescue = await newestRescueRef(gitRoot, session);
+    if (rescue) {
+      const restored = await restoreFromRescue(gitRoot, target, rescue);
+      if (!restored.ok) return { ok: false, message: `Could not rebuild the worker's folder from ${rescue}: ${restored.message}` };
+      const head = await git(["-C", target, "rev-parse", "HEAD"]);
+      return { ok: true, path: target, gitRoot, head, reused: false, restored: rescue };
+    }
+
     await git(["-C", gitRoot, "worktree", "add", "--detach", target, "HEAD"]);
     const head = await git(["-C", target, "rev-parse", "HEAD"]);
     return { ok: true, path: target, gitRoot, head, reused: false };
@@ -109,11 +118,15 @@ export type WorktreeSweepReport = {
   maxTrees: number;
   overTrees: boolean;
   removed: number;
+  /** Of those removed, how many had their work kept at a rescue ref first. */
+  rescued: number;
   held: Array<{ name: string; reason: string }>;
 };
 
 export type WorktreePruneResult = {
   removed: string[];
+  /** Removed folders whose work was kept first, with the ref that holds it. */
+  rescued: Array<{ name: string; ref: string }>;
   /** Worktrees left in place, with the reason Git or the filesystem gave. */
   kept: Array<{ name: string; reason: string }>;
 };
@@ -525,6 +538,304 @@ function holdsNoFiles(target: string): boolean {
   return true;
 }
 
+/* ------------------------------------------------------------ rescue, then let go */
+
+/**
+ * Where a released folder's work is kept once the folder goes.
+ *
+ * Not under `refs/heads`: a push of every branch never carries it, and no
+ * branch list fills up with it. Each ref is created once and never moved, so
+ * an earlier rescue of the same worker is never the one overwritten.
+ */
+export const RESCUE_REF_PREFIX = "refs/workhorse/rescue/";
+
+/** An untracked file past this keeps the tree. Art and builds are a person's call, not a commit's. */
+export const RESCUE_MAX_FILE_BYTES = 25 * 1024 * 1024;
+
+const RESCUE_GIT_TIMEOUT_MS = 20_000;
+
+/** The line that marks a rescue commit as a snapshot of uncommitted work, so a rebuild can hand it back uncommitted. */
+const RESCUE_TRAILER = "Workhorse-Rescue: snapshot";
+
+export type RescueOptions = {
+  /** The session the folder belongs to; the ref is named after it. */
+  sessionName: string;
+  managedRoot: string;
+  /** A repository under this folder is not a durable home for anything. */
+  tempRoot: string;
+  deadline: number;
+};
+
+export type RescueResult = { ok: true; ref: string; files: number } | { ok: false; reason: string };
+
+/**
+ * A `git` call for the rescue: its own timeout, never past the sweep's
+ * deadline, an optional private index, and a fixed identity so a repository
+ * with no user configured can still hold the commit.
+ */
+function rescueGit(args: string[], deadline: number, index?: string): { ok: boolean; out: string } {
+  const left = deadline - Date.now();
+  if (left <= 0) return { ok: false, out: "the sweep ran out of time" };
+  try {
+    const stdout = execFileSync(process.env.GIT || "git", args, {
+      windowsHide: true,
+      timeout: Math.min(RESCUE_GIT_TIMEOUT_MS, left),
+      maxBuffer: 8 * 1024 * 1024,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+      env: {
+        ...worktreeGitEnv(),
+        ...(index ? { GIT_INDEX_FILE: index } : {}),
+        GIT_AUTHOR_NAME: "Go7 Workhorse",
+        GIT_AUTHOR_EMAIL: "workhorse@localhost",
+        GIT_COMMITTER_NAME: "Go7 Workhorse",
+        GIT_COMMITTER_EMAIL: "workhorse@localhost",
+      },
+    });
+    return { ok: true, out: String(stdout ?? "") };
+  } catch (error) {
+    const detail = error as { stderr?: unknown; message?: unknown };
+    return { ok: false, out: String(detail.stderr ?? detail.message ?? "").trim() };
+  }
+}
+
+function withinPath(parent: string, child: string): boolean {
+  const relative = path.relative(parent, child);
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
+/**
+ * Why the repository that would hold the rescue is not a place to keep it, or
+ * null when it is.
+ *
+ * Not inside the folder about to go, not among the desk's own worker folders,
+ * not in the system temporary folder, and not borrowing objects from the
+ * folder about to go. Compared by realpath: this Mac's temporary folder is
+ * `/var/folders/...`, which is `/private/var/folders/...` underneath.
+ */
+function rescueHomeRefusal(target: string, options: RescueOptions): string | null {
+  const common = gitSync(["-C", target, "rev-parse", "--git-common-dir"]);
+  if (!common.ok || !common.out) return "git could not say where its repository is";
+  const home = canonicalPath(path.isAbsolute(common.out) ? common.out : path.resolve(target, common.out));
+  const folder = canonicalPath(target);
+  if (withinPath(folder, home)) return "its repository lives inside the folder itself";
+  if (withinPath(canonicalPath(options.managedRoot), home)) return "its repository lives among the desk's worker folders";
+  if (withinPath(canonicalPath(options.tempRoot), home)) return "its repository lives in the temporary folder";
+  let alternates: string[] = [];
+  try {
+    alternates = fs
+      .readFileSync(path.join(home, "objects", "info", "alternates"), "utf8")
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean);
+  } catch {
+    alternates = [];
+  }
+  for (const line of alternates) {
+    const borrowed = canonicalPath(path.isAbsolute(line) ? line : path.resolve(home, "objects", line));
+    if (withinPath(folder, borrowed)) return "its repository borrows objects from the folder itself";
+  }
+  return null;
+}
+
+/**
+ * What the folder holds that git can save, or why it cannot save all of it.
+ *
+ * A submodule or a nested repository is stored as a pointer, not as its
+ * files, and an unfinished merge is not a state a commit can hold, so each
+ * keeps the tree. So does any untracked file past the size line.
+ */
+function rescueInventory(target: string, deadline: number): { entries: number } | { refusal: string } {
+  const listed = rescueGit(
+    ["-C", target, "status", "--porcelain=v2", "-z", "--untracked-files=all", "--ignore-submodules=none"],
+    deadline,
+  );
+  if (!listed.ok) return { refusal: "git could not say what it holds, so nothing can vouch for its contents" };
+  const records = listed.out.split("\0").filter(Boolean);
+  const large: string[] = [];
+  let entries = 0;
+  for (let index = 0; index < records.length; index += 1) {
+    const record = records[index];
+    if (record.startsWith("u ")) return { refusal: "it holds an unfinished merge" };
+    if (record.startsWith("1 ") || record.startsWith("2 ")) {
+      if (record.split(" ")[2]?.startsWith("S")) {
+        return { refusal: "it holds a submodule, whose files git keeps only as a pointer" };
+      }
+      entries += 1;
+      if (record.startsWith("2 ")) index += 1; // a rename's original path is the next record
+      continue;
+    }
+    if (record.startsWith("? ")) {
+      const listedPath = record.slice(2);
+      if (listedPath.endsWith("/")) return { refusal: `it holds a nested repository (${listedPath}) git cannot save` };
+      entries += 1;
+      try {
+        const size = fs.lstatSync(path.join(target, listedPath)).size;
+        if (size > RESCUE_MAX_FILE_BYTES) large.push(`${listedPath} ${Math.round(size / 1048576)} MB`);
+      } catch {
+        return { refusal: "a file changed while it was being read" };
+      }
+    }
+  }
+  if (large.length > 0) {
+    return { refusal: `it holds large files git would not save (${namedSample(large)}) — move them, then it will go` };
+  }
+  return { entries };
+}
+
+/** The rescue's own scratch folder for a private index. Never a worker's folder. */
+function removeScratch(dir: string): void {
+  try {
+    fs.rmSync(dir, { recursive: true });
+  } catch {
+    /* already gone */
+  }
+}
+
+/** A commit of the folder as it stands, parented on HEAD, built in a private index so the folder is never touched. */
+function snapshotFolder(target: string, head: string, sessionName: string, deadline: number): string | null {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "workhorse-rescue-"));
+  const index = path.join(dir, "index");
+  try {
+    if (!rescueGit(["-C", target, "read-tree", head], deadline, index).ok) return null;
+    if (!rescueGit(["-C", target, "add", "-A", "--", "."], deadline, index).ok) return null;
+    const tree = rescueGit(["-C", target, "write-tree"], deadline, index);
+    if (!tree.ok || !tree.out.trim()) return null;
+    const commit = rescueGit(
+      [
+        "-C",
+        target,
+        "-c",
+        "commit.gpgsign=false",
+        "commit-tree",
+        tree.out.trim(),
+        "-p",
+        head,
+        "-m",
+        `Workhorse kept ${sessionName} before removing its folder\n\n${RESCUE_TRAILER}`,
+      ],
+      deadline,
+    );
+    return commit.ok && commit.out.trim() ? commit.out.trim() : null;
+  } finally {
+    removeScratch(dir);
+  }
+}
+
+/**
+ * Does the commit hold exactly what the folder holds? Read back into a second
+ * private index and compared with the folder: any tracked file that differs,
+ * or any untracked file the commit lacks, and the answer is no.
+ */
+export function snapshotMatchesFolder(target: string, commit: string, deadline: number): boolean {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "workhorse-rescue-check-"));
+  const index = path.join(dir, "index");
+  try {
+    if (!rescueGit(["-C", target, "read-tree", commit], deadline, index).ok) return false;
+    // Refresh fills in the stat data a fresh index lacks; it exits non-zero
+    // when something differs, which the next two calls say for certain.
+    rescueGit(["-C", target, "update-index", "-q", "--refresh"], deadline, index);
+    const differs = rescueGit(["-C", target, "diff-files", "--name-only", "-z"], deadline, index);
+    if (!differs.ok || differs.out.replace(/\0/g, "").length > 0) return false;
+    const extra = rescueGit(["-C", target, "ls-files", "--others", "--exclude-standard", "-z"], deadline, index);
+    return extra.ok && extra.out.replace(/\0/g, "").length === 0;
+  } finally {
+    removeScratch(dir);
+  }
+}
+
+/**
+ * Create the rescue ref, never replacing one: `-2`, `-3` when the name is
+ * taken. A ref that already holds this same content on the same commit is the
+ * answer, so a folder whose removal ran out of time is not saved twice.
+ */
+function createRescueRef(target: string, name: string, commit: string, deadline: number): string | null {
+  const sameContent = (ref: string) => {
+    const mine = rescueGit(["-C", target, "rev-parse", `${commit}^{tree}`, `${commit}^@`], deadline);
+    const theirs = rescueGit(["-C", target, "rev-parse", `${ref}^{tree}`, `${ref}^@`], deadline);
+    return mine.ok && theirs.ok && mine.out.trim() === theirs.out.trim();
+  };
+  for (let attempt = 1; attempt <= 50; attempt += 1) {
+    const ref = `${RESCUE_REF_PREFIX}${name}${attempt === 1 ? "" : `-${attempt}`}`;
+    if (rescueGit(["-C", target, "update-ref", ref, commit, ""], deadline).ok) return ref;
+    if (!rescueGit(["-C", target, "show-ref", "--verify", "--quiet", ref], deadline).ok) return null;
+    if (sameContent(ref)) return ref;
+  }
+  return null;
+}
+
+/**
+ * Keep a released folder's work in its repository, exactly, before the folder
+ * goes. A clean folder is kept as a ref at HEAD; anything else as a snapshot
+ * commit that is proven to match the folder before the ref is written. Every
+ * doubt, error and timeout answers no, writes no ref, and keeps the folder.
+ */
+export function rescueWorktree(target: string, options: RescueOptions): RescueResult {
+  const home = rescueHomeRefusal(target, options);
+  if (home) return { ok: false, reason: home };
+  const inventory = rescueInventory(target, options.deadline);
+  if ("refusal" in inventory) return { ok: false, reason: inventory.refusal };
+  const head = rescueGit(["-C", target, "rev-parse", "HEAD"], options.deadline);
+  if (!head.ok || !head.out.trim()) return { ok: false, reason: "git could not name its commit" };
+  let commit = head.out.trim();
+  if (inventory.entries > 0) {
+    const snapshot = snapshotFolder(target, commit, options.sessionName, options.deadline);
+    if (!snapshot) return { ok: false, reason: "git could not save it before the sweep ran out of time" };
+    if (!snapshotMatchesFolder(target, snapshot, options.deadline)) {
+      return { ok: false, reason: "the saved copy did not match the folder, so the folder stays" };
+    }
+    commit = snapshot;
+  }
+  const ref = createRescueRef(target, safeSegment(options.sessionName), commit, options.deadline);
+  if (!ref) return { ok: false, reason: "git would not keep a ref for it" };
+  return { ok: true, ref, files: inventory.entries };
+}
+
+/**
+ * The newest rescue ref for a session in this repository, if any. Newest by
+ * the order the refs were made (`-2` after the bare name), not by commit date:
+ * a ref at a clean folder's HEAD carries that commit's old date.
+ */
+async function newestRescueRef(gitRoot: string, session: string): Promise<string | null> {
+  try {
+    const out = await git(["-C", gitRoot, "for-each-ref", "--format=%(refname)", `${RESCUE_REF_PREFIX}${session}`, `${RESCUE_REF_PREFIX}${session}-*`]);
+    let best: { ref: string; order: number } | null = null;
+    for (const ref of out.split("\n").map((row) => row.trim()).filter(Boolean)) {
+      const suffix = ref.slice(RESCUE_REF_PREFIX.length + session.length);
+      const order = suffix === "" ? 1 : /^-\d+$/.test(suffix) ? Number(suffix.slice(1)) : NaN;
+      if (Number.isFinite(order) && (!best || order > best.order)) best = { ref, order };
+    }
+    return best?.ref ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Rebuild a released folder from its rescue: at the commit it started from,
+ * with the snapshot's files put back and left uncommitted, as the worker left
+ * them. A rebuild that fails part way takes its half-made folder with it.
+ */
+async function restoreFromRescue(gitRoot: string, target: string, rescue: string): Promise<{ ok: true } | { ok: false; message: string }> {
+  try {
+    const body = await git(["-C", gitRoot, "log", "-1", "--format=%B", rescue]);
+    const snapshot = body.includes(RESCUE_TRAILER);
+    await git(["-C", gitRoot, "worktree", "add", "--detach", target, snapshot ? `${rescue}^` : rescue]);
+    if (snapshot) {
+      await git(["-C", target, "read-tree", "-u", "--reset", rescue]);
+      await git(["-C", target, "reset", "-q"]);
+    }
+    return { ok: true };
+  } catch (error) {
+    try {
+      await git(["-C", gitRoot, "worktree", "remove", "--force", target]);
+    } catch {
+      /* nothing was made */
+    }
+    return { ok: false, message: error instanceof Error ? error.message : String(error) };
+  }
+}
+
 /**
  * Drop one managed worktree, but only when Git agrees it holds nothing.
  *
@@ -546,43 +857,28 @@ function holdsNoFiles(target: string): boolean {
  * squash merges and deletes the branch, which leaves the work on main and the
  * commits on no remote branch at all.
  */
-function dropManagedWorktree(target: string): { dropped: boolean; reason: string } {
+type DropOptions = {
+  managedRoot: string;
+  tempRoot: string;
+  deadline: number;
+  /** An interrupted worker's folder: kept as a ref even when clean, so resuming finds exactly where it stopped. */
+  resumable: boolean;
+  sessionName: string;
+};
+
+function dropManagedWorktree(
+  target: string,
+  options: DropOptions,
+): { dropped: boolean; reason: string; rescued?: string } {
   const repo = owningRepo(target);
   if (repo) {
     const status = worktreeIsDirty(target);
     if (status.unknown) {
       return { dropped: false, reason: "git could not say what it holds, so nothing can vouch for its contents" };
     }
-    if (status.held) {
-      return {
-        dropped: false,
-        reason: `it holds ${status.held} (${namedSample(status.paths)}) — open it, save what you need, then remove it yourself`,
-      };
-    }
-    // The one thing that answers both refusals below, asked once and only when
-    // one of them is about to fire. It is three or four `git` calls and most
-    // trees never need it.
-    let onDefaultBranch: boolean | null = null;
-    const alreadySaved = () => {
-      if (onDefaultBranch === null) onDefaultBranch = headContentIsOnDefaultBranch(target);
-      return onDefaultBranch;
-    };
-
-    // The narrower finding first. "No ref at all" and "no remote ref" are both
-    // refusals; a person reading the log is better served by the one that says
-    // the commit is not even on a local branch.
-    if (!headIsReachable(repo, target) && !alreadySaved()) {
-      return { dropped: false, reason: "it holds a commit no branch or tag can reach" };
-    }
-    const remote = headIsOnARemote(target);
-    if (!remote.pushed && !alreadySaved()) {
-      return {
-        dropped: false,
-        reason: remote.unknown
-          ? "git could not say whether its commits are on a remote"
-          : "it holds commits no remote branch has — push them, then it will go",
-      };
-    }
+    // Ignored files first. Git would delete them with the folder and no commit
+    // can hold them, so a tree carrying work of that kind stays whatever else
+    // is true, and no rescue ref is written for a tree that is not going.
     const ignored = ignoredWorkAtRisk(target);
     if (ignored.unknown) {
       return { dropped: false, reason: "git could not list what it ignores there, so nothing can vouch for its contents" };
@@ -593,11 +889,39 @@ function dropManagedWorktree(target: string): { dropped: boolean; reason: string
         reason: `git would delete ignored files it holds (${namedSample(ignored.paths)}) — open it, move anything you need, then remove it yourself`,
       };
     }
-    const result = gitSync(["-C", repo, "worktree", "remove", target]);
-    if (result.ok && !fs.existsSync(target)) return { dropped: true, reason: "" };
-    if (!fs.existsSync(target)) return { dropped: true, reason: "" };
+    // Saved elsewhere already: clean, and either a remote branch holds HEAD or
+    // every path it changed is on the default branch. The two tests are the
+    // same as before; what changed is what happens when they say no.
+    let onDefaultBranch: boolean | null = null;
+    const alreadySaved = () => {
+      if (onDefaultBranch === null) onDefaultBranch = headContentIsOnDefaultBranch(target);
+      return onDefaultBranch;
+    };
+    const saved =
+      !status.held && (headIsReachable(repo, target) || alreadySaved()) && (headIsOnARemote(target).pushed || alreadySaved());
+
+    // Not saved, or a worker that may be picked up again: keep its work in its
+    // repository first, proven exact, or keep the folder.
+    let rescued: string | undefined;
+    if (!saved || options.resumable) {
+      const rescue = rescueWorktree(target, {
+        sessionName: options.sessionName,
+        managedRoot: options.managedRoot,
+        tempRoot: options.tempRoot,
+        deadline: options.deadline,
+      });
+      if (!rescue.ok) return { dropped: false, reason: rescue.reason };
+      rescued = rescue.ref;
+    }
+    // Git refuses a dirty folder without --force, and only a folder whose
+    // every file the rescue just proved it holds is given it.
+    const result =
+      rescued && status.held
+        ? rescueGit(["-C", repo, "worktree", "remove", "--force", target], options.deadline)
+        : gitSync(["-C", repo, "worktree", "remove", target]);
+    if (!fs.existsSync(target)) return { dropped: true, reason: "", ...(rescued ? { rescued } : {}) };
     const reason = result.out.replace(/^fatal:\s*/i, "").split("\n")[0] || "git declined to remove it";
-    return { dropped: false, reason };
+    return { dropped: false, reason, ...(rescued ? { rescued } : {}) };
   }
   // Git could not answer. A directory that still carries a `.git` link was a worktree
   // whose repository has since been deleted, so nothing can vouch for what it holds and
@@ -681,16 +1005,21 @@ export async function folderLeftBehind(sessionId: string, managedRoot: string): 
  * copies — but never at the cost of work that exists nowhere else. A tree Git will
  * not part with is kept and reported, because disk is cheaper than a lost afternoon.
  */
-export function pruneOrphanWorktrees(managedRoot: string, liveSessionIds: string[]): WorktreePruneResult {
+export function pruneOrphanWorktrees(
+  managedRoot: string,
+  liveSessionIds: string[],
+  options: { resumable?: ReadonlySet<string>; tempRoot?: string } = {},
+): WorktreePruneResult {
   const removed: string[] = [];
   const kept: WorktreePruneResult["kept"] = [];
-  if (!managedRoot.trim() || !fs.existsSync(managedRoot)) return { removed, kept };
+  const rescued: WorktreePruneResult["rescued"] = [];
+  if (!managedRoot.trim() || !fs.existsSync(managedRoot)) return { removed, kept, rescued };
   const live = new Set(liveSessionIds.map(safeSegment).filter(Boolean));
   let names: string[] = [];
   try {
     names = fs.readdirSync(managedRoot);
   } catch {
-    return { removed, kept };
+    return { removed, kept, rescued };
   }
   const deadline = Date.now() + PRUNE_BUDGET_MS;
   for (const name of names) {
@@ -723,9 +1052,17 @@ export function pruneOrphanWorktrees(managedRoot: string, liveSessionIds: string
       continue;
     }
 
-    const outcome = dropManagedWorktree(target);
-    if (outcome.dropped) removed.push(name);
-    else kept.push({ name, reason: outcome.reason });
+    const outcome = dropManagedWorktree(target, {
+      managedRoot,
+      tempRoot: options.tempRoot ?? os.tmpdir(),
+      deadline,
+      resumable: options.resumable?.has(id) ?? false,
+      sessionName: id,
+    });
+    if (outcome.dropped) {
+      removed.push(name);
+      if (outcome.rescued) rescued.push({ name, ref: outcome.rescued });
+    } else kept.push({ name, reason: outcome.reason });
   }
-  return { removed, kept };
+  return { removed, kept, rescued };
 }

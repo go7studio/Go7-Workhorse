@@ -89,7 +89,8 @@ test("state:load routes the sweep through that decision and logs the skip", () =
     "the sweep must sit inside the else, not beside it",
   );
   const scheduled = main.indexOf("function scheduleHousekeeping");
-  const pruneCall = main.indexOf("pruneOrphanWorktrees(root, keep)");
+  // The call may pass options (the resumable set); the rule is where it sits.
+  const pruneCall = main.indexOf("pruneOrphanWorktrees(root, keep");
   assert.ok(scheduled > 0 && pruneCall > scheduled, "the only prune call must be the one the timer reaches");
   assert.equal(main.split("pruneOrphanWorktrees(").length - 1, 1, "exactly one call site, and the timer owns it");
   assert.match(main, /const load = readStateWithSource\(\)/, "the handler must read the source, not just the state");

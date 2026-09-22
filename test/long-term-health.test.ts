@@ -26,6 +26,7 @@ import {
   isRetiredWorkerRow,
   sameJsonValue,
   worktreeKeepSet,
+  worktreeResumableSet,
 } from "../electron/state-persistence";
 import {
   STATE_NAMED_BACKUP_MAX_AGE_MS,
@@ -119,19 +120,22 @@ test("the age floor keeps a tree for a week after its worker finished", () => {
   assert.deepEqual(worktreeKeepSet(exactly, { now: NOW }), ["sess_edge"]);
 });
 
-test("every terminal status is a candidate except interrupted, which can be resumed", () => {
+test("every terminal status is a candidate after the grace, interrupted included, and interrupted is marked resumable", () => {
   const long = NOW - 90 * DAY;
-  for (const status of ["completed", "failed", "cancelled", "timed-out", "budget-exceeded"]) {
+  for (const status of ["completed", "failed", "cancelled", "timed-out", "budget-exceeded", "interrupted"]) {
     assert.deepEqual(
       worktreeKeepSet([worker(`sess_${status}`, status, long)], { now: NOW }),
       [],
-      `${status} means the run is over`,
+      `${status}: the folder may go once the grace has passed`,
     );
   }
-  // `interrupted` is the desk stopping, not the worker failing. src/lib/types.ts
-  // says the brief, the transcript and the folder all survive so it can be
-  // picked up again — sweeping the folder is what would make that untrue.
-  assert.deepEqual(worktreeKeepSet([worker("sess_int", "interrupted", long)], { now: NOW }), ["sess_int"]);
+  // `interrupted` can still be picked up again. The sweep keeps its folder's
+  // exact state as a rescue ref before it goes, and resuming rebuilds the
+  // folder from that ref, so the promise in src/lib/types.ts still holds.
+  const sessions = [worker("sess_int", "interrupted", long), worker("sess_done", "completed", long)];
+  assert.deepEqual(worktreeResumableSet(sessions), ["sess_int"]);
+  // Inside the grace it is kept like any other.
+  assert.deepEqual(worktreeKeepSet([worker("sess_new", "interrupted", NOW - DAY)], { now: NOW }), ["sess_new"]);
 });
 
 test("anything the live set cannot read for certain keeps its tree", () => {
@@ -167,7 +171,7 @@ test("the sweep is handed the keep set, off the boot path, and every Lane 0 refu
   // The bug was `pruneOrphanWorktrees(root, liveSessionIds)` inside state:load.
   assert.doesNotMatch(main, /pruneOrphanWorktrees\([^)]*liveSessionIds/);
   assert.match(main, /const keep = worktreeKeepSet\(sessions\)/);
-  assert.match(main, /pruneOrphanWorktrees\(root, keep\)/);
+  assert.match(main, /pruneOrphanWorktrees\(root, keep, \{ resumable \}\)/);
   // state:load must hand the prune to the timer, not run it between read and reply.
   assert.match(main, /scheduleHousekeeping\(sessions\)/);
   assert.match(main, /HOUSEKEEPING_DELAY_MS/);

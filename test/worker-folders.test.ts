@@ -41,7 +41,7 @@ test("the note names the worker and the count, and the Settings line says what t
   const titles: Record<string, string> = { sess_a: "Wanda 2", sess_b: "Wren 3" };
   const titleOf = (id: string) => titles[id];
   assert.equal(workerFoldersLine(null, titleOf), "The desk counts them shortly after it opens.");
-  const base = { at: 1, trees: 2, maxTrees: 24, overTrees: false, removed: 0, held: [] };
+  const base = { at: 1, trees: 2, maxTrees: 24, overTrees: false, removed: 0, rescued: 0, held: [] };
   assert.equal(workerFoldersLine(base, titleOf), "2 folders. None stay.");
   const held = [
     { name: "sess_a", reason: "it holds untracked files (art/x.blend)" },
@@ -54,6 +54,14 @@ test("the note names the worker and the count, and the Settings line says what t
   const many = [...held, { name: "sess_c", reason: "r" }, { name: "sess_d", reason: "r" }, { name: "sess_e", reason: "r" }];
   assert.equal(workerFoldersLine({ ...base, trees: 5, held: many }, titleOf), "5 folders. 5 stay: Wanda 2, Wren 3, sess_c and 2 more.");
   assert.equal(workerFoldersLine({ ...base, trees: 1, held: held.slice(0, 1) }, titleOf), "1 folder. One stays: Wanda 2.");
+  assert.equal(
+    workerFoldersLine({ ...base, trees: 2, removed: 3, rescued: 3 }, titleOf),
+    "2 folders. Git keeps the work of 3 removed folders. None stay.",
+  );
+  assert.equal(
+    workerFoldersLine({ ...base, trees: 2, removed: 1, rescued: 1, held }, titleOf),
+    "2 folders. Git keeps the work of 1 removed folder. 2 stay: Wanda 2, Wren 3.",
+  );
 });
 
 test("the count survives a save, and a worker's status carries it", () => {
@@ -71,6 +79,14 @@ test("the count survives a save, and a worker's status carries it", () => {
   // A reused worker starts its next slice with no count from the last one.
   const next = continueWorkerRun({ status: "completed", startedAt: 1, finishedAt: 5, isolation: "worktree", leftInFolder: { files: 4, at: 6 } }, { now: 10 });
   assert.equal(next.leftInFolder, undefined);
+});
+
+test("resuming and reusing a worker ask main for its folder before the turn starts", () => {
+  const store = source("src", "lib", "store.tsx");
+  // resumeAgentRun: the folder first, the brief after; a folder main cannot give back leaves the worker interrupted.
+  assert.match(store, /ensureWorktree\(\{ sessionId: child\.id, root: environment\.gitRoot \}\)[\s\S]{0,120}if \(result\.ok\) return resume\(\);/);
+  // The reused-worker spawn path does the same before the new slice.
+  assert.match(store, /ensureWorktree\(\{ sessionId: priorWorker\.id, root: environment\.gitRoot \}\)/);
 });
 
 test("main hands the sweep the chats it last saved, and the store counts on settle, once per run", () => {

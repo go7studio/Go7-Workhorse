@@ -88,7 +88,8 @@ import {
 import { clearPerfCause, setPerfCause, stallThresholdMs, startPerfHeartbeat } from "./perf-heartbeat";
 import { offloadStateTranscripts, readTranscriptSidecar, repairRetiredSidecars, transcriptSidecarPath } from "./transcript-store";
 import { applyComposerDrafts, type ComposerDraftSnap } from "../src/lib/chats";
-import { createSaveQueue, dueByInterval, readComposerDraftFile, readStringMapFile, readVersionedState, sameJsonValue, STATE_BACKUP_INTERVAL_MS, STATE_FSYNC_INTERVAL_MS, syncFileInPlace, worktreeKeepSet, worktreePruneDecision, writeComposerDraftFile, writeStringMapFile, writeVersionedState, writeVersionedStateAsync } from "./state-persistence";
+import { createSaveQueue, dueByInterval, readComposerDraftFile, readStringMapFile, readVersionedState, sameJsonValue, STATE_BACKUP_INTERVAL_MS, STATE_FSYNC_INTERVAL_MS, syncFileInPlace, worktreeKeepSet,
+  worktreeResumableSet, worktreePruneDecision, writeComposerDraftFile, writeStringMapFile, writeVersionedState, writeVersionedStateAsync } from "./state-persistence";
 import { workhorseUserDataOverride, workhorseVolatileCredentials } from "../src/lib/user-data";
 import {
   bookmarksFromProjects,
@@ -850,8 +851,9 @@ function runHousekeeping(sessions: readonly unknown[]) {
    * has to agree before a single folder goes.
    */
   const keep = worktreeKeepSet(sessions);
+  const resumable = new Set(worktreeResumableSet(sessions));
   const before = measureWorktreeStore(root);
-  const pruned = pruneOrphanWorktrees(root, keep);
+  const pruned = pruneOrphanWorktrees(root, keep, { resumable });
   const after = measureWorktreeStore(root);
   mainLog.record(
     "prune:run",
@@ -860,8 +862,11 @@ function runHousekeeping(sessions: readonly unknown[]) {
   // One line per folder that went, beside the line per folder that stayed. A
   // removal is the only thing this sweep does that a person cannot undo, so it
   // is the one thing the log may not summarise.
+  const rescuedRefs = new Map(pruned.rescued.map((row) => [row.name, row.ref]));
   for (const name of pruned.removed) {
-    mainLog.record("prune:removed", `${name}: clean and holding nothing unsaved`);
+    const ref = rescuedRefs.get(name);
+    if (ref) mainLog.record("prune:rescued", `${name}: its work is kept at ${ref}`);
+    else mainLog.record("prune:removed", `${name}: clean and holding nothing unsaved`);
   }
   for (const held of pruned.kept) {
     console.info(`Kept the worktree for ${held.name}: ${held.reason}.`);
@@ -873,6 +878,7 @@ function runHousekeeping(sessions: readonly unknown[]) {
     maxTrees: WORKTREE_MAX_TREES,
     overTrees: after.overTrees,
     removed: pruned.removed.length,
+    rescued: pruned.rescued.length,
     held: pruned.kept.map(({ name, reason }) => ({ name, reason })),
   };
 

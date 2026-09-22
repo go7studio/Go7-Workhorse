@@ -8,6 +8,7 @@ export type WorkerFoldersReport = {
   maxTrees: number;
   overTrees: boolean;
   removed: number;
+  rescued: number;
   held: Array<{ name: string; reason: string }>;
 };
 
@@ -41,8 +42,10 @@ export function workerFoldersLine(report: WorkerFoldersReport | null, titleOf: (
   if (!report) return "The desk counts them shortly after it opens.";
   const count = `${report.trees} ${report.trees === 1 ? "folder" : "folders"}`;
   const over = report.overTrees ? `, over the limit of ${report.maxTrees}` : "";
-  if (report.held.length === 0) return `${count}${over}. None stay.`;
+  const saved =
+    report.rescued > 0 ? ` Git keeps the work of ${report.rescued} removed ${report.rescued === 1 ? "folder" : "folders"}.` : "";
+  if (report.held.length === 0) return `${count}${over}.${saved} None stay.`;
   const names = report.held.slice(0, 3).map((row) => titleOf(row.name) ?? row.name);
   const more = report.held.length > 3 ? ` and ${report.held.length - 3} more` : "";
-  return `${count}${over}. ${report.held.length === 1 ? "One stays" : `${report.held.length} stay`}: ${names.join(", ")}${more}.`;
+  return `${count}${over}.${saved} ${report.held.length === 1 ? "One stays" : `${report.held.length} stay`}: ${names.join(", ")}${more}.`;
 }

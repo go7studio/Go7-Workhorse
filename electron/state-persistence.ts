@@ -208,12 +208,22 @@ export function worktreePruneDecision(
 /**
  * Statuses that mean a worker's run is over and nothing will pick it up again.
  *
- * `interrupted` is deliberately not here. It is the desk stopping, not the
- * worker failing — the brief, the transcript and the folder all survive so the
- * run can be resumed (see `AgentRun` in src/lib/types.ts). Sweeping those trees
- * would delete the thing that makes resuming possible.
+ * `interrupted` is not here. It is the desk stopping, not the worker failing:
+ * the brief, the transcript and the folder all survive so the run can be
+ * resumed (see `AgentRun` in src/lib/types.ts).
  */
 const FINISHED_WORKER_STATUS = new Set(["completed", "failed", "cancelled", "timed-out", "budget-exceeded"]);
+
+/**
+ * Statuses whose folder the sweep may release once the grace has passed.
+ *
+ * `interrupted` is here because its folder is no longer the only copy: before
+ * a released folder goes, the sweep keeps its exact state at
+ * `refs/workhorse/rescue/<id>`, a clean one included, and resuming rebuilds the
+ * folder from that ref (`ensureManagedWorktree`). Held for ever, eleven such
+ * folders reached 5 GB with nobody resuming any of them.
+ */
+const RELEASABLE_WORKER_STATUS = new Set([...FINISHED_WORKER_STATUS, "interrupted"]);
 
 /**
  * How long a finished worker keeps its worktree.
@@ -274,16 +284,36 @@ export function worktreeKeepSet(
         ? (row.agentRun as { status?: unknown; finishedAt?: unknown; startedAt?: unknown })
         : null;
     const status = typeof run?.status === "string" ? run.status : "";
-    if (!FINISHED_WORKER_STATUS.has(status)) {
+    if (!RELEASABLE_WORKER_STATUS.has(status)) {
       keep.push(id);
       continue;
     }
-    if (isRetiredWorkerRow(row)) continue;
+    // A retired transcript means the run is long over. The transcript store
+    // never retires an interrupted worker, and one that looks retired still
+    // waits out the grace.
+    if (status !== "interrupted" && isRetiredWorkerRow(row)) continue;
     const finishedAt = firstFiniteNumber(run?.finishedAt, run?.startedAt);
     // A finished run with no clock on it cannot be aged, so it is kept.
     if (finishedAt === null || now - finishedAt < keepMs) keep.push(id);
   }
   return keep;
+}
+
+/**
+ * Workers that may be picked up again: interrupted runs. The sweep keeps the
+ * exact state of such a folder as a ref before it goes, even a clean one, so
+ * resuming rebuilds it where the worker stopped.
+ */
+export function worktreeResumableSet(sessions: readonly unknown[]): string[] {
+  const ids: string[] = [];
+  for (const item of sessions) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+    const row = item as { id?: unknown; agentRun?: unknown };
+    const id = typeof row.id === "string" ? row.id.trim() : "";
+    const run = row.agentRun && typeof row.agentRun === "object" ? (row.agentRun as { status?: unknown }) : null;
+    if (id && run?.status === "interrupted") ids.push(id);
+  }
+  return ids;
 }
 
 /**

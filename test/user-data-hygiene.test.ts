@@ -4,7 +4,14 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { folderLeftBehind, pruneOrphanWorktrees } from "../electron/worktree-host";
+import {
+  RESCUE_REF_PREFIX,
+  ensureManagedWorktree,
+  folderLeftBehind,
+  pruneOrphanWorktrees,
+  rescueWorktree,
+  snapshotMatchesFolder,
+} from "../electron/worktree-host";
 import { sweepStaleUserData } from "../electron/user-data-hygiene";
 
 test("sweepStaleUserData drops leftover update installers and oversized Chromium caches", () => {
@@ -143,32 +150,57 @@ function repoWithWorktree(
   return { root, repo, managed, wt, remote };
 }
 
-test("pruneOrphanWorktrees keeps a worktree holding untracked work", () => {
+/*
+ * The fixtures live under the system temporary folder, which is exactly where
+ * the rescue refuses to keep anything. Tests that mean "a durable repository"
+ * name a stand-in temporary folder that does not hold the fixture.
+ */
+function durable(root: string) {
+  return { tempRoot: path.join(root, "elsewhere-temp") };
+}
+
+const git = (cwd: string, args: string[]) => execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
+
+test("pruneOrphanWorktrees keeps untracked work at a rescue ref, then lets the folder go", () => {
   const { root, repo, managed, wt } = repoWithWorktree("untracked");
   fs.mkdirSync(path.join(wt, "art"));
   fs.writeFileSync(path.join(wt, "art", "hero.blend"), "generated art in no commit");
 
-  const pruned = pruneOrphanWorktrees(managed, []);
+  const pruned = pruneOrphanWorktrees(managed, [], durable(root));
 
-  assert.deepEqual(pruned.removed, [], "an untracked file must stop the removal");
-  assert.equal(pruned.kept.length, 1);
-  assert.match(pruned.kept[0].reason, /untracked/i);
-  assert.ok(fs.existsSync(path.join(wt, "art", "hero.blend")), "the art must survive");
-  const listed = execFileSync("git", ["worktree", "list"], { cwd: repo, encoding: "utf8" });
-  assert.ok(listed.includes("sess_gone"), "a kept worktree stays registered");
+  assert.deepEqual(pruned.removed, ["sess_gone"]);
+  assert.deepEqual(pruned.rescued, [{ name: "sess_gone", ref: `${RESCUE_REF_PREFIX}sess_gone` }]);
+  assert.equal(git(repo, ["show", `${RESCUE_REF_PREFIX}sess_gone:art/hero.blend`]), "generated art in no commit", "the art is in git, byte for byte");
+  assert.ok(!fs.existsSync(wt));
+  assert.ok(!git(repo, ["worktree", "list"]).includes("sess_gone"), "git forgets the folder it removed");
+  assert.equal(git(repo, ["branch", "--list", "*rescue*"]), "", "a rescue is never a branch a push would carry");
   fs.rmSync(root, { recursive: true, force: true });
 });
 
-test("pruneOrphanWorktrees keeps a worktree holding uncommitted edits", () => {
-  const { root, managed, wt } = repoWithWorktree("dirty");
-  fs.writeFileSync(path.join(wt, "tracked.txt"), "edited, never committed\n");
+test("pruneOrphanWorktrees keeps untracked work in place when its repository lives in the temporary folder", () => {
+  const { root, managed, wt } = repoWithWorktree("untracked-temp");
+  fs.writeFileSync(path.join(wt, "hero.blend"), "the only copy");
 
   const pruned = pruneOrphanWorktrees(managed, []);
 
   assert.deepEqual(pruned.removed, []);
-  assert.match(pruned.kept[0].reason, /uncommitted changes/);
-  assert.match(pruned.kept[0].reason, /tracked\.txt/, "the refusal must name what it is protecting");
-  assert.equal(fs.readFileSync(path.join(wt, "tracked.txt"), "utf8"), "edited, never committed\n");
+  assert.match(pruned.kept[0].reason, /temporary folder/);
+  assert.ok(fs.existsSync(path.join(wt, "hero.blend")));
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test("pruneOrphanWorktrees keeps uncommitted edits at a rescue ref, then lets the folder go", () => {
+  const { root, repo, managed, wt } = repoWithWorktree("dirty");
+  fs.writeFileSync(path.join(wt, "tracked.txt"), "edited, never committed\n");
+  const head = git(wt, ["rev-parse", "HEAD"]);
+
+  const pruned = pruneOrphanWorktrees(managed, [], durable(root));
+
+  assert.deepEqual(pruned.removed, ["sess_gone"]);
+  const ref = `${RESCUE_REF_PREFIX}sess_gone`;
+  assert.equal(git(repo, ["show", `${ref}:tracked.txt`]), "edited, never committed");
+  assert.equal(git(repo, ["rev-parse", `${ref}^`]), head, "the snapshot sits on the commit the worker started from");
+  assert.match(git(repo, ["log", "-1", "--format=%B", ref]), /Workhorse-Rescue: snapshot/);
   fs.rmSync(root, { recursive: true, force: true });
 });
 
@@ -220,19 +252,15 @@ function squashMergeToMain(repo: string, head: string): string {
   return squash;
 }
 
-test("pruneOrphanWorktrees keeps a clean tree whose commit no remote branch has", () => {
+test("pruneOrphanWorktrees keeps a commit no remote branch has at a rescue ref, then lets the folder go", () => {
   const { root, repo, managed, wt } = repoWithWorktree("unpushed");
   const head = commitInWorktree(wt, "the worker's only commit\n");
-  // Reachable locally, so this is not the unreachable-commit refusal doing the
-  // work. A local branch stops garbage collection; it does not survive a disk.
-  execFileSync("git", ["branch", "saved", head], { cwd: repo });
-  assert.equal(execFileSync("git", ["status", "--porcelain"], { cwd: wt, encoding: "utf8" }).trim(), "");
+  assert.equal(git(wt, ["status", "--porcelain"]), "");
 
-  const pruned = pruneOrphanWorktrees(managed, []);
+  const pruned = pruneOrphanWorktrees(managed, [], durable(root));
 
-  assert.deepEqual(pruned.removed, []);
-  assert.match(pruned.kept[0].reason, /no remote branch has/);
-  assert.ok(fs.existsSync(wt));
+  assert.deepEqual(pruned.removed, ["sess_gone"]);
+  assert.equal(git(repo, ["rev-parse", `${RESCUE_REF_PREFIX}sess_gone`]), head, "a clean folder is kept as a ref at its commit");
   fs.rmSync(root, { recursive: true, force: true });
 });
 
@@ -264,7 +292,7 @@ test("pruneOrphanWorktrees drops a tree whose branch was squash merged and delet
   fs.rmSync(root, { recursive: true, force: true });
 });
 
-test("pruneOrphanWorktrees keeps a squash merged tree the worker went on committing to", () => {
+test("pruneOrphanWorktrees keeps a squash merged tree's later commit at a rescue ref", () => {
   // Merged, and then the worker did one more piece of work that never left this
   // disk. The merged half must not vouch for the half that never landed.
   const { root, repo, managed, wt } = repoWithWorktree("squashed-plus");
@@ -285,11 +313,11 @@ test("pruneOrphanWorktrees keeps a squash merged tree the worker went on committ
     "the merged file matches main; only the later one does not",
   );
 
-  const pruned = pruneOrphanWorktrees(managed, []);
+  const pruned = pruneOrphanWorktrees(managed, [], durable(root));
 
-  assert.deepEqual(pruned.removed, [], "one path missing from main holds the whole tree");
-  assert.match(pruned.kept[0].reason, /no remote branch has/);
-  assert.equal(fs.readFileSync(path.join(wt, "notes.md"), "utf8"), "the part that never landed\n");
+  assert.deepEqual(pruned.removed, ["sess_gone"], "one path missing from main is kept in git, not in the folder");
+  assert.equal(git(repo, ["rev-parse", `${RESCUE_REF_PREFIX}sess_gone`]), head);
+  assert.equal(git(repo, ["show", `${RESCUE_REF_PREFIX}sess_gone:notes.md`]), "the part that never landed");
   fs.rmSync(root, { recursive: true, force: true });
 });
 
@@ -420,7 +448,7 @@ test("pruneOrphanWorktrees still drops a live chat's worktree never", () => {
   fs.rmSync(root, { recursive: true, force: true });
 });
 
-test("pruneOrphanWorktrees keeps a worktree whose commit no ref can reach", () => {
+test("pruneOrphanWorktrees keeps a commit no ref can reach at a rescue ref before the folder goes", () => {
   const { root, repo, managed, wt } = repoWithWorktree("unreachable");
   fs.writeFileSync(path.join(wt, "tracked.txt"), "the worker's only commit\n");
   execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-aqm", "worker work"], { cwd: wt });
@@ -429,11 +457,12 @@ test("pruneOrphanWorktrees keeps a worktree whose commit no ref can reach", () =
   assert.equal(refs, "", "the commit must start out unreachable, or this test proves nothing");
   assert.equal(execFileSync("git", ["status", "--porcelain"], { cwd: wt, encoding: "utf8" }).trim(), "", "and the tree must be clean");
 
-  const pruned = pruneOrphanWorktrees(managed, []);
+  const pruned = pruneOrphanWorktrees(managed, [], durable(root));
 
-  assert.deepEqual(pruned.removed, [], "a clean tree can still hold the only copy of a commit");
-  assert.match(pruned.kept[0].reason, /no branch or tag can reach/i);
-  assert.ok(fs.existsSync(wt));
+  // A clean tree can hold the only copy of a commit; the ref now holds it too.
+  assert.deepEqual(pruned.removed, ["sess_gone"]);
+  assert.equal(git(repo, ["rev-parse", `${RESCUE_REF_PREFIX}sess_gone`]), head);
+  assert.notEqual(git(repo, ["for-each-ref", "--contains", head]), "", "the commit is reachable again");
   fs.rmSync(root, { recursive: true, force: true });
 });
 
@@ -697,5 +726,165 @@ test("folderLeftBehind counts what a worker left in its own folder, and nothing 
   assert.deepEqual(await folderLeftBehind("sess_link", managed), { ok: false });
   assert.deepEqual(await folderLeftBehind("sess_missing", managed), { ok: false });
   assert.deepEqual(await folderLeftBehind("", managed), { ok: false });
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+/* ----------------------------------------------------------------- what the rescue refuses */
+
+test("the rescue keeps a folder holding a file too large to save, and names it", () => {
+  const { root, managed, wt } = repoWithWorktree("large");
+  fs.mkdirSync(path.join(wt, "art"));
+  const big = path.join(wt, "art", "hero.blend");
+  fs.writeFileSync(big, "");
+  fs.truncateSync(big, 26 * 1024 * 1024);
+
+  const pruned = pruneOrphanWorktrees(managed, [], durable(root));
+
+  assert.deepEqual(pruned.removed, []);
+  assert.match(pruned.kept[0].reason, /large files git would not save \(art\/hero\.blend 26 MB\)/);
+  assert.equal(execFileSync("git", ["for-each-ref", RESCUE_REF_PREFIX], { cwd: wt, encoding: "utf8" }).trim(), "", "no ref for a folder that stays");
+  assert.ok(fs.existsSync(big));
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test("the rescue keeps a folder holding a nested repository", () => {
+  const { root, managed, wt } = repoWithWorktree("nested");
+  const inner = path.join(wt, "vendored");
+  fs.mkdirSync(inner);
+  execFileSync("git", ["init", "-q", "."], { cwd: inner });
+  fs.writeFileSync(path.join(inner, "work.txt"), "a repository's own files");
+
+  const pruned = pruneOrphanWorktrees(managed, [], durable(root));
+
+  assert.deepEqual(pruned.removed, []);
+  assert.match(pruned.kept[0].reason, /nested repository/);
+  assert.ok(fs.existsSync(path.join(inner, "work.txt")));
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test("the rescue keeps a folder whose repository lives inside it or among the worker folders", () => {
+  const { root, managed } = repoWithWorktree("home");
+  // A clone dropped straight into the managed folder: its .git is inside the folder.
+  const clone = path.join(managed, "sess_clone");
+  fs.mkdirSync(clone);
+  execFileSync("git", ["init", "-q", "."], { cwd: clone });
+  fs.writeFileSync(path.join(clone, "only.txt"), "only here");
+
+  const pruned = pruneOrphanWorktrees(managed, ["sess_gone"], durable(root));
+
+  const held = pruned.kept.find((row) => row.name === "sess_clone");
+  assert.ok(held, "the clone stays");
+  assert.match(held.reason, /inside the folder itself|among the desk's worker folders/);
+  assert.ok(fs.existsSync(path.join(clone, "only.txt")));
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test("a rescue never replaces an earlier one", () => {
+  const { root, repo, managed, wt } = repoWithWorktree("collide");
+  const earlier = git(wt, ["rev-parse", "HEAD"]);
+  git(repo, ["update-ref", `${RESCUE_REF_PREFIX}sess_gone`, earlier]);
+  fs.writeFileSync(path.join(wt, "tracked.txt"), "later work\n");
+
+  const pruned = pruneOrphanWorktrees(managed, [], durable(root));
+
+  assert.deepEqual(pruned.rescued, [{ name: "sess_gone", ref: `${RESCUE_REF_PREFIX}sess_gone-2` }]);
+  assert.equal(git(repo, ["rev-parse", `${RESCUE_REF_PREFIX}sess_gone`]), earlier, "the first ref is untouched");
+  assert.equal(git(repo, ["show", `${RESCUE_REF_PREFIX}sess_gone-2:tracked.txt`]), "later work");
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test("a worker that may be resumed is kept as a ref even when its folder is clean and saved", () => {
+  const { root, repo, managed, wt } = repoWithWorktree("resumable");
+  const head = git(wt, ["rev-parse", "HEAD"]);
+
+  const plain = repoWithWorktree("not-resumable");
+  const dropped = pruneOrphanWorktrees(plain.managed, [], durable(plain.root));
+  assert.deepEqual(dropped.removed, ["sess_gone"]);
+  assert.deepEqual(dropped.rescued, [], "a finished, saved, clean folder needs no ref");
+  fs.rmSync(plain.root, { recursive: true, force: true });
+
+  const pruned = pruneOrphanWorktrees(managed, [], { ...durable(root), resumable: new Set(["sess_gone"]) });
+  assert.deepEqual(pruned.removed, ["sess_gone"]);
+  assert.equal(git(repo, ["rev-parse", `${RESCUE_REF_PREFIX}sess_gone`]), head, "resuming must find exactly where it stopped");
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test("the rescue writes nothing once the sweep is out of time", () => {
+  const { root, managed, wt } = repoWithWorktree("late");
+  fs.writeFileSync(path.join(wt, "tracked.txt"), "edited\n");
+  const late = rescueWorktree(wt, { sessionName: "sess_gone", managedRoot: managed, tempRoot: path.join(root, "elsewhere"), deadline: Date.now() - 1 });
+  assert.equal(late.ok, false);
+  assert.equal(execFileSync("git", ["for-each-ref", RESCUE_REF_PREFIX], { cwd: wt, encoding: "utf8" }).trim(), "");
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test("the check that a saved copy matches its folder catches a difference", () => {
+  // An instrument that cannot flag a known-bad input is not evidence.
+  const { root, wt } = repoWithWorktree("verify");
+  const head = git(wt, ["rev-parse", "HEAD"]);
+  const soon = Date.now() + 30_000;
+  assert.equal(snapshotMatchesFolder(wt, head, soon), true, "a clean folder matches its own commit");
+  fs.writeFileSync(path.join(wt, "tracked.txt"), "changed after the copy\n");
+  assert.equal(snapshotMatchesFolder(wt, head, soon), false, "an edited file is caught");
+  fs.writeFileSync(path.join(wt, "tracked.txt"), "original\n");
+  fs.writeFileSync(path.join(wt, "extra.md"), "a file the copy lacks\n");
+  assert.equal(snapshotMatchesFolder(wt, head, soon), false, "an extra file is caught");
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+/* ----------------------------------------------------------------- picked up again */
+
+test("resuming rebuilds a released folder from its rescue, with its changes uncommitted again", async () => {
+  const { root, repo, managed, wt } = repoWithWorktree("restore", { "old.txt": "old\n" });
+  const head = git(wt, ["rev-parse", "HEAD"]);
+  fs.writeFileSync(path.join(wt, "tracked.txt"), "edited, never committed\n");
+  fs.rmSync(path.join(wt, "old.txt"));
+  fs.writeFileSync(path.join(wt, "new.md"), "added\n");
+  assert.deepEqual(pruneOrphanWorktrees(managed, [], durable(root)).removed, ["sess_gone"]);
+  // The project moves on meanwhile; the worker must come back where it was.
+  fs.writeFileSync(path.join(repo, "later.txt"), "main moved\n");
+  git(repo, ["add", "later.txt"]);
+  git(repo, ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "later"]);
+
+  const back = await ensureManagedWorktree({ sessionId: "sess_gone", root: repo }, managed);
+
+  assert.equal(back.ok, true);
+  assert.equal(back.ok && back.restored, `${RESCUE_REF_PREFIX}sess_gone`);
+  assert.equal(git(wt, ["rev-parse", "HEAD"]), head, "the folder starts from the worker's own commit");
+  assert.equal(fs.readFileSync(path.join(wt, "tracked.txt"), "utf8"), "edited, never committed\n");
+  assert.ok(!fs.existsSync(path.join(wt, "old.txt")), "a file it deleted stays deleted");
+  assert.ok(!fs.existsSync(path.join(wt, "later.txt")), "and nothing the project added since appears");
+  const status = execFileSync("git", ["status", "--porcelain"], { cwd: wt, encoding: "utf8" }).trimEnd().split("\n").sort();
+  assert.deepEqual(status, [" D old.txt", " M tracked.txt", "?? new.md"]);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test("a missing folder with no rescue is cut fresh, as before", async () => {
+  const { root, repo, managed, wt } = repoWithWorktree("fresh");
+  git(repo, ["worktree", "remove", "--force", wt]);
+  const back = await ensureManagedWorktree({ sessionId: "sess_gone", root: repo }, managed);
+  assert.equal(back.ok, true);
+  assert.equal(back.ok && back.restored, undefined);
+  assert.ok(fs.existsSync(path.join(wt, "tracked.txt")));
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test("a folder saved twice is kept once, and the rebuild takes the ref made last", async () => {
+  const { root, repo, managed, wt } = repoWithWorktree("twice");
+  fs.writeFileSync(path.join(wt, "tracked.txt"), "work in progress\n");
+  const options = { sessionName: "sess_gone", managedRoot: managed, tempRoot: path.join(root, "elsewhere"), deadline: Date.now() + 60_000 };
+  const first = rescueWorktree(wt, options);
+  const again = rescueWorktree(wt, options);
+  assert.deepEqual(again, first, "the same content on the same commit is the same rescue");
+  assert.equal(git(repo, ["for-each-ref", "--format=%(refname)", RESCUE_REF_PREFIX]), `${RESCUE_REF_PREFIX}sess_gone`);
+
+  // A later rescue of a clean folder points at an old commit; it is still the newest.
+  fs.writeFileSync(path.join(wt, "tracked.txt"), "original\n");
+  const base = git(wt, ["rev-parse", "HEAD"]);
+  git(repo, ["update-ref", `${RESCUE_REF_PREFIX}sess_gone-2`, base]);
+  git(repo, ["worktree", "remove", "--force", wt]);
+  const back = await ensureManagedWorktree({ sessionId: "sess_gone", root: repo }, managed);
+  assert.equal(back.ok && back.restored, `${RESCUE_REF_PREFIX}sess_gone-2`);
+  assert.equal(fs.readFileSync(path.join(wt, "tracked.txt"), "utf8"), "original\n");
   fs.rmSync(root, { recursive: true, force: true });
 });

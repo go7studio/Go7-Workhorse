@@ -8,6 +8,16 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.6.91](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.90...v0.6.91) (2026-09-22)
+
+### Features
+
+* **workers:** Always with Sandbox Off or Workspace skips the path allowlist on write preflight and at completion; Ask, accept-edits, read-only, and strict keep it
+
+### Bug Fixes
+
+* **chat:** transcript scroll no longer fights the wheel while streaming; the stack grows inside the flex scrollport so history scrolls and stick-to-bottom still pins on new tokens
+
 ## [0.6.90](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.89...v0.6.90) (2026-09-22)
 
 ### Features

@@ -10,7 +10,8 @@ When you add a feature, add it here in the same commit.
 - Set the bot, model and thinking effort per chat, or let the desk pick.
 - Spawned workers copy this chat's Permission and Sandbox. A path allowlist
   still launches the vendor at Ask so writes can be preflighted; the worker
-  chip stays Always if the orchestrator is Always.
+  chip stays Always if the orchestrator is Always. Always with Sandbox Off or
+  Workspace skips that allowlist.
 - Chat status is a tiled Workhorse mascot, a 3-by-3 grid with the bottom-right
   pixel sliver omitted. It rests as one seamless image that separates into tiles
   when work starts.
@@ -285,8 +286,10 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
 - Every vendor CLI leads its own process group, so ending a worker or quitting
   the desk stops what it started. Known limit: a CLI that double-forks with
   `nohup`, `setsid`, launchd or systemd leaves that group.
-- **Worker path scope** assigned repo-relative paths appear with the worker, and
-  Git-visible changes outside them are reported when the run ends.
+- **Worker path scope** assigned repo-relative paths appear with the worker.
+  Ask, accept-edits, read-only, and strict report Git-visible changes outside
+  that list when the run ends. Always with Sandbox Off or Workspace does not
+  path-own writes.
 - This is review evidence, not containment:
   Sandbox controls where the runtime may write, and worktrees keep worker
   changes out of the linked folder.

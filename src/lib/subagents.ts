@@ -20,6 +20,7 @@ import type {
   FileLease,
   MissionCaps,
   MissionIteration,
+  PermissionMode,
   ProviderId,
   RoutingDecision,
   Session,
@@ -3042,6 +3043,33 @@ export function refreshSharedFileFingerprint(input: {
   );
 }
 
+/**
+ * Always (`always-approve`) with Sandbox Off or Workspace is not path-owned.
+ * Those seats skip the slice allowlist and may write any path. Ask,
+ * accept-edits, read-only, and strict stay on the allowlist, so a `tmp/../`
+ * escape is not a sandbox bypass for them.
+ */
+export function alwaysSkipsPathAllowlist(input: {
+  mode?: PermissionMode;
+  sandbox?: SandboxProfile;
+}): boolean {
+  if (input.mode !== "always-approve") return false;
+  return input.sandbox === "off" || input.sandbox === "workspace";
+}
+
+/** Git changes that fail path ownership at completion. Always (Off or Workspace) does not. */
+export function pathOwnershipViolation(input: {
+  file: string;
+  owned: string[];
+  root?: string;
+  mode?: PermissionMode;
+  sandbox?: SandboxProfile;
+}): boolean {
+  if (alwaysSkipsPathAllowlist({ mode: input.mode, sandbox: input.sandbox })) return false;
+  const key = input.file.replaceAll("\\", "/").toLowerCase();
+  return !input.owned.some((owned) => owned.toLowerCase() === key);
+}
+
 export function assertAgentPathWrite(input: {
   leases: FileLease[];
   sessionId: string;
@@ -3050,8 +3078,12 @@ export function assertAgentPathWrite(input: {
   root?: string;
   currentFingerprint: string;
   role?: DeskRole;
+  mode?: PermissionMode;
   sandbox?: SandboxProfile;
 }): { ok: true } | { ok: false; error: string } {
+  if (alwaysSkipsPathAllowlist({ mode: input.mode, sandbox: input.sandbox })) {
+    return { ok: true };
+  }
   const path = leasePathForWrite(input.path, input.root);
   const allowed = normalizePathAllowlist(input.paths);
   if (!allowed.some((item) => item.toLowerCase() === path.toLowerCase())) {

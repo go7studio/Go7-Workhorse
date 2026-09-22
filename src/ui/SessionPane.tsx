@@ -53,6 +53,7 @@ import {
   pinnedToLatest,
   pinToLatest,
   shouldLoadEarlierWindow,
+  shouldPinLatest,
   sizeTranscriptView,
   transcriptPaddingY,
 } from "../lib/transcript-scroll";
@@ -202,7 +203,7 @@ export function SessionPane() {
       createPinScheduler(
         () => {
           const el = scroller.current;
-          if (el && followBottom.current) pinToLatest(el);
+          if (el && shouldPinLatest(followBottom.current, userMoved.current)) pinToLatest(el);
         },
         {
           frame: (run) => requestAnimationFrame(run),
@@ -336,7 +337,7 @@ export function SessionPane() {
     if (!el) return;
     sizeThread(el);
     followLatestClass(el, followBottom.current);
-    if (followBottom.current) pinToLatest(el);
+    if (shouldPinLatest(followBottom.current, userMoved.current)) pinToLatest(el);
     filling.current = false;
   }, [session?.id, paintFrom]);
 
@@ -347,7 +348,7 @@ export function SessionPane() {
     if (!el) return;
     sizeThread(el);
     followLatestClass(el, followBottom.current);
-    if (followBottom.current) pinLatest.request();
+    if (shouldPinLatest(followBottom.current, userMoved.current)) pinLatest.request();
   }, [session?.messages, session?.status, editsBarOpen, pinLatest]);
 
   useEffect(() => () => pinLatest.stop(), [pinLatest]);
@@ -375,7 +376,7 @@ export function SessionPane() {
     const pin = () => {
       sizeThread(thread);
       if (skipPin) return;
-      if (followBottom.current) pinToLatest(thread);
+      if (shouldPinLatest(followBottom.current, userMoved.current)) pinToLatest(thread);
     };
     const observer = new ResizeObserver(pin);
     thread.addEventListener("toggle", onToggle, true);

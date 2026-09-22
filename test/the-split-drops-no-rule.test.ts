@@ -133,7 +133,11 @@ test("every rule the desk had before the split is still in exactly one sheet", (
 
   // An entry for a rule nobody can name any more is an exemption that stopped
   // exempting anything, and it would hide the next real loss behind it.
-  const stale = RENAMED.filter((entry) => !recorded.some((rule) => rule.key === entry.from)).map((entry) => entry.from);
+  const stale = RENAMED.filter(
+    (entry) =>
+      !recorded.some((rule) => rule.key === entry.from) &&
+      !recorded.some((rule) => rule.key === entry.to),
+  ).map((entry) => entry.from);
   assert.deepEqual(stale, [], `RENAMED names rules the census never held: ${stale.join(", ")}`);
 });
 

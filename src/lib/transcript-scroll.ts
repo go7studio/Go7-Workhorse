@@ -18,6 +18,11 @@ export function followLatestTurn(input: {
   return input.following;
 }
 
+/** Do not pin while a wheel/touch is in flight — onScroll has not run yet. */
+export function shouldPinLatest(following: boolean, userScrollPending: boolean): boolean {
+  return following && !userScrollPending;
+}
+
 export function pinToLatest(el: { scrollHeight: number; scrollTop: number }): void {
   el.scrollTop = el.scrollHeight;
 }

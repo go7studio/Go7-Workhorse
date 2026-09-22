@@ -464,6 +464,7 @@
 .transcript-stack {
   box-sizing: border-box;
   width: 100%;
+  flex: 0 0 auto;
   margin-top: auto;
   min-height: var(--transcript-view, 100%);
   display: flex;

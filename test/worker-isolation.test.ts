@@ -1,9 +1,14 @@
 import assert from "node:assert/strict";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { test } from "node:test";
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 import {
   assertAgentPathWrite,
   assertSharedWrite,
   claimSharedFiles,
+  pathOwnershipViolation,
   fileContentsFingerprint,
   nestedWorkerPolicy,
   normalizeAgentRun,
@@ -205,7 +210,11 @@ test("an allowlist blocks a disallowed path and a stale allowed path before writ
     currentFingerprint: fileContentsFingerprint("before"),
   });
   assert.equal(denied.ok, false);
-  if (!denied.ok) assert.match(denied.error, /not in this worker's allowlist/);
+  if (!denied.ok) {
+    assert.match(denied.error, /Path ownership blocked write/);
+    assert.match(denied.error, /not in this worker's allowlist/);
+    assert.doesNotMatch(denied.error, /sandbox/i);
+  }
   const stale = assertAgentPathWrite({
     leases: claim.leases,
     sessionId: "wren",
@@ -216,6 +225,106 @@ test("an allowlist blocks a disallowed path and a stale allowed path before writ
   });
   assert.equal(stale.ok, false);
   if (!stale.ok) assert.match(stale.error, /changed since claim/);
+});
+
+test("Always skips the path allowlist; Ask, accept-edits, read-only, and strict keep it", () => {
+  const root = ROOT.replaceAll("\\", "/");
+  const seat = { mode: "always-approve" as const, sandbox: "off" as const };
+  const allow = (filePath: string, extra: { mode?: "always-approve" | "ask" | "accept-edits"; sandbox?: "off" | "workspace" | "read-only" | "strict" } = seat) =>
+    assertAgentPathWrite({
+      leases: [],
+      sessionId: "wren",
+      paths: ["src/lib/subagents.ts"],
+      path: filePath,
+      root,
+      currentFingerprint: "",
+      ...extra,
+    });
+  const free = [
+    "tmp/make_platform_cutouts.py",
+    `${root}/tmp/make_platform_cutouts.py`,
+    "C:/Temp/outclimb-cutout-qa.py",
+    "C:\\Temp\\outclimb-cutout-qa.py",
+    "/tmp/outclimb-cutout-qa.py",
+    "src/lib/store.tsx",
+    "tmp/../src/lib/store.tsx",
+    "C:/Temp/nested/outclimb-cutout-qa.py",
+  ];
+  for (const path of free) {
+    assert.equal(allow(path).ok, true, path);
+    assert.equal(allow(path, { mode: "always-approve", sandbox: "workspace" }).ok, true, `workspace ${path}`);
+  }
+  const held = [
+    { mode: "ask" as const, sandbox: "off" as const },
+    { mode: "accept-edits" as const, sandbox: "off" as const },
+    { mode: "always-approve" as const, sandbox: "read-only" as const },
+    { mode: "always-approve" as const, sandbox: "strict" as const },
+    { mode: "ask" as const, sandbox: "read-only" as const },
+    { mode: "ask" as const, sandbox: "strict" as const },
+  ];
+  const heldPaths = ["tmp/make_platform_cutouts.py", "src/lib/store.tsx", "tmp/../src/lib/store.tsx"];
+  for (const extra of held) {
+    for (const path of heldPaths) {
+      const denied = allow(path, extra);
+      assert.equal(denied.ok, false, `${extra.mode}/${extra.sandbox} ${path}`);
+      if (!denied.ok) {
+        assert.match(denied.error, /Path ownership blocked write/);
+        assert.match(denied.error, /not in this worker's allowlist/);
+        assert.doesNotMatch(denied.error, /sandbox/i);
+      }
+    }
+  }
+  const askSource = allow("src/lib/store.tsx", { mode: "ask", sandbox: "off" });
+  assert.equal(askSource.ok, false);
+  if (!askSource.ok) {
+    assert.equal(askSource.error, "Path ownership blocked write: src/lib/store.tsx is not in this worker's allowlist.");
+  }
+  const askEscape = allow("tmp/../src/lib/store.tsx", { mode: "ask", sandbox: "off" });
+  assert.equal(askEscape.ok, false);
+  if (!askEscape.ok) {
+    assert.equal(askEscape.error, "Path ownership blocked write: tmp/../src/lib/store.tsx is not in this worker's allowlist.");
+  }
+  assert.equal(pathOwnershipViolation({
+    file: "src/lib/store.tsx",
+    owned: ["src/lib/subagents.ts"],
+    root,
+    ...seat,
+  }), false);
+  assert.equal(pathOwnershipViolation({
+    file: "tmp/../src/lib/store.tsx",
+    owned: ["src/lib/subagents.ts"],
+    root,
+    mode: "always-approve",
+    sandbox: "workspace",
+  }), false);
+  assert.equal(pathOwnershipViolation({
+    file: "tmp/make_platform_cutouts.py",
+    owned: ["src/lib/subagents.ts"],
+    root,
+    mode: "ask",
+    sandbox: "off",
+  }), true);
+  assert.equal(pathOwnershipViolation({
+    file: "tmp/../src/lib/store.tsx",
+    owned: ["src/lib/store.tsx"],
+    root,
+    mode: "ask",
+    sandbox: "off",
+  }), true);
+  assert.equal(pathOwnershipViolation({
+    file: "src/lib/store.tsx",
+    owned: ["src/lib/subagents.ts"],
+    root,
+    mode: "always-approve",
+    sandbox: "read-only",
+  }), true);
+  assert.equal(pathOwnershipViolation({
+    file: "src/lib/store.tsx",
+    owned: ["src/lib/subagents.ts"],
+    root,
+    mode: "accept-edits",
+    sandbox: "off",
+  }), true);
 });
 
 test("releasing a session lease lets the next shared writer claim the path", () => {

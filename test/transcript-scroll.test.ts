@@ -10,6 +10,7 @@ import {
   captureViewportLock,
   countTurnsAboveViewport,
   followLatestTurn,
+  shouldPinLatest,
   keepScrollThroughPrepend,
   keepViewportOnAnchor,
   pinnedToLatest,
@@ -23,6 +24,12 @@ import {
 } from "../src/lib/transcript-scroll";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
+test("shouldPinLatest waits for onScroll after wheel or touch", () => {
+  assert.equal(shouldPinLatest(true, false), true);
+  assert.equal(shouldPinLatest(true, true), false);
+  assert.equal(shouldPinLatest(false, false), false);
+});
 
 test("layout growth does not unpin the latest turn; a user scroll away does", () => {
   assert.equal(followLatestTurn({ following: true, atBottom: true, userInitiated: false }), true);
@@ -172,8 +179,10 @@ test("SessionPane follows latest on start and ignores layout scroll unpinning", 
   assert.match(css, /\.transcript \{[^}]*overflow-anchor:\s*auto/);
   assert.match(css, /\.transcript \{[^}]*display:\s*flex/);
   assert.match(css, /\.transcript \{[^}]*flex-direction:\s*column/);
+  assert.match(css, /\.transcript-stack \{[^}]*flex:\s*0 0 auto/);
   assert.match(css, /\.transcript-stack \{[^}]*margin-top:\s*auto/);
   assert.match(css, /\.transcript-stack \{[^}]*min-height:\s*var\(--transcript-view, 100%\)/);
+  assert.match(pane, /shouldPinLatest/);
   assert.match(css, /\.transcript-fill \{[^}]*flex:\s*1 0 0/);
   assert.match(css, /\.transcript\.follow-latest \{[^}]*overflow-anchor:\s*none/);
   assert.match(pane, /addEventListener\("toggle", onToggle, true\)/);

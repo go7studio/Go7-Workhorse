@@ -558,9 +558,12 @@ const PYCACHE_FILE = /^[A-Za-z_][A-Za-z0-9_]*\.[a-z]+-?\d+(\.opt-\d+)?\.pyc$/;
 const OPEN_NO_LINK = fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0);
 
 /**
- * A `.pyc` file by its bytes: Python's header is a two-byte version number,
- * then a carriage return and a line feed, then twelve bytes of flags and
- * source stamp. A file that only borrows the name fails here.
+ * A `.pyc` file by its bytes, as CPython 3 writes it: a version number from
+ * 3000 to 3999, a carriage return and a line feed, a flags word of 0, 1 or 3,
+ * eight bytes of source stamp, and then a code object, whose first byte is
+ * `c` with or without the reference bit. A file that only borrows the name,
+ * or the first few bytes, fails here. One built to copy the whole shape would
+ * pass; nothing a person writes by hand looks like this.
  */
 function readsAsBytecode(file: string): boolean {
   let fd: number;
@@ -570,8 +573,18 @@ function readsAsBytecode(file: string): boolean {
     return false;
   }
   try {
-    const head = Buffer.alloc(16);
-    return fs.readSync(fd, head, 0, 16, 0) === 16 && head[2] === 0x0d && head[3] === 0x0a;
+    const head = Buffer.alloc(17);
+    if (fs.readSync(fd, head, 0, 17, 0) !== 17) return false;
+    const version = head.readUInt16LE(0);
+    const flags = head.readUInt32LE(4);
+    return (
+      version >= 3000 &&
+      version <= 3999 &&
+      head[2] === 0x0d &&
+      head[3] === 0x0a &&
+      (flags === 0 || flags === 1 || flags === 3) &&
+      (head[16] === 0x63 || head[16] === 0xe3)
+    );
   } catch {
     return false;
   } finally {

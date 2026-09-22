@@ -1124,9 +1124,9 @@ test("a folder the rescue would let go of keeps unique files a cache folder's na
   fs.rmSync(root, { recursive: true, force: true });
 });
 
-/** What CPython 3.12 writes: its version number 3531, a carriage return and line feed, then flags and stamp. */
+/** What CPython 3.12 writes: version 3531, CR LF, flags 0, an eight-byte stamp, then a code object. */
 function pycBytes(): Buffer {
-  return Buffer.concat([Buffer.from([0xcb, 0x0d, 0x0d, 0x0a]), Buffer.alloc(12), Buffer.from("code object")]);
+  return Buffer.concat([Buffer.from([0xcb, 0x0d, 0x0d, 0x0a]), Buffer.alloc(12), Buffer.from([0xe3]), Buffer.from("code object")]);
 }
 
 test("bytecode in __pycache__, named as Python names it, does not hold a folder back", () => {
@@ -1200,20 +1200,23 @@ test("a long list of empty folders is kept and comes back", async () => {
   fs.rmSync(root, { recursive: true, force: true });
 });
 
-test("a file in __pycache__ that only borrows a bytecode name keeps the folder", () => {
-  const { root, repo, managed, wt } = repoWithWorktree("pycache-fake", { ".gitignore": "__pycache__/\n" });
-  fs.mkdirSync(path.join(wt, "__pycache__"));
-  fs.writeFileSync(path.join(wt, "__pycache__", "tool.cpython-312.pyc"), pycBytes());
-  fs.writeFileSync(path.join(wt, "__pycache__", "note.cpython-312.pyc"), "NOT-BYTECODE");
-  fs.writeFileSync(path.join(wt, "tracked.txt"), "work in progress\n");
+test("a file in __pycache__ that only borrows a bytecode name, or its first bytes, keeps the folder", () => {
+  // The second is right in the two bytes an earlier check read and wrong everywhere else.
+  for (const [label, body] of [["name", Buffer.from("NOT-BYTECODE")], ["head", Buffer.from("ab\r\n UNIQUE-BYTES")]] as const) {
+    const { root, repo, managed, wt } = repoWithWorktree(`pycache-${label}`, { ".gitignore": "__pycache__/\n" });
+    fs.mkdirSync(path.join(wt, "__pycache__"));
+    fs.writeFileSync(path.join(wt, "__pycache__", "tool.cpython-312.pyc"), pycBytes());
+    fs.writeFileSync(path.join(wt, "__pycache__", "note.cpython-312.pyc"), body);
+    fs.writeFileSync(path.join(wt, "tracked.txt"), "work in progress\n");
 
-  const pruned = pruneOrphanWorktrees(managed, [], durable(root));
+    const pruned = pruneOrphanWorktrees(managed, [], durable(root));
 
-  assert.deepEqual(pruned.removed, []);
-  assert.match(pruned.kept[0].reason, /nothing shows they are only a cache/);
-  assert.equal(fs.readFileSync(path.join(wt, "__pycache__", "note.cpython-312.pyc"), "utf8"), "NOT-BYTECODE");
-  assert.equal(git(repo, ["for-each-ref", RESCUE_REF_PREFIX]), "", "no ref for a folder that stays");
-  fs.rmSync(root, { recursive: true, force: true });
+    assert.deepEqual(pruned.removed, [], label);
+    assert.match(pruned.kept[0].reason, /nothing shows they are only a cache/);
+    assert.deepEqual([...fs.readFileSync(path.join(wt, "__pycache__", "note.cpython-312.pyc"))], [...body]);
+    assert.equal(git(repo, ["for-each-ref", RESCUE_REF_PREFIX]), "", "no ref for a folder that stays");
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("with its list unreadable or gone, the desk will not cut a fresh folder beside a rescue, and says so", async () => {

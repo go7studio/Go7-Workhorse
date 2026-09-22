@@ -13,6 +13,7 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 ### Features
 
 * **workers:** Always with Sandbox Off or Workspace skips the path allowlist on write preflight and at completion; Ask, accept-edits, read-only, and strict keep it
+* **judge:** Settings → Routing → Judge reports, off by default: each finished mission report's text is scored by TypeSafe's Jev through your Vercel AI Gateway bot, per acceptance criterion, as shown, not shown or unclear; the next pass keeps every criterion, a pass it could not score says so, and it ran nothing and verified nothing ([#353](https://github.com/go7studio/Go7-Workhorse/issues/353)) ([fc8a9d5](https://github.com/go7studio/Go7-Workhorse/commit/fc8a9d58ca3aa77eadfb5ff3e630da245490ae1c))
 
 ### Bug Fixes
 

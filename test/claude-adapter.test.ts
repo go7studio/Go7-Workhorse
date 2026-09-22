@@ -796,7 +796,12 @@ test("Claude ring caches successful plans but still re-reads after 180s", async 
   clearClaudePlanCache();
   const third = await fetchClaudePlanUsage({ userAgent: "claude-code/test", token: "sk-test", nodeGet });
   assert.equal(calls, 2, "after the cache window the next fetch goes to the wire");
-  assert.deepEqual(third, first);
+  // A re-read is the same plan stamped with its own clock. Comparing the
+  // stamps too lost a release build to a millisecond tick between the parses.
+  const { observedAt: firstSeen, ...firstPlan } = first ?? {};
+  const { observedAt: thirdSeen, ...thirdPlan } = third ?? {};
+  assert.deepEqual(thirdPlan, firstPlan);
+  assert.ok(firstSeen && thirdSeen && Date.parse(thirdSeen) >= Date.parse(firstSeen), "a re-read is stamped at or after the read it replaces");
   clearClaudePlanCache();
 });
 

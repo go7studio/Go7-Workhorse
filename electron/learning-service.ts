@@ -17,6 +17,7 @@ import {
   effectiveLearningMode,
   eventsRequireMemory,
   eventsRequireAgentMemory,
+  proposalCitesOnlyCompletedEnvelopes,
   frameRetrievedMemories,
   HUMAN_INTELLIGENCE_LANE,
   learningCaptures,
@@ -469,6 +470,17 @@ export class LearningService {
       rationale: selection.reason,
     });
     try {
+      if (lane === AGENT_INTELLIGENCE_LANE && !eventsRequireAgentMemory(events)) {
+        this.options.store.putCompilerRun({
+          ...(this.options.store.getCompilerRun(runId) ?? { id: runId, intelligenceLane: lane, status: "running", attempt, inputHash }),
+          status: "completed",
+          endedAt: this.now(),
+          outputMemoryIds: [],
+          eventWatermark: events.at(-1)?.id,
+        });
+        this.consecutiveFailures = 0;
+        return { ran: true, runId, memories: 0, ...route };
+      }
       let brief = this.options.allowStub
         ? lane === HUMAN_INTELLIGENCE_LANE
           ? stubCompile(events, memories)
@@ -488,7 +500,7 @@ export class LearningService {
         if (result.createdWorkhorseChat !== false || result.leftoverVendorThread !== false) {
           throw new Error("auxiliary-pollution");
         }
-        const parsed = parseBriefText(result.text);
+        let parsed = parseBriefText(result.text);
         this.options.store.putCompilerRun({
           ...(this.options.store.getCompilerRun(runId) ?? { id: runId, intelligenceLane: lane, status: "running", attempt, inputHash }),
           inputTokens: result.inputTokens,
@@ -508,6 +520,12 @@ export class LearningService {
           this.noteFailure();
         return { ran: false, skipped: "invalid-brief", runId, ...route };
         }
+        if (lane === AGENT_INTELLIGENCE_LANE) {
+          parsed = {
+            intent: parsed.intent.filter((proposal) => !proposalCitesOnlyCompletedEnvelopes(proposal.sourceEventIds, events)),
+            operations: parsed.operations.filter((proposal) => !proposalCitesOnlyCompletedEnvelopes(proposal.sourceEventIds, events)),
+          };
+        }
         if (
           parsed.intent.length + parsed.operations.length === 0 &&
           (lane === HUMAN_INTELLIGENCE_LANE ? eventsRequireMemory(events) : eventsRequireAgentMemory(events))
@@ -524,7 +542,13 @@ export class LearningService {
           this.noteFailure();
         return { ran: false, skipped: "empty-explicit-brief", runId, ...route };
         }
-        if (lane === AGENT_INTELLIGENCE_LANE && parsed.intent.length > 0) {
+        // Agent evidence never becomes intent, in either list. An intent-class
+        // item filed under operations used to be stored, and automatic mode
+        // makes intent active on sight.
+        if (
+          lane === AGENT_INTELLIGENCE_LANE &&
+          (parsed.intent.length > 0 || parsed.operations.some((proposal) => proposal.memoryClass === "intent"))
+        ) {
           this.options.store.putCompilerRun({
             ...(this.options.store.getCompilerRun(runId) ?? { id: runId, intelligenceLane: lane, status: "running", attempt, inputHash }),
             status: "failed",
@@ -581,6 +605,12 @@ export class LearningService {
         });
         this.noteFailure();
         return { ran: false, skipped: "invalid-brief", runId, ...route };
+      }
+      if (lane === AGENT_INTELLIGENCE_LANE) {
+        brief = {
+          intent: brief.intent.filter((proposal) => !proposalCitesOnlyCompletedEnvelopes(proposal.sourceEventIds, events)),
+          operations: brief.operations.filter((proposal) => !proposalCitesOnlyCompletedEnvelopes(proposal.sourceEventIds, events)),
+        };
       }
       const outputIds: string[] = [];
       const apply = (proposal: (typeof brief.intent)[number]) => {

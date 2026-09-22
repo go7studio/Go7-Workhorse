@@ -1,5 +1,5 @@
 import { boundStatement } from "./learning-redact";
-import { validateBrief } from "./learning-policy";
+import { eventsRequireAgentMemory, validateBrief } from "./learning-policy";
 import type { LearningBrief, LearningEvent, MemoryItem } from "./learning-types";
 
 /** Deterministic compiler used by tests, smoke, and when no ephemeral provider is eligible. */
@@ -30,7 +30,11 @@ export function stubCompileAgent(events: LearningEvent[], _memories: MemoryItem[
   const operations: LearningBrief["operations"] = [];
   for (const event of events) {
     if (event.tombstone || event.purged || event.actorClass !== "agent") continue;
-    if (event.kind !== "outcome" && event.kind !== "tool") continue;
+    // A tool or a model call earns a row only when it failed, retried or erred;
+    // the model path applies the same rule, so both answer a retry alike.
+    if (event.kind === "tool" || event.kind === "execution") {
+      if (!eventsRequireAgentMemory([event])) continue;
+    } else if (event.kind !== "outcome") continue;
     const status = String(event.payload.status ?? event.payload.outcome ?? "").trim();
     const summary = boundStatement(String(event.payload.summary ?? event.payload.error ?? `${event.provider ?? "Agent"} ${status}`));
     if (!summary) continue;

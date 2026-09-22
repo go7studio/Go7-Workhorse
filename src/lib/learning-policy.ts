@@ -534,10 +534,11 @@ export function compilerPrompt(events: LearningEvent[], memories: MemoryItem[]):
 export function agentCompilerPrompt(events: LearningEvent[], memories: MemoryItem[]): string {
   return [
     "Compile agent-authored Workhorse evidence into an agent-performance JSON object with keys intent and operations.",
-    "Intent must always be empty. Each operations item is {action, memoryClass, scope, statement, sourceEventIds, projectId?, providerScope?, tags?}.",
-    "Capture observable performance: completed or failed model calls, tool behavior, retries, errors, tests, artifacts, latency, usage, missing verification, and inbound Workhorse Link tool calls from a harness (tool, outcome, envelope — not human intent).",
+    "Each operations item is {action, memoryClass, scope, statement, sourceEventIds, projectId?, providerScope?, tags?}.",
+    "Record a failed tool, a retry, an error, or an outcome claim that has no corroborating evidence.",
+    "A completed tool status is not proof the outcome was correct, and it is not itself a memory.",
     "Never infer a human goal, preference, complaint, or acceptance criterion. Human-authored events must never appear in this input.",
-    "Distinguish an agent claim from verified evidence. A successful terminal event alone does not prove the requested outcome was correct.",
+    "Distinguish an agent claim from verified evidence.",
     "State facts compactly, including the provider when useful. Do not copy raw output, secrets, commands, or paths into the statement.",
     'Use this exact shape: {"intent":[],"operations":[{"action":"add","memoryClass":"operations","scope":"project","statement":"...","sourceEventIds":["event-id"]}]}',
     "Every item must cite one or more exact event ids from the Agent events input.",
@@ -596,13 +597,54 @@ export function eventsRequireMemory(events: LearningEvent[]): boolean {
   });
 }
 
+const COMPLETED_TOOL_STATUSES = new Set(["completed", "complete", "ok", "success", "succeeded"]);
+
+function agentEventStatus(event: LearningEvent): string {
+  return String(event.payload.status ?? event.payload.outcome ?? "").trim().toLowerCase();
+}
+
+/**
+ * A failed call, a retry, or an error, on a tool or on a model call. The desk
+ * records a rate-limited model call as an execution event with status "retry",
+ * never as a tool, so a rule that read tools alone let the batch skip the
+ * compiler and the retry left no memory. A finished success status is none of
+ * these, and neither is a call that only started.
+ */
+export function agentEventNeedsMemory(event: LearningEvent): boolean {
+  if (event.actorClass !== "agent" || (event.kind !== "tool" && event.kind !== "execution")) return false;
+  const status = agentEventStatus(event);
+  if (/fail|error|denied|cancel|forbidden|\bretry(?:ing|ed)?\b/.test(status)) return true;
+  if (event.payload.retry === true) return true;
+  if (typeof event.payload.error === "string" && event.payload.error.trim().length > 0) return true;
+  const attempt = event.payload.attempt;
+  return typeof attempt === "number" && Number.isFinite(attempt) && attempt > 1;
+}
+
+/**
+ * A finished tool call whose status is completed, complete, ok, success, or
+ * succeeded, including a Workhorse Link envelope. That status is not a memory.
+ */
+export function completedToolEnvelope(event: LearningEvent): boolean {
+  if (event.actorClass !== "agent" || event.kind !== "tool") return false;
+  if (agentEventNeedsMemory(event)) return false;
+  return COMPLETED_TOOL_STATUSES.has(agentEventStatus(event));
+}
+
+export function proposalCitesOnlyCompletedEnvelopes(sourceEventIds: string[], events: LearningEvent[]): boolean {
+  if (sourceEventIds.length === 0) return false;
+  const byId = new Map(events.map((event) => [event.id, event]));
+  return sourceEventIds.every((id) => {
+    const event = byId.get(id);
+    return Boolean(event && completedToolEnvelope(event));
+  });
+}
+
 export function eventsRequireAgentMemory(events: LearningEvent[]): boolean {
   return events.some((event) => {
     if (event.actorClass !== "agent") return false;
-    const status = String(event.payload.status ?? event.payload.outcome ?? "").toLowerCase();
+    if (completedToolEnvelope(event)) return false;
     if (event.kind === "outcome") return true;
-    if (event.kind === "tool" && /fail|error|denied|cancel|forbidden/.test(status)) return true;
-    return event.kind === "tool" && event.payload.surface === "workhorse-link" && event.payload.mutating === true;
+    return agentEventNeedsMemory(event);
   });
 }
 

@@ -119,6 +119,16 @@ export async function ensureManagedWorktree(
       const head = await git(["-C", target, "rev-parse", "HEAD"]);
       return { ok: true, path: target, gitRoot, head, reused: false, restored: rescue.ref };
     }
+    // A ref under this worker's name that the desk's list does not vouch for
+    // (another tool's, or the list is gone or unreadable) may still hold its
+    // work. A fresh folder would hide it, so the worker waits for a person.
+    const unlisted = await unlistedRescueRef(gitRoot, session);
+    if (unlisted) {
+      return {
+        ok: false,
+        message: `${unlisted} may hold this worker's work, and it is not on the desk's own list of rescues, so the desk will not rebuild the folder from it. Restore that ref by hand, or delete it to start the worker fresh.`,
+      };
+    }
 
     await git(["-C", gitRoot, "worktree", "add", "--detach", target, "HEAD"]);
     const head = await git(["-C", target, "rev-parse", "HEAD"]);
@@ -544,13 +554,42 @@ function ignoredWorkAtRisk(target: string): { paths: string[]; loose: string[]; 
 /** `<module>.<interpreter tag>[.opt-N].pyc`: the only names Python writes into `__pycache__`. */
 const PYCACHE_FILE = /^[A-Za-z_][A-Za-z0-9_]*\.[a-z]+-?\d+(\.opt-\d+)?\.pyc$/;
 
-/** A `__pycache__` holding nothing but bytecode files named as Python names them. */
+/** Open for reading, refusing to follow a link at the last step. */
+const OPEN_NO_LINK = fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0);
+
+/**
+ * A `.pyc` file by its bytes: Python's header is a two-byte version number,
+ * then a carriage return and a line feed, then twelve bytes of flags and
+ * source stamp. A file that only borrows the name fails here.
+ */
+function readsAsBytecode(file: string): boolean {
+  let fd: number;
+  try {
+    fd = fs.openSync(file, OPEN_NO_LINK);
+  } catch {
+    return false;
+  }
+  try {
+    const head = Buffer.alloc(16);
+    return fs.readSync(fd, head, 0, 16, 0) === 16 && head[2] === 0x0d && head[3] === 0x0a;
+  } catch {
+    return false;
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+/** A `__pycache__` holding nothing but bytecode, named as Python names it and starting as Python writes it. */
 function pycacheOnly(target: string, listed: string): boolean {
   const segments = listed.split("/").filter(Boolean);
   if (segments[segments.length - 1] !== "__pycache__") return false;
+  const dir = path.join(target, ...segments);
   try {
-    const entries = fs.readdirSync(path.join(target, ...segments), { withFileTypes: true });
-    return entries.length <= GODOT_WALK_LIMIT && entries.every((entry) => entry.isFile() && PYCACHE_FILE.test(entry.name));
+    const entries = fs.readdirSync(dir, { withFileTypes: true });
+    return (
+      entries.length <= GODOT_WALK_LIMIT &&
+      entries.every((entry) => entry.isFile() && PYCACHE_FILE.test(entry.name) && readsAsBytecode(path.join(dir, entry.name)))
+    );
   } catch {
     return false;
   }
@@ -942,8 +981,6 @@ function walkFolder(target: string, skip: ReadonlySet<string>, deadline: number,
 function blobHash(format: ObjectFormat, size: number): crypto.Hash {
   return crypto.createHash(format).update(`blob ${size}\0`);
 }
-
-const OPEN_NO_LINK = fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0);
 
 function hashEntry(file: string, entry: WalkedEntry, format: ObjectFormat, deadline: number, chunk: Buffer): { id: string; size: number } | null {
   if (entry.link) {
@@ -1407,6 +1444,16 @@ async function newestRescue(gitRoot: string, session: string, managedRoot: strin
   return null;
 }
 
+/** Any ref under this session's rescue names, listed or not; the first by name. */
+async function unlistedRescueRef(gitRoot: string, session: string): Promise<string | null> {
+  try {
+    const listed = await git(["-C", gitRoot, "for-each-ref", "--format=%(refname)", `${RESCUE_REF_PREFIX}${session}`, `${RESCUE_REF_PREFIX}${session}-*`]);
+    return listed.split("\n").map((line) => line.trim()).find((ref) => rescueOrder(ref, session) !== null) ?? null;
+  } catch {
+    return null;
+  }
+}
+
 /** A path from a rescue that lands inside the folder: relative, no `..`, no `.git`. */
 function safeRescuePath(rel: string): boolean {
   const windows = process.platform === "win32";
@@ -1671,6 +1718,12 @@ function dropManagedWorktree(
       // rescue read the folder keeps the folder; the ref holds the folder as
       // it was a moment ago, and the next sweep saves the change.
       if (!stillAsRead(target, rescue.listing, options.deadline)) {
+        return { dropped: false, reason: "a file changed while it was being saved, so the folder stays" };
+      }
+      // The walk does not enter what git ignores, so that is read again too:
+      // a file dropped into a cache folder since the first look keeps the folder.
+      const ignoredNow = ignoredWorkAtRisk(target);
+      if (ignoredNow.unknown || ignoredNow.paths.length > 0 || ignoredNow.loose.length > 0) {
         return { dropped: false, reason: "a file changed while it was being saved, so the folder stays" };
       }
       rescued = rescue.ref;

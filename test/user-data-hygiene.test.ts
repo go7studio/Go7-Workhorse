@@ -1124,11 +1124,16 @@ test("a folder the rescue would let go of keeps unique files a cache folder's na
   fs.rmSync(root, { recursive: true, force: true });
 });
 
+/** What CPython 3.12 writes: its version number 3531, a carriage return and line feed, then flags and stamp. */
+function pycBytes(): Buffer {
+  return Buffer.concat([Buffer.from([0xcb, 0x0d, 0x0d, 0x0a]), Buffer.alloc(12), Buffer.from("code object")]);
+}
+
 test("bytecode in __pycache__, named as Python names it, does not hold a folder back", () => {
   const { root, repo, managed, wt } = repoWithWorktree("pycache", { ".gitignore": "__pycache__/\n", "tool.py": "print(1)\n" });
   fs.mkdirSync(path.join(wt, "__pycache__"));
-  fs.writeFileSync(path.join(wt, "__pycache__", "tool.cpython-312.pyc"), "bytecode");
-  fs.writeFileSync(path.join(wt, "__pycache__", "tool.cpython-312.opt-1.pyc"), "bytecode");
+  fs.writeFileSync(path.join(wt, "__pycache__", "tool.cpython-312.pyc"), pycBytes());
+  fs.writeFileSync(path.join(wt, "__pycache__", "tool.cpython-312.opt-1.pyc"), pycBytes());
   fs.writeFileSync(path.join(wt, "tracked.txt"), "work in progress\n");
 
   const pruned = pruneOrphanWorktrees(managed, [], durable(root));
@@ -1192,5 +1197,51 @@ test("a long list of empty folders is kept and comes back", async () => {
   const back = await ensureManagedWorktree({ sessionId: "sess_gone", root: repo }, managed);
   assert.equal(back.ok, true);
   assert.equal(names.every((name) => fs.statSync(path.join(wt, name)).isDirectory()), true);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test("a file in __pycache__ that only borrows a bytecode name keeps the folder", () => {
+  const { root, repo, managed, wt } = repoWithWorktree("pycache-fake", { ".gitignore": "__pycache__/\n" });
+  fs.mkdirSync(path.join(wt, "__pycache__"));
+  fs.writeFileSync(path.join(wt, "__pycache__", "tool.cpython-312.pyc"), pycBytes());
+  fs.writeFileSync(path.join(wt, "__pycache__", "note.cpython-312.pyc"), "NOT-BYTECODE");
+  fs.writeFileSync(path.join(wt, "tracked.txt"), "work in progress\n");
+
+  const pruned = pruneOrphanWorktrees(managed, [], durable(root));
+
+  assert.deepEqual(pruned.removed, []);
+  assert.match(pruned.kept[0].reason, /nothing shows they are only a cache/);
+  assert.equal(fs.readFileSync(path.join(wt, "__pycache__", "note.cpython-312.pyc"), "utf8"), "NOT-BYTECODE");
+  assert.equal(git(repo, ["for-each-ref", RESCUE_REF_PREFIX]), "", "no ref for a folder that stays");
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test("with its list unreadable or gone, the desk will not cut a fresh folder beside a rescue, and says so", async () => {
+  for (const breakList of [(file: string) => fs.writeFileSync(file, "{not json"), (file: string) => fs.rmSync(file)]) {
+    const { root, repo, managed, wt } = repoWithWorktree("unlisted");
+    fs.writeFileSync(path.join(wt, "tracked.txt"), "the only copy\n");
+    assert.deepEqual(pruneOrphanWorktrees(managed, [], durable(root)).removed, ["sess_gone"]);
+    breakList(rescueRecordFile(managed));
+
+    const back = await ensureManagedWorktree({ sessionId: "sess_gone", root: repo }, managed);
+
+    assert.equal(back.ok, false);
+    assert.match(back.ok ? "" : back.message, /refs\/workhorse\/rescue\/sess_gone may hold this worker's work/);
+    assert.ok(!fs.existsSync(wt), "no fresh folder is cut beside it");
+    assert.equal(git(repo, ["show", `${RESCUE_REF_PREFIX}sess_gone:tracked.txt`]), "the only copy");
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a ref under a worker's rescue name that another tool wrote stops the rebuild instead of being used", async () => {
+  const { root, repo, managed, wt } = repoWithWorktree("foreign-only");
+  git(repo, ["worktree", "remove", "--force", wt]);
+  git(repo, ["update-ref", `${RESCUE_REF_PREFIX}sess_gone-9`, git(repo, ["rev-parse", "HEAD"])]);
+
+  const back = await ensureManagedWorktree({ sessionId: "sess_gone", root: repo }, managed);
+
+  assert.equal(back.ok, false);
+  assert.match(back.ok ? "" : back.message, /sess_gone-9 may hold this worker's work/);
+  assert.ok(!fs.existsSync(wt));
   fs.rmSync(root, { recursive: true, force: true });
 });

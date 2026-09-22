@@ -37,6 +37,16 @@ import {
 import { JUDGE_TIMEOUT_MS, callJudge, judgeUrl } from "../electron/judge-client";
 import { judgeReadiness, judgeReport } from "../electron/judge-desk";
 import { applyJudgeOutcomes, continueWorkerRun, normalizeAgentRun, workerReportText } from "../src/lib/subagents";
+import {
+  JUDGE_SLOT_CAP,
+  createJudgeSlots,
+  judgeSlotKey,
+  outcomeShownOnRun,
+  rearmJudgeSlots,
+  runWithOutcome,
+  sweepJudgeSlots,
+  type JudgeSlot,
+} from "../src/lib/judge-slots";
 import type { Session } from "../src/lib/types";
 
 const CRITERIA = ["All 807 tests pass", "The README mentions the new setting"];
@@ -419,4 +429,44 @@ test("the judge reads this run's reply, not a reused worker's earlier pass; outc
   const kept = continueWorkerRun(live, { now: 200 });
   assert.equal(kept.runId, "run_1");
   assert.deepEqual(kept.verdict, verdict);
+});
+
+test("the judge's table: a slot lives from the call until the store shows its outcome, and never past a re-arm, a gone chat, a new run, or the cap", () => {
+  const verdict = verdictFromAnswers(CRITERIA, LIVE_ANSWERS, { at: 1 });
+  const failed = { at: 2, why: "403: no", tries: 2 };
+  // Two different pairs cannot share a key, whatever a persisted id contains.
+  assert.notEqual(judgeSlotKey("a:run", { runId: "x", startedAt: 1 }), judgeSlotKey("a", { runId: "run:x", startedAt: 1 }));
+  assert.equal(judgeSlotKey("s", { startedAt: 100 }), JSON.stringify(["s", "start:100"]));
+  const run = (extra: Record<string, unknown> = {}) => ({ runId: "r1", startedAt: 100, ...extra });
+  assert.equal(outcomeShownOnRun(run(), { verdict, runKey: "run:r1" }), false);
+  assert.equal(outcomeShownOnRun(run({ verdict }), { verdict, runKey: "run:r1" }), true);
+  assert.equal(outcomeShownOnRun(run({ judgeFailed: { ...failed, at: 9 } }), { failed, runKey: "run:r1" }), false);
+  assert.equal(outcomeShownOnRun(run({ judgeFailed: failed }), { failed, runKey: "run:r1" }), true);
+  assert.deepEqual(runWithOutcome(run(), { failed, runKey: "run:r1" }), run({ judgeFailed: failed }));
+  const slot = (settled?: JudgeSlot["settled"], generation = 0): JudgeSlot => ({ task: Promise.resolve(settled ?? { verdict, runKey: "run:r1" }), settled, generation });
+  const slots = createJudgeSlots();
+  const key = (id: string, r = run()) => judgeSlotKey(id, r);
+  slots.map.set(key("shown"), slot({ verdict, runKey: "run:r1" }));
+  slots.map.set(key("pending"), slot({ failed, runKey: "run:r1" }));
+  slots.map.set(key("inflight-gone"), slot(undefined));
+  slots.map.set(key("gone"), slot({ failed, runKey: "run:r1" }));
+  slots.map.set(key("replaced"), slot({ verdict, runKey: "run:r1" }));
+  sweepJudgeSlots(slots, [
+    { id: "shown", agentRun: run({ verdict }) },
+    { id: "pending", agentRun: run() },
+    { id: "replaced", agentRun: run({ runId: "r2" }) },
+  ]);
+  // Shown, gone and replaced go; a settled outcome the store has not committed stays; a call still out stays even with its chat gone.
+  assert.deepEqual([...slots.map.keys()].sort(), [key("inflight-gone"), key("pending")].sort());
+  // A re-arm moves the table on: the settled failure left behind no longer speaks for its run. The call still out is left alone.
+  rearmJudgeSlots(slots);
+  sweepJudgeSlots(slots, [{ id: "pending", agentRun: run() }, { id: "inflight-gone", agentRun: run() }]);
+  assert.deepEqual([...slots.map.keys()], [key("inflight-gone")]);
+  // Past the cap, settled slots go oldest first.
+  const crowded = createJudgeSlots();
+  for (let index = 0; index < JUDGE_SLOT_CAP + 3; index += 1) crowded.map.set(key(`w${index}`), slot({ failed, runKey: "run:r1" }));
+  sweepJudgeSlots(crowded, Array.from({ length: JUDGE_SLOT_CAP + 3 }, (_, index) => ({ id: `w${index}`, agentRun: run() })));
+  assert.equal(crowded.map.size, JUDGE_SLOT_CAP);
+  assert.equal(crowded.map.has(key("w0")), false);
+  assert.equal(crowded.map.has(key(`w${JUDGE_SLOT_CAP + 2}`)), true);
 });

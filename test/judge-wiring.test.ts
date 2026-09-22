@@ -33,15 +33,19 @@ test("scores ride as reportSays on both payloads, computed once at the payload, 
   // Both places a caller reads a report: agent-status and await-agents.
   assert.equal((store.match(/await judgeCompletedWorkers\(/g) ?? []).length, 2);
   // A poll that lands mid-call waits on that call instead of starting another; a poll that lands after
-  // the call settled but before React committed reads the settled outcome from the slot, not the stale
-  // run. The slot is keyed by session and run id, and its outcome fits only that run, so a worker reused
-  // meanwhile never wears it.
-  assert.match(store, /const slotKey = \(session: Session\) => `\$\{session\.id\}:\$\{judgeRunKey\(session\.agentRun!\)\}`/);
-  assert.match(store, /if \(inflight && !inflight\.settled\)/);
-  assert.match(store, /slot\.settled = outcome/);
-  assert.match(store, /judgeMayTry\(runNow\(session\), now\)/);
+  // the call settled but before React committed reads the settled outcome from the table, not the stale
+  // run. The table is swept on every call, keyed by session and run id, and an outcome fits only the run
+  // it scored, so a worker reused meanwhile never wears it.
+  assert.match(store, /sweepJudgeSlots\(slots, stateRef\.current\.sessions\)/);
+  assert.match(store, /const key = judgeSlotKey\(session\.id, session\.agentRun!\)/);
+  assert.match(store, /if \(slot && !slot\.settled\)/);
+  assert.match(store, /runWithOutcome\(session\.agentRun!, slot\.settled\)/);
+  assert.match(store, /if \(slot\?\.settled\) outcomes\.set\(session\.id, slot\.settled\)/);
+  assert.match(store, /fresh\.settled = outcome/);
   assert.match(store, /judgeRunKey\(item\.agentRun\) === runKey && !item\.agentRun\.verdict/);
   assert.match(store, /return \{ \.\.\.outcome, runKey \}/);
+  // A re-arm moves the table on before the store forgets, so a failure the table still holds is not read back.
+  assert.equal((store.match(/rearmJudgeSlots\(judgeSlotsRef\.current\)/g) ?? []).length, 2);
   // Every run gets its own id at spawn; a continuation of a finished worker mints another and drops the score.
   assert.match(store, /startedAt,\s*runId: uid\("run"\),/);
   const subagentsSrc = read("src", "lib", "subagents.ts");
@@ -49,7 +53,7 @@ test("scores ride as reportSays on both payloads, computed once at the payload, 
   // Switching the judge back on forgets the failures it gave up on; so does a key, host, model or
   // on-switch edit on a bot the judge could borrow. A name edit, or an edit to another bot, does not.
   assert.ok((store.match(/forgetJudgeFailures\(/g) ?? []).length >= 2);
-  assert.match(store, /judgeBotsFor\(\[bot\]\)\.length > 0 &&\s*\(\["apiKey", "credentialId", "baseUrl", "models", "model", "enabled"\] as const\)\.some/);
+  assert.match(store, /judgeBotsFor\(\[after\]\)\.length > 0 &&\s*\(\["apiKey", "credentialId", "baseUrl", "models", "model", "enabled"\] as const\)\.some/);
   assert.match(store, /workerReportText\(session\)/);
   // The renderer cuts the report before IPC.
   assert.match(store, /truncated: bounded\.truncated/);

@@ -623,6 +623,8 @@ const RESCUE_MARK = "Workhorse-Rescue: folder";
 const RESCUE_SESSION = "Workhorse-Session: ";
 /** Git keeps no empty folder, so the rescue names them in its message. */
 const RESCUE_EMPTY_FOLDERS = "Workhorse-Empty-Folders: ";
+/** The branch the folder was on, when it was on one. */
+const RESCUE_BRANCH = "Workhorse-Branch: ";
 
 export type RescueOptions = {
   /** The session the folder belongs to; the ref is named after it. */
@@ -965,7 +967,7 @@ function folderListing(
   const files = new Map<string, SavedFile>();
   for (const [rel, entry] of walked.entries) {
     const hashed = hashEntry(path.join(target, ...rel.split("/")), entry, format, deadline, chunk);
-    if (!hashed) return { refusal: "a file changed while it was being read" };
+    if (!hashed) return { refusal: `${rel} could not be read, or changed while it was read` };
     // Windows keeps no executable bit, so there the index's word stands.
     const exec = process.platform === "win32" ? indexModes.get(rel) === "100755" : entry.exec;
     files.set(rel, { mode: entry.link ? "120000" : exec ? "100755" : "100644", id: hashed.id, size: hashed.size, mtimeMs: entry.mtimeMs });
@@ -1016,14 +1018,22 @@ function writeMissing(target: string, files: Map<string, SavedFile>, have: Map<s
   return true;
 }
 
-function rescueMessage(session: string, emptyFolders: string[]): string {
+function rescueMessage(session: string, emptyFolders: string[], branch: string): string {
   return [
     `Workhorse kept ${session} before removing its folder`,
     "",
     RESCUE_MARK,
     `${RESCUE_SESSION}${session}`,
+    ...(branch ? [`${RESCUE_BRANCH}${branch}`] : []),
     ...(emptyFolders.length > 0 ? [`${RESCUE_EMPTY_FOLDERS}${JSON.stringify(emptyFolders)}`] : []),
   ].join("\n");
+}
+
+/** The branch a rescue message names, or "" when the folder was on none. */
+function branchIn(body: string): string {
+  const line = body.split("\n").find((row) => row.startsWith(RESCUE_BRANCH));
+  const branch = line ? line.slice(RESCUE_BRANCH.length).trim() : "";
+  return /^refs\/heads\/\S+$/.test(branch) ? branch : "";
 }
 
 /** The empty folders a rescue message names, sorted; none when it names none. */
@@ -1048,6 +1058,7 @@ function emptyFoldersIn(body: string): string[] {
 function buildRescue(
   target: string,
   head: string,
+  branch: string,
   listing: FolderListing,
   indexFile: string,
   session: string,
@@ -1085,7 +1096,7 @@ function buildRescue(
         "-p",
         indexCommit.out.trim(),
         "-m",
-        rescueMessage(session, listing.emptyFolders),
+        rescueMessage(session, listing.emptyFolders, branch),
       ],
       deadline,
     );
@@ -1181,6 +1192,8 @@ function createRescueRef(target: string, name: string, commit: string, deadline:
   return null;
 }
 
+type Rescued = { ok: true; ref: string; files: number; listing: FolderListing } | { ok: false; reason: string };
+
 /**
  * Keep a released folder's work in its repository, exactly, before the folder
  * goes: every file's bytes as the disk holds them, its index, and its empty
@@ -1190,8 +1203,13 @@ function createRescueRef(target: string, name: string, commit: string, deadline:
  * no ref, and keeps the folder.
  */
 export function rescueWorktree(target: string, options: RescueOptions): RescueResult {
+  const done = rescueFolder(target, options);
+  return done.ok ? { ok: true, ref: done.ref, files: done.files } : done;
+}
+
+function rescueFolder(target: string, options: RescueOptions): Rescued {
   const { deadline } = options;
-  const no = (reason: string): RescueResult => ({
+  const no = (reason: string): Rescued => ({
     ok: false,
     reason: Date.now() > deadline ? "the sweep ran out of time; it will be tried again next launch" : reason,
   });
@@ -1201,6 +1219,9 @@ export function rescueWorktree(target: string, options: RescueOptions): RescueRe
   const head = read.out.trim();
   if (!read.ok || !/^([0-9a-f]{40}|[0-9a-f]{64})$/.test(head)) return no("git could not name its commit");
   const format: ObjectFormat = head.length === 64 ? "sha256" : "sha1";
+  // Detached is the usual answer; a worker that made a branch gets it back.
+  const onBranch = rescueGit(["-C", target, "symbolic-ref", "-q", "HEAD"], deadline);
+  const branch = onBranch.ok && /^refs\/heads\/\S+$/.test(onBranch.out.trim()) ? onBranch.out.trim() : "";
   const index = readWorkerIndex(target, deadline);
   if ("refusal" in index) return no(index.refusal);
   const listing = folderListing(target, format, index.modes, deadline);
@@ -1222,7 +1243,7 @@ export function rescueWorktree(target: string, options: RescueOptions): RescueRe
   }
   if (!writeMissing(target, listing.files, have, deadline)) return no("a file changed while it was being saved");
 
-  const built = buildRescue(target, head, listing, index.file, options.sessionName, deadline);
+  const built = buildRescue(target, head, branch, listing, index.file, options.sessionName, deadline);
   if (!built) return no("git could not save it");
   const shape = rescueGit(["-C", target, "rev-parse", `${built.commit}^1`, `${built.commit}^2^{tree}`, `${built.commit}^2^1`], deadline);
   if (!shape.ok || shape.out.trim() !== [head, built.indexTree, head].join("\n") || !commitHoldsFolder(target, built.commit, listing, deadline)) {
@@ -1231,7 +1252,7 @@ export function rescueWorktree(target: string, options: RescueOptions): RescueRe
   if (!stillAsRead(target, listing, deadline)) return no("a file changed while it was being saved, so the folder stays");
   const ref = createRescueRef(target, safeSegment(options.sessionName), built.commit, deadline);
   if (!ref) return no("git would not keep a ref for it");
-  return { ok: true, ref, files: listing.files.size };
+  return { ok: true, ref, files: listing.files.size, listing };
 }
 
 /**
@@ -1287,8 +1308,31 @@ async function newestRescueRef(gitRoot: string, session: string): Promise<string
 
 /** A path from a rescue that lands inside the folder: relative, no `..`, no `.git`. */
 function safeRescuePath(rel: string): boolean {
-  if (!rel || path.isAbsolute(rel) || (process.platform === "win32" && /[\\:]/.test(rel))) return false;
-  return rel.split("/").every((part) => part !== "" && part !== "." && part !== ".." && part.toLowerCase() !== ".git");
+  const windows = process.platform === "win32";
+  if (!rel || path.isAbsolute(rel) || (windows && /[\\:]/.test(rel))) return false;
+  return rel.split("/").every((part) => {
+    if (part === "" || part === "." || part === ".." || part.toLowerCase() === ".git") return false;
+    // Windows drops a trailing dot or space and answers to a short name, so
+    // `.git.` and `GIT~1` both mean `.git` there.
+    return !windows || (!/[. ]$/.test(part) && !/^git~\d+$/i.test(part));
+  });
+}
+
+/**
+ * Put the folder back on the branch it was on, when that branch still names
+ * the commit it started from and no other folder has it checked out. Anything
+ * else leaves it detached on that commit, which holds the same work.
+ */
+async function rejoinBranch(gitRoot: string, target: string, branch: string, base: string): Promise<void> {
+  try {
+    await git(["check-ref-format", branch]);
+    if ((await git(["-C", gitRoot, "rev-parse", "--verify", "-q", `${branch}^{commit}`])) !== base) return;
+    const listed = await git(["-C", gitRoot, "worktree", "list", "--porcelain"]);
+    if (listed.split("\n").includes(`branch ${branch}`)) return;
+    await git(["-C", target, "symbolic-ref", "HEAD", branch]);
+  } catch {
+    /* detached on the same commit still holds the worker's work */
+  }
 }
 
 /** False when a folder on the way to `rel` is a link: writing through it would land somewhere else. */
@@ -1346,7 +1390,8 @@ async function restoreFromRescue(gitRoot: string, target: string, rescue: string
   try {
     const [base = "", indexTree = ""] = (await git(["-C", gitRoot, "rev-parse", `${rescue}^1`, `${rescue}^2^{tree}`])).split("\n").map((row) => row.trim());
     const format: ObjectFormat = base.length === 64 ? "sha256" : "sha1";
-    const emptyFolders = emptyFoldersIn(await git(["-C", gitRoot, "log", "-1", "--format=%B", rescue]));
+    const message = await git(["-C", gitRoot, "log", "-1", "--format=%B", rescue]);
+    const emptyFolders = emptyFoldersIn(message);
     const saved = new Map<string, RescuedFile>();
     for (const record of (await gitOut(["-C", gitRoot, "ls-tree", "-r", "-l", "-z", "--full-tree", rescue])).split("\0")) {
       if (!record) continue;
@@ -1412,6 +1457,8 @@ async function restoreFromRescue(gitRoot: string, target: string, rescue: string
         throw new Error(`${rel} did not come back as it was saved`);
       }
     }
+    const branch = branchIn(message);
+    if (branch) await rejoinBranch(gitRoot, target, branch, base);
     return { ok: true };
   } catch (error) {
     if (made) {
@@ -1510,13 +1557,19 @@ function dropManagedWorktree(
     // repository first, proven exact, or keep the folder.
     let rescued: string | undefined;
     if (!saved || options.resumable) {
-      const rescue = rescueWorktree(target, {
+      const rescue = rescueFolder(target, {
         sessionName: options.sessionName,
         managedRoot: options.managedRoot,
         tempRoot: options.tempRoot,
         deadline: options.deadline,
       });
       if (!rescue.ok) return { dropped: false, reason: rescue.reason };
+      // One last look just before git takes it. A file written since the
+      // rescue read the folder keeps the folder; the ref holds the folder as
+      // it was a moment ago, and the next sweep saves the change.
+      if (!stillAsRead(target, rescue.listing, options.deadline)) {
+        return { dropped: false, reason: "a file changed while it was being saved, so the folder stays" };
+      }
       rescued = rescue.ref;
     }
     // Git refuses a dirty folder without --force. Only a folder the rescue

@@ -1088,3 +1088,19 @@ test("an empty folder and a link come back", async () => {
   if (links) assert.equal(fs.readlinkSync(path.join(wt, "latest")), "tracked.txt");
   fs.rmSync(root, { recursive: true, force: true });
 });
+
+test("a worker that made a branch comes back on it", async () => {
+  const { root, repo, managed, wt } = repoWithWorktree("branch");
+  execFileSync("git", ["checkout", "-q", "-b", "work"], { cwd: wt });
+  fs.writeFileSync(path.join(wt, "tracked.txt"), "on a branch\n");
+
+  const pruned = pruneOrphanWorktrees(managed, [], durable(root));
+  assert.deepEqual(pruned.removed, ["sess_gone"]);
+  assert.match(git(repo, ["log", "-1", "--format=%B", `${RESCUE_REF_PREFIX}sess_gone`]), /Workhorse-Branch: refs\/heads\/work/);
+  const back = await ensureManagedWorktree({ sessionId: "sess_gone", root: repo }, managed);
+
+  assert.equal(back.ok, true);
+  assert.equal(git(wt, ["symbolic-ref", "HEAD"]), "refs/heads/work");
+  assert.equal(fs.readFileSync(path.join(wt, "tracked.txt"), "utf8"), "on a branch\n");
+  fs.rmSync(root, { recursive: true, force: true });
+});

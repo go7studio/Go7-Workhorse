@@ -1,6 +1,7 @@
 import { rankRoutingCandidates, routingCandidatesForDesk } from "../lib/routing";
 import type { RankedRoutingCandidate } from "../lib/routing";
 import { vendorTint } from "../lib/settings";
+import { judgeBotFor } from "../lib/judge";
 import { useStore } from "../lib/store";
 import type { RoutingSettings } from "../lib/types";
 import { watchVendorStatuses } from "../lib/watch";
@@ -49,6 +50,8 @@ export function RoutingPane() {
   }));
 
   const set = (patch: Partial<RoutingSettings>) => store.updateRouting(patch);
+  // The judge borrows the Vercel bot's key and needs jev ticked there like any model.
+  const judgeReady = Boolean(judgeBotFor(store.settings.customBots));
   // Prefer spare and Weekly reserve only act inside the leftover weighing, so
   // with that off they are shown but inert.
   const weighs = routing.capacityAware;
@@ -77,6 +80,17 @@ export function RoutingPane() {
           copy="Let granted harnesses join Auto routing."
           on={routing.includeExternalAgents === true}
           onChange={(on) => set({ includeExternalAgents: on })}
+        />
+        <SwitchRow
+          label="Judge reports"
+          copy={
+            judgeReady
+              ? "After a mission pass, Jev scores each report's text against the acceptance criteria: shown, not shown, unclear. It ran nothing; every criterion stays on the next pass."
+              : "Needs a Vercel AI Gateway bot with a key and typesafe-ai/jev ticked. Scores report text only; it ran nothing."
+          }
+          on={store.settings.judge?.enabled === true}
+          disabled={!judgeReady}
+          onChange={(on) => store.updateJudge({ enabled: on })}
         />
         <SwitchRow
           label="Allow local models"

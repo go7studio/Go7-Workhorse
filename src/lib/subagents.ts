@@ -1,3 +1,4 @@
+import { JUDGE_NOTE, normalizeJudgeVerdict, reportSaysFor, type JudgeVerdict, type ReportSays } from "./judge";
 import { isExternalAgentAddress } from "./agent-runtime";
 import { crewTurnInFlight } from "./crew-live";
 import { isGrokBotModel, isGrokBotName } from "./custom-http-identity";
@@ -738,6 +739,7 @@ export function collectChildAgentReports(
   sessions: Session[],
   parentId: string,
   childIds?: ReadonlySet<string>,
+  opts?: { judge?: boolean },
 ): Array<{
   title: string;
   status: string;
@@ -746,6 +748,7 @@ export function collectChildAgentReports(
   provider: Session["provider"];
   model: string;
   effort: Session["effort"];
+  reportSays?: ReportSays;
   exclusions?: string[];
   mission?: MissionIteration;
   findings?: WorkerFinding[];
@@ -756,6 +759,7 @@ export function collectChildAgentReports(
       const reply = [...session.messages]
         .reverse()
         .find((message) => message.role === "assistant" && message.text.trim());
+      const reportSays = reportSaysFor(session.agentRun, opts?.judge === true);
       const findings = normalizeWorkerFindings(session.agentRun?.findings)
         ?? (reply ? parseWorkerFindings(reply.text) : undefined);
       return {
@@ -767,6 +771,7 @@ export function collectChildAgentReports(
         model: session.model,
         effort: session.effort,
         ...(session.agentRun?.exclusions?.length ? { exclusions: session.agentRun.exclusions } : {}),
+        ...(reportSays ? { reportSays } : {}),
         ...(session.agentRun?.mission ? { mission: session.agentRun.mission } : {}),
         ...(findings?.length ? { findings } : {}),
       };
@@ -852,6 +857,20 @@ const CHECK_MARKERS: Array<[RegExp, string]> = [
   [/\btypecheck\b|\btsc --noEmit\b|\btsc\b/i, "typecheck"],
   [/\beslint\b|\bnpm run lint\b/i, "lint"],
 ];
+
+/** The whole last reply, or the shortened copy a retired worker kept. The judge reads this, never the bounded copy. */
+export function workerReportText(session: Pick<Session, "messages" | "retainedReport">): string {
+  return lastAssistantReport(session.messages)?.text.trim() || session.retainedReport?.trim() || "";
+}
+
+/** Sessions with fresh scores set on their runs, for a payload built before the store has saved them. */
+export function applyVerdicts(sessions: Session[], scored: Map<string, JudgeVerdict>): Session[] {
+  if (scored.size === 0) return sessions;
+  return sessions.map((session) => {
+    const verdict = scored.get(session.id);
+    return verdict && session.agentRun ? { ...session, agentRun: { ...session.agentRun, verdict } } : session;
+  });
+}
 
 function lastAssistantReport(messages: ChatMessage[] | undefined): ChatMessage | undefined {
   return [...(messages ?? [])]
@@ -1189,6 +1208,8 @@ export type AgentStatusLookup = {
   externalTask?: (Record<string, unknown> & { id: string; status: string }) | null;
   /** Desk usage ledger. Pass it and a worker's status carries `spend`. */
   usage?: UsageEvent[];
+  /** Judge on: a finished mission worker with no score is marked not-scored. */
+  judge?: boolean;
 };
 
 export type AgentStatusResult =
@@ -1207,7 +1228,7 @@ export function resolveAgentStatus(input: AgentStatusLookup): AgentStatusResult 
   if (session) {
     const isWorker = Boolean(session.parentId);
     const descendantOk = isWorker && (!from || descendantSessionIds(input.sessions, from).includes(session.id));
-    if (descendantOk) return { ok: true, snapshot: workerStatusSnapshot(session, { usage: input.usage }) };
+    if (descendantOk) return { ok: true, snapshot: workerStatusSnapshot(session, { usage: input.usage, judge: input.judge }) };
     const asked = askedChatStatusSnapshot(session, from || undefined, input.sessions);
     if (asked) return { ok: true, snapshot: asked };
     return { ok: false, error: "unknown" };
@@ -1226,7 +1247,7 @@ export function resolveAgentStatus(input: AgentStatusLookup): AgentStatusResult 
 export function workerStatusSnapshot(
   worker: Pick<Session, "id" | "title" | "workerName" | "parentId" | "status" | "provider" | "model" | "effort" | "agentRun" | "routingMode" | "routingDecision" | "messages"> &
     Pick<Partial<Session>, "retainedReport">,
-  opts?: { usage?: UsageEvent[] },
+  opts?: { usage?: UsageEvent[]; judge?: boolean },
 ): Record<string, unknown> {
   const spend = sessionSpend(opts?.usage, worker.id);
   const last = lastAssistantReport(worker.messages);
@@ -1248,7 +1269,8 @@ export function workerStatusSnapshot(
     parentId: worker.parentId,
     status,
     next: follow.next,
-    how: follow.how,
+    // A score on the payload says what it is, right where a caller reads it.
+    how: reportSaysFor(worker.agentRun, opts?.judge === true) ? `${follow.how} ${JUDGE_NOTE}` : follow.how,
     provider: worker.provider,
     model: worker.model,
     effort: worker.effort,
@@ -1258,6 +1280,8 @@ export function workerStatusSnapshot(
     ...(worker.agentRun?.exclusions?.length ? { exclusions: worker.agentRun.exclusions } : {}),
     ...(worker.agentRun?.changedFiles?.length ? { changedFiles: worker.agentRun.changedFiles } : {}),
     ...(worker.agentRun?.mission ? { mission: worker.agentRun.mission } : {}),
+    // The report scored against the mission's criteria: evidence in the report, not a check of the work.
+    ...(reportSaysFor(worker.agentRun, opts?.judge === true) ? { reportSays: reportSaysFor(worker.agentRun, opts?.judge === true) } : {}),
     ...(worker.agentRun?.executionOwner ? { executionOwner: worker.agentRun.executionOwner } : {}),
     ...(worker.agentRun?.takeoverReason ? { takeoverReason: worker.agentRun.takeoverReason } : {}),
     // Two token counts, never a sum. usedTokens is the budget meter and bills
@@ -2759,6 +2783,7 @@ export function normalizeAgentRun(
     (row.status === "running" && !stillRunning) ||
     (row.status === "failed" && (row.error ?? "").trim() === LEGACY_INTERRUPTED_ERROR);
   const mission = normalizeMissionIteration(row.mission);
+  const verdict = normalizeJudgeVerdict(row.verdict);
   const findings = normalizeWorkerFindings(row.findings);
   return {
     status: interrupted ? "interrupted" : row.status as AgentRun["status"],
@@ -2805,6 +2830,7 @@ export function normalizeAgentRun(
     ...(findings ? { findings } : {}),
     ...(typeof row.correlationId === "string" && row.correlationId.trim() ? { correlationId: row.correlationId.trim() } : {}),
     ...(mission ? { mission } : {}),
+    ...(verdict ? { verdict } : {}),
   };
 }
 

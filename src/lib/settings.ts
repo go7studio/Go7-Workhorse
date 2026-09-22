@@ -10,6 +10,7 @@ import type { AgentSystemsSettings, BotAccessDefaults, CustomBot, CustomLlm, Des
 import { migrateCustomBotRatings } from "./routing";
 import { normalizeWatch } from "./watch";
 import { DEFAULT_WATCH } from "./watch-defaults";
+import { normalizeJudge } from "./judge";
 import { RETENTION_DAYS_DEFAULT, normalizeRetentionDays } from "./transcript-sidecar";
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -440,6 +441,7 @@ export function normalizeSettings(raw: unknown): Settings {
     skills: normalizeSkillDiscovery((record as { skills?: unknown }).skills),
     learning: normalizeLearning((record as { learning?: unknown }).learning),
     agentSystems: normalizeAgentSystems((record as { agentSystems?: unknown }).agentSystems),
+    judge: normalizeJudge((record as { judge?: unknown }).judge),
     localCompute: normalizeLocalComputeSettings((record as { localCompute?: unknown }).localCompute),
     workshop: normalizeWorkshopSettings((record as { workshop?: unknown }).workshop),
     retentionDays: normalizeRetentionDays((record as { retentionDays?: unknown }).retentionDays),

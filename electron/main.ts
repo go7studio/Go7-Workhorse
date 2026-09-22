@@ -98,6 +98,7 @@ import {
   rememberFolderBookmark,
 } from "./folder-access";
 import { normalizeSettings } from "../src/lib/settings";
+import { judgeReadiness, judgeReport } from "./judge-desk";
 import { customBotEnabled, customBotModels } from "../src/lib/custom-bots";
 import { routingProfileForModel } from "../src/lib/routing";
 import type { AdaptiveCandidate } from "../src/lib/learning-policy";
@@ -2048,6 +2049,31 @@ app.whenReady().then(async () => {
   ipcMain.handle("custom:models", async (_event, config: { baseUrl: string; apiKey: string }) => {
     return fetchCustomModels(config);
   });
+  // The judge: score one finished mission report against its criteria. The
+  // key stays here; the renderer sends text and gets a verdict or a reason.
+  ipcMain.handle("judge:report", async (_event, raw: { criteria?: unknown; report?: unknown; workerStatus?: unknown }) => {
+    const criteria = Array.isArray(raw?.criteria)
+      ? raw.criteria.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+      : [];
+    const report = typeof raw?.report === "string" ? raw.report : "";
+    const workerStatus = typeof raw?.workerStatus === "string" ? raw.workerStatus : undefined;
+    const settings = normalizeSettings(readState().settings);
+    const ready = judgeReadiness({
+      enabled: settings.judge?.enabled === true,
+      bots: settings.customBots,
+      readKey: (credentialId) => {
+        try {
+          return credentialStore().get(credentialId);
+        } catch {
+          return null;
+        }
+      },
+    });
+    if (!ready.ready) return { why: ready.why };
+    const verdict = await judgeReport({ criteria, report, workerStatus, endpoint: ready.endpoint, log: (line) => mainLog.record("judge", line) });
+    return verdict ? { verdict } : { why: "no-verdict" };
+  });
+
   ipcMain.handle("custom:probe", async (_event, config: { baseUrl: string; apiKey: string; model: string; api?: "anthropic-messages" | "openai-completions" }) => {
     return probeCustomHttp(config);
   });

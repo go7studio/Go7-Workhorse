@@ -1,3 +1,4 @@
+import { declaredStatus, normalizeJudge, type JudgeSettings, type JudgeVerdict } from "./judge";
 import {
   useCallback,
   useEffect,
@@ -256,6 +257,8 @@ import {
 import { boundLinkReply, linkLabel } from "./link-reply";
 import { applyPlanAuditorSpawn, joinAndAdmit } from "./plan-admission";
 import {
+  applyVerdicts,
+  workerReportText,
   applyCancelWorker,
   admitSpawn,
   assertAgentPathWrite,
@@ -588,6 +591,7 @@ export type Store = AppState & {
   updateRouting: (patch: Partial<RoutingSettings>) => void;
   updateSkillDiscovery: (patch: Partial<SkillDiscoverySettings>) => void;
   updateAgentSystems: (patch: Partial<AgentSystemsSettings>) => void;
+  updateJudge: (patch: Partial<JudgeSettings>) => void;
   updateLocalCompute: (settings: import("./types").LocalComputeSettings) => void;
   updateWorkshop: (settings: WorkshopSettings) => Promise<void>;
   grantPlanExternalAgents: (sessionId: string, allow: boolean) => void;
@@ -1289,6 +1293,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const pathFingerprintRefreshes = useRef(new Map<string, Promise<void>>());
   const forkFromRef = useRef<(messageId: string, sessionId?: string) => void>(() => undefined);
   const stateRef = useRef<AppState>(EMPTY);
+  // Reports being scored right now, so two payload builds in flight do not bill twice.
+  const judgingRef = useRef<Set<string>>(new Set());
   const workerNameReservations = useRef<WorkerNameReservation[]>([]);
   const deskSkillsRef = useRef<DeskSkill[]>([]);
   const grokAssistantId = useRef<Record<string, string>>({});
@@ -3995,6 +4001,56 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  /**
+   * Score the finished mission workers among `ids` that have no score yet.
+   * Runs when a payload that carries reports is built, so the last pass and
+   * an auditor are covered the same as a pass with a continuation. Main holds
+   * the key and makes the call; this only stores what came back. Returns the
+   * fresh scores so the payload can carry them before the save lands.
+   */
+  const judgeCompletedWorkers = useCallback(async (ids: Iterable<string>): Promise<Map<string, JudgeVerdict>> => {
+    const scored = new Map<string, JudgeVerdict>();
+    const judge = window.workhorse?.judgeReport;
+    if (!stateRef.current.settings.judge?.enabled || !judge) return scored;
+    const wanted = new Set(ids);
+    const targets = stateRef.current.sessions.filter(
+      (session) =>
+        wanted.has(session.id) &&
+        session.agentRun?.status === "completed" &&
+        (session.agentRun.mission?.acceptanceCriteria?.length ?? 0) > 0 &&
+        !session.agentRun.verdict &&
+        !judgingRef.current.has(session.id),
+    );
+    await Promise.all(
+      targets.map(async (session) => {
+        judgingRef.current.add(session.id);
+        try {
+          const report = workerReportText(session);
+          if (!report) return;
+          const result = await judge({
+            criteria: session.agentRun!.mission!.acceptanceCriteria,
+            report,
+            workerStatus: declaredStatus(report),
+          });
+          const verdict = result?.verdict;
+          if (!verdict) return;
+          scored.set(session.id, verdict);
+          setState((current) => ({
+            ...current,
+            sessions: current.sessions.map((item) =>
+              item.id === session.id && item.agentRun && !item.agentRun.verdict ? { ...item, agentRun: { ...item.agentRun, verdict } } : item,
+            ),
+          }));
+        } catch {
+          // A judge that cannot answer stays silent; the payload says not-scored.
+        } finally {
+          judgingRef.current.delete(session.id);
+        }
+      }),
+    );
+    return scored;
+  }, []);
+
   useEffect(() => {
     if (!window.workhorse?.onPeerAsk) return;
     return window.workhorse.onPeerAsk((payload) => {
@@ -5185,11 +5241,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             }
             if (action === "agent-status") {
               const id = (payload.name || payload.message || "").trim();
+              const scored = await judgeCompletedWorkers([id]);
               const resolved = resolveAgentStatus({
                 id,
                 fromSessionId: payload.fromSessionId,
-                sessions: latest.sessions,
+                sessions: applyVerdicts(latest.sessions, scored),
                 externalTask: normalizeTaskStore(latest.externalTasks).byId[id],
+                judge: stateRef.current.settings.judge?.enabled === true,
               });
               if (!resolved.ok) {
                 await replyAsk({ error: "unknown" });
@@ -5361,8 +5419,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 sessions = handOverLineup(sessions, parentId);
                 return sessions === current.sessions ? current : { ...current, sessions };
               });
-              const parentNow = stateRef.current.sessions.find((item) => item.id === parentId);
-              const reports = collectChildAgentReports(stateRef.current.sessions, parentId, waveIdSet);
+              const scored = await judgeCompletedWorkers(waveIds);
+              const sessionsNow = applyVerdicts(stateRef.current.sessions, scored);
+              const parentNow = sessionsNow.find((item) => item.id === parentId);
+              const reports = collectChildAgentReports(sessionsNow, parentId, waveIdSet, {
+                judge: stateRef.current.settings.judge?.enabled === true,
+              });
               const scopedLineup = parentNow?.lineup
                 ? { ...parentNow.lineup, rows: parentNow.lineup.rows.filter((row) => waveIdSet.has(row.childId)) }
                 : undefined;
@@ -8686,6 +8748,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }));
   }, []);
 
+  const updateJudge = useCallback((patch: Partial<JudgeSettings>) => {
+    setState((current) => ({
+      ...current,
+      settings: {
+        ...current.settings,
+        judge: normalizeJudge({ ...(current.settings.judge ?? {}), ...patch }),
+      },
+    }));
+  }, []);
+
   const updateAgentSystems = useCallback((patch: Partial<AgentSystemsSettings>) => {
     setState((current) => ({
       ...current,
@@ -9100,6 +9172,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       updateRouting,
       updateSkillDiscovery,
       updateAgentSystems,
+      updateJudge,
       updateLocalCompute,
       updateWorkshop,
       grantPlanExternalAgents,
@@ -9242,6 +9315,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       updateRouting,
       updateSkillDiscovery,
       updateAgentSystems,
+      updateJudge,
       updateLocalCompute,
       updateWorkshop,
       grantPlanExternalAgents,

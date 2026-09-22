@@ -359,6 +359,12 @@ export type AgentRun = {
   tokenBudget?: number;
   /** Persisted mission-level ceiling. No longer assigned. */
   missionTokenBudget?: number;
+  /**
+   * The report scored against the mission's acceptance criteria, once. It
+   * is evidence about the report, not a check of the work, and it is kept
+   * here so a status poll never scores the same report twice.
+   */
+  verdict?: import("./judge").JudgeVerdict;
   /** Current assignment spend. Resets when a reused worker takes a new slice. */
   usedTokens?: number;
   /** Sum of prior assignments on this worker. Not a ceiling. */
@@ -1000,6 +1006,8 @@ export type Settings = {
   skills: SkillDiscoverySettings;
   learning: import("./learning-types").LearningSettings;
   agentSystems?: AgentSystemsSettings;
+  /** Score mission reports against their acceptance criteria. Off by default. */
+  judge?: import("./judge").JudgeSettings;
   localCompute: LocalComputeSettings;
   workshop: import("./workshop-pack").WorkshopSettings;
   /** Days a finished worker's transcript stays in the desk file. Nought keeps every row in it. */

@@ -8,6 +8,14 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.6.93](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.92...v0.6.93) (2026-09-22)
+
+
+### Features
+
+* a finished worker says what it left, and Settings shows the folders the desk keeps ([#359](https://github.com/go7studio/Go7-Workhorse/issues/359)) ([c94684f](https://github.com/go7studio/Go7-Workhorse/commit/c94684f0626e3928cc4011972b2ec73e6ca51c34))
+* a released worker folder is kept in git before it goes, and resuming brings it back ([#361](https://github.com/go7studio/Go7-Workhorse/issues/361)) ([5c533c6](https://github.com/go7studio/Go7-Workhorse/commit/5c533c684939ce1289ea7c5affd44df6f2f69ef0))
+
 ## [0.6.92](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.91...v0.6.92) (2026-09-22)
 
 ### Bug Fixes

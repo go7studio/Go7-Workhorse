@@ -909,8 +909,16 @@ export const EXPIRY_PEAK = 48;
 export const EXPIRY_SPENT_REMAINING = 0.5;
 /** A meter older than this cannot say what is left, so it earns nothing. */
 export const EXPIRY_METER_STALE_MS = 6 * 60 * 60 * 1000;
-/** Leftover at which the credit is whole. Below it the credit shrinks in step: half a percent cannot absorb a task. */
+/** Leftover at which the credit is whole. */
 export const EXPIRY_FINISHABLE_PERCENT = 5;
+/**
+ * Leftover at or under which a pool is not worth finishing: no credit, and it
+ * sorts behind every live row. A sliver of credit was still enough to beat an
+ * on-pace twin of the same brain, whose equal profile left the capacity term
+ * as the whole decision, and a pool with half a percent left cannot absorb a
+ * task however close its reset.
+ */
+export const EXPIRY_UNFINISHABLE_PERCENT = 1;
 
 /**
  * How much a pool is worth for being about to reset.
@@ -946,11 +954,13 @@ export function expiryCredit(input: {
   const closeness = 1 - resetMs / EXPIRY_WINDOW_MS;
   const base = EXPIRY_FLOOR + (EXPIRY_PEAK - EXPIRY_FLOOR) * closeness;
   const pile = Math.min(remaining, 50) * 0.15 * (0.5 + 0.5 * closeness);
-  // A pool with 0.6% left an hour from reset earned the same credit as one
-  // with 6% left, and on quick work that outscored an on-pace cheap model
-  // that could actually do the job. The credit is for finishing what is
-  // there; when there is nearly nothing, it is nearly nothing.
-  const finishable = Math.min(1, remaining / EXPIRY_FINISHABLE_PERCENT);
+  // The credit is for finishing what is there. Nothing at or under the
+  // unfinishable line, whole from the finishable line up, and in step between.
+  const finishable = clamp(
+    (remaining - EXPIRY_UNFINISHABLE_PERCENT) / (EXPIRY_FINISHABLE_PERCENT - EXPIRY_UNFINISHABLE_PERCENT),
+    0,
+    1,
+  );
   return (base + pile) * finishable;
 }
 
@@ -966,9 +976,9 @@ export function candidateExpiryCredit(capacity: RoutingCapacity | undefined, now
   });
 }
 
-/** Rows with nothing left sort behind every live row, however close their reset. */
+/** Rows with nothing worth finishing sort behind every live row, however close their reset. An unknown gauge is not an empty one. */
 function routingRowLive(row: { usedPercent?: number }): boolean {
-  return row.usedPercent === undefined || row.usedPercent < 100 - EXPIRY_SPENT_REMAINING;
+  return row.usedPercent === undefined || row.usedPercent < 100 - EXPIRY_UNFINISHABLE_PERCENT;
 }
 
 function sameRoutingIdentity(

@@ -401,7 +401,7 @@ test("a spent pool is never picked however close its reset", () => {
   const ranked = rankRoutingCandidates([grok, cursor], { prompt: "Review this pull request", tier: "deep", now }, settings);
   assert.equal(ranked[0]?.provider, "cursor", "nothing left is nothing to finish");
   assert.equal(candidateExpiryCredit(grok.capacity, now), 0);
-  // 99.6% used is spent too: the half-percent floor is the same one Watch calls spent.
+  // 99.6% used is not worth finishing either: at or under one percent left the credit is zero.
   const nearlySpent = grokFamily(now, { grokUsed: 99.6, grokResetMs: 1 * HOUR });
   assert.equal(candidateExpiryCredit(nearlySpent.grok.capacity, now), 0);
 });
@@ -472,9 +472,26 @@ test("a pool with half a percent left earns almost nothing, however close its re
   const whole = at(95);
   assert.ok(whole >= EXPIRY_FLOOR, `at five percent left the credit is whole: ${whole}`);
   assert.ok(at(94) > whole && at(94) < whole * 1.05, "above five percent only the small leftover term grows");
-  assert.ok(at(97.5) > whole * 0.45 && at(97.5) < whole * 0.55, `half the finishable leftover earns about half: ${at(97.5)} of ${whole}`);
-  const sliver = at(99.4);
-  assert.ok(sliver > 0 && sliver < whole / 4, `0.6% left earns a sliver of what 5% earns: ${sliver} vs ${whole}`);
+  assert.ok(at(97) > whole * 0.45 && at(97) < whole * 0.55, `three percent left, midway between the two lines, earns about half: ${at(97)} of ${whole}`);
+  assert.equal(at(99.4), 0, "0.6% left earns nothing: it is not worth finishing");
+  assert.equal(at(99), 0, "the unfinishable line itself earns nothing");
+  assert.ok(at(98.9) > 0 && at(98.9) < whole * 0.05, "just above it, a sliver");
+});
+
+test("a pool not worth finishing loses to an on-pace twin of the same brain", () => {
+  // Second gate: with equal profiles the capacity term is the whole decision,
+  // so even a sliver of credit put ACP Grok 4.7 at 0.6% left ahead of an
+  // on-pace Cursor Grok 4.7. Now it earns nothing and sorts behind every live
+  // row, so the twin with real capacity gets the work.
+  const now = Date.parse("2026-09-22T11:53:00Z");
+  const { grok, cursor } = grokFamily(now, { grokUsed: 99.4, grokResetMs: 1 * HOUR });
+  const onPace = { ...cursor, capacity: { ...cursor.capacity, usedPercent: 30 } };
+  const ranked = rankRoutingCandidates([grok, onPace], { prompt: "Review this pull request adversarially", tier: "deep", now }, settings);
+  assert.equal(ranked[0]?.provider, "cursor", `the twin with capacity wins, got ${ranked.map((r) => `${r.provider}:${r.score}`).join(" ")}`);
+  // With five percent left the same pool is worth finishing, and it wins.
+  const worth = grokFamily(now, { grokUsed: 95, grokResetMs: 1 * HOUR });
+  const rankedWorth = rankRoutingCandidates([worth.grok, { ...worth.cursor, capacity: { ...worth.cursor.capacity, usedPercent: 30 } }], { prompt: "Review this pull request adversarially", tier: "deep", now }, settings);
+  assert.equal(rankedWorth[0]?.provider, "grok");
 });
 
 test("the credit stands in for the pace term rather than stacking on it", () => {
@@ -516,6 +533,13 @@ test("every vendor's candidate carries the clock its plan was read at", () => {
   assert.equal(planObservedNow({ usedPercent: 1, leftPercent: 99 } as { observedAt?: string }, now)?.observedAt, new Date(now).toISOString(), "a fresh parse is stamped now");
   assert.equal(planObservedNow({ usedPercent: 1, leftPercent: 99, observedAt } as { observedAt?: string }, now)?.observedAt, observedAt, "a plan that has its clock keeps it");
   assert.equal(planObservedNow(undefined, now), undefined);
+  // The stamp is applied where each vendor's plan is parsed, so a plan that
+  // reaches routing has its clock whichever door it came through. Grok Bot's
+  // file carries its own `asOf` and is not restamped.
+  for (const file of ["claude-plan.ts", "codex-plan.ts", "cursor-plan.ts", "custom-plan.ts"]) {
+    const source = readFileSync(path.join(ROOT, "electron", file), "utf8");
+    assert.match(source, /planObservedNow\(parse[A-Z][A-Za-z]*PlanUsage\(/, `${file} stamps the plan at the parse`);
+  }
 });
 
 test("a hold on one Cursor ring takes that ring's models out and leaves the other's in", () => {

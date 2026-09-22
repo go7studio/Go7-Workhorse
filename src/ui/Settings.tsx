@@ -10,6 +10,7 @@ import { llmCardHint, llmDetailCopy } from "../lib/llm-copy";
 import { claudeTokenComplaint, CLAUDE_SETUP_TOKEN_COMMAND } from "../lib/claude-token";
 import { APP_VERSION } from "../lib/app-info";
 import { useStore } from "../lib/store";
+import { workerFoldersLine, workerLabel, type WorkerFoldersReport } from "../lib/worker-folders";
 import { SETTINGS_THEME_CHOICES } from "../lib/theme";
 import type { AgentRuntimeId, CustomBot, DeskExportKind, LlmLink, PermissionMode, ProviderId, SandboxProfile, SettingsSection } from "../lib/types";
 import type { AgentRuntimeStatus } from "../lib/external-catalog";
@@ -65,6 +66,16 @@ export function Settings() {
   const botDetail = useRef<HTMLDivElement>(null);
   const [claudeAuth, setClaudeAuth] = useState<ClaudeAuthState>({ stage: "idle", message: "" });
   const offCustomBots = settings.customBots.filter((bot) => !customBotEnabled(bot));
+  // What the last launch sweep found. Read when Profile opens; Settings never walks the folders.
+  const [workerFolders, setWorkerFolders] = useState<WorkerFoldersReport | null>(null);
+  useEffect(() => {
+    if (section !== "profile") return;
+    void window.workhorse?.worktreesReport?.().then((report) => setWorkerFolders(report ?? null)).catch(() => undefined);
+  }, [section]);
+  const folderTitle = (id: string) => {
+    const session = store.sessions.find((item) => item.id === id);
+    return session ? workerLabel(session) : undefined;
+  };
 
   /**
    * Mint a token for this desk with `claude setup-token`. Signing in the
@@ -268,6 +279,19 @@ export function Settings() {
                     {store.appUpdateBusy ? "Installing…" : `Install ${store.appUpdate.version}`}
                   </button>
                 ) : null}
+              </div>
+            </div>
+            <div className="settings-row">
+              <div className="settings-row-copy">
+                <strong>Worker folders</strong>
+                <span title={workerFolders?.held.map((row) => `${folderTitle(row.name) ?? row.name}: ${row.reason}`).join("\n") || undefined}>
+                  {workerFoldersLine(workerFolders, folderTitle)}
+                </span>
+              </div>
+              <div className="settings-control">
+                <button className="tiny" type="button" onClick={() => void window.workhorse?.revealWorktrees?.()}>
+                  Show
+                </button>
               </div>
             </div>
             <div className="settings-row">

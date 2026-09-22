@@ -102,6 +102,16 @@ export async function ensureManagedWorktree(
   }
 }
 
+/** What the last launch sweep found, for Settings. */
+export type WorktreeSweepReport = {
+  at: number;
+  trees: number;
+  maxTrees: number;
+  overTrees: boolean;
+  removed: number;
+  held: Array<{ name: string; reason: string }>;
+};
+
 export type WorktreePruneResult = {
   removed: string[];
   /** Worktrees left in place, with the reason Git or the filesystem gave. */
@@ -314,9 +324,55 @@ const REBUILDABLE_FROM_MANIFEST: Array<{ segment: string; manifests: string[] }>
   { segment: "Pods", manifests: ["Podfile"] },
 ];
 
+/**
+ * What Godot's `.godot` folder may hold for the tree to go: what the editor
+ * rebuilds from the project on the next open. `export_credentials.cfg` lives
+ * in the same folder and is a person's keystore details, not a cache, so it
+ * and anything else not named here keep the tree.
+ */
+const GODOT_REBUILDS = new Set([
+  "imported",
+  "shader_cache",
+  "editor",
+  "global_script_class_cache.cfg",
+  "uid_cache.bin",
+  "extension_list.cfg",
+  ".gdignore",
+]);
+
+/**
+ * `.godot` beside the `project.godot` that rebuilds it. `--directory` hands a
+ * wholly ignored folder over as one entry, so the folder's own entries are
+ * read here rather than trusted from its name.
+ */
+function godotRebuilds(target: string, listed: string): boolean {
+  const segments = listed.split("/").filter(Boolean);
+  const at = segments.indexOf(".godot");
+  if (at < 0) return false;
+  if (!fs.existsSync(path.join(target, ...segments.slice(0, at), "project.godot"))) return false;
+  const inside = segments[at + 1];
+  if (inside !== undefined) return GODOT_REBUILDS.has(inside);
+  try {
+    return fs.readdirSync(path.join(target, ...segments.slice(0, at + 1))).every((name) => GODOT_REBUILDS.has(name));
+  } catch {
+    return false;
+  }
+}
+
+/** TypeScript's incremental build record, in the folder whose tsconfig rebuilds it. */
+function tsBuildInfoRebuilds(target: string, listed: string): boolean {
+  if (!listed.endsWith(".tsbuildinfo")) return false;
+  try {
+    return fs.readdirSync(path.dirname(path.join(target, listed))).some((name) => /^tsconfig.*\.json$/.test(name));
+  } catch {
+    return false;
+  }
+}
+
 function rebuildable(target: string, listed: string): boolean {
   const segments = listed.split("/").filter(Boolean);
   if (segments.some((segment) => REBUILDABLE_CACHES.has(segment))) return true;
+  if (godotRebuilds(target, listed) || tsBuildInfoRebuilds(target, listed)) return true;
   return REBUILDABLE_FROM_MANIFEST.some(
     (rule) =>
       segments.includes(rule.segment) &&
@@ -486,6 +542,44 @@ function dropManagedWorktree(target: string): { dropped: boolean; reason: string
   } catch {
     if (!fs.existsSync(target)) return { dropped: true, reason: "" };
     return { dropped: false, reason: "in use" };
+  }
+}
+
+export type FolderLeft = { ok: true; changed: number; untracked: number } | { ok: false };
+
+/**
+ * What a finished worker left in its own folder: tracked files it changed and
+ * files it added that no commit holds. Ignored files are not counted.
+ *
+ * Only the desk's managed folders are read. A shared worker ran in the
+ * person's own checkout, whose status is the person's work, not the worker's.
+ */
+export async function folderLeftBehind(sessionId: string, managedRoot: string): Promise<FolderLeft> {
+  const session = safeSegment(sessionId);
+  if (!session || !managedRoot.trim()) return { ok: false };
+  const target = path.join(path.resolve(managedRoot), session);
+  if (!containedPath(managedRoot, target)) return { ok: false };
+  try {
+    if (fs.lstatSync(target).isSymbolicLink()) return { ok: false };
+  } catch {
+    return { ok: false };
+  }
+  if (!containedPath(canonicalPath(managedRoot), canonicalPath(target))) return { ok: false };
+  try {
+    const out = await git(["-C", target, "status", "--porcelain=v1", "-z", "--untracked-files=all"]);
+    let changed = 0;
+    let untracked = 0;
+    const entries = out.split("\0").filter(Boolean);
+    for (let index = 0; index < entries.length; index += 1) {
+      const code = entries[index].slice(0, 2);
+      if (code === "??") untracked += 1;
+      else changed += 1;
+      // A rename or copy carries its old path as the next entry.
+      if (code[0] === "R" || code[0] === "C") index += 1;
+    }
+    return { ok: true, changed, untracked };
+  } catch {
+    return { ok: false };
   }
 }
 

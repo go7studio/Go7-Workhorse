@@ -60,7 +60,8 @@ import {
   shiftQueuedPrompt,
   sidebarKeepsChat,
 } from "./chats";
-import { workerJustSettled } from "./worker-settled";
+import { settledWorkers, workerJustSettled } from "./worker-settled";
+import { foldersToCount, leftInFolderNote, workerLabel } from "./worker-folders";
 import { deskPersistBodyEqual } from "./desk-persist";
 import { restoredPanel } from "./restored-panel";
 import { mergeTranscriptRows, normalizeRetentionDays, transcriptFetchPlan, transcriptStillOnDisk } from "./transcript-sidecar";
@@ -1521,6 +1522,53 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  /*
+   * A worker that ends with work no commit holds says so, once, in the chat
+   * that sent it. A finished fix once sat uncommitted in a worker's folder for
+   * five hours because nothing mentioned it. The count is main's, read from the
+   * worker's own managed folder; it lands only if the worker is still on the
+   * run that ended.
+   */
+  const countedFolders = useRef(new Set<string>());
+  const noteFoldersLeft = useCallback((workers: Array<{ id: string; runKey: string }>) => {
+    const count = window.workhorse?.folderLeft;
+    if (!count) return;
+    for (const { id, runKey } of workers) {
+      if (countedFolders.current.has(runKey)) continue;
+      countedFolders.current.add(runKey);
+      void count(id)
+        .then((left) => {
+          if (!left?.ok) return;
+          const files = left.changed + left.untracked;
+          if (files <= 0) return;
+          const at = Date.now();
+          setState((current) => {
+            const worker = current.sessions.find((session) => session.id === id);
+            const run = worker?.agentRun;
+            if (!worker || !run || `${id}:${run.runId ?? run.startedAt ?? ""}` !== runKey) return current;
+            const note = leftInFolderNote(workerLabel(worker), files);
+            return {
+              ...current,
+              sessions: current.sessions.map((session) => {
+                if (session.id === id) return { ...session, agentRun: { ...run, leftInFolder: { files, at } } };
+                if (worker.parentId && session.id === worker.parentId) {
+                  return {
+                    ...session,
+                    messages: [
+                      ...session.messages,
+                      { id: uid("msg"), role: "system" as const, text: note, createdAt: at, subagentSessionId: id },
+                    ],
+                  };
+                }
+                return session;
+              }),
+            };
+          });
+        })
+        .catch(() => undefined);
+    }
+  }, []);
+
   useEffect(() => {
     if (!ready || !window.workhorse) return;
     const previous = persistBody.current;
@@ -1547,6 +1595,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     // refresh is debounced to a minute and asks only for plans past the stale
     // age, so the latch staying up for a state change or two costs nothing.
     if (settledPending.current) refreshPlansForRouting(plansRef.current);
+    if (settledPending.current) noteFoldersLeft(foldersToCount(settledWorkers(previous?.sessions, state.sessions), state.sessions));
     persistTimer.current = window.setTimeout(() => {
       settledPending.current = false;
       const saved = listedChats(applyComposerDrafts(state.sessions, composerDraftsRef.current));

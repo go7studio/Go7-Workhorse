@@ -68,6 +68,10 @@ contextBridge.exposeInMainWorld("workhorse", {
     ipcRenderer.invoke("project:edit-stats", paths, roots, createdPaths),
   ensureWorktree: (input: import("./worktree-host").EnsureWorktreeInput) =>
     ipcRenderer.invoke("project:ensure-worktree", input) as Promise<import("./worktree-host").EnsureWorktreeResult>,
+  folderLeft: (sessionId: string) =>
+    ipcRenderer.invoke("project:folder-left", sessionId) as Promise<import("./worktree-host").FolderLeft>,
+  worktreesReport: () => ipcRenderer.invoke("worktrees:report") as Promise<import("./worktree-host").WorktreeSweepReport | null>,
+  revealWorktrees: () => ipcRenderer.invoke("worktrees:reveal") as Promise<void>,
   terminalStart: (sessionId: string, cwd: string) => ipcRenderer.invoke("terminal:start", { sessionId, cwd }),
   terminalWrite: (sessionId: string, text: string) => ipcRenderer.invoke("terminal:write", { sessionId, text }),
   terminalStop: (sessionId: string) => ipcRenderer.invoke("terminal:stop", sessionId),

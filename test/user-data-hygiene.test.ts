@@ -4,7 +4,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { pruneOrphanWorktrees } from "../electron/worktree-host";
+import { folderLeftBehind, pruneOrphanWorktrees } from "../electron/worktree-host";
 import { sweepStaleUserData } from "../electron/user-data-hygiene";
 
 test("sweepStaleUserData drops leftover update installers and oversized Chromium caches", () => {
@@ -123,6 +123,7 @@ function repoWithWorktree(
   git(["init", "-q", "."]);
   fs.writeFileSync(path.join(repo, "tracked.txt"), "original\n");
   for (const [name, body] of Object.entries(tracked)) {
+    fs.mkdirSync(path.dirname(path.join(repo, name)), { recursive: true });
     fs.writeFileSync(path.join(repo, name), body);
   }
   git(["add", "-A"]);
@@ -553,4 +554,91 @@ test("attachment write temps older than a day are swept; fresh ones and blobs ar
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+/*
+ * Godot's `.godot` folder beside its `project.godot` is the editor's own
+ * rebuild of the project: imported assets, compiled shaders, editor layout, the
+ * class and uid caches. Every game worktree carries one, and treating it as
+ * somebody's work pinned every such tree for good. Only what the editor
+ * rebuilds is let go; `export_credentials.cfg` lives in the same folder and is a
+ * person's keystore details.
+ */
+function godotTree(label: string) {
+  const made = repoWithWorktree(label, {
+    ".gitignore": ".godot/\n",
+    "game/project.godot": "[application]\nconfig/name=\"Cargo\"\n",
+  });
+  const cache = path.join(made.wt, "game", ".godot");
+  fs.mkdirSync(path.join(cache, "imported"), { recursive: true });
+  fs.writeFileSync(path.join(cache, "imported", "crate.png-1.ctex"), "imported texture");
+  fs.mkdirSync(path.join(cache, "editor"), { recursive: true });
+  fs.writeFileSync(path.join(cache, "editor", "editor_layout.cfg"), "[docks]");
+  fs.writeFileSync(path.join(cache, "uid_cache.bin"), "uids");
+  return { ...made, cache };
+}
+
+test("pruneOrphanWorktrees drops a tree whose only ignored output is Godot's editor cache", () => {
+  const { root, managed, wt } = godotTree("godot");
+  assert.equal(execFileSync("git", ["status", "--porcelain"], { cwd: wt, encoding: "utf8" }).trim(), "");
+
+  const pruned = pruneOrphanWorktrees(managed, []);
+
+  assert.deepEqual(pruned.removed, ["sess_gone"], "the editor rebuilds all of it on the next open");
+  assert.ok(!fs.existsSync(wt));
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test("pruneOrphanWorktrees keeps a tree whose .godot holds export credentials", () => {
+  const { root, managed, cache } = godotTree("godot-credentials");
+  fs.writeFileSync(path.join(cache, "export_credentials.cfg"), "keystore user and password");
+
+  const pruned = pruneOrphanWorktrees(managed, []);
+
+  assert.deepEqual(pruned.removed, []);
+  assert.match(pruned.kept[0].reason, /\.godot/, "the refusal names the folder it is protecting");
+  assert.ok(fs.existsSync(path.join(cache, "export_credentials.cfg")), "a person's credentials are never a cache");
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test("pruneOrphanWorktrees keeps a .godot folder with no project.godot beside it", () => {
+  const { root, managed, wt } = repoWithWorktree("godot-orphan", { ".gitignore": ".godot/\n" });
+  fs.mkdirSync(path.join(wt, ".godot", "imported"), { recursive: true });
+  fs.writeFileSync(path.join(wt, ".godot", "imported", "x.ctex"), "nothing here rebuilds this");
+
+  const pruned = pruneOrphanWorktrees(managed, []);
+
+  assert.deepEqual(pruned.removed, []);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test("pruneOrphanWorktrees drops a tsbuildinfo beside its tsconfig and keeps one without", () => {
+  const beside = repoWithWorktree("tsbuildinfo", { ".gitignore": "*.tsbuildinfo\n", "tsconfig.json": "{}\n" });
+  fs.writeFileSync(path.join(beside.wt, "tsconfig.tsbuildinfo"), "{\"program\":{}}");
+  assert.deepEqual(pruneOrphanWorktrees(beside.managed, []).removed, ["sess_gone"]);
+  fs.rmSync(beside.root, { recursive: true, force: true });
+
+  const alone = repoWithWorktree("tsbuildinfo-alone", { ".gitignore": "*.tsbuildinfo\n" });
+  fs.writeFileSync(path.join(alone.wt, "app.tsbuildinfo"), "{\"program\":{}}");
+  assert.deepEqual(pruneOrphanWorktrees(alone.managed, []).removed, [], "no tsconfig here rebuilds it");
+  fs.rmSync(alone.root, { recursive: true, force: true });
+});
+
+test("folderLeftBehind counts what a worker left in its own folder, and nothing ignored", async () => {
+  const { root, repo, managed, wt } = repoWithWorktree("left", { ".gitignore": "*.log\n", "old.txt": "old\n" });
+  fs.writeFileSync(path.join(wt, "tracked.txt"), "edited, never committed\n");
+  execFileSync("git", ["mv", "old.txt", "renamed.txt"], { cwd: wt });
+  fs.writeFileSync(path.join(wt, "new.md"), "added\n");
+  fs.mkdirSync(path.join(wt, "notes"));
+  fs.writeFileSync(path.join(wt, "notes", "a.md"), "a\n");
+  fs.writeFileSync(path.join(wt, "debug.log"), "ignored, so not the worker's work");
+
+  assert.deepEqual(await folderLeftBehind("sess_gone", managed), { ok: true, changed: 2, untracked: 2 });
+
+  // Only the desk's own folders are read: not a link out of them, not a missing one.
+  fs.symlinkSync(repo, path.join(managed, "sess_link"));
+  assert.deepEqual(await folderLeftBehind("sess_link", managed), { ok: false });
+  assert.deepEqual(await folderLeftBehind("sess_missing", managed), { ok: false });
+  assert.deepEqual(await folderLeftBehind("", managed), { ok: false });
+  fs.rmSync(root, { recursive: true, force: true });
 });

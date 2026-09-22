@@ -147,6 +147,9 @@ type WorkhorseBridge = {
   ensureWorktree: (
     input: import("../electron/worktree-host").EnsureWorktreeInput,
   ) => Promise<import("../electron/worktree-host").EnsureWorktreeResult>;
+  folderLeft?: (sessionId: string) => Promise<import("../electron/worktree-host").FolderLeft>;
+  worktreesReport?: () => Promise<import("../electron/worktree-host").WorktreeSweepReport | null>;
+  revealWorktrees?: () => Promise<void>;
   terminalStart?: (sessionId: string, cwd: string) => Promise<{ ok: boolean; message?: string }>;
   terminalWrite?: (sessionId: string, text: string) => Promise<{ ok: boolean; message?: string }>;
   terminalStop?: (sessionId: string) => Promise<void>;

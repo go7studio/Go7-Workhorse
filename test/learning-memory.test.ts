@@ -38,7 +38,7 @@ import {
   UNTRUSTED_MEMORY_FRAME,
 } from "../src/lib/learning-policy";
 import { InMemoryStore, boundedReplace } from "../src/lib/learning-store";
-import { stubCompile } from "../src/lib/learning-compiler";
+import { stubCompile, stubCompileAgent } from "../src/lib/learning-compiler";
 import { exportJsonl, exportMarkdown } from "../src/lib/learning-export";
 import { extractGoalBudget, settleBoundedGoal, settleSessionGoals } from "../src/lib/learning-goal";
 import {
@@ -1004,6 +1004,10 @@ test("agent and mismatch compiler prompts keep their source lanes explicit", () 
   });
   const agentPrompt = agentCompilerPrompt([agentEvent], []);
   assert.match(agentPrompt, /Never infer a human goal/);
+  assert.match(agentPrompt, /A completed tool status is not proof the outcome was correct, and it is not itself a memory/);
+  assert.doesNotMatch(agentPrompt, /Intent must always be empty/i);
+  assert.doesNotMatch(agentPrompt, /intent empty/i);
+  assert.doesNotMatch(agentPrompt, /missing verification|missing latency|missing token|missing title/i);
   assert.match(agentPrompt, /lev_agent_prompt/);
   const records = [
     {
@@ -1411,9 +1415,10 @@ test("inbound Link drafts drop keys and paths, and only the harness profile capt
   assert.match(String(forbidden.payload.summary), /refused profile_forbidden/);
   assert.equal(
     eventsRequireAgentMemory([prepareEvent(draft)]),
-    true,
-    "a mutating Link call is agent evidence",
+    false,
+    "a completed Link envelope is not a memory",
   );
+  assert.equal(eventsRequireAgentMemory([prepareEvent(forbidden)]), true);
   const listed = inboundLearningDraft({
     tool: "workhorse_list_chats",
     args: {},
@@ -1423,7 +1428,10 @@ test("inbound Link drafts drop keys and paths, and only the harness profile capt
   });
   assert.equal(listed.payload.mutating, false);
   assert.equal(eventsRequireAgentMemory([prepareEvent(listed)]), false);
-  assert.match(agentCompilerPrompt([prepareEvent(draft)], []), /inbound Workhorse Link/);
+  const prompt = agentCompilerPrompt([prepareEvent(draft)], []);
+  assert.match(prompt, /not itself a memory/);
+  assert.doesNotMatch(prompt, /inbound Workhorse Link/);
+  assert.doesNotMatch(prompt, /Intent must always be empty/i);
 });
 
 test("inbound jsonl drains into Learning and Off leaves the sidecar", () => {
@@ -1474,4 +1482,174 @@ test("inbound jsonl drains into Learning and Off leaves the sidecar", () => {
   assert.equal(events[0]?.provider, undefined);
   assert.equal(fs.existsSync(file), false);
   fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("a completed Workhorse Link envelope compiles no memory and does not call the model", async () => {
+  const store = new InMemoryStore(":memory:");
+  let calls = 0;
+  const service = new LearningService({
+    store,
+    settings: () => ({
+      mode: "automatic",
+      autoRetrieve: false,
+      compilerProvider: "custom",
+      compilerModel: "fixture",
+      compilerCustomBotId: "bot_desk",
+    }),
+    allowStub: false,
+    caller: async () => {
+      calls += 1;
+      throw new Error("model must not run for a completed envelope");
+    },
+    candidates: () => [
+      { provider: "custom", model: "fixture", customBotId: "bot_desk", connected: true, ephemeral: true, intelligence: 4, speed: 4, cost: 1 },
+    ],
+  });
+  const draft = inboundLearningDraft({
+    tool: "workhorse_read_chat",
+    args: { fromSessionId: "chat_1", traceId: "trace_env" },
+    ok: true,
+    rpcId: 11,
+  });
+  assert.equal(draft.payload.status, "ok");
+  assert.equal(draft.payload.surface, "workhorse-link");
+  service.record(draft);
+  const compiled = await service.compile();
+  assert.equal(calls, 0);
+  assert.equal(compiled.ran, true);
+  assert.equal(compiled.memories, 0);
+  assert.equal(compiled.intelligenceLane, "agent-performance");
+  assert.equal(store.listMemories({ intelligenceLane: "agent-performance" }).length, 0);
+  const run = store.listCompilerRuns()[0];
+  assert.equal(run?.status, "completed");
+  assert.deepEqual(run?.outputMemoryIds, []);
+  for (const status of ["completed", "complete", "ok", "success", "succeeded"] as const) {
+    const event = eventDraft(`lev_env_${status}`, {
+      kind: "tool",
+      actorClass: "agent",
+      provider: "cursor",
+      payload: { summary: `tool ${status}`, status, surface: "workhorse-link" },
+    });
+    assert.equal(eventsRequireAgentMemory([event]), false, status);
+    assert.equal(stubCompileAgent([event]).operations.length, 0, status);
+  }
+});
+
+test("a mixed agent batch drops a proposal that cites only a completed envelope", async () => {
+  const store = new InMemoryStore(":memory:");
+  let calls = 0;
+  const service = new LearningService({
+    store,
+    settings: () => ({
+      mode: "automatic",
+      autoRetrieve: false,
+      compilerProvider: "custom",
+      compilerModel: "fixture",
+      compilerCustomBotId: "bot_desk",
+    }),
+    allowStub: false,
+    caller: async () => {
+      calls += 1;
+      return {
+        text: JSON.stringify({
+          intent: [],
+          operations: [
+            {
+              action: "add",
+              memoryClass: "operations",
+              scope: "project",
+              statement: "Read failed on a missing file",
+              sourceEventIds: ["lev_fail_tool"],
+            },
+            {
+              action: "add",
+              memoryClass: "operations",
+              scope: "project",
+              statement: "Link read completed",
+              sourceEventIds: ["lev_ok_tool"],
+            },
+          ],
+        }),
+        createdWorkhorseChat: false,
+        leftoverVendorThread: false,
+      };
+    },
+    candidates: () => [
+      { provider: "custom", model: "fixture", customBotId: "bot_desk", connected: true, ephemeral: true, intelligence: 4, speed: 4, cost: 1 },
+    ],
+  });
+  service.record(eventDraft("lev_fail_tool", {
+    kind: "tool",
+    actorClass: "agent",
+    provider: "cursor",
+    payload: { summary: "Read failed", status: "failed", error: "ENOENT" },
+  }));
+  service.record(eventDraft("lev_ok_tool", {
+    createdAt: 1_700_000_000_100,
+    kind: "tool",
+    actorClass: "agent",
+    provider: "cursor",
+    payload: { summary: "Harness called workhorse_read_chat", status: "succeeded", surface: "workhorse-link" },
+  }));
+  const compiled = await service.compile();
+  assert.equal(calls, 1);
+  assert.equal(compiled.ran, true);
+  assert.equal(compiled.memories, 1);
+  const memories = store.listMemories({ intelligenceLane: "agent-performance" });
+  assert.equal(memories.length, 1);
+  assert.equal(memories[0]?.statement, "Read failed on a missing file");
+  assert.deepEqual(memories[0]?.sourceEventIds, ["lev_fail_tool"]);
+});
+
+test("failed tools, retries, errors, and unverified outcome claims still compile", async () => {
+  const store = new InMemoryStore(":memory:");
+  const service = new LearningService({
+    store,
+    settings: () => ({ mode: "automatic", autoRetrieve: false }),
+    allowStub: true,
+  });
+  service.record(eventDraft("lev_failed_tool", {
+    kind: "tool",
+    actorClass: "agent",
+    provider: "codex",
+    payload: { summary: "Tests failed", status: "failed" },
+  }));
+  service.record(eventDraft("lev_retry_tool", {
+    createdAt: 1_700_000_000_010,
+    kind: "tool",
+    actorClass: "agent",
+    provider: "codex",
+    payload: { summary: "Read retried", status: "completed", retry: true, attempt: 2 },
+  }));
+  service.record(eventDraft("lev_error_tool", {
+    createdAt: 1_700_000_000_020,
+    kind: "tool",
+    actorClass: "agent",
+    provider: "codex",
+    payload: { summary: "Delegate errored", status: "error", error: "not_callable" },
+  }));
+  service.record(eventDraft("lev_claim_outcome", {
+    createdAt: 1_700_000_000_030,
+    kind: "outcome",
+    actorClass: "agent",
+    provider: "codex",
+    payload: { summary: "I finished the release", status: "completed", signals: { agentClaimed: true } },
+  }));
+  service.record(eventDraft("lev_done_tool", {
+    createdAt: 1_700_000_000_040,
+    kind: "tool",
+    actorClass: "agent",
+    provider: "codex",
+    payload: { summary: "Harness called workhorse_list_chats", status: "ok", surface: "workhorse-link" },
+  }));
+  const compiled = await service.compile();
+  assert.equal(compiled.intelligenceLane, "agent-performance");
+  assert.equal(compiled.memories, 4);
+  const statements = store.listMemories({ intelligenceLane: "agent-performance" }).map((item) => item.statement);
+  assert.deepEqual(statements.sort(), [
+    "Delegate errored",
+    "I finished the release",
+    "Read retried",
+    "Tests failed",
+  ]);
 });

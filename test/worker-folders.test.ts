@@ -83,10 +83,20 @@ test("the count survives a save, and a worker's status carries it", () => {
 
 test("resuming and reusing a worker ask main for its folder before the turn starts", () => {
   const store = source("src", "lib", "store.tsx");
-  // resumeAgentRun: the folder first, the brief after; a folder main cannot give back leaves the worker interrupted.
-  assert.match(store, /ensureWorktree\(\{ sessionId: child\.id, root: environment\.gitRoot \}\)[\s\S]{0,120}if \(result\.ok\) return resume\(\);/);
-  // The reused-worker spawn path does the same before the new slice.
-  assert.match(store, /ensureWorktree\(\{ sessionId: priorWorker\.id, root: environment\.gitRoot \}\)/);
+  // resumeAgentRun: the folder first, the brief after. A folder main cannot
+  // give back, and a call that fails outright, both leave the worker
+  // interrupted; neither starts the turn.
+  assert.match(
+    store,
+    /ensureWorktree\(\{ sessionId: child\.id, root: environment\.gitRoot \}\)\.then\(\s*\(result\) => \(result\.ok \? resume\(\) : interrupt\(result\.message\)\),\s*\(error: unknown\) => interrupt\(/,
+  );
+  assert.doesNotMatch(store, /\.catch\(\(\) => resume\(\)\)/, "a thrown call must not start the turn");
+  // The reused-worker spawn path does the same before the new slice, and a
+  // thrown call becomes the reply's error rather than a silent stall.
+  assert.match(
+    store,
+    /ensureWorktree\(\{ sessionId: priorWorker\.id, root: environment\.gitRoot \}\)\s*\.catch\(\(error: unknown\) => \(\{\s*ok: false as const,/,
+  );
 });
 
 test("main hands the sweep the chats it last saved, and the store counts on settle, once per run", () => {

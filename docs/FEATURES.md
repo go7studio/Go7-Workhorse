@@ -276,12 +276,13 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
   before. Settings → Profile sets the days, and nought keeps every row in the
   desk file.
 - A finished or interrupted worker's folder goes a week after the worker
-  ends. Work no commit or remote holds is kept in git first, at
-  `refs/workhorse/rescue/<chat>`, and resuming or reusing the worker brings the
-  folder back with that work uncommitted. A folder git cannot save whole (a
-  large file, a nested repository, a submodule) stays, named with the reason,
-  and Settings → Profile lists what the last sweep kept. Godot's editor cache
-  and TypeScript's build record count as rebuildable.
+  ends. Work no commit or remote holds is kept in git first, byte for byte and
+  with what the worker staged, at `refs/workhorse/rescue/<chat>`, and resuming
+  or reusing the worker brings the folder back with that work uncommitted. A
+  folder git cannot save whole (a large file, a nested repository, a
+  submodule, uncommitted work beside installed packages) stays, named with the
+  reason, and Settings → Profile lists what the last sweep kept. Godot's editor
+  cache and TypeScript's build record count as rebuildable.
 - A worker that ends with uncommitted files in its own folder says so in the
   chat that sent it. A folder made in the last hour is never swept.
 - If the parent does the work itself, the run records that it took over.

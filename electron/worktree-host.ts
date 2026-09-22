@@ -1,4 +1,5 @@
 import { execFile, execFileSync } from "node:child_process";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -39,6 +40,29 @@ async function git(args: string[], cwd?: string): Promise<string> {
     env: worktreeGitEnv(),
   });
   return String(result.stdout ?? "").trim();
+}
+
+/** Output as git wrote it, for lists that run long. */
+async function gitOut(args: string[]): Promise<string> {
+  const result = await execFileAsync("git", args, {
+    windowsHide: true,
+    timeout: 60_000,
+    maxBuffer: 64 * 1024 * 1024,
+    env: worktreeGitEnv(),
+  });
+  return String(result.stdout ?? "");
+}
+
+/** One object's bytes, exactly. */
+async function gitBytes(args: string[], maxBuffer: number): Promise<Buffer> {
+  const result = await execFileAsync("git", args, {
+    windowsHide: true,
+    timeout: 60_000,
+    maxBuffer,
+    encoding: "buffer",
+    env: worktreeGitEnv(),
+  });
+  return result.stdout as Buffer;
 }
 
 function containedPath(parent: string, child: string): boolean {
@@ -506,11 +530,30 @@ function rebuildable(target: string, listed: string): boolean {
  * `--directory` collapses a wholly-ignored folder to one entry, so a
  * `node_modules` costs one line and not a hundred thousand.
  */
-function ignoredWorkAtRisk(target: string): { paths: string[]; unknown: boolean } {
+function ignoredWorkAtRisk(target: string): { paths: string[]; packages: string[]; unknown: boolean } {
   const listed = gitSync(["-C", target, "ls-files", "--others", "--ignored", "--exclude-standard", "--directory"]);
-  if (!listed.ok) return { paths: [], unknown: true };
+  if (!listed.ok) return { paths: [], packages: [], unknown: true };
   const rows = listed.out.split("\n").map((row) => row.trim()).filter(Boolean);
-  return { paths: rows.filter((row) => !rebuildable(target, row)), unknown: false };
+  return {
+    paths: rows.filter((row) => !rebuildable(target, row)),
+    packages: rows.filter((row) => installedPackages(target, row)),
+    unknown: false,
+  };
+}
+
+/**
+ * An installed-dependency folder itself, as opposed to a link to one kept
+ * elsewhere. The manifest brings back what the registry holds; it does not
+ * bring back an edit a person or a worker made inside a package.
+ */
+function installedPackages(target: string, listed: string): boolean {
+  const segments = listed.split("/").filter(Boolean);
+  if (!REBUILDABLE_FROM_MANIFEST.some((rule) => segments.includes(rule.segment))) return false;
+  try {
+    return !fs.lstatSync(path.join(target, ...segments)).isSymbolicLink();
+  } catch {
+    return true;
+  }
 }
 
 function namedSample(paths: string[]): string {
@@ -549,13 +592,37 @@ function holdsNoFiles(target: string): boolean {
  */
 export const RESCUE_REF_PREFIX = "refs/workhorse/rescue/";
 
-/** An untracked file past this keeps the tree. Art and builds are a person's call, not a commit's. */
+/** A file past this that the repository does not already hold keeps the folder. Art and builds are a person's call, not a commit's. */
 export const RESCUE_MAX_FILE_BYTES = 25 * 1024 * 1024;
+
+/** New bytes one rescue may add to the repository, every file together. */
+const RESCUE_MAX_NEW_BYTES = 256 * 1024 * 1024;
+
+/**
+ * Bytes one rescue may read. The sweep runs in the desk's main process and
+ * reads every file in the folder, so a folder past this stays rather than
+ * hold the desk up.
+ */
+const RESCUE_MAX_READ_BYTES = 2 * 1024 * 1024 * 1024;
+
+/** Files and folders one walk may visit. */
+const RESCUE_MAX_ENTRIES = 200_000;
 
 const RESCUE_GIT_TIMEOUT_MS = 20_000;
 
-/** The line that marks a rescue commit as a snapshot of uncommitted work, so a rebuild can hand it back uncommitted. */
-const RESCUE_TRAILER = "Workhorse-Rescue: snapshot";
+/*
+ * Every rescue commit is the desk's own and says whose work it holds. Resume
+ * trusts a ref under the prefix only when its commit carries the desk's name,
+ * the mark, and the session: any tool can write a ref there, and a ref another
+ * tool wrote is not the worker's work.
+ */
+const RESCUE_NAME = "Go7 Workhorse";
+const RESCUE_EMAIL = "workhorse@localhost";
+const RESCUE_AUTHOR = `${RESCUE_NAME} <${RESCUE_EMAIL}>`;
+const RESCUE_MARK = "Workhorse-Rescue: folder";
+const RESCUE_SESSION = "Workhorse-Session: ";
+/** Git keeps no empty folder, so the rescue names them in its message. */
+const RESCUE_EMPTY_FOLDERS = "Workhorse-Empty-Folders: ";
 
 export type RescueOptions = {
   /** The session the folder belongs to; the ref is named after it. */
@@ -568,28 +635,49 @@ export type RescueOptions = {
 
 export type RescueResult = { ok: true; ref: string; files: number } | { ok: false; reason: string };
 
+type ObjectFormat = "sha1" | "sha256";
+type FileMode = "100644" | "100755" | "120000";
+/** One file as the rescue saw it: its mode, the object id of its bytes, and what the disk said of it. */
+type SavedFile = { mode: FileMode; id: string; size: number; mtimeMs: number };
+type WalkedEntry = { link: boolean; exec: boolean; size: number; mtimeMs: number };
+type Walked = { entries: Map<string, WalkedEntry>; emptyFolders: string[]; bytes: number };
+type FolderListing = {
+  /** Every file git does not ignore, by the path the disk spells. */
+  files: Map<string, SavedFile>;
+  /** Folders with nothing in them at all. */
+  emptyFolders: string[];
+  /** What git ignores there. The walk does not enter it. */
+  skip: ReadonlySet<string>;
+};
+
 /**
  * A `git` call for the rescue: its own timeout, never past the sweep's
- * deadline, an optional private index, and a fixed identity so a repository
- * with no user configured can still hold the commit.
+ * deadline, an optional private index, optional input, and a fixed identity
+ * so a repository with no user configured can still hold the commit.
  */
-function rescueGit(args: string[], deadline: number, index?: string): { ok: boolean; out: string } {
+function rescueGit(
+  args: string[],
+  deadline: number,
+  options: { index?: string; input?: string | Buffer } = {},
+): { ok: boolean; out: string } {
   const left = deadline - Date.now();
   if (left <= 0) return { ok: false, out: "the sweep ran out of time" };
+  const stdin: "ignore" | "pipe" = options.input === undefined ? "ignore" : "pipe";
   try {
     const stdout = execFileSync(process.env.GIT || "git", args, {
       windowsHide: true,
       timeout: Math.min(RESCUE_GIT_TIMEOUT_MS, left),
-      maxBuffer: 8 * 1024 * 1024,
+      maxBuffer: 64 * 1024 * 1024,
       encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
+      input: options.input,
+      stdio: [stdin, "pipe", "pipe"],
       env: {
         ...worktreeGitEnv(),
-        ...(index ? { GIT_INDEX_FILE: index } : {}),
-        GIT_AUTHOR_NAME: "Go7 Workhorse",
-        GIT_AUTHOR_EMAIL: "workhorse@localhost",
-        GIT_COMMITTER_NAME: "Go7 Workhorse",
-        GIT_COMMITTER_EMAIL: "workhorse@localhost",
+        ...(options.index ? { GIT_INDEX_FILE: options.index } : {}),
+        GIT_AUTHOR_NAME: RESCUE_NAME,
+        GIT_AUTHOR_EMAIL: RESCUE_EMAIL,
+        GIT_COMMITTER_NAME: RESCUE_NAME,
+        GIT_COMMITTER_EMAIL: RESCUE_EMAIL,
       },
     });
     return { ok: true, out: String(stdout ?? "") };
@@ -601,7 +689,61 @@ function rescueGit(args: string[], deadline: number, index?: string): { ok: bool
 
 function withinPath(parent: string, child: string): boolean {
   const relative = path.relative(parent, child);
-  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+  return relative === "" || (relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
+}
+
+function megabytes(bytes: number): number {
+  return Math.round(bytes / 1048576);
+}
+
+function sameList(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((item, at) => item === right[at]);
+}
+
+/**
+ * Every object store git reads for the repository at `home`: its own, any the
+ * environment names, and the alternates each of those names, as deep as they
+ * go. Null when a store names another in a way this cannot follow.
+ */
+function objectStores(home: string, target: string): string[] | null {
+  const env = worktreeGitEnv();
+  const queue = [env.GIT_OBJECT_DIRECTORY ? path.resolve(target, env.GIT_OBJECT_DIRECTORY) : path.join(home, "objects")];
+  for (const extra of (env.GIT_ALTERNATE_OBJECT_DIRECTORIES ?? "").split(path.delimiter)) {
+    if (extra) queue.push(path.resolve(target, extra));
+  }
+  const stores: string[] = [];
+  const seen = new Set<string>();
+  while (queue.length > 0) {
+    const dir = queue.shift()!;
+    const real = canonicalPath(dir);
+    if (seen.has(real)) continue;
+    seen.add(real);
+    stores.push(real);
+    // Git follows five links. A chain far longer than that is not one to vouch for.
+    if (stores.length > 32) return null;
+    let text: string;
+    try {
+      text = fs.readFileSync(path.join(dir, "info", "alternates"), "utf8");
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === "ENOENT" || code === "ENOTDIR") continue;
+      return null;
+    }
+    for (const line of text.split("\n")) {
+      if (!line || line.startsWith("#")) continue;
+      if (line.startsWith("\"")) return null;
+      queue.push(path.isAbsolute(line) ? line : path.resolve(dir, line));
+    }
+  }
+  return stores;
+}
+
+/** Where `place` sits among the three places nothing durable may live, or null. */
+function placeOf(place: string, folder: string, managed: string, temp: string): string | null {
+  if (withinPath(folder, place)) return "inside the folder itself";
+  if (withinPath(managed, place)) return "among the desk's worker folders";
+  if (withinPath(temp, place)) return "in the temporary folder";
+  return null;
 }
 
 /**
@@ -609,78 +751,26 @@ function withinPath(parent: string, child: string): boolean {
  * null when it is.
  *
  * Not inside the folder about to go, not among the desk's own worker folders,
- * not in the system temporary folder, and not borrowing objects from the
- * folder about to go. Compared by realpath: this Mac's temporary folder is
- * `/var/folders/...`, which is `/private/var/folders/...` underneath.
+ * not in the system temporary folder, and not reading objects from any of
+ * them through alternates at any depth: a rescue whose parent commit lived in
+ * the folder cannot be rebuilt once the folder is gone. Compared by realpath:
+ * this Mac's temporary folder is `/var/folders/...`, which is
+ * `/private/var/folders/...` underneath.
  */
 function rescueHomeRefusal(target: string, options: RescueOptions): string | null {
   const common = gitSync(["-C", target, "rev-parse", "--git-common-dir"]);
   if (!common.ok || !common.out) return "git could not say where its repository is";
   const home = canonicalPath(path.isAbsolute(common.out) ? common.out : path.resolve(target, common.out));
-  const folder = canonicalPath(target);
-  if (withinPath(folder, home)) return "its repository lives inside the folder itself";
-  if (withinPath(canonicalPath(options.managedRoot), home)) return "its repository lives among the desk's worker folders";
-  if (withinPath(canonicalPath(options.tempRoot), home)) return "its repository lives in the temporary folder";
-  let alternates: string[] = [];
-  try {
-    alternates = fs
-      .readFileSync(path.join(home, "objects", "info", "alternates"), "utf8")
-      .split("\n")
-      .map((line) => line.trim())
-      .filter(Boolean);
-  } catch {
-    alternates = [];
-  }
-  for (const line of alternates) {
-    const borrowed = canonicalPath(path.isAbsolute(line) ? line : path.resolve(home, "objects", line));
-    if (withinPath(folder, borrowed)) return "its repository borrows objects from the folder itself";
+  const places = [canonicalPath(target), canonicalPath(options.managedRoot), canonicalPath(options.tempRoot)] as const;
+  const repository = placeOf(home, ...places);
+  if (repository) return `its repository lives ${repository}`;
+  const stores = objectStores(home, target);
+  if (!stores) return "git could not say where it keeps its objects";
+  for (const store of stores) {
+    const borrowed = placeOf(store, ...places);
+    if (borrowed) return `its repository keeps objects ${borrowed}`;
   }
   return null;
-}
-
-/**
- * What the folder holds that git can save, or why it cannot save all of it.
- *
- * A submodule or a nested repository is stored as a pointer, not as its
- * files, and an unfinished merge is not a state a commit can hold, so each
- * keeps the tree. So does any untracked file past the size line.
- */
-function rescueInventory(target: string, deadline: number): { entries: number } | { refusal: string } {
-  const listed = rescueGit(
-    ["-C", target, "status", "--porcelain=v2", "-z", "--untracked-files=all", "--ignore-submodules=none"],
-    deadline,
-  );
-  if (!listed.ok) return { refusal: "git could not say what it holds, so nothing can vouch for its contents" };
-  const records = listed.out.split("\0").filter(Boolean);
-  const large: string[] = [];
-  let entries = 0;
-  for (let index = 0; index < records.length; index += 1) {
-    const record = records[index];
-    if (record.startsWith("u ")) return { refusal: "it holds an unfinished merge" };
-    if (record.startsWith("1 ") || record.startsWith("2 ")) {
-      if (record.split(" ")[2]?.startsWith("S")) {
-        return { refusal: "it holds a submodule, whose files git keeps only as a pointer" };
-      }
-      entries += 1;
-      if (record.startsWith("2 ")) index += 1; // a rename's original path is the next record
-      continue;
-    }
-    if (record.startsWith("? ")) {
-      const listedPath = record.slice(2);
-      if (listedPath.endsWith("/")) return { refusal: `it holds a nested repository (${listedPath}) git cannot save` };
-      entries += 1;
-      try {
-        const size = fs.lstatSync(path.join(target, listedPath)).size;
-        if (size > RESCUE_MAX_FILE_BYTES) large.push(`${listedPath} ${Math.round(size / 1048576)} MB`);
-      } catch {
-        return { refusal: "a file changed while it was being read" };
-      }
-    }
-  }
-  if (large.length > 0) {
-    return { refusal: `it holds large files git would not save (${namedSample(large)}) — move them, then it will go` };
-  }
-  return { entries };
 }
 
 /** The rescue's own scratch folder for a private index. Never a worker's folder. */
@@ -692,15 +782,296 @@ function removeScratch(dir: string): void {
   }
 }
 
-/** A commit of the folder as it stands, parented on HEAD, built in a private index so the folder is never touched. */
-function snapshotFolder(target: string, head: string, sessionName: string, deadline: number): string | null {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "workhorse-rescue-"));
-  const index = path.join(dir, "index");
+/** A path as `--stdin-paths` reads it back: quoted, so no name can be taken for another. */
+function quotedPath(rel: string): string {
+  const escaped = rel
+    .replace(/[\\"]/g, (found) => `\\${found}`)
+    .replace(/[\x00-\x1f\x7f]/g, (found) => `\\${found.charCodeAt(0).toString(8).padStart(3, "0")}`);
+  return `"${escaped}"`;
+}
+
+/**
+ * Every file under `target` except what `skip` names, read from the disk and
+ * not from git: names as the disk spells them, the executable bit as the disk
+ * holds it, a link as a link, and each folder with nothing in it. The folder's
+ * own `.git` is its link to the repository and is not work; a `.git` anywhere
+ * else is a repository git would keep only as a pointer.
+ */
+function walkFolder(target: string, skip: ReadonlySet<string>, deadline: number, refuseLinks: boolean): Walked | { refusal: string } {
+  const entries = new Map<string, WalkedEntry>();
+  const emptyFolders: string[] = [];
+  let bytes = 0;
+  let seen = 0;
+  const stack = [""];
+  while (stack.length > 0) {
+    const dir = stack.pop()!;
+    let names: fs.Dirent[];
+    try {
+      names = fs.readdirSync(dir ? path.join(target, ...dir.split("/")) : target, { withFileTypes: true });
+    } catch {
+      return { refusal: "a folder inside it could not be read" };
+    }
+    if (dir && names.length === 0) emptyFolders.push(dir);
+    for (const entry of names) {
+      seen += 1;
+      if (seen > RESCUE_MAX_ENTRIES) return { refusal: "it holds more files than one sweep can check" };
+      if (seen % 256 === 0 && Date.now() > deadline) return { refusal: "the sweep ran out of time" };
+      if (entry.name.toLowerCase() === ".git") {
+        if (!dir && entry.name === ".git") continue;
+        return { refusal: `it holds a nested repository (${dir ? `${dir}/` : entry.name}) git cannot save` };
+      }
+      const rel = dir ? `${dir}/${entry.name}` : entry.name;
+      if (skip.has(rel)) continue;
+      let stat: fs.Stats;
+      try {
+        stat = fs.lstatSync(path.join(target, ...rel.split("/")));
+      } catch {
+        return { refusal: "a file changed while it was being read" };
+      }
+      if (stat.isDirectory()) {
+        stack.push(rel);
+      } else if (stat.isSymbolicLink()) {
+        // Windows makes a link only with a privilege most accounts lack, so a
+        // link saved there might not come back as one.
+        if (refuseLinks) return { refusal: `it holds a link (${rel}) this computer may not rebuild` };
+        entries.set(rel, { link: true, exec: false, size: stat.size, mtimeMs: stat.mtimeMs });
+      } else if (stat.isFile()) {
+        entries.set(rel, { link: false, exec: (stat.mode & 0o100) !== 0, size: stat.size, mtimeMs: stat.mtimeMs });
+        bytes += stat.size;
+      } else {
+        return { refusal: `it holds ${rel}, which is not a file git can save` };
+      }
+    }
+  }
+  return { entries, emptyFolders: emptyFolders.sort(), bytes };
+}
+
+/** Git's object id for these bytes as a blob, worked out here and not by git. */
+function blobHash(format: ObjectFormat, size: number): crypto.Hash {
+  return crypto.createHash(format).update(`blob ${size}\0`);
+}
+
+const OPEN_NO_LINK = fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0);
+
+function hashEntry(file: string, entry: WalkedEntry, format: ObjectFormat, deadline: number, chunk: Buffer): { id: string; size: number } | null {
+  if (entry.link) {
+    try {
+      const link = fs.readlinkSync(file, { encoding: "buffer" });
+      return { id: blobHash(format, link.length).update(link).digest("hex"), size: link.length };
+    } catch {
+      return null;
+    }
+  }
+  let fd: number;
   try {
-    if (!rescueGit(["-C", target, "read-tree", head], deadline, index).ok) return null;
-    if (!rescueGit(["-C", target, "add", "-A", "--", "."], deadline, index).ok) return null;
-    const tree = rescueGit(["-C", target, "write-tree"], deadline, index);
-    if (!tree.ok || !tree.out.trim()) return null;
+    fd = fs.openSync(file, OPEN_NO_LINK);
+  } catch {
+    return null;
+  }
+  try {
+    const hash = blobHash(format, entry.size);
+    let total = 0;
+    for (;;) {
+      const read = fs.readSync(fd, chunk, 0, chunk.length, null);
+      if (read === 0) break;
+      total += read;
+      if (total > entry.size || Date.now() > deadline) return null;
+      hash.update(chunk.subarray(0, read));
+    }
+    return total === entry.size ? { id: hash.digest("hex"), size: total } : null;
+  } catch {
+    return null;
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+async function hashEntryAsync(file: string, link: boolean, format: ObjectFormat): Promise<string | null> {
+  try {
+    if (link) {
+      const target = await fs.promises.readlink(file, { encoding: "buffer" });
+      return blobHash(format, target.length).update(target).digest("hex");
+    }
+    const handle = await fs.promises.open(file, OPEN_NO_LINK);
+    try {
+      const { size } = await handle.stat();
+      const hash = blobHash(format, size);
+      const chunk = Buffer.allocUnsafe(1024 * 1024);
+      let total = 0;
+      for (;;) {
+        const { bytesRead } = await handle.read(chunk, 0, chunk.length, null);
+        if (bytesRead === 0) break;
+        total += bytesRead;
+        if (total > size) return null;
+        hash.update(chunk.subarray(0, bytesRead));
+      }
+      return total === size ? hash.digest("hex") : null;
+    } finally {
+      await handle.close();
+    }
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The worker's own index, read and never written: where it is, and each
+ * path's mode. An unfinished merge, a submodule, and a sparse checkout (paths
+ * the index holds that were never put on disk) are states a rescue cannot hold.
+ */
+function readWorkerIndex(target: string, deadline: number): { file: string; modes: Map<string, string> } | { refusal: string } {
+  const listed = rescueGit(["-C", target, "ls-files", "-s", "-v", "-z"], deadline);
+  if (!listed.ok) return { refusal: "git could not read its index" };
+  const modes = new Map<string, string>();
+  for (const record of listed.out.split("\0")) {
+    if (!record) continue;
+    const match = /^(\S) (\d{6}) [0-9a-f]+ (\d)\t([\s\S]+)$/.exec(record);
+    if (!match) return { refusal: "git could not read its index" };
+    const [, tag, mode, stage, rel] = match;
+    if (stage !== "0") return { refusal: "it holds an unfinished merge" };
+    if (mode === "160000") return { refusal: "it holds a submodule, whose files git keeps only as a pointer" };
+    if (tag === "S" || tag === "s") return { refusal: "it is a sparse checkout, so some of its files are not on disk" };
+    modes.set(rel, mode);
+  }
+  const where = rescueGit(["-C", target, "rev-parse", "--git-path", "index"], deadline);
+  const file = where.ok ? path.resolve(target, where.out.trim()) : "";
+  if (!file || !fs.existsSync(file)) return { refusal: "git could not find its index" };
+  return { file, modes };
+}
+
+/**
+ * The folder as it stands, every byte read here. What git ignores is not
+ * entered: the sweep has already kept any folder where that is not
+ * rebuildable. Every file git calls untracked has to be one the walk found, or
+ * the walk skipped something and the folder stays.
+ */
+function folderListing(
+  target: string,
+  format: ObjectFormat,
+  indexModes: Map<string, string>,
+  deadline: number,
+): FolderListing | { refusal: string } {
+  const ignored = rescueGit(["-C", target, "ls-files", "--others", "--ignored", "--exclude-standard", "--directory", "-z"], deadline);
+  const untracked = rescueGit(["-C", target, "ls-files", "--others", "--exclude-standard", "-z"], deadline);
+  if (!ignored.ok || !untracked.ok) return { refusal: "git could not say what it holds, so nothing can vouch for its contents" };
+  const skip = new Set(ignored.out.split("\0").filter(Boolean).map((row) => row.replace(/\/$/, "")));
+  const walked = walkFolder(target, skip, deadline, process.platform === "win32");
+  if ("refusal" in walked) return walked;
+  for (const row of untracked.out.split("\0")) {
+    if (row && !walked.entries.has(row)) return { refusal: "git and the disk disagree about what it holds" };
+  }
+  if (walked.bytes > RESCUE_MAX_READ_BYTES) return { refusal: `it is too large to read in one sweep (${megabytes(walked.bytes)} MB)` };
+  const chunk = Buffer.allocUnsafe(1024 * 1024);
+  const files = new Map<string, SavedFile>();
+  for (const [rel, entry] of walked.entries) {
+    const hashed = hashEntry(path.join(target, ...rel.split("/")), entry, format, deadline, chunk);
+    if (!hashed) return { refusal: "a file changed while it was being read" };
+    // Windows keeps no executable bit, so there the index's word stands.
+    const exec = process.platform === "win32" ? indexModes.get(rel) === "100755" : entry.exec;
+    files.set(rel, { mode: entry.link ? "120000" : exec ? "100755" : "100644", id: hashed.id, size: hashed.size, mtimeMs: entry.mtimeMs });
+  }
+  return { files, emptyFolders: walked.emptyFolders, skip };
+}
+
+/** Which of these ids the repository holds, with each one's size. Null when git would not say. */
+function objectSizes(target: string, ids: Iterable<string>, deadline: number): Map<string, number> | null {
+  const wanted = [...new Set(ids)];
+  if (wanted.length === 0) return new Map();
+  const checked = rescueGit(["-C", target, "cat-file", "--batch-check"], deadline, { input: `${wanted.join("\n")}\n` });
+  if (!checked.ok) return null;
+  const sizes = new Map<string, number>();
+  for (const line of checked.out.split("\n")) {
+    const match = /^([0-9a-f]+) blob (\d+)$/.exec(line.trim());
+    if (match) sizes.set(match[1], Number(match[2]));
+  }
+  return sizes;
+}
+
+/**
+ * Put into the repository the bytes it lacks, with git's filters and line
+ * ending rules off, and check git filed each under the id worked out here.
+ */
+function writeMissing(target: string, files: Map<string, SavedFile>, have: Map<string, number>, deadline: number): boolean {
+  const wanted = new Map<string, string>();
+  for (const [rel, file] of files) if (!have.has(file.id) && !wanted.has(file.id)) wanted.set(file.id, rel);
+  const plain = [...wanted].filter(([, rel]) => files.get(rel)?.mode !== "120000");
+  if (plain.length > 0) {
+    const wrote = rescueGit(["-C", target, "hash-object", "-w", "--no-filters", "--stdin-paths"], deadline, {
+      input: `${plain.map(([, rel]) => quotedPath(rel)).join("\n")}\n`,
+    });
+    const ids = wrote.out.split("\n").filter(Boolean);
+    if (!wrote.ok || ids.length !== plain.length || ids.some((id, at) => id !== plain[at][0])) return false;
+  }
+  for (const [id, rel] of wanted) {
+    if (files.get(rel)?.mode !== "120000") continue;
+    let link: Buffer;
+    try {
+      link = fs.readlinkSync(path.join(target, ...rel.split("/")), { encoding: "buffer" });
+    } catch {
+      return false;
+    }
+    const wrote = rescueGit(["-C", target, "hash-object", "-w", "--no-filters", "--stdin"], deadline, { input: link });
+    if (!wrote.ok || wrote.out.trim() !== id) return false;
+  }
+  return true;
+}
+
+function rescueMessage(session: string, emptyFolders: string[]): string {
+  return [
+    `Workhorse kept ${session} before removing its folder`,
+    "",
+    RESCUE_MARK,
+    `${RESCUE_SESSION}${session}`,
+    ...(emptyFolders.length > 0 ? [`${RESCUE_EMPTY_FOLDERS}${JSON.stringify(emptyFolders)}`] : []),
+  ].join("\n");
+}
+
+/** The empty folders a rescue message names, sorted; none when it names none. */
+function emptyFoldersIn(body: string): string[] {
+  const line = body.split("\n").find((row) => row.startsWith(RESCUE_EMPTY_FOLDERS));
+  if (!line) return [];
+  try {
+    const parsed: unknown = JSON.parse(line.slice(RESCUE_EMPTY_FOLDERS.length));
+    return Array.isArray(parsed) && parsed.every((item) => typeof item === "string") ? [...parsed].sort() : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * The rescue commit, built in private indexes so the folder and its own index
+ * are never touched. Its tree is the folder's bytes. Its first parent is the
+ * commit the worker started from, and its second is a commit of the worker's
+ * index on that same commit, so work the worker staged and then changed again
+ * is kept as well.
+ */
+function buildRescue(
+  target: string,
+  head: string,
+  listing: FolderListing,
+  indexFile: string,
+  session: string,
+  deadline: number,
+): { commit: string; indexTree: string } | null {
+  let scratch = "";
+  try {
+    scratch = fs.mkdtempSync(path.join(os.tmpdir(), "workhorse-rescue-"));
+    const folderIndex = path.join(scratch, "folder");
+    const records = [...listing.files].map(([rel, file]) => `${file.mode} ${file.id}\t${rel}\0`).join("");
+    if (records && !rescueGit(["-C", target, "-c", "core.splitIndex=false", "update-index", "-z", "--index-info"], deadline, { index: folderIndex, input: records }).ok) {
+      return null;
+    }
+    const folderTree = rescueGit(["-C", target, "-c", "core.splitIndex=false", "write-tree"], deadline, { index: folderIndex });
+    // A copy of the worker's index, so git never locks or rewrites the real one.
+    const indexCopy = path.join(scratch, "index");
+    fs.copyFileSync(indexFile, indexCopy);
+    const indexTree = rescueGit(["-C", target, "-c", "core.splitIndex=false", "write-tree"], deadline, { index: indexCopy });
+    if (!folderTree.ok || !indexTree.ok) return null;
+    const indexCommit = rescueGit(
+      ["-C", target, "-c", "commit.gpgsign=false", "commit-tree", indexTree.out.trim(), "-p", head, "-m", `The index of ${session} when its folder was removed`],
+      deadline,
+    );
+    if (!indexCommit.ok) return null;
     const commit = rescueGit(
       [
         "-C",
@@ -708,129 +1079,354 @@ function snapshotFolder(target: string, head: string, sessionName: string, deadl
         "-c",
         "commit.gpgsign=false",
         "commit-tree",
-        tree.out.trim(),
+        folderTree.out.trim(),
         "-p",
         head,
+        "-p",
+        indexCommit.out.trim(),
         "-m",
-        `Workhorse kept ${sessionName} before removing its folder\n\n${RESCUE_TRAILER}`,
+        rescueMessage(session, listing.emptyFolders),
       ],
       deadline,
     );
-    return commit.ok && commit.out.trim() ? commit.out.trim() : null;
+    return commit.ok && commit.out.trim() ? { commit: commit.out.trim(), indexTree: indexTree.out.trim() } : null;
+  } catch {
+    return null;
   } finally {
-    removeScratch(dir);
+    if (scratch) removeScratch(scratch);
   }
 }
 
 /**
- * Does the commit hold exactly what the folder holds? Read back into a second
- * private index and compared with the folder: any tracked file that differs,
- * or any untracked file the commit lacks, and the answer is no.
+ * Does the commit hold exactly this folder? Checked against bytes read here,
+ * not against git's reading of them: every path, its mode, the object id
+ * worked out from its bytes, an object of that id and size in the
+ * repository, and the empty folders. A clean filter or a line ending rule
+ * cannot make two different files agree here, as they could when the check
+ * asked git.
  */
-export function snapshotMatchesFolder(target: string, commit: string, deadline: number): boolean {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "workhorse-rescue-check-"));
-  const index = path.join(dir, "index");
-  try {
-    if (!rescueGit(["-C", target, "read-tree", commit], deadline, index).ok) return false;
-    // Refresh fills in the stat data a fresh index lacks; it exits non-zero
-    // when something differs, which the next two calls say for certain.
-    rescueGit(["-C", target, "update-index", "-q", "--refresh"], deadline, index);
-    const differs = rescueGit(["-C", target, "diff-files", "--name-only", "-z"], deadline, index);
-    if (!differs.ok || differs.out.replace(/\0/g, "").length > 0) return false;
-    const extra = rescueGit(["-C", target, "ls-files", "--others", "--exclude-standard", "-z"], deadline, index);
-    return extra.ok && extra.out.replace(/\0/g, "").length === 0;
-  } finally {
-    removeScratch(dir);
+function commitHoldsFolder(target: string, commit: string, listing: Pick<FolderListing, "files" | "emptyFolders">, deadline: number): boolean {
+  const tree = rescueGit(["-C", target, "ls-tree", "-r", "-z", "--full-tree", commit], deadline);
+  if (!tree.ok) return false;
+  const records = tree.out.split("\0").filter(Boolean);
+  if (records.length !== listing.files.size) return false;
+  for (const record of records) {
+    const match = /^(\d{6}) blob ([0-9a-f]+)\t([\s\S]+)$/.exec(record);
+    const file = match ? listing.files.get(match[3]) : undefined;
+    if (!match || !file || file.mode !== match[1] || file.id !== match[2]) return false;
   }
+  const sizes = objectSizes(target, [...listing.files.values()].map((file) => file.id), deadline);
+  if (!sizes) return false;
+  for (const file of listing.files.values()) if (sizes.get(file.id) !== file.size) return false;
+  const body = rescueGit(["-C", target, "log", "-1", "--format=%B", commit], deadline);
+  return body.ok && sameList(emptyFoldersIn(body.out), listing.emptyFolders);
+}
+
+/** Nothing in the folder changed since the rescue read it: the same files, sizes, modes and times. */
+function stillAsRead(target: string, listing: FolderListing, deadline: number): boolean {
+  const again = walkFolder(target, listing.skip, deadline, process.platform === "win32");
+  if ("refusal" in again || again.entries.size !== listing.files.size || !sameList(again.emptyFolders, listing.emptyFolders)) return false;
+  for (const [rel, entry] of again.entries) {
+    const saved = listing.files.get(rel);
+    if (!saved || saved.mtimeMs !== entry.mtimeMs || (saved.mode === "120000") !== entry.link) return false;
+    if (!entry.link && saved.size !== entry.size) return false;
+    if (!entry.link && process.platform !== "win32" && (saved.mode === "100755") !== entry.exec) return false;
+  }
+  return true;
+}
+
+/** `-N` after the session's name, or 1 for the bare name; null for a ref that is not this session's at all. */
+function rescueOrder(ref: string, name: string): number | null {
+  const bare = `${RESCUE_REF_PREFIX}${name}`;
+  if (!ref.startsWith(bare)) return null;
+  const suffix = ref.slice(bare.length);
+  if (suffix === "") return 1;
+  return /^-[1-9]\d{0,5}$/.test(suffix) ? Number(suffix.slice(1)) : null;
 }
 
 /**
- * Create the rescue ref, never replacing one: `-2`, `-3` when the name is
- * taken. A ref that already holds this same content on the same commit is the
- * answer, so a folder whose removal ran out of time is not saved twice.
+ * What a rescue commit holds, as one string two rescues can be compared by,
+ * or null when the commit is not one of the desk's rescues.
+ */
+function describeRescue(target: string, rev: string, deadline: number): string | null {
+  const shape = rescueGit(["-C", target, "rev-parse", `${rev}^{tree}`, `${rev}^1`, `${rev}^2^{tree}`], deadline);
+  const info = rescueGit(["-C", target, "log", "-1", "--format=%an <%ae>%x00%B", rev], deadline);
+  if (!shape.ok || !info.ok) return null;
+  const [author, body = ""] = info.out.split("\0");
+  if (author !== RESCUE_AUTHOR || !body.split("\n").includes(RESCUE_MARK)) return null;
+  return `${shape.out.trim()}\n${body.trim()}`;
+}
+
+/**
+ * Create the rescue ref, never replacing one, one number above the highest
+ * already there: `-2`, `-3`. A rescue of the desk's that already holds this
+ * same content is the answer, so a folder whose removal ran out of time is not
+ * saved twice.
  */
 function createRescueRef(target: string, name: string, commit: string, deadline: number): string | null {
-  const sameContent = (ref: string) => {
-    const mine = rescueGit(["-C", target, "rev-parse", `${commit}^{tree}`, `${commit}^@`], deadline);
-    const theirs = rescueGit(["-C", target, "rev-parse", `${ref}^{tree}`, `${ref}^@`], deadline);
-    return mine.ok && theirs.ok && mine.out.trim() === theirs.out.trim();
-  };
-  for (let attempt = 1; attempt <= 50; attempt += 1) {
-    const ref = `${RESCUE_REF_PREFIX}${name}${attempt === 1 ? "" : `-${attempt}`}`;
+  const mine = describeRescue(target, commit, deadline);
+  const listed = rescueGit(["-C", target, "for-each-ref", "--format=%(refname)", `${RESCUE_REF_PREFIX}${name}`, `${RESCUE_REF_PREFIX}${name}-*`], deadline);
+  if (!mine || !listed.ok) return null;
+  let highest = 0;
+  for (const ref of listed.out.split("\n").map((row) => row.trim()).filter(Boolean)) {
+    const order = rescueOrder(ref, name);
+    if (order === null) continue;
+    highest = Math.max(highest, order);
+    if (describeRescue(target, ref, deadline) === mine) return ref;
+  }
+  for (let order = highest + 1; order <= highest + 20; order += 1) {
+    const ref = `${RESCUE_REF_PREFIX}${name}${order === 1 ? "" : `-${order}`}`;
     if (rescueGit(["-C", target, "update-ref", ref, commit, ""], deadline).ok) return ref;
-    if (!rescueGit(["-C", target, "show-ref", "--verify", "--quiet", ref], deadline).ok) return null;
-    if (sameContent(ref)) return ref;
   }
   return null;
 }
 
 /**
  * Keep a released folder's work in its repository, exactly, before the folder
- * goes. A clean folder is kept as a ref at HEAD; anything else as a snapshot
- * commit that is proven to match the folder before the ref is written. Every
- * doubt, error and timeout answers no, writes no ref, and keeps the folder.
+ * goes: every file's bytes as the disk holds them, its index, and its empty
+ * folders, in one commit on the commit it started from. The copy is checked
+ * against bytes read here, and the folder is read again to see nothing moved,
+ * before the ref is written. Every doubt, error and timeout answers no, writes
+ * no ref, and keeps the folder.
  */
 export function rescueWorktree(target: string, options: RescueOptions): RescueResult {
+  const { deadline } = options;
+  const no = (reason: string): RescueResult => ({
+    ok: false,
+    reason: Date.now() > deadline ? "the sweep ran out of time; it will be tried again next launch" : reason,
+  });
   const home = rescueHomeRefusal(target, options);
-  if (home) return { ok: false, reason: home };
-  const inventory = rescueInventory(target, options.deadline);
-  if ("refusal" in inventory) return { ok: false, reason: inventory.refusal };
-  const head = rescueGit(["-C", target, "rev-parse", "HEAD"], options.deadline);
-  if (!head.ok || !head.out.trim()) return { ok: false, reason: "git could not name its commit" };
-  let commit = head.out.trim();
-  if (inventory.entries > 0) {
-    const snapshot = snapshotFolder(target, commit, options.sessionName, options.deadline);
-    if (!snapshot) return { ok: false, reason: "git could not save it before the sweep ran out of time" };
-    if (!snapshotMatchesFolder(target, snapshot, options.deadline)) {
-      return { ok: false, reason: "the saved copy did not match the folder, so the folder stays" };
-    }
-    commit = snapshot;
+  if (home) return no(home);
+  const read = rescueGit(["-C", target, "rev-parse", "--verify", "HEAD"], deadline);
+  const head = read.out.trim();
+  if (!read.ok || !/^([0-9a-f]{40}|[0-9a-f]{64})$/.test(head)) return no("git could not name its commit");
+  const format: ObjectFormat = head.length === 64 ? "sha256" : "sha1";
+  const index = readWorkerIndex(target, deadline);
+  if ("refusal" in index) return no(index.refusal);
+  const listing = folderListing(target, format, index.modes, deadline);
+  if ("refusal" in listing) return no(listing.refusal);
+
+  const have = objectSizes(target, [...listing.files.values()].map((file) => file.id), deadline);
+  if (!have) return no("git could not say what it already holds");
+  const fresh = new Map<string, number>();
+  const large: string[] = [];
+  for (const [rel, file] of listing.files) {
+    if (have.has(file.id)) continue;
+    if (file.size > RESCUE_MAX_FILE_BYTES) large.push(`${rel} ${megabytes(file.size)} MB`);
+    fresh.set(file.id, file.size);
   }
-  const ref = createRescueRef(target, safeSegment(options.sessionName), commit, options.deadline);
-  if (!ref) return { ok: false, reason: "git would not keep a ref for it" };
-  return { ok: true, ref, files: inventory.entries };
+  if (large.length > 0) return no(`it holds large files git would not save (${namedSample(large)}); move them and it will go`);
+  const freshBytes = [...fresh.values()].reduce((sum, size) => sum + size, 0);
+  if (freshBytes > RESCUE_MAX_NEW_BYTES) {
+    return no(`it holds ${megabytes(freshBytes)} MB of new work, more than one sweep copies into git; commit or move it and it will go`);
+  }
+  if (!writeMissing(target, listing.files, have, deadline)) return no("a file changed while it was being saved");
+
+  const built = buildRescue(target, head, listing, index.file, options.sessionName, deadline);
+  if (!built) return no("git could not save it");
+  const shape = rescueGit(["-C", target, "rev-parse", `${built.commit}^1`, `${built.commit}^2^{tree}`, `${built.commit}^2^1`], deadline);
+  if (!shape.ok || shape.out.trim() !== [head, built.indexTree, head].join("\n") || !commitHoldsFolder(target, built.commit, listing, deadline)) {
+    return no("the saved copy did not match the folder, so the folder stays");
+  }
+  if (!stillAsRead(target, listing, deadline)) return no("a file changed while it was being saved, so the folder stays");
+  const ref = createRescueRef(target, safeSegment(options.sessionName), built.commit, deadline);
+  if (!ref) return no("git would not keep a ref for it");
+  return { ok: true, ref, files: listing.files.size };
 }
 
 /**
- * The newest rescue ref for a session in this repository, if any. Newest by
- * the order the refs were made (`-2` after the bare name), not by commit date:
- * a ref at a clean folder's HEAD carries that commit's old date.
+ * Does this commit's tree hold exactly the folder as it stands now, byte for
+ * byte, with the empty folders its message names? The same check the rescue
+ * makes before it writes a ref, run fresh.
+ */
+export function snapshotMatchesFolder(target: string, commit: string, deadline: number): boolean {
+  const read = rescueGit(["-C", target, "rev-parse", "--verify", `${commit}^{commit}`], deadline);
+  const id = read.out.trim();
+  if (!read.ok || !/^([0-9a-f]{40}|[0-9a-f]{64})$/.test(id)) return false;
+  const index = readWorkerIndex(target, deadline);
+  if ("refusal" in index) return false;
+  const listing = folderListing(target, id.length === 64 ? "sha256" : "sha1", index.modes, deadline);
+  return !("refusal" in listing) && commitHoldsFolder(target, id, listing, deadline);
+}
+
+/**
+ * The newest rescue of this session's folder in this repository, if any.
+ *
+ * Only the desk's own count: a commit it made, marked as a rescue, naming
+ * this session, with the two parents a rescue has. A ref another tool wrote
+ * under the same prefix is passed over, whatever its number. Newest is the
+ * highest number, which is the order the desk made them in.
  */
 async function newestRescueRef(gitRoot: string, session: string): Promise<string | null> {
+  let listed: string;
   try {
-    const out = await git(["-C", gitRoot, "for-each-ref", "--format=%(refname)", `${RESCUE_REF_PREFIX}${session}`, `${RESCUE_REF_PREFIX}${session}-*`]);
-    let best: { ref: string; order: number } | null = null;
-    for (const ref of out.split("\n").map((row) => row.trim()).filter(Boolean)) {
-      const suffix = ref.slice(RESCUE_REF_PREFIX.length + session.length);
-      const order = suffix === "" ? 1 : /^-\d+$/.test(suffix) ? Number(suffix.slice(1)) : NaN;
-      if (Number.isFinite(order) && (!best || order > best.order)) best = { ref, order };
-    }
-    return best?.ref ?? null;
+    listed = await git(["-C", gitRoot, "for-each-ref", "--format=%(refname)", `${RESCUE_REF_PREFIX}${session}`, `${RESCUE_REF_PREFIX}${session}-*`]);
   } catch {
     return null;
   }
+  const candidates = listed
+    .split("\n")
+    .map((row) => row.trim())
+    .filter(Boolean)
+    .map((ref) => ({ ref, order: rescueOrder(ref, session) }))
+    .filter((row): row is { ref: string; order: number } => row.order !== null)
+    .sort((a, b) => b.order - a.order);
+  for (const { ref } of candidates) {
+    try {
+      const [author, parents = "", body = ""] = (await git(["-C", gitRoot, "log", "-1", "--format=%an <%ae>%x00%P%x00%B", ref])).split("\0");
+      const lines = body.split("\n");
+      if (author === RESCUE_AUTHOR && parents.trim().split(" ").length === 2 && lines.includes(RESCUE_MARK) && lines.includes(`${RESCUE_SESSION}${session}`)) {
+        return ref;
+      }
+    } catch {
+      /* not a commit, so not one of the desk's */
+    }
+  }
+  return null;
+}
+
+/** A path from a rescue that lands inside the folder: relative, no `..`, no `.git`. */
+function safeRescuePath(rel: string): boolean {
+  if (!rel || path.isAbsolute(rel) || (process.platform === "win32" && /[\\:]/.test(rel))) return false;
+  return rel.split("/").every((part) => part !== "" && part !== "." && part !== ".." && part.toLowerCase() !== ".git");
+}
+
+/** False when a folder on the way to `rel` is a link: writing through it would land somewhere else. */
+function noLinkOnTheWay(target: string, rel: string): boolean {
+  const parts = rel.split("/").slice(0, -1);
+  for (let depth = 1; depth <= parts.length; depth += 1) {
+    try {
+      if (fs.lstatSync(path.join(target, ...parts.slice(0, depth))).isSymbolicLink()) return false;
+    } catch {
+      return true; // not made yet; mkdir makes a plain folder
+    }
+  }
+  return true;
+}
+
+type RescuedFile = { mode: string; id: string; size: number };
+
+async function holdsRescued(file: string, have: WalkedEntry, want: RescuedFile, format: ObjectFormat): Promise<boolean> {
+  if ((want.mode === "120000") !== have.link) return false;
+  if (!have.link && process.platform !== "win32" && have.exec !== (want.mode === "100755")) return false;
+  return (await hashEntryAsync(file, have.link, format)) === want.id;
+}
+
+/** Write one file back from its object, bytes exactly as saved, with no filter or line ending rule between. */
+async function putRescued(gitRoot: string, target: string, rel: string, want: RescuedFile): Promise<void> {
+  if (!noLinkOnTheWay(target, rel)) throw new Error(`a folder on the way to ${rel} is a link`);
+  const file = path.join(target, ...rel.split("/"));
+  try {
+    fs.rmSync(file, { recursive: true });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const bytes = await gitBytes(["-C", gitRoot, "cat-file", "blob", want.id], want.size + 1024);
+  if (want.mode === "120000") {
+    fs.symlinkSync(bytes, file);
+    return;
+  }
+  const mode = want.mode === "100755" ? 0o755 : 0o644;
+  fs.writeFileSync(file, bytes, { mode });
+  if (process.platform !== "win32") fs.chmodSync(file, mode);
 }
 
 /**
  * Rebuild a released folder from its rescue: at the commit it started from,
- * with the snapshot's files put back and left uncommitted, as the worker left
- * them. A rebuild that fails part way takes its half-made folder with it.
+ * with its own bytes put back, its index as the worker left it, and its empty
+ * folders. Checkout writes the starting commit; anything checkout wrote
+ * differently from what was saved (a filter, a line ending, a mode, a name
+ * whose case changed, a file the worker deleted) is then put right from the
+ * saved objects, and the result is read back against the rescue. A rebuild
+ * that fails part way takes its half-made folder with it.
  */
 async function restoreFromRescue(gitRoot: string, target: string, rescue: string): Promise<{ ok: true } | { ok: false; message: string }> {
+  let made = false;
   try {
-    const body = await git(["-C", gitRoot, "log", "-1", "--format=%B", rescue]);
-    const snapshot = body.includes(RESCUE_TRAILER);
-    await git(["-C", gitRoot, "worktree", "add", "--detach", target, snapshot ? `${rescue}^` : rescue]);
-    if (snapshot) {
-      await git(["-C", target, "read-tree", "-u", "--reset", rescue]);
-      await git(["-C", target, "reset", "-q"]);
+    const [base = "", indexTree = ""] = (await git(["-C", gitRoot, "rev-parse", `${rescue}^1`, `${rescue}^2^{tree}`])).split("\n").map((row) => row.trim());
+    const format: ObjectFormat = base.length === 64 ? "sha256" : "sha1";
+    const emptyFolders = emptyFoldersIn(await git(["-C", gitRoot, "log", "-1", "--format=%B", rescue]));
+    const saved = new Map<string, RescuedFile>();
+    for (const record of (await gitOut(["-C", gitRoot, "ls-tree", "-r", "-l", "-z", "--full-tree", rescue])).split("\0")) {
+      if (!record) continue;
+      const match = /^(\d{6}) blob ([0-9a-f]+) +(\d+)\t([\s\S]+)$/.exec(record);
+      if (!match) throw new Error("the rescue holds something other than files");
+      saved.set(match[4], { mode: match[1], id: match[2], size: Number(match[3]) });
+    }
+    for (const rel of [...saved.keys(), ...emptyFolders]) {
+      if (!safeRescuePath(rel)) throw new Error(`the rescue names a path outside the folder (${rel})`);
+    }
+
+    // Set before the add: a checkout that fails part way leaves a folder too.
+    made = true;
+    await git(["-C", gitRoot, "worktree", "add", "--detach", target, base]);
+    // What a hook made and git ignores is not the rescue's to judge.
+    const ignored = await gitOut(["-C", target, "ls-files", "--others", "--ignored", "--exclude-standard", "--directory", "-z"]);
+    const skip = new Set(ignored.split("\0").filter(Boolean).map((row) => row.replace(/\/$/, "")));
+    const checkedOut = walkFolder(target, skip, Number.POSITIVE_INFINITY, false);
+    if ("refusal" in checkedOut) throw new Error(checkedOut.refusal);
+
+    // What the worker deleted or renamed goes first, so a name that now
+    // differs only in case is written fresh rather than matched to the old one.
+    const emptied = new Set<string>();
+    for (const rel of checkedOut.entries.keys()) {
+      if (saved.has(rel)) continue;
+      fs.rmSync(path.join(target, ...rel.split("/")));
+      const parts = rel.split("/");
+      for (let depth = 1; depth < parts.length; depth += 1) emptied.add(parts.slice(0, depth).join("/"));
+    }
+    const written: string[] = [];
+    for (const [rel, want] of saved) {
+      const have = checkedOut.entries.get(rel);
+      if (have && (await holdsRescued(path.join(target, ...rel.split("/")), have, want, format))) continue;
+      await putRescued(gitRoot, target, rel, want);
+      written.push(rel);
+    }
+    const leftEmpty = new Set(emptyFolders);
+    for (const dir of [...emptied].sort((a, b) => b.split("/").length - a.split("/").length)) {
+      if (leftEmpty.has(dir)) continue;
+      try {
+        fs.rmdirSync(path.join(target, ...dir.split("/")));
+      } catch {
+        /* still holds something */
+      }
+    }
+    for (const dir of emptyFolders) {
+      if (!noLinkOnTheWay(target, `${dir}/-`)) throw new Error(`a folder on the way to ${dir} is a link`);
+      fs.mkdirSync(path.join(target, ...dir.split("/")), { recursive: true });
+    }
+    await git(["-C", target, "read-tree", indexTree]);
+    // Refresh fills in the stat data read-tree leaves empty; it exits non-zero
+    // when the folder differs from the index, which is the point.
+    await git(["-C", target, "update-index", "-q", "--refresh"]).catch(() => "");
+
+    const rebuilt = walkFolder(target, skip, Number.POSITIVE_INFINITY, false);
+    if ("refusal" in rebuilt || rebuilt.entries.size !== saved.size || !sameList(rebuilt.emptyFolders, emptyFolders)) {
+      throw new Error("the rebuilt folder does not match its rescue");
+    }
+    for (const rel of saved.keys()) if (!rebuilt.entries.has(rel)) throw new Error(`the rebuilt folder lacks ${rel}`);
+    for (const rel of written) {
+      const have = rebuilt.entries.get(rel)!;
+      if (!(await holdsRescued(path.join(target, ...rel.split("/")), have, saved.get(rel)!, format))) {
+        throw new Error(`${rel} did not come back as it was saved`);
+      }
     }
     return { ok: true };
   } catch (error) {
-    try {
-      await git(["-C", gitRoot, "worktree", "remove", "--force", target]);
-    } catch {
-      /* nothing was made */
+    if (made) {
+      try {
+        await git(["-C", gitRoot, "worktree", "remove", "--force", target]);
+      } catch {
+        // The folder did not exist before this call, so everything in it came
+        // from the rescue, which still holds all of it.
+        try {
+          fs.rmSync(target, { recursive: true });
+          await git(["-C", gitRoot, "worktree", "prune"]);
+        } catch {
+          /* left for the next attempt to report */
+        }
+      }
     }
     return { ok: false, message: error instanceof Error ? error.message : String(error) };
   }
@@ -889,6 +1485,16 @@ function dropManagedWorktree(
         reason: `git would delete ignored files it holds (${namedSample(ignored.paths)}) — open it, move anything you need, then remove it yourself`,
       };
     }
+    // Uncommitted work beside installed packages stays. Git refuses a dirty
+    // folder without --force, and before there was a rescue that refusal kept
+    // this one. The manifest rebuilds the packages but not an edit made inside
+    // them, and the force would take that edit with the folder.
+    if (status.held && ignored.packages.length > 0) {
+      return {
+        dropped: false,
+        reason: `it holds uncommitted work beside installed packages (${namedSample(ignored.packages)}), and an edit made inside them would go with the folder`,
+      };
+    }
     // Saved elsewhere already: clean, and either a remote branch holds HEAD or
     // every path it changed is on the default branch. The two tests are the
     // same as before; what changed is what happens when they say no.
@@ -913,8 +1519,9 @@ function dropManagedWorktree(
       if (!rescue.ok) return { dropped: false, reason: rescue.reason };
       rescued = rescue.ref;
     }
-    // Git refuses a dirty folder without --force, and only a folder whose
-    // every file the rescue just proved it holds is given it.
+    // Git refuses a dirty folder without --force. Only a folder the rescue
+    // just proved it holds byte for byte, and read again unchanged, is given
+    // it, and only once nothing but rebuildable caches is left beside it.
     const result =
       rescued && status.held
         ? rescueGit(["-C", repo, "worktree", "remove", "--force", target], options.deadline)

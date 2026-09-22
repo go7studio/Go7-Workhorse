@@ -1304,6 +1304,7 @@ export function workerStatusSnapshot(
     ...(worker.agentRun?.error ? { error: worker.agentRun.error } : {}),
     ...(worker.agentRun?.exclusions?.length ? { exclusions: worker.agentRun.exclusions } : {}),
     ...(worker.agentRun?.changedFiles?.length ? { changedFiles: worker.agentRun.changedFiles } : {}),
+    ...(worker.agentRun?.leftInFolder ? { leftInFolder: worker.agentRun.leftInFolder.files } : {}),
     ...(worker.agentRun?.mission ? { mission: worker.agentRun.mission } : {}),
     // The report scored against the mission's criteria: evidence in the report, not a check of the work.
     ...(reportSaysFor(worker.agentRun, opts?.judge === true) ? { reportSays: reportSaysFor(worker.agentRun, opts?.judge === true) } : {}),
@@ -1737,6 +1738,7 @@ export function continueWorkerRun(
           budgetHandoffAt: undefined,
           missionTokenBudget: undefined,
           findings: undefined,
+          leftInFolder: undefined,
         }),
     ...(input.correlationId ? { correlationId: input.correlationId } : {}),
   };
@@ -2866,6 +2868,13 @@ export function normalizeAgentRun(
     ...(mission ? { mission } : {}),
     ...(verdict ? { verdict } : {}),
     ...(judgeFailed ? { judgeFailed } : {}),
+    ...(row.leftInFolder &&
+    typeof row.leftInFolder === "object" &&
+    Number.isInteger(row.leftInFolder.files) &&
+    row.leftInFolder.files > 0 &&
+    typeof row.leftInFolder.at === "number"
+      ? { leftInFolder: { files: row.leftInFolder.files, at: row.leftInFolder.at } }
+      : {}),
   };
 }
 

@@ -276,7 +276,11 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
   before. Settings → Profile sets the days, and nought keeps every row in the
   desk file.
 - A worker's tree is removed only when it holds nothing unsaved. Anything else
-  is kept and named, with the reason.
+  is kept and named, with the reason, and Settings → Profile lists the folders
+  the last sweep kept. Godot's editor cache and TypeScript's build record count
+  as rebuildable.
+- A worker that ends with uncommitted files in its own folder says so in the
+  chat that sent it. A folder made in the last hour is never swept.
 - If the parent does the work itself, the run records that it took over.
 - A cancelled or failed worker still reports to its parent, in one line naming
   the worker, what happened and why.

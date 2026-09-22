@@ -4,7 +4,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { pruneOrphanWorktrees } from "../electron/worktree-host";
+import { folderLeftBehind, pruneOrphanWorktrees } from "../electron/worktree-host";
 import { sweepStaleUserData } from "../electron/user-data-hygiene";
 
 test("sweepStaleUserData drops leftover update installers and oversized Chromium caches", () => {
@@ -123,6 +123,7 @@ function repoWithWorktree(
   git(["init", "-q", "."]);
   fs.writeFileSync(path.join(repo, "tracked.txt"), "original\n");
   for (const [name, body] of Object.entries(tracked)) {
+    fs.mkdirSync(path.dirname(path.join(repo, name)), { recursive: true });
     fs.writeFileSync(path.join(repo, name), body);
   }
   git(["add", "-A"]);
@@ -135,6 +136,10 @@ function repoWithWorktree(
   git(["fetch", "-q", "origin"]);
   const wt = path.join(managed, "sess_gone");
   git(["worktree", "add", "--quiet", "--detach", wt]);
+  // A folder made in the last hour is never swept; these trees stand in for
+  // ones a finished worker left long ago.
+  const earlier = new Date(Date.now() - 2 * 60 * 60 * 1000);
+  fs.utimesSync(path.join(wt, ".git"), earlier, earlier);
   return { root, repo, managed, wt, remote };
 }
 
@@ -553,4 +558,144 @@ test("attachment write temps older than a day are swept; fresh ones and blobs ar
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+/*
+ * Godot's `.godot` folder beside its `project.godot` is the editor's own
+ * rebuild of the project, and every game worktree carries one. Only files in
+ * the shapes Godot writes are let go; the gate found a person's file inside
+ * `imported/` and `editor/` going with the tree when only folder names were
+ * read, and those probes are pinned here.
+ */
+const HASH = "5f3a9c0e1b2d4f6a8c0e2b4d6f8a0c1e";
+function godotTree(label: string) {
+  const made = repoWithWorktree(label, {
+    ".gitignore": ".godot/\n",
+    "game/project.godot": "[application]\nconfig/name=\"Cargo\"\n",
+  });
+  const cache = path.join(made.wt, "game", ".godot");
+  fs.mkdirSync(path.join(cache, "imported"), { recursive: true });
+  fs.writeFileSync(path.join(cache, "imported", `crate.png-${HASH}.ctex`), "imported texture");
+  fs.writeFileSync(path.join(cache, "imported", `crate.png-${HASH}.md5`), "checksum");
+  fs.mkdirSync(path.join(cache, "editor"), { recursive: true });
+  fs.writeFileSync(path.join(cache, "editor", "editor_layout.cfg"), "[docks]");
+  fs.writeFileSync(path.join(cache, "editor", "filesystem_cache8"), "cache");
+  fs.mkdirSync(path.join(cache, "shader_cache", "CanvasShaderRD", "a1b2c3d4e5f60718"), { recursive: true });
+  fs.writeFileSync(path.join(cache, "shader_cache", "CanvasShaderRD", "a1b2c3d4e5f60718", "0f1e2d3c4b5a6978.cache"), "spirv");
+  fs.writeFileSync(path.join(cache, "uid_cache.bin"), "uids");
+  return { ...made, cache };
+}
+
+test("pruneOrphanWorktrees drops a tree whose only ignored output is Godot's editor cache", () => {
+  const { root, managed, wt } = godotTree("godot");
+  assert.equal(execFileSync("git", ["status", "--porcelain"], { cwd: wt, encoding: "utf8" }).trim(), "");
+
+  const pruned = pruneOrphanWorktrees(managed, []);
+
+  assert.deepEqual(pruned.removed, ["sess_gone"], "the editor rebuilds all of it on the next open");
+  assert.ok(!fs.existsSync(wt));
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test("pruneOrphanWorktrees keeps a .godot holding anything Godot did not write", () => {
+  const probes: Array<[string, string]> = [
+    ["export_credentials.cfg", "keystore user and password"],
+    ["imported/only-copy.txt", "a person's note"],
+    ["editor/only-copy.scn", "a person's scene"],
+    ["editor/recovery/scene.tscn", "a scene in a folder Godot does not make"],
+    // Round two: names that only look like what Godot writes.
+    [`imported/notes-${HASH}.txt`, "a note wearing an importer's name"],
+    ["editor/secrets.cfg", "a cfg the person wrote"],
+    ["shader_cache/only-copy.cache", "a cache-shaped name that is not a shader"],
+    [`shader_cache/CanvasShaderRD/a1b2c3d4e5f60718/notes.cache`, "not a hash name"],
+    // Round three: suffixes and tokens wider than Godot's own.
+    ["editor/favorites.txt", "a note named like a list"],
+    ["editor/create_recent.notes", "a note named like a list"],
+    ["editor/favorites.cfg", "a cfg named like a list"],
+    [`shader_cache/CanvasShaderRD/a1b2c3d4e5f60718/0f1e2d3c4b5a6978.notes.cache`, "not a driver"],
+  ];
+  for (const [relative, body] of probes) {
+    const { root, managed, cache } = godotTree(`godot-${relative.replace(/[^a-z]/gi, "")}`);
+    fs.mkdirSync(path.dirname(path.join(cache, relative)), { recursive: true });
+    fs.writeFileSync(path.join(cache, relative), body);
+
+    const pruned = pruneOrphanWorktrees(managed, []);
+
+    assert.deepEqual(pruned.removed, [], relative);
+    assert.match(pruned.kept[0].reason, /\.godot/, "the refusal names the folder it is protecting");
+    assert.equal(fs.readFileSync(path.join(cache, relative), "utf8"), body, `${relative} survives`);
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("pruneOrphanWorktrees keeps a .godot holding a link", () => {
+  const { root, managed, cache } = godotTree("godot-link");
+  fs.symlinkSync("/etc/hosts", path.join(cache, "imported", `link.png-${HASH}.ctex`));
+  assert.deepEqual(pruneOrphanWorktrees(managed, []).removed, []);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test("pruneOrphanWorktrees keeps a .godot folder with no project.godot beside it", () => {
+  const { root, managed, wt } = repoWithWorktree("godot-orphan", { ".gitignore": ".godot/\n" });
+  fs.mkdirSync(path.join(wt, ".godot", "imported"), { recursive: true });
+  fs.writeFileSync(path.join(wt, ".godot", "imported", `x.png-${HASH}.ctex`), "nothing here rebuilds this");
+
+  const pruned = pruneOrphanWorktrees(managed, []);
+
+  assert.deepEqual(pruned.removed, []);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test("pruneOrphanWorktrees drops a TypeScript build record beside its tsconfig, and nothing that only borrows the name", () => {
+  const record = JSON.stringify({ program: { fileNames: ["../node_modules/typescript/lib/lib.d.ts", "./a.ts"] }, version: "5.4.5" });
+  const beside = repoWithWorktree("tsbuildinfo", { ".gitignore": "*.tsbuildinfo\n", "tsconfig.json": "{}\n" });
+  fs.writeFileSync(path.join(beside.wt, "tsconfig.tsbuildinfo"), record);
+  assert.deepEqual(pruneOrphanWorktrees(beside.managed, []).removed, ["sess_gone"]);
+  fs.rmSync(beside.root, { recursive: true, force: true });
+
+  for (const [label, name, body, files] of [
+    ["ts-alone", "app.tsbuildinfo", record, {}],
+    ["ts-prose", "chapter.tsbuildinfo", "the only copy of the chapter, not a build record", { "tsconfig.json": "{}\n" }],
+    ["ts-noversion", "app.tsbuildinfo", JSON.stringify({ program: {} }), { "tsconfig.json": "{}\n" }],
+    ["ts-fake", "diary.tsbuildinfo", JSON.stringify({ version: "not a compiler", program: "the only copy of the chapter" }), { "tsconfig.json": "{}\n" }],
+    ["ts-prose-program", "diary.tsbuildinfo", JSON.stringify({ version: "5.6.2", program: "the only copy of the chapter" }), { "tsconfig.json": "{}\n" }],
+    ["ts-prose-object", "diary.tsbuildinfo", JSON.stringify({ version: "5.6.2", program: { text: "the only copy of the chapter" } }), { "tsconfig.json": "{}\n" }],
+    ["ts-prose-root", "diary.tsbuildinfo", JSON.stringify({ version: "5.6.2", root: ["the only copy of the chapter"] }), { "tsconfig.json": "{}\n" }],
+  ] as Array<[string, string, string, Record<string, string>]>) {
+    const made = repoWithWorktree(label, { ".gitignore": "*.tsbuildinfo\n", ...files });
+    fs.writeFileSync(path.join(made.wt, name), body);
+    assert.deepEqual(pruneOrphanWorktrees(made.managed, []).removed, [], label);
+    assert.equal(fs.readFileSync(path.join(made.wt, name), "utf8"), body);
+    fs.rmSync(made.root, { recursive: true, force: true });
+  }
+});
+
+test("pruneOrphanWorktrees leaves a worktree made in the last hour alone", () => {
+  const { root, managed, wt } = repoWithWorktree("young");
+  fs.utimesSync(path.join(wt, ".git"), new Date(), new Date());
+
+  const pruned = pruneOrphanWorktrees(managed, []);
+
+  assert.deepEqual(pruned.removed, [], "a fresh tree at HEAD is clean and saved, and may be a worker no list has yet");
+  assert.match(pruned.kept[0].reason, /made in the last hour/);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test("folderLeftBehind counts what a worker left in its own folder, and nothing ignored", async () => {
+  const { root, repo, managed, wt } = repoWithWorktree("left", { ".gitignore": "*.log\n", "old.txt": "old\n" });
+  fs.writeFileSync(path.join(wt, "tracked.txt"), "edited, never committed\n");
+  execFileSync("git", ["mv", "old.txt", "renamed.txt"], { cwd: wt });
+  fs.writeFileSync(path.join(wt, "new.md"), "added\n");
+  fs.mkdirSync(path.join(wt, "notes"));
+  fs.writeFileSync(path.join(wt, "notes", "a.md"), "a\n");
+  fs.writeFileSync(path.join(wt, "debug.log"), "ignored, so not the worker's work");
+
+  assert.deepEqual(await folderLeftBehind("sess_gone", managed), { ok: true, changed: 2, untracked: 2 });
+
+  // Only the desk's own folders are read: not a link out of them, not a missing one.
+  fs.symlinkSync(repo, path.join(managed, "sess_link"));
+  assert.deepEqual(await folderLeftBehind("sess_link", managed), { ok: false });
+  assert.deepEqual(await folderLeftBehind("sess_missing", managed), { ok: false });
+  assert.deepEqual(await folderLeftBehind("", managed), { ok: false });
+  fs.rmSync(root, { recursive: true, force: true });
 });

@@ -369,6 +369,8 @@ export type AgentRun = {
   verdict?: import("./judge").JudgeVerdict;
   /** The last judge call that gave no score, with why and how many calls reached the gateway. A run is tried at most twice. */
   judgeFailed?: import("./judge").JudgeFailure;
+  /** Files this run left uncommitted in its own folder, counted when it ended. */
+  leftInFolder?: { files: number; at: number };
   /** Current assignment spend. Resets when a reused worker takes a new slice. */
   usedTokens?: number;
   /** Sum of prior assignments on this worker. Not a ceiling. */

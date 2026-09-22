@@ -56,7 +56,7 @@ import {
 import { showDesktopNotice } from "./notify";
 import { applyAppUpdate, checkAppUpdate } from "./app-update";
 import { deskToolEnv, ensureDeskRipgrep } from "./desk-path";
-import { ensureManagedWorktree, pruneOrphanWorktrees, type EnsureWorktreeInput } from "./worktree-host";
+import { ensureManagedWorktree, folderLeftBehind, pruneOrphanWorktrees, type EnsureWorktreeInput, type WorktreeSweepReport } from "./worktree-host";
 import { offloadStateAttachments } from "./attachment-store";
 import {
   CredentialStore,
@@ -75,7 +75,7 @@ import { grokBotWakePath, inspectGrokBotWake, saveGrokBotWake } from "./grok-bot
 import { LINK_HOSTS, type LinkHost } from "../src/lib/workhorse-link";
 import { buildSupportReport } from "./diagnostics";
 import { APP_VERSION } from "../src/lib/app-info";
-import { measureWorktreeStore, sweepAgedStateBackups, sweepStaleUserData } from "./user-data-hygiene";
+import { measureWorktreeStore, sweepAgedStateBackups, sweepStaleUserData, WORKTREE_MAX_TREES } from "./user-data-hygiene";
 import { faultDetail, memoryDetail, nullMainLog, openMainLog, startMemoryLog } from "./main-log";
 import {
   configureProcRegistry,
@@ -789,6 +789,19 @@ const HOUSEKEEPING_DELAY_MS = 30_000;
 let housekeepingScheduled = false;
 
 /**
+ * The chats the desk last saved, for the sweep.
+ *
+ * The sweep runs half a minute after load. A worker a mission picks up in that
+ * half minute is running in the saved chats and still finished in the
+ * load-time list, so the sweep judges each folder by the newer of the two.
+ * Only a save that was written counts.
+ */
+let latestSavedSessions: readonly unknown[] | null = null;
+
+/** What the last sweep found. Settings reads this; it never walks the folders itself. */
+let lastSweep: WorktreeSweepReport | null = null;
+
+/**
  * The slow, destructive half of launch, off the path a person is watching.
  *
  * Two sweeps run here. The worktree prune, which the `state:load` guard has
@@ -802,7 +815,7 @@ function scheduleHousekeeping(sessions: readonly unknown[]) {
   housekeepingScheduled = true;
   const timer = setTimeout(() => {
     try {
-      runHousekeeping(sessions);
+      runHousekeeping(latestSavedSessions ?? sessions);
     } catch (error) {
       mainLog.record("housekeeping", `failed ${faultDetail(error)}`);
     }
@@ -854,6 +867,14 @@ function runHousekeeping(sessions: readonly unknown[]) {
     console.info(`Kept the worktree for ${held.name}: ${held.reason}.`);
     mainLog.record("prune:kept", `${held.name}: ${held.reason}`);
   }
+  lastSweep = {
+    at: Date.now(),
+    trees: after.trees,
+    maxTrees: WORKTREE_MAX_TREES,
+    overTrees: after.overTrees,
+    removed: pruned.removed.length,
+    held: pruned.kept.map(({ name, reason }) => ({ name, reason })),
+  };
 
   const backups = sweepAgedStateBackups(userData);
   if (backups.removed.length) {
@@ -1614,6 +1635,19 @@ app.whenReady().then(async () => {
     return readEditStatsAsync(files, folders, { instances: fileInstances }, created);
   });
 
+  // What a finished worker left in its folder. Read-only, and only the desk's
+  // own managed folders: the id names the folder, the renderer never a path.
+  ipcMain.handle("project:folder-left", (_event, sessionId: unknown) =>
+    typeof sessionId === "string"
+      ? folderLeftBehind(sessionId, path.join(app.getPath("userData"), "worktrees"))
+      : { ok: false },
+  );
+  ipcMain.handle("worktrees:report", () => lastSweep);
+  ipcMain.handle("worktrees:reveal", () => {
+    const root = path.join(app.getPath("userData"), "worktrees");
+    if (fs.existsSync(root)) void shell.openPath(root);
+  });
+
   ipcMain.handle("project:ensure-worktree", (_event, raw: unknown) => {
     if (!raw || typeof raw !== "object") {
       return { ok: false, message: "Invalid worktree request." };
@@ -1712,6 +1746,7 @@ app.whenReady().then(async () => {
 
   ipcMain.handle("state:save", (_event, state: Persistable) => {
     if (!state || typeof state !== "object") return { written: false };
+    const saved = (state as { sessions?: unknown }).sessions;
     if ("settings" in state) {
       const nextSettings = normalizeSettings((state as { settings?: unknown }).settings);
       const workshopChanged = JSON.stringify(liveSettings.workshop) !== JSON.stringify(nextSettings.workshop);
@@ -1729,7 +1764,12 @@ app.whenReady().then(async () => {
     }
     // The queue guards the write: writeState guards its own body, but a future
     // edit that throws before its try must not silently end every save after it.
-    return stateSaves.enqueue(state);
+    // The sweep trusts only chats the desk actually wrote. A save refused for
+    // being empty, or superseded before it landed, never becomes its keep list.
+    return stateSaves.enqueue(state).then((result) => {
+      if (result?.written && Array.isArray(saved)) latestSavedSessions = saved;
+      return result;
+    });
   });
   ipcMain.handle("state:save-drafts", (_event, drafts: unknown) => {
     if (!drafts || typeof drafts !== "object" || Array.isArray(drafts)) return;

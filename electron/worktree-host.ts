@@ -102,6 +102,16 @@ export async function ensureManagedWorktree(
   }
 }
 
+/** What the last launch sweep found, for Settings. */
+export type WorktreeSweepReport = {
+  at: number;
+  trees: number;
+  maxTrees: number;
+  overTrees: boolean;
+  removed: number;
+  held: Array<{ name: string; reason: string }>;
+};
+
 export type WorktreePruneResult = {
   removed: string[];
   /** Worktrees left in place, with the reason Git or the filesystem gave. */
@@ -125,6 +135,23 @@ const PRUNE_GIT_TIMEOUT_MS = 3_000;
  * cannot hold the sweep open, and whatever is left is simply tried next launch.
  */
 export const PRUNE_BUDGET_MS = 20_000;
+
+/**
+ * A worktree younger than this is left alone. A worker spawned just before the
+ * sweep may be in no list the sweep was handed yet, and a fresh tree at HEAD is
+ * clean and saved, so every other test would let it go.
+ */
+export const PRUNE_YOUNGEST_MS = 60 * 60 * 1000;
+
+/** When git made this linked worktree: the mtime of its `.git` link file, written once at `worktree add`. */
+function madeWithin(target: string, windowMs: number): boolean {
+  try {
+    const link = fs.lstatSync(path.join(target, ".git"));
+    return link.isFile() && Date.now() - link.mtimeMs < windowMs;
+  } catch {
+    return false;
+  }
+}
 
 function gitSync(args: string[], cwd?: string): { ok: boolean; out: string } {
   try {
@@ -314,9 +341,131 @@ const REBUILDABLE_FROM_MANIFEST: Array<{ segment: string; manifests: string[] }>
   { segment: "Pods", manifests: ["Podfile"] },
 ];
 
+/**
+ * What Godot writes into its `.godot` folder, by name and shape. The editor
+ * rebuilds all of it from the project on the next open. Names are not enough:
+ * a person can drop a file into `editor/` or `imported/`, so every file is
+ * read against the shape Godot gives it, and one that does not fit keeps the
+ * tree. `export_credentials.cfg` lives here too and is a person's keystore
+ * details, so it is not on the list.
+ */
+const GODOT_TOP_FILES = new Set(["uid_cache.bin", "global_script_class_cache.cfg", "extension_list.cfg", ".gdignore"]);
+/**
+ * `<source name>-<32 hex>[.<compression>].<importer extension>`: an imported
+ * asset and its checksum, in the extensions Godot's importers write.
+ */
+const GODOT_IMPORTED =
+  /^.+-[0-9a-f]{32}(\.(s3tc|etc|etc2|bptc|astc))?\.(md5|ctex|ctexarray|ccube|ccubearray|ctex3d|stex|sample|oggvorbisstr|mp3str|fontdata|scn|res|mesh|image)$/;
+/** The editor's own files, by the names it gives them. `favorites` and `create_recent` carry a class name. */
+const GODOT_EDITOR =
+  /^(editor_layout\.cfg|project_metadata\.cfg|script_editor_cache\.cfg|shader_editor_cache\.cfg|.+-(folding|editstate)-[0-9a-f]{32}\.cfg|filesystem_cache\d+|filesystem_update\d+|recent_dirs|create_recent\.[A-Z][A-Za-z0-9]*|favorites\.[A-Z][A-Za-z0-9]*)$/;
+/** `shader_cache/<Name>Shader.../<hash>/<hash>[.<driver>].cache`. */
+const GODOT_SHADER_GROUP = /^[A-Za-z0-9_]*Shader[A-Za-z0-9_]*$/;
+const GODOT_SHADER_HASH = /^[0-9a-f]{16,64}$/;
+const GODOT_SHADER_FILE = /^[0-9a-f]{16,64}(\.(vulkan|metal|d3d12|opengl3|gles3|spirv))?\.cache$/;
+const GODOT_WALK_LIMIT = 20_000;
+
+function godotCacheOnly(dir: string): boolean {
+  let seen = 0;
+  const walk = (folder: string, zone: "top" | "imported" | "editor" | "shader" | "shader-group" | "shader-hash"): boolean => {
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(folder, { withFileTypes: true });
+    } catch {
+      return false;
+    }
+    for (const entry of entries) {
+      seen += 1;
+      if (seen > GODOT_WALK_LIMIT) return false;
+      const name = entry.name;
+      if (entry.isSymbolicLink()) return false;
+      if (entry.isDirectory()) {
+        if (zone === "top" && name === "imported") {
+          if (!walk(path.join(folder, name), "imported")) return false;
+        } else if (zone === "top" && name === "editor") {
+          if (!walk(path.join(folder, name), "editor")) return false;
+        } else if (zone === "top" && name === "shader_cache") {
+          if (!walk(path.join(folder, name), "shader")) return false;
+        } else if (zone === "shader" && GODOT_SHADER_GROUP.test(name)) {
+          if (!walk(path.join(folder, name), "shader-group")) return false;
+        } else if (zone === "shader-group" && GODOT_SHADER_HASH.test(name)) {
+          if (!walk(path.join(folder, name), "shader-hash")) return false;
+        } else {
+          return false;
+        }
+        continue;
+      }
+      if (!entry.isFile()) return false;
+      const fits =
+        zone === "top" ? GODOT_TOP_FILES.has(name)
+        : zone === "imported" ? GODOT_IMPORTED.test(name)
+        : zone === "editor" ? GODOT_EDITOR.test(name)
+        : zone === "shader-hash" ? GODOT_SHADER_FILE.test(name)
+        : false;
+      if (!fits) return false;
+    }
+    return true;
+  };
+  return walk(dir, "top");
+}
+
+/**
+ * `.godot` beside the `project.godot` that rebuilds it, holding only what
+ * Godot writes there. `--directory` hands a wholly ignored folder over as one
+ * entry, so the folder is walked here rather than trusted from its name.
+ */
+function godotRebuilds(target: string, listed: string): boolean {
+  const segments = listed.split("/").filter(Boolean);
+  const at = segments.indexOf(".godot");
+  if (at < 0 || at !== segments.length - 1) return false;
+  if (!fs.existsSync(path.join(target, ...segments.slice(0, at), "project.godot"))) return false;
+  return godotCacheOnly(path.join(target, ...segments));
+}
+
+/**
+ * TypeScript's incremental build record, in the folder whose tsconfig rebuilds
+ * it, and only when it reads as one: JSON naming a compiler version and the
+ * code files the compiler recorded (`program.fileNames`, `fileNames`, or `root`
+ * as code paths or file ids). A file that only borrows the name keeps the tree.
+ * A file built to copy that shape exactly would pass; nothing short of running
+ * the compiler tells the two apart, and nothing a person writes by hand looks
+ * like this.
+ */
+function tsBuildInfoRebuilds(target: string, listed: string): boolean {
+  if (!listed.endsWith(".tsbuildinfo")) return false;
+  const file = path.join(target, listed);
+  try {
+    if (!fs.readdirSync(path.dirname(file)).some((name) => /^tsconfig.*\.json$/.test(name))) return false;
+    const stat = fs.lstatSync(file);
+    if (!stat.isFile() || stat.size > 64 * 1024 * 1024) return false;
+    const record = JSON.parse(fs.readFileSync(file, "utf8")) as Record<string, unknown>;
+    const version = typeof record.version === "string" && /^\d+\.\d+\.\d+/.test(record.version);
+    const code = (item: unknown) => typeof item === "string" && /\.(d\.)?[cm]?[jt]sx?$|\.json$/.test(item);
+    const codeFiles = (list: unknown) => Array.isArray(list) && list.length > 0 && list.every(code);
+    const program =
+      record.program !== null && typeof record.program === "object" && !Array.isArray(record.program)
+        ? (record.program as Record<string, unknown>)
+        : null;
+    // `root` holds code paths, or file ids and id ranges, never prose.
+    const roots =
+      Array.isArray(record.root) &&
+      record.root.length > 0 &&
+      record.root.every(
+        (item) =>
+          code(item) ||
+          (typeof item === "number" && Number.isInteger(item)) ||
+          (Array.isArray(item) && item.length === 2 && item.every((n) => typeof n === "number" && Number.isInteger(n))),
+      );
+    return version && (codeFiles(program?.fileNames) || codeFiles(record.fileNames) || roots);
+  } catch {
+    return false;
+  }
+}
+
 function rebuildable(target: string, listed: string): boolean {
   const segments = listed.split("/").filter(Boolean);
   if (segments.some((segment) => REBUILDABLE_CACHES.has(segment))) return true;
+  if (godotRebuilds(target, listed) || tsBuildInfoRebuilds(target, listed)) return true;
   return REBUILDABLE_FROM_MANIFEST.some(
     (rule) =>
       segments.includes(rule.segment) &&
@@ -489,6 +638,44 @@ function dropManagedWorktree(target: string): { dropped: boolean; reason: string
   }
 }
 
+export type FolderLeft = { ok: true; changed: number; untracked: number } | { ok: false };
+
+/**
+ * What a finished worker left in its own folder: tracked files it changed and
+ * files it added that no commit holds. Ignored files are not counted.
+ *
+ * Only the desk's managed folders are read. A shared worker ran in the
+ * person's own checkout, whose status is the person's work, not the worker's.
+ */
+export async function folderLeftBehind(sessionId: string, managedRoot: string): Promise<FolderLeft> {
+  const session = safeSegment(sessionId);
+  if (!session || !managedRoot.trim()) return { ok: false };
+  const target = path.join(path.resolve(managedRoot), session);
+  if (!containedPath(managedRoot, target)) return { ok: false };
+  try {
+    if (fs.lstatSync(target).isSymbolicLink()) return { ok: false };
+  } catch {
+    return { ok: false };
+  }
+  if (!containedPath(canonicalPath(managedRoot), canonicalPath(target))) return { ok: false };
+  try {
+    const out = await git(["-C", target, "status", "--porcelain=v1", "-z", "--untracked-files=all"]);
+    let changed = 0;
+    let untracked = 0;
+    const entries = out.split("\0").filter(Boolean);
+    for (let index = 0; index < entries.length; index += 1) {
+      const code = entries[index].slice(0, 2);
+      if (code === "??") untracked += 1;
+      else changed += 1;
+      // A rename or copy carries its old path as the next entry.
+      if (code[0] === "R" || code[0] === "C") index += 1;
+    }
+    return { ok: true, changed, untracked };
+  } catch {
+    return { ok: false };
+  }
+}
+
 /**
  * Drop managed worktrees whose chats are gone so AppData cannot keep whole project
  * copies — but never at the cost of work that exists nowhere else. A tree Git will
@@ -523,6 +710,11 @@ export function pruneOrphanWorktrees(managedRoot: string, liveSessionIds: string
     }
     if (link || !containedPath(canonicalPath(managedRoot), canonicalPath(target))) {
       kept.push({ name, reason: "it points outside the managed folder" });
+      continue;
+    }
+
+    if (madeWithin(target, PRUNE_YOUNGEST_MS)) {
+      kept.push({ name, reason: "it was made in the last hour" });
       continue;
     }
 

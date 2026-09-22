@@ -2051,29 +2051,6 @@ app.whenReady().then(async () => {
   });
   // The judge: score one finished mission report against its criteria. The
   // key stays here; the renderer sends text and gets a verdict or a reason.
-  ipcMain.handle("judge:report", async (_event, raw: { criteria?: unknown; report?: unknown; workerStatus?: unknown }) => {
-    const criteria = Array.isArray(raw?.criteria)
-      ? raw.criteria.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
-      : [];
-    const report = typeof raw?.report === "string" ? raw.report : "";
-    const workerStatus = typeof raw?.workerStatus === "string" ? raw.workerStatus : undefined;
-    const settings = normalizeSettings(readState().settings);
-    const ready = judgeReadiness({
-      enabled: settings.judge?.enabled === true,
-      bots: settings.customBots,
-      readKey: (credentialId) => {
-        try {
-          return credentialStore().get(credentialId);
-        } catch {
-          return null;
-        }
-      },
-    });
-    if (!ready.ready) return { why: ready.why };
-    const verdict = await judgeReport({ criteria, report, workerStatus, endpoint: ready.endpoint, log: (line) => mainLog.record("judge", line) });
-    return verdict ? { verdict } : { why: "no-verdict" };
-  });
-
   ipcMain.handle("custom:probe", async (_event, config: { baseUrl: string; apiKey: string; model: string; api?: "anthropic-messages" | "openai-completions" }) => {
     return probeCustomHttp(config);
   });
@@ -2106,6 +2083,40 @@ app.whenReady().then(async () => {
     }
     return { bot, apiKey };
   };
+
+  /*
+   * The judge borrows the Vercel bot's key the way a chat on it does: the
+   * same resolution, here, and nothing secret goes back. Readiness answers
+   * the Settings switch; report scores one finished mission report.
+   */
+  const judgeReadyNow = (enabled: boolean) =>
+    judgeReadiness({
+      enabled,
+      bots: liveSettings.customBots,
+      readKey: (bot) => customBotCredential(bot.id)?.apiKey,
+    });
+  ipcMain.handle("judge:readiness", async () => {
+    const ready = judgeReadyNow(true);
+    return ready.ready ? { ready: true, botId: ready.botId } : { ready: false, why: ready.why };
+  });
+  ipcMain.handle("judge:report", async (_event, raw: { criteria?: unknown; report?: unknown; truncated?: unknown; workerStatus?: unknown }) => {
+    const criteria = Array.isArray(raw?.criteria)
+      ? raw.criteria.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+      : [];
+    const report = typeof raw?.report === "string" ? raw.report : "";
+    const workerStatus = typeof raw?.workerStatus === "string" ? raw.workerStatus : undefined;
+    const ready = judgeReadyNow(liveSettings.judge?.enabled === true);
+    if (!ready.ready) return { why: ready.why, called: false };
+    const outcome = await judgeReport({
+      criteria,
+      report,
+      truncated: raw?.truncated === true,
+      workerStatus,
+      endpoint: ready.endpoint,
+      log: (line) => mainLog.record("judge", line),
+    });
+    return "verdict" in outcome ? { verdict: outcome.verdict, botId: ready.botId } : outcome;
+  });
 
   /*
    * Both handlers below reach a third-party host with a real credential, so

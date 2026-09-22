@@ -33,6 +33,20 @@ export const NOT_SHOWN_BELOW = 0.2;
 export const REPORT_HEAD_CHARS = 16_000;
 export const REPORT_TAIL_CHARS = 8_000;
 
+/** Bounds main enforces before a request is built, so a mission cannot push Jev past its window. */
+export const JUDGE_MAX_CRITERIA = 24;
+export const JUDGE_CRITERION_CHARS = 400;
+/** The bounded report plus its omission marker. Main refuses anything longer. */
+export const JUDGE_REPORT_CHARS = REPORT_HEAD_CHARS + REPORT_TAIL_CHARS + 120;
+
+/**
+ * A report goes to the judge at most twice, and never twice within half a
+ * minute. A judge that failed on every poll would bill on every poll and
+ * stall every answer; the failure is kept on the run instead, with why.
+ */
+export const JUDGE_MAX_TRIES = 2;
+export const JUDGE_RETRY_AFTER_MS = 30_000;
+
 export type JudgeSettings = {
   enabled: boolean;
 };
@@ -84,6 +98,14 @@ export type JudgeVerdict = {
   truncated: boolean;
 };
 
+/**
+ * A judge call that gave no score, kept on the run so the next poll does not
+ * bill again. `tries` counts only calls that reached the gateway.
+ */
+export type JudgeFailure = { at: number; why: string; tries: number };
+
+export type JudgeOutcome = { verdict: JudgeVerdict } | { failed: JudgeFailure };
+
 /** What rides on a status or await payload beside the report. */
 export type ReportSays =
   | (JudgeVerdict & { status: "scored"; note: string })
@@ -105,18 +127,40 @@ export function declaredStatus(text: string | undefined): "complete" | "continue
   return last.startsWith("complete") ? "complete" : (last as "continue" | "blocked");
 }
 
-/** What the model reads. The report is data here, never instructions. */
+/**
+ * The report the judge reads. A long one keeps its head and its tail: the
+ * work is at the start and the declared status line at the end.
+ */
+export function boundJudgeReport(report: string): { text: string; truncated: boolean } {
+  const trimmed = report.trim();
+  const limit = REPORT_HEAD_CHARS + REPORT_TAIL_CHARS;
+  if (trimmed.length <= limit) return { text: trimmed, truncated: false };
+  return {
+    text: `${trimmed.slice(0, REPORT_HEAD_CHARS)}\n\n[… ${trimmed.length - limit} characters omitted …]\n\n${trimmed.slice(-REPORT_TAIL_CHARS)}`,
+    truncated: true,
+  };
+}
+
+/** Why a criteria list cannot go to the judge, or nothing. */
+export function judgeCriteriaProblem(criteria: string[]): string | undefined {
+  if (criteria.length > JUDGE_MAX_CRITERIA) return `${criteria.length} criteria; the judge takes at most ${JUDGE_MAX_CRITERIA}`;
+  const long = criteria.findIndex((text) => text.length > JUDGE_CRITERION_CHARS);
+  if (long >= 0) return `criterion ${long + 1} is ${criteria[long].length} characters; the judge takes at most ${JUDGE_CRITERION_CHARS}`;
+  return undefined;
+}
+
+/**
+ * What the model reads. The report is data here, never instructions. Pass
+ * `truncatedAlready` for text that went through `boundJudgeReport` and was
+ * cut, so it is not cut twice.
+ */
 export function judgeState(
   criteria: string[],
   report: string,
   workerStatus?: string,
+  truncatedAlready = false,
 ): { state: Record<string, unknown>; truncated: boolean } {
-  const trimmed = report.trim();
-  const limit = REPORT_HEAD_CHARS + REPORT_TAIL_CHARS;
-  const truncated = trimmed.length > limit;
-  const text = truncated
-    ? `${trimmed.slice(0, REPORT_HEAD_CHARS)}\n\n[… ${trimmed.length - limit} characters omitted …]\n\n${trimmed.slice(-REPORT_TAIL_CHARS)}`
-    : trimmed;
+  const { text, truncated } = truncatedAlready ? { text: report.trim(), truncated: true } : boundJudgeReport(report);
   return {
     state: {
       acceptance_criteria: criteria.map((text, index) => ({ id: criterionKey(index), text })),
@@ -127,6 +171,9 @@ export function judgeState(
     truncated,
   };
 }
+
+/** 0 vague, 1 gaps, 2 concrete. A score off this scale is not an answer. */
+const SPECIFICITY_SCALE = ["vague or empty", "some specifics, gaps remain", "concrete and complete"];
 
 export function judgeQuestions(criteria: string[]): Record<string, JudgeQuestion> {
   const questions: Record<string, JudgeQuestion> = {};
@@ -152,13 +199,19 @@ export function judgeQuestions(criteria: string[]): Record<string, JudgeQuestion
   questions[SPECIFICITY_KEY] = {
     type: "score",
     instructions: "How complete and specific is this report as evidence of the work?",
-    criteria: ["vague or empty", "some specifics, gaps remain", "concrete and complete"],
+    criteria: [...SPECIFICITY_SCALE],
   };
   return questions;
 }
 
 function finite(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+/** A probability or a confidence: within 0..1, or not an answer. */
+function unit(value: unknown): number | undefined {
+  const number = finite(value);
+  return number !== undefined && number >= 0 && number <= 1 ? number : undefined;
 }
 
 export function criterionStatus(probability: number, shownAbove = SHOWN_ABOVE, notShownBelow = NOT_SHOWN_BELOW): JudgeCriterionStatus {
@@ -178,7 +231,7 @@ export function verdictFromAnswers(
 ): JudgeVerdict {
   const rows: JudgeCriterionVerdict[] = criteria.map((text, index) => {
     const answer = answers?.[criterionKey(index)] as Partial<Extract<JudgeAnswer, { type: "boolean" }>> | undefined;
-    const probability = answer?.type === "boolean" ? finite(answer.probability) : undefined;
+    const probability = answer?.type === "boolean" ? unit(answer.probability) : undefined;
     if (probability === undefined) return { text, probability: 0.5, status: "unclear" };
     return { text, probability, status: criterionStatus(probability, input.shownAbove, input.notShownBelow) };
   });
@@ -186,15 +239,16 @@ export function verdictFromAnswers(
   const choice = claimAnswer?.type === "choice" ? claimAnswer.choice : undefined;
   const claimChoice: JudgeClaim | undefined =
     choice === "consistent" || choice === "overclaimed" || choice === "underclaimed" ? choice : undefined;
-  const claimConfidence = finite(claimAnswer?.confidence);
+  const claimConfidence = unit(claimAnswer?.confidence);
   const claim: JudgeVerdict["claim"] = claimChoice
     ? { choice: claimChoice, ...(claimConfidence !== undefined ? { confidence: claimConfidence } : {}) }
     : undefined;
   const scoreAnswer = answers?.[SPECIFICITY_KEY] as Partial<Extract<JudgeAnswer, { type: "score" }>> | undefined;
-  const score = scoreAnswer?.type === "score" ? finite(scoreAnswer.score) : undefined;
+  const rawScore = scoreAnswer?.type === "score" ? finite(scoreAnswer.score) : undefined;
+  const score = rawScore !== undefined && rawScore >= 0 && rawScore <= SPECIFICITY_SCALE.length - 1 ? rawScore : undefined;
   const specificity =
     score !== undefined
-      ? { score, ...(finite(scoreAnswer?.confidence) !== undefined ? { confidence: finite(scoreAnswer?.confidence) } : {}) }
+      ? { score, ...(unit(scoreAnswer?.confidence) !== undefined ? { confidence: unit(scoreAnswer?.confidence) } : {}) }
       : undefined;
   return {
     version: 1,
@@ -240,6 +294,27 @@ export function normalizeJudgeVerdict(raw: unknown): JudgeVerdict | undefined {
   };
 }
 
+export function normalizeJudgeFailure(raw: unknown): JudgeFailure | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const row = raw as Partial<JudgeFailure>;
+  if (typeof row.at !== "number" || typeof row.why !== "string" || typeof row.tries !== "number" || !Number.isFinite(row.tries)) return undefined;
+  return { at: row.at, why: row.why, tries: Math.max(0, Math.floor(row.tries)) };
+}
+
+/** Whether a finished run goes to the judge now: no score yet, a try left, and the retry gap past. */
+export function judgeMayTry(run: { verdict?: JudgeVerdict; judgeFailed?: JudgeFailure } | undefined, now: number): boolean {
+  if (!run || run.verdict) return false;
+  const failed = run.judgeFailed;
+  if (!failed) return true;
+  if (failed.tries >= JUDGE_MAX_TRIES) return false;
+  return now - failed.at >= JUDGE_RETRY_AFTER_MS;
+}
+
+/** The failure to keep after a call that gave no score. Only a call that reached the gateway counts as a try. */
+export function judgeFailureAfter(previous: JudgeFailure | undefined, why: string, called: boolean, at: number): JudgeFailure {
+  return { at, why, tries: (previous?.tries ?? 0) + (called ? 1 : 0) };
+}
+
 const GATEWAY_HOST = /(^|\.)ai-gateway\.vercel\.sh$/i;
 
 /**
@@ -248,11 +323,13 @@ const GATEWAY_HOST = /(^|\.)ai-gateway\.vercel\.sh$/i;
  * The judge has no key of its own, no ring, and no model the person did not
  * approve; its spend shows on that bot's credits.
  */
-export function judgeBotFor<T extends { baseUrl: string; model: string; models?: string[]; credentialId?: string; enabled?: boolean }>(
+export function judgeBotFor<T extends { baseUrl: string; model: string; models?: string[]; apiKey?: string; credentialId?: string; enabled?: boolean }>(
   bots: T[],
 ): T | undefined {
   return bots.find((bot) => {
-    if (!bot.credentialId || bot.enabled === false) return false;
+    if (bot.enabled === false) return false;
+    // A key just typed sits on the bot until the vault hands back its id.
+    if (!bot.apiKey?.trim() && !bot.credentialId) return false;
     if (!(bot.models ?? [bot.model]).includes(JUDGE_MODEL)) return false;
     try {
       return GATEWAY_HOST.test(new URL(bot.baseUrl).hostname);
@@ -267,13 +344,13 @@ export function judgeBotFor<T extends { baseUrl: string; model: string; models?:
  * a worker that has no score says so, so a failed call never looks clean.
  */
 export function reportSaysFor(
-  run: { status?: string; verdict?: JudgeVerdict; mission?: { acceptanceCriteria?: string[] } } | undefined,
+  run: { status?: string; verdict?: JudgeVerdict; judgeFailed?: JudgeFailure; mission?: { acceptanceCriteria?: string[] } } | undefined,
   judgeEnabled: boolean,
 ): ReportSays | undefined {
   if (!run?.mission?.acceptanceCriteria?.length) return undefined;
   if (run.verdict) return { ...run.verdict, status: "scored", note: JUDGE_NOTE };
   if (!judgeEnabled || run.status !== "completed") return undefined;
-  return { status: "not-scored", why: "no score for this report", note: JUDGE_NOTE };
+  return { status: "not-scored", why: run.judgeFailed?.why ?? "no score yet", note: JUDGE_NOTE };
 }
 
 function percent(probability: number): string {

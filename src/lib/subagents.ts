@@ -1,4 +1,4 @@
-import { JUDGE_NOTE, normalizeJudgeVerdict, reportSaysFor, type JudgeVerdict, type ReportSays } from "./judge";
+import { JUDGE_NOTE, normalizeJudgeFailure, normalizeJudgeVerdict, reportSaysFor, type JudgeOutcome, type ReportSays } from "./judge";
 import { isExternalAgentAddress } from "./agent-runtime";
 import { crewTurnInFlight } from "./crew-live";
 import { isGrokBotModel, isGrokBotName } from "./custom-http-identity";
@@ -859,23 +859,43 @@ const CHECK_MARKERS: Array<[RegExp, string]> = [
 ];
 
 /** The whole last reply, or the shortened copy a retired worker kept. The judge reads this, never the bounded copy. */
-export function workerReportText(session: Pick<Session, "messages" | "retainedReport">): string {
-  return lastAssistantReport(session.messages)?.text.trim() || session.retainedReport?.trim() || "";
+/**
+ * The text the judge scores: this run's last reply. A reused worker keeps
+ * its earlier replies, so a run that ended on tool rows alone has no
+ * report, not the previous pass's. A retired worker's messages are gone
+ * and its retained report stands in.
+ */
+export function workerReportText(session: Pick<Session, "messages" | "retainedReport" | "agentRun">): string {
+  const since = session.agentRun?.startedAt;
+  const reply = lastAssistantReport(session.messages, since)?.text.trim();
+  if (reply) return reply;
+  const anyReply = (session.messages ?? []).some((message) => message.role === "assistant");
+  return anyReply ? "" : session.retainedReport?.trim() || "";
 }
 
-/** Sessions with fresh scores set on their runs, for a payload built before the store has saved them. */
-export function applyVerdicts(sessions: Session[], scored: Map<string, JudgeVerdict>): Session[] {
-  if (scored.size === 0) return sessions;
+/** Sessions with fresh judge outcomes set on their runs, for a payload built before the store has saved them. */
+export function applyJudgeOutcomes(sessions: Session[], outcomes: Map<string, JudgeOutcome>): Session[] {
+  if (outcomes.size === 0) return sessions;
   return sessions.map((session) => {
-    const verdict = scored.get(session.id);
-    return verdict && session.agentRun ? { ...session, agentRun: { ...session.agentRun, verdict } } : session;
+    const outcome = outcomes.get(session.id);
+    if (!outcome || !session.agentRun) return session;
+    return "verdict" in outcome
+      ? { ...session, agentRun: { ...session.agentRun, verdict: outcome.verdict } }
+      : { ...session, agentRun: { ...session.agentRun, judgeFailed: outcome.failed } };
   });
 }
 
-function lastAssistantReport(messages: ChatMessage[] | undefined): ChatMessage | undefined {
+function lastAssistantReport(messages: ChatMessage[] | undefined, since?: number): ChatMessage | undefined {
   return [...(messages ?? [])]
     .reverse()
-    .find((message) => message.role === "assistant" && message.kind !== "tool" && message.kind !== "thought" && message.text.trim());
+    .find(
+      (message) =>
+        message.role === "assistant" &&
+        message.kind !== "tool" &&
+        message.kind !== "thought" &&
+        (since === undefined || message.createdAt >= since) &&
+        message.text.trim(),
+    );
 }
 
 export function boundWorkerReport(
@@ -2784,6 +2804,7 @@ export function normalizeAgentRun(
     (row.status === "failed" && (row.error ?? "").trim() === LEGACY_INTERRUPTED_ERROR);
   const mission = normalizeMissionIteration(row.mission);
   const verdict = normalizeJudgeVerdict(row.verdict);
+  const judgeFailed = normalizeJudgeFailure(row.judgeFailed);
   const findings = normalizeWorkerFindings(row.findings);
   return {
     status: interrupted ? "interrupted" : row.status as AgentRun["status"],
@@ -2831,6 +2852,7 @@ export function normalizeAgentRun(
     ...(typeof row.correlationId === "string" && row.correlationId.trim() ? { correlationId: row.correlationId.trim() } : {}),
     ...(mission ? { mission } : {}),
     ...(verdict ? { verdict } : {}),
+    ...(judgeFailed ? { judgeFailed } : {}),
   };
 }
 

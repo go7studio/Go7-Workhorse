@@ -315,7 +315,9 @@ type WorkhorseBridge = {
   }>;
   learningCompile?: () => Promise<import("./lib/learning-types").CompileResult>;
   /** Score one finished mission report against its criteria. Main holds the key; the renderer never sees it. */
-  judgeReport?: (input: { criteria: string[]; report: string; workerStatus?: string }) => Promise<{ verdict?: import("./lib/judge").JudgeVerdict; why?: string }>;
+  judgeReport?: (input: { criteria: string[]; report: string; truncated?: boolean; workerStatus?: string }) => Promise<{ verdict?: import("./lib/judge").JudgeVerdict; botId?: string; why?: string; called?: boolean }>;
+  /** Whether the judge could run now: a Vercel bot with a key main can read and jev ticked. Never the key. */
+  judgeReadiness?: () => Promise<{ ready: boolean; botId?: string; why?: string }>;
   learningMemories?: () => Promise<import("./lib/learning-types").MemoryItem[]>;
   learningStats?: () => Promise<import("./lib/learning-types").LearningIndexStats>;
   learningApprove?: (id: string) => Promise<import("./lib/learning-types").MemoryItem | undefined>;

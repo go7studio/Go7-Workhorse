@@ -240,7 +240,9 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
   on `workhorse_agent_status` and `workhorse_await_agents` as `reportSays`,
   and the next pass is told what no report showed. It ran nothing and
   verified nothing, never removes a criterion, and a pass it could not score
-  says so. Spend shows on that bot's credits.
+  says so, with why. A report goes to the judge at most twice, and a call
+  never waits past the status reply's own deadline. Its tokens are on the
+  usage ledger under that bot; spend shows on that bot's credits.
 - Debug makes the seated bot establish expected versus observed behavior,
   reproduce before editing, identify the actual source and runtime under test,
   preserve unrelated work, and verify the real artifact when packaging or

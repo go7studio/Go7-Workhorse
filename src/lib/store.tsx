@@ -1,4 +1,4 @@
-import { declaredStatus, normalizeJudge, type JudgeSettings, type JudgeVerdict } from "./judge";
+import { JUDGE_MODEL, boundJudgeReport, declaredStatus, judgeFailureAfter, judgeMayTry, normalizeJudge, type JudgeOutcome, type JudgeSettings } from "./judge";
 import {
   useCallback,
   useEffect,
@@ -257,7 +257,7 @@ import {
 import { boundLinkReply, linkLabel } from "./link-reply";
 import { applyPlanAuditorSpawn, joinAndAdmit } from "./plan-admission";
 import {
-  applyVerdicts,
+  applyJudgeOutcomes,
   workerReportText,
   applyCancelWorker,
   admitSpawn,
@@ -1294,7 +1294,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const forkFromRef = useRef<(messageId: string, sessionId?: string) => void>(() => undefined);
   const stateRef = useRef<AppState>(EMPTY);
   // Reports being scored right now, so two payload builds in flight do not bill twice.
-  const judgingRef = useRef<Set<string>>(new Set());
+  const judgingRef = useRef<Map<string, Promise<JudgeOutcome>>>(new Map());
   const workerNameReservations = useRef<WorkerNameReservation[]>([]);
   const deskSkillsRef = useRef<DeskSkill[]>([]);
   const grokAssistantId = useRef<Record<string, string>>({});
@@ -4008,48 +4008,76 @@ export function StoreProvider({ children }: { children: ReactNode }) {
    * the key and makes the call; this only stores what came back. Returns the
    * fresh scores so the payload can carry them before the save lands.
    */
-  const judgeCompletedWorkers = useCallback(async (ids: Iterable<string>): Promise<Map<string, JudgeVerdict>> => {
-    const scored = new Map<string, JudgeVerdict>();
+  /**
+   * Finished mission workers in `ids` with no score yet go to the judge, at
+   * most twice each. A poll that lands mid-call waits on that same call, so
+   * two payload builds never bill twice. Every outcome, score or failure,
+   * lands on the run and comes back for the payload being built now.
+   */
+  const judgeCompletedWorkers = useCallback(async (ids: Iterable<string>): Promise<Map<string, JudgeOutcome>> => {
+    const outcomes = new Map<string, JudgeOutcome>();
     const judge = window.workhorse?.judgeReport;
-    if (!stateRef.current.settings.judge?.enabled || !judge) return scored;
+    if (!stateRef.current.settings.judge?.enabled || !judge) return outcomes;
     const wanted = new Set(ids);
+    const now = Date.now();
     const targets = stateRef.current.sessions.filter(
       (session) =>
         wanted.has(session.id) &&
         session.agentRun?.status === "completed" &&
         (session.agentRun.mission?.acceptanceCriteria?.length ?? 0) > 0 &&
-        !session.agentRun.verdict &&
-        !judgingRef.current.has(session.id),
+        judgeMayTry(session.agentRun, now),
     );
+    const judgeOne = async (session: Session): Promise<JudgeOutcome> => {
+      const run = session.agentRun!;
+      const fail = (why: string, called: boolean): JudgeOutcome => ({ failed: judgeFailureAfter(run.judgeFailed, why, called, Date.now()) });
+      const attempt = async (): Promise<JudgeOutcome> => {
+        const report = workerReportText(session);
+        if (!report) return fail("the worker left no report to score", false);
+        // Cut here, before the text crosses IPC; main refuses anything past the cut.
+        const bounded = boundJudgeReport(report);
+        const result = await judge({
+          criteria: run.mission!.acceptanceCriteria,
+          report: bounded.text,
+          truncated: bounded.truncated,
+          workerStatus: declaredStatus(report),
+        });
+        if (!result?.verdict) return fail(result?.why ?? "no verdict", result?.called === true);
+        // The judge's tokens are this worker's spend, on the bot whose key it borrowed.
+        if (result.verdict.usage && result.botId) {
+          recordUsage({
+            provider: "custom",
+            model: JUDGE_MODEL,
+            customBotId: result.botId,
+            sessionId: session.id,
+            projectId: session.projectId ?? undefined,
+            inputTokens: result.verdict.usage.inputTokens ?? 0,
+            outputTokens: result.verdict.usage.outputTokens ?? 0,
+            source: "request",
+          });
+        }
+        return { verdict: result.verdict };
+      };
+      const outcome = await attempt().catch((error: unknown) => fail(`desk error: ${error instanceof Error ? error.message : String(error)}`, false));
+      setState((current) => ({
+        ...current,
+        sessions: current.sessions.map((item) =>
+          item.id === session.id && item.agentRun && !item.agentRun.verdict
+            ? { ...item, agentRun: "verdict" in outcome ? { ...item.agentRun, verdict: outcome.verdict } : { ...item.agentRun, judgeFailed: outcome.failed } }
+            : item,
+        ),
+      }));
+      return outcome;
+    };
     await Promise.all(
       targets.map(async (session) => {
-        judgingRef.current.add(session.id);
-        try {
-          const report = workerReportText(session);
-          if (!report) return;
-          const result = await judge({
-            criteria: session.agentRun!.mission!.acceptanceCriteria,
-            report,
-            workerStatus: declaredStatus(report),
-          });
-          const verdict = result?.verdict;
-          if (!verdict) return;
-          scored.set(session.id, verdict);
-          setState((current) => ({
-            ...current,
-            sessions: current.sessions.map((item) =>
-              item.id === session.id && item.agentRun && !item.agentRun.verdict ? { ...item, agentRun: { ...item.agentRun, verdict } } : item,
-            ),
-          }));
-        } catch {
-          // A judge that cannot answer stays silent; the payload says not-scored.
-        } finally {
-          judgingRef.current.delete(session.id);
-        }
+        const inflight = judgingRef.current.get(session.id);
+        const task = inflight ?? judgeOne(session).finally(() => judgingRef.current.delete(session.id));
+        if (!inflight) judgingRef.current.set(session.id, task);
+        outcomes.set(session.id, await task);
       }),
     );
-    return scored;
-  }, []);
+    return outcomes;
+  }, [recordUsage]);
 
   useEffect(() => {
     if (!window.workhorse?.onPeerAsk) return;
@@ -5241,13 +5269,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             }
             if (action === "agent-status") {
               const id = (payload.name || payload.message || "").trim();
-              const scored = await judgeCompletedWorkers([id]);
+              const outcomes = await judgeCompletedWorkers([id]);
+              // Read the desk again after the wait: a worker deleted meanwhile is gone.
+              const now = stateRef.current;
               const resolved = resolveAgentStatus({
                 id,
                 fromSessionId: payload.fromSessionId,
-                sessions: applyVerdicts(latest.sessions, scored),
-                externalTask: normalizeTaskStore(latest.externalTasks).byId[id],
-                judge: stateRef.current.settings.judge?.enabled === true,
+                sessions: applyJudgeOutcomes(now.sessions, outcomes),
+                externalTask: normalizeTaskStore(now.externalTasks).byId[id],
+                judge: now.settings.judge?.enabled === true,
               });
               if (!resolved.ok) {
                 await replyAsk({ error: "unknown" });
@@ -5419,8 +5449,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 sessions = handOverLineup(sessions, parentId);
                 return sessions === current.sessions ? current : { ...current, sessions };
               });
-              const scored = await judgeCompletedWorkers(waveIds);
-              const sessionsNow = applyVerdicts(stateRef.current.sessions, scored);
+              const outcomes = await judgeCompletedWorkers(waveIds);
+              const sessionsNow = applyJudgeOutcomes(stateRef.current.sessions, outcomes);
               const parentNow = sessionsNow.find((item) => item.id === parentId);
               const reports = collectChildAgentReports(sessionsNow, parentId, waveIdSet, {
                 judge: stateRef.current.settings.judge?.enabled === true,

@@ -27,7 +27,13 @@ export type JudgeCallResult =
 
 export type FetchLike = (input: string, init: RequestInit) => Promise<Response>;
 
-export const JUDGE_TIMEOUT_MS = 20_000;
+/**
+ * The judge answers inside a status reply. The Link's bridge gives
+ * agent-status 8 seconds and await-agents 15, or the cursor plus 5, so a
+ * judge allowed 20 would hand the caller a timeout instead of a payload.
+ * Jev answered the live sample in 395 ms.
+ */
+export const JUDGE_TIMEOUT_MS = 4_000;
 
 export function judgeUrl(baseUrl: string): string {
   return `${baseUrl.trim().replace(/\/+$/, "")}/evaluate`;
@@ -37,7 +43,13 @@ function readNumber(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
-/** Keeps only answers whose type matches the question it answers. */
+/** A probability or a confidence: within 0..1, or not an answer. */
+function readUnit(value: unknown): number | undefined {
+  const number = readNumber(value);
+  return number !== undefined && number >= 0 && number <= 1 ? number : undefined;
+}
+
+/** Keeps only answers whose type matches the question it answers and whose numbers are on the question's scale. */
 function readAnswers(raw: unknown, questions: Record<string, JudgeQuestion>): Record<string, JudgeAnswer> {
   const out: Record<string, JudgeAnswer> = {};
   if (!raw || typeof raw !== "object") return out;
@@ -47,7 +59,7 @@ function readAnswers(raw: unknown, questions: Record<string, JudgeQuestion>): Re
     const record = answer as Record<string, unknown>;
     if (record.type !== question.type) continue;
     if (question.type === "boolean") {
-      const probability = readNumber(record.probability);
+      const probability = readUnit(record.probability);
       if (probability !== undefined) out[key] = { type: "boolean", probability };
     } else if (question.type === "choice") {
       if (typeof record.choice === "string") {
@@ -55,17 +67,18 @@ function readAnswers(raw: unknown, questions: Record<string, JudgeQuestion>): Re
           type: "choice",
           choice: record.choice,
           ...(record.probabilities && typeof record.probabilities === "object" ? { probabilities: record.probabilities as Record<string, number> } : {}),
-          ...(readNumber(record.confidence) !== undefined ? { confidence: readNumber(record.confidence) } : {}),
+          ...(readUnit(record.confidence) !== undefined ? { confidence: readUnit(record.confidence) } : {}),
         };
       }
     } else {
-      const score = readNumber(record.score);
+      const raw = readNumber(record.score);
+      const score = raw !== undefined && raw >= 0 && raw <= question.criteria.length - 1 ? raw : undefined;
       if (score !== undefined) {
         out[key] = {
           type: "score",
           score,
           ...(record.probabilities && typeof record.probabilities === "object" ? { probabilities: record.probabilities as Record<string, number> } : {}),
-          ...(readNumber(record.confidence) !== undefined ? { confidence: readNumber(record.confidence) } : {}),
+          ...(readUnit(record.confidence) !== undefined ? { confidence: readUnit(record.confidence) } : {}),
         };
       }
     }
@@ -112,7 +125,12 @@ export async function callJudge(
     if (!body || typeof body !== "object") return { ok: false, reason: "empty or non-JSON response", status: response.status, elapsedMs };
     const record = body as { model?: unknown; answers?: unknown; usage?: { inputTokens?: unknown; outputTokens?: unknown } };
     const answers = readAnswers(record.answers, questions);
-    if (Object.keys(answers).length === 0) return { ok: false, reason: "no usable answers in response", status: response.status, elapsedMs };
+    // A verdict needs at least one criterion scored. The claim and the
+    // specificity alone would persist as a scored report with every
+    // criterion unclear, which reads as a verdict and is none.
+    if (!Object.values(answers).some((answer) => answer.type === "boolean")) {
+      return { ok: false, reason: "no criterion answers in response", status: response.status, elapsedMs };
+    }
     const usage = record.usage && typeof record.usage === "object"
       ? {
           ...(readNumber(record.usage.inputTokens) !== undefined ? { inputTokens: readNumber(record.usage.inputTokens) } : {}),

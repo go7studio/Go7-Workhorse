@@ -365,6 +365,8 @@ export type AgentRun = {
    * here so a status poll never scores the same report twice.
    */
   verdict?: import("./judge").JudgeVerdict;
+  /** The last judge call that gave no score, with why and how many calls reached the gateway. A run is tried at most twice. */
+  judgeFailed?: import("./judge").JudgeFailure;
   /** Current assignment spend. Resets when a reused worker takes a new slice. */
   usedTokens?: number;
   /** Sum of prior assignments on this worker. Not a ceiling. */

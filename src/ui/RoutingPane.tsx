@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { rankRoutingCandidates, routingCandidatesForDesk } from "../lib/routing";
 import type { RankedRoutingCandidate } from "../lib/routing";
 import { vendorTint } from "../lib/settings";
@@ -50,8 +51,30 @@ export function RoutingPane() {
   }));
 
   const set = (patch: Partial<RoutingSettings>) => store.updateRouting(patch);
-  // The judge borrows the Vercel bot's key and needs jev ticked there like any model.
-  const judgeReady = Boolean(judgeBotFor(store.settings.customBots));
+  // The judge borrows the Vercel bot's key, and only main can read the vault.
+  // Ask main whether it could run; until it answers, read the bot list here.
+  const bots = store.settings.customBots;
+  const [judgeCheck, setJudgeCheck] = useState<{ ready: boolean; why?: string } | undefined>();
+  useEffect(() => {
+    let live = true;
+    const ask = window.workhorse?.judgeReadiness;
+    if (!ask) return;
+    ask()
+      .then((result) => {
+        if (live) setJudgeCheck(result);
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [bots]);
+  const judgeReady = judgeCheck ? judgeCheck.ready : Boolean(judgeBotFor(bots));
+  const judgeOn = store.settings.judge?.enabled === true;
+  const judgeCopy = judgeReady
+    ? "After a mission pass, Jev scores each report's text against the acceptance criteria: shown, not shown, unclear. It ran nothing; every criterion stays on the next pass."
+    : judgeCheck?.why === "no-key"
+      ? `${judgeOn ? "On, but it cannot score: the" : "The"} Vercel AI Gateway bot has no key the desk can read. Add one under LLMs. Scores report text only; it ran nothing.`
+      : `${judgeOn ? "On, but it cannot score: needs" : "Needs"} a Vercel AI Gateway bot with a key and typesafe-ai/jev ticked. Scores report text only; it ran nothing.`;
   // Prefer spare and Weekly reserve only act inside the leftover weighing, so
   // with that off they are shown but inert.
   const weighs = routing.capacityAware;
@@ -83,13 +106,9 @@ export function RoutingPane() {
         />
         <SwitchRow
           label="Judge reports"
-          copy={
-            judgeReady
-              ? "After a mission pass, Jev scores each report's text against the acceptance criteria: shown, not shown, unclear. It ran nothing; every criterion stays on the next pass."
-              : "Needs a Vercel AI Gateway bot with a key and typesafe-ai/jev ticked. Scores report text only; it ran nothing."
-          }
-          on={store.settings.judge?.enabled === true}
-          disabled={!judgeReady}
+          copy={judgeCopy}
+          on={judgeOn}
+          disabled={!judgeReady && !judgeOn}
           onChange={(on) => store.updateJudge({ enabled: on })}
         />
         <SwitchRow

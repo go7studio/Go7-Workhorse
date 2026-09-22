@@ -252,6 +252,7 @@ contextBridge.exposeInMainWorld("workhorse", {
   learningRetrieve: (query: unknown) => ipcRenderer.invoke("learning:retrieve", query),
   learningCompile: () => ipcRenderer.invoke("learning:compile"),
   judgeReport: (input: unknown) => ipcRenderer.invoke("judge:report", input),
+  judgeReadiness: () => ipcRenderer.invoke("judge:readiness"),
   learningMemories: () => ipcRenderer.invoke("learning:memories"),
   learningStats: () => ipcRenderer.invoke("learning:stats"),
   learningApprove: (id: string) => ipcRenderer.invoke("learning:approve", id),

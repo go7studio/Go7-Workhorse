@@ -4053,7 +4053,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         session.agentRun?.status === "completed" &&
         (session.agentRun.mission?.acceptanceCriteria?.length ?? 0) > 0,
     );
-    const judgeOne = async (session: Session, run: AgentRun): Promise<RunJudgeOutcome> => {
+    const judgeOne = async (session: Session, run: AgentRun, generation: number): Promise<RunJudgeOutcome> => {
       const runKey = judgeRunKey(run);
       const fail = (why: string, called: boolean): JudgeOutcome => ({ failed: judgeFailureAfter(run.judgeFailed, why, called, Date.now()) });
       const attempt = async (): Promise<JudgeOutcome> => {
@@ -4087,14 +4087,21 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         return { verdict: result.verdict };
       };
       const outcome = await attempt().catch((error: unknown) => fail(`desk error: ${error instanceof Error ? error.message : String(error)}`, false));
-      setState((current) => ({
-        ...current,
-        sessions: current.sessions.map((item) =>
-          item.id === session.id && item.agentRun && judgeRunKey(item.agentRun) === runKey && !item.agentRun.verdict
-            ? { ...item, agentRun: "verdict" in outcome ? { ...item.agentRun, verdict: outcome.verdict } : { ...item.agentRun, judgeFailed: outcome.failed } }
-            : item,
-        ),
-      }));
+      // A failure from a call that started before the person re-armed the
+      // judge is not written: the store just cleared that run, and this
+      // failure counted tries the person has asked to forget. A score is a
+      // score whenever it lands.
+      const stale = "failed" in outcome && generation !== judgeSlotsRef.current.generation;
+      if (!stale) {
+        setState((current) => ({
+          ...current,
+          sessions: current.sessions.map((item) =>
+            item.id === session.id && item.agentRun && judgeRunKey(item.agentRun) === runKey && !item.agentRun.verdict
+              ? { ...item, agentRun: "verdict" in outcome ? { ...item.agentRun, verdict: outcome.verdict } : { ...item.agentRun, judgeFailed: outcome.failed } }
+              : item,
+          ),
+        }));
+      }
       return { ...outcome, runKey };
     };
     await Promise.all(
@@ -4110,7 +4117,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         const run = slot?.settled ? runWithOutcome(session.agentRun!, slot.settled) : session.agentRun!;
         if (slot?.settled) outcomes.set(session.id, slot.settled);
         if (!judgeMayTry(run, now)) return;
-        const fresh: JudgeSlot = { task: judgeOne(session, run), generation: slots.generation };
+        const fresh: JudgeSlot = { task: judgeOne(session, run, slots.generation), generation: slots.generation };
         slots.map.set(key, fresh);
         const outcome = await fresh.task;
         fresh.settled = outcome;

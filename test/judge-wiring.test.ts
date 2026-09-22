@@ -44,8 +44,11 @@ test("scores ride as reportSays on both payloads, computed once at the payload, 
   assert.match(store, /fresh\.settled = outcome/);
   assert.match(store, /judgeRunKey\(item\.agentRun\) === runKey && !item\.agentRun\.verdict/);
   assert.match(store, /return \{ \.\.\.outcome, runKey \}/);
-  // A re-arm moves the table on before the store forgets, so a failure the table still holds is not read back.
+  // A re-arm moves the table on before the store forgets, so a failure the table still holds is not read
+  // back, and a failure from a call that started before the re-arm is not written when it lands.
   assert.equal((store.match(/rearmJudgeSlots\(judgeSlotsRef\.current\)/g) ?? []).length, 2);
+  assert.match(store, /const stale = "failed" in outcome && generation !== judgeSlotsRef\.current\.generation;\s*if \(!stale\) \{/);
+  assert.match(store, /judgeOne\(session, run, slots\.generation\)/);
   // Every run gets its own id at spawn; a continuation of a finished worker mints another and drops the score.
   assert.match(store, /startedAt,\s*runId: uid\("run"\),/);
   const subagentsSrc = read("src", "lib", "subagents.ts");

@@ -19,9 +19,6 @@ export type JudgeSlot = {
 
 export type JudgeSlots = { map: Map<string, JudgeSlot>; generation: number };
 
-/** More settled slots than this and the oldest go, whether or not the store has caught up. */
-export const JUDGE_SLOT_CAP = 256;
-
 export function createJudgeSlots(): JudgeSlots {
   return { map: new Map(), generation: 0 };
 }
@@ -52,11 +49,12 @@ export function rearmJudgeSlots(slots: JudgeSlots): void {
 
 /**
  * Drop every settled slot the store has caught up with, whose chat or run is
- * gone, or that is from before a re-arm. Calls still out stay. Past the cap,
- * settled slots go oldest first, so the table holds what is in flight and
- * little else.
+ * gone, or that is from before a re-arm. Calls still out stay, and so does a
+ * settled outcome the store has yet to commit: no cap, because a cap would
+ * evict the one thing the table exists to hold, and the sweep alone keeps it
+ * to what is in flight and what the next render will clear.
  */
-export function sweepJudgeSlots(slots: JudgeSlots, sessions: Iterable<{ id: string; agentRun?: JudgeRunShape }>, cap = JUDGE_SLOT_CAP): void {
+export function sweepJudgeSlots(slots: JudgeSlots, sessions: Iterable<{ id: string; agentRun?: JudgeRunShape }>): void {
   const runs = new Map<string, JudgeRunShape | undefined>();
   for (const session of sessions) runs.set(session.id, session.agentRun);
   for (const [key, slot] of slots.map) {
@@ -65,11 +63,5 @@ export function sweepJudgeSlots(slots: JudgeSlots, sessions: Iterable<{ id: stri
     const run = runs.get(sessionId);
     const gone = run === undefined || judgeSlotKey(sessionId, run) !== key;
     if (gone || slot.generation !== slots.generation || (run !== undefined && outcomeShownOnRun(run, slot.settled))) slots.map.delete(key);
-  }
-  if (slots.map.size > cap) {
-    for (const [key, slot] of slots.map) {
-      if (slots.map.size <= cap) break;
-      if (slot.settled) slots.map.delete(key);
-    }
   }
 }

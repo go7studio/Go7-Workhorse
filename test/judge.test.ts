@@ -38,7 +38,6 @@ import { JUDGE_TIMEOUT_MS, callJudge, judgeUrl } from "../electron/judge-client"
 import { judgeReadiness, judgeReport } from "../electron/judge-desk";
 import { applyJudgeOutcomes, continueWorkerRun, normalizeAgentRun, workerReportText } from "../src/lib/subagents";
 import {
-  JUDGE_SLOT_CAP,
   createJudgeSlots,
   judgeSlotKey,
   outcomeShownOnRun,
@@ -431,7 +430,7 @@ test("the judge reads this run's reply, not a reused worker's earlier pass; outc
   assert.deepEqual(kept.verdict, verdict);
 });
 
-test("the judge's table: a slot lives from the call until the store shows its outcome, and never past a re-arm, a gone chat, a new run, or the cap", () => {
+test("the judge's table: a slot lives from the call until the store shows its outcome, and never past a re-arm, a gone chat, or a new run", () => {
   const verdict = verdictFromAnswers(CRITERIA, LIVE_ANSWERS, { at: 1 });
   const failed = { at: 2, why: "403: no", tries: 2 };
   // Two different pairs cannot share a key, whatever a persisted id contains.
@@ -462,11 +461,13 @@ test("the judge's table: a slot lives from the call until the store shows its ou
   rearmJudgeSlots(slots);
   sweepJudgeSlots(slots, [{ id: "pending", agentRun: run() }, { id: "inflight-gone", agentRun: run() }]);
   assert.deepEqual([...slots.map.keys()], [key("inflight-gone")]);
-  // Past the cap, settled slots go oldest first.
+  // No cap: a settled outcome the store has yet to commit is the one thing the table exists to hold,
+  // however many there are. They go the moment the store shows them.
   const crowded = createJudgeSlots();
-  for (let index = 0; index < JUDGE_SLOT_CAP + 3; index += 1) crowded.map.set(key(`w${index}`), slot({ failed, runKey: "run:r1" }));
-  sweepJudgeSlots(crowded, Array.from({ length: JUDGE_SLOT_CAP + 3 }, (_, index) => ({ id: `w${index}`, agentRun: run() })));
-  assert.equal(crowded.map.size, JUDGE_SLOT_CAP);
-  assert.equal(crowded.map.has(key("w0")), false);
-  assert.equal(crowded.map.has(key(`w${JUDGE_SLOT_CAP + 2}`)), true);
+  const wave = Array.from({ length: 300 }, (_, index) => `w${index}`);
+  for (const id of wave) crowded.map.set(key(id), slot({ failed, runKey: "run:r1" }));
+  sweepJudgeSlots(crowded, wave.map((id) => ({ id, agentRun: run() })));
+  assert.equal(crowded.map.size, 300);
+  sweepJudgeSlots(crowded, wave.map((id) => ({ id, agentRun: run({ judgeFailed: failed }) })));
+  assert.equal(crowded.map.size, 0);
 });

@@ -25,6 +25,13 @@ import {
   routingModelFamily,
   spawnModelFamilyKey,
   type RoutingCandidate,
+  expiryCredit,
+  candidateExpiryCredit,
+  expiryHoursLabel,
+  routingDecisionLogDetail,
+  EXPIRY_FLOOR,
+  EXPIRY_PEAK,
+  EXPIRY_WINDOW_MS,
 } from "../src/lib/routing";
 import { applyVendorCatalog, modelsFor, parseEffortFromText, resetVendorCatalog } from "../src/lib/models";
 import { normalizeSettings } from "../src/lib/settings";
@@ -334,6 +341,123 @@ test("a monthly Cursor window is not scored as a 7-day one", () => {
   const draw = weeklyDrawState({ usedPercent: 8, resetsAt: reset }, now);
   assert.ok((draw.expectedUsedPercent ?? 0) > 8, `expected used should beat 8%, got ${draw.expectedUsedPercent}`);
   assert.ok((draw.delta ?? 0) > 0, `monthly Cursor must look inside budget, got delta ${draw.delta}`);
+});
+
+/*
+ * 2026-09-22. The desk's operator sent a review to Cursor Grok 4.7 to spare a
+ * Grok pool at 6% that reset in hours, which spent Cursor's monthly ring and
+ * let the Grok leftover expire unused. The owner's rule: the final 24 hours
+ * before a reset, finish that pool. Unused leftover evaporates; it is free.
+ */
+
+const HOUR = 60 * 60 * 1000;
+const DAY = 24 * HOUR;
+
+function grokFamily(now: number, patch: { grokUsed?: number; grokResetMs?: number; grokObserved?: string; cursorObserved?: string } = {}) {
+  const fresh = new Date(now - 60_000).toISOString();
+  const grok = candidate("grok-4.7", patch.grokUsed ?? 94, {
+    provider: "grok",
+    label: "Grok 4.7",
+    profile: routingProfileForModel("grok", "grok-4.7"),
+    capacity: {
+      usedPercent: patch.grokUsed ?? 94,
+      resetsAt: new Date(now + (patch.grokResetMs ?? 2 * HOUR)).toISOString(),
+      period: "weekly",
+      observedAt: patch.grokObserved ?? fresh,
+    },
+  });
+  const cursor = candidate("grok-4.7-high", 21, {
+    provider: "cursor",
+    label: "Cursor Grok 4.7",
+    profile: routingProfileForModel("cursor", "grok-4.7-high"),
+    capacity: {
+      usedPercent: 21,
+      resetsAt: new Date(now + 21 * DAY).toISOString(),
+      period: "monthly",
+      observedAt: patch.cursorObserved ?? fresh,
+    },
+  });
+  return { grok, cursor };
+}
+
+test("a pool at 6% resetting in two hours outranks a pool at 79% resetting in three weeks", () => {
+  const now = Date.parse("2026-09-22T11:53:00Z");
+  const { grok, cursor } = grokFamily(now);
+  const request = { prompt: "Review this pull request adversarially", tier: "deep" as const, now };
+  const ranked = rankRoutingCandidates([grok, cursor], request, settings);
+  assert.equal(ranked[0]?.provider, "grok", `the expiring pool goes first, got ${ranked.map((r) => `${r.provider}:${r.score}`).join(" ")}`);
+  // The same pair a day and a half out: the credit is gone and pace decides, as it did before.
+  const far = grokFamily(now, { grokResetMs: 36 * HOUR });
+  const later = rankRoutingCandidates([far.grok, far.cursor], request, settings);
+  assert.equal(later[0]?.provider, "cursor", "outside the last day the far pool's better pace still wins");
+});
+
+test("a spent pool is never picked however close its reset", () => {
+  const now = Date.parse("2026-09-22T11:53:00Z");
+  const { grok, cursor } = grokFamily(now, { grokUsed: 100, grokResetMs: 1 * HOUR });
+  const ranked = rankRoutingCandidates([grok, cursor], { prompt: "Review this pull request", tier: "deep", now }, settings);
+  assert.equal(ranked[0]?.provider, "cursor", "nothing left is nothing to finish");
+  assert.equal(candidateExpiryCredit(grok.capacity, now), 0);
+  // 99.6% used is spent too: the half-percent floor is the same one Watch calls spent.
+  const nearlySpent = grokFamily(now, { grokUsed: 99.6, grokResetMs: 1 * HOUR });
+  assert.equal(candidateExpiryCredit(nearlySpent.grok.capacity, now), 0);
+});
+
+test("a stale meter earns no expiry credit", () => {
+  // The desk served "6% left, observed 20:00 yesterday" at 07:44 the next
+  // morning. A reading sixteen hours old cannot say what is left to finish.
+  const now = Date.parse("2026-09-22T11:53:00Z");
+  const stale = grokFamily(now, { grokObserved: new Date(now - 16 * HOUR).toISOString() });
+  assert.equal(candidateExpiryCredit(stale.grok.capacity, now), 0);
+  const ranked = rankRoutingCandidates([stale.grok, stale.cursor], { prompt: "Review this pull request", tier: "deep", now }, settings);
+  assert.equal(ranked[0]?.provider, "cursor", "an unreadable pool is ranked as it was before, not finished on faith");
+  // No clock at all is the same as an old one.
+  const clockless = { ...stale.grok.capacity, observedAt: undefined };
+  assert.equal(candidateExpiryCredit(clockless, now), 0);
+});
+
+test("the credit rises toward the reset and stays inside its bounds", () => {
+  const now = 1_000_000_000_000;
+  const at = (resetMs: number, used = 94) => expiryCredit({ resetMs, usedPercent: used, observedAtMs: now - 1000, now });
+  assert.equal(at(EXPIRY_WINDOW_MS + 1), 0, "a day and a second out earns nothing");
+  assert.equal(at(0), 0, "a reset that has passed earns nothing");
+  assert.equal(at(-HOUR), 0);
+  const edge = at(EXPIRY_WINDOW_MS);
+  const close = at(HOUR);
+  assert.ok(edge >= EXPIRY_FLOOR && edge < close, `edge ${edge} rises toward ${close}`);
+  assert.ok(close <= EXPIRY_PEAK + 7.5, `never past the peak plus the small leftover term, got ${close}`);
+  assert.ok(at(HOUR, 50) > at(HOUR, 94), "in the same hour, more left to finish ranks higher");
+  assert.equal(expiryCredit({ resetMs: HOUR, usedPercent: undefined, observedAtMs: now, now }), 0, "no gauge, no credit");
+});
+
+test("the decision and the log both say the pool is being finished", () => {
+  const now = Date.parse("2026-09-22T11:53:00Z");
+  const { grok, cursor } = grokFamily(now);
+  const request = { prompt: "Review this pull request adversarially", tier: "deep" as const, now };
+  const decision = chooseRoutingDecision([grok, cursor], request, settings);
+  assert.equal(decision?.provider, "grok");
+  assert.match(decision?.reason ?? "", /finishing leftover \(2h to reset\)/, decision?.reason);
+  const line = routingDecisionLogDetail({ source: "spawn", candidates: [grok, cursor], request, settings });
+  assert.match(line, /finishing=grok\/grok-4\.7@2h/, line);
+  assert.equal(expiryHoursLabel(90 * 60_000), "1.5h");
+  assert.equal(expiryHoursLabel(20 * 60_000), "20m");
+  assert.equal(expiryHoursLabel(36 * HOUR), "1.5d");
+});
+
+test("the desk asks its meters again after a worker settles and on a beat", () => {
+  // A desk with routing set by hand and Usage closed served its launch reading
+  // for sixteen hours. Leftover the desk cannot see is leftover it cannot finish.
+  const store = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
+  assert.match(
+    store,
+    /settledPending\.current = true;\s*\n(\s*\/\/[^\n]*\n)*\s*if \(settledPending\.current\) refreshPlansForRouting\(plansRef\.current\);/,
+    "a settled worker just spent a pool; the meter should say so before the next routing call",
+  );
+  assert.match(
+    store,
+    /window\.setInterval\(\(\) => refreshPlansForRouting\(plansRef\.current\), PLAN_BEAT_MS\)/,
+    "an open desk asks again on a beat, and only for plans past the stale age",
+  );
 });
 
 test("a vendor inside 24h of reset does not take the full flat -70 reserve", () => {

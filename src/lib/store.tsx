@@ -397,6 +397,7 @@ import {
   planAfterRefresh,
   pruneWatchPermits,
   runCustomMeterBeat,
+  PLAN_BEAT_MS,
   shouldRefreshPlansForRouting,
   syncWatchDayMarks,
   watchVendorStatuses,
@@ -1512,6 +1513,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     // previous and the finish would fall back to the 2s debounce. The latch
     // holds until a write actually happens.
     if (workerJustSettled(previous?.sessions, state.sessions)) settledPending.current = true;
+    // A settled worker just spent a pool. The meter should say so before the
+    // next routing call, not sixteen hours later when someone opens Usage. The
+    // refresh is debounced to a minute and asks only for plans past the stale
+    // age, so the latch staying up for a state change or two costs nothing.
+    if (settledPending.current) refreshPlansForRouting(plansRef.current);
     persistTimer.current = window.setTimeout(() => {
       settledPending.current = false;
       const saved = listedChats(applyComposerDrafts(state.sessions, composerDraftsRef.current));
@@ -8632,6 +8638,21 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     refreshCursorPlan();
     refreshCustomPlans();
   }, [refreshGrokPlan, refreshCodexPlan, refreshClaudePlan, refreshCursorPlan, refreshCustomPlans]);
+
+  /*
+   * The meters used to refresh on launch, while the Usage pane was open, and
+   * when Auto routed a send. A desk with routing set by hand and Usage closed
+   * therefore served its launch reading for as long as it stayed up: sixteen
+   * hours on 2026-09-22, "6% left" the whole time four workers spent the pool.
+   * Leftover the desk cannot see is leftover it cannot finish. The beat asks
+   * only for plans older than the routing stale age, so a fresh reading costs
+   * nothing and an idle desk makes four calls an hour per vendor at most.
+   */
+  useEffect(() => {
+    if (!ready) return;
+    const timer = window.setInterval(() => refreshPlansForRouting(plansRef.current), PLAN_BEAT_MS);
+    return () => window.clearInterval(timer);
+  }, [ready, refreshPlansForRouting]);
   // Declared far above, beside plansRef, because the routing paths run before
   // any of these refreshers exist in this body.
   runPlanRefresh.current = refreshAllPlans;

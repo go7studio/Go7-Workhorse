@@ -33,6 +33,8 @@ export type RoutingCapacity = {
   usedPercent?: number;
   resetsAt?: string;
   period?: "weekly" | "monthly" | "unknown";
+  /** When the meter behind these numbers was last read. A reading with no clock earns no expiry credit. */
+  observedAt?: string;
 };
 
 /**
@@ -244,6 +246,7 @@ export function routingCandidatesForDesk(
           usedPercent: product?.usagePercent ?? laneCapacity?.usedPercent ?? capacity?.usedPercent,
           resetsAt: product?.resetsAt ?? laneCapacity?.resetsAt ?? capacity?.resetsAt,
           period: plan?.period ?? laneCapacity?.period ?? capacity?.period,
+          ...(plan?.observedAt ? { observedAt: plan.observedAt } : {}),
         },
       });
     }
@@ -892,6 +895,71 @@ export function reservePenaltyWeight(resetMs: number | undefined): number {
   return (resetMs - MS_DAY) / (6 * MS_DAY);
 }
 
+/** The final day before a reset: leftover inside it evaporates, so it is spent first. */
+export const EXPIRY_WINDOW_MS = 24 * 60 * 60 * 1000;
+/** Credit at the window's edge, a day out. Enough to beat a far pool's pace term on the same brain. */
+export const EXPIRY_FLOOR = 24;
+/** Credit at the reset itself. */
+export const EXPIRY_PEAK = 48;
+/** Same floor as DEFAULT_SPENT_PERCENT: at or under this much left, the pool is spent, not expiring. */
+export const EXPIRY_SPENT_REMAINING = 0.5;
+/** A meter older than this cannot say what is left, so it earns nothing. */
+export const EXPIRY_METER_STALE_MS = 6 * 60 * 60 * 1000;
+
+/**
+ * How much a pool is worth for being about to reset.
+ *
+ * Unused leftover evaporates at the reset, so a pool inside its last day is
+ * the cheapest capacity on the desk and the ranking must spend it first. The
+ * product owner's rule, 2026-09-22: "the final 24h usage should prioritize
+ * finishing an account nearing usage expiration and reset." That day the desk
+ * had sent a review to Cursor Grok 4.7 to spare a Grok pool at 6% that reset
+ * in hours, which spent Cursor's monthly ring and let the Grok leftover expire.
+ *
+ * Zero unless the reset is inside the window, the pool is not spent, and the
+ * meter was read recently enough to be believed. Otherwise a base that rises
+ * from the floor at the window's edge to the peak at the reset, plus a small
+ * term for how much is left, so two pools in the same hour still split on
+ * which has more to finish.
+ */
+export function expiryCredit(input: {
+  resetMs?: number;
+  usedPercent?: number;
+  observedAtMs?: number;
+  now: number;
+  staleAfterMs?: number;
+}): number {
+  const { resetMs, usedPercent } = input;
+  if (resetMs === undefined || !Number.isFinite(resetMs) || resetMs <= 0 || resetMs > EXPIRY_WINDOW_MS) return 0;
+  if (usedPercent === undefined || !Number.isFinite(usedPercent)) return 0;
+  const remaining = 100 - usedPercent;
+  if (remaining <= EXPIRY_SPENT_REMAINING) return 0;
+  const staleAfter = input.staleAfterMs ?? EXPIRY_METER_STALE_MS;
+  const observed = input.observedAtMs;
+  if (observed === undefined || !Number.isFinite(observed) || input.now - observed > staleAfter) return 0;
+  const closeness = 1 - resetMs / EXPIRY_WINDOW_MS;
+  const base = EXPIRY_FLOOR + (EXPIRY_PEAK - EXPIRY_FLOOR) * closeness;
+  const pile = Math.min(remaining, 50) * 0.15 * (0.5 + 0.5 * closeness);
+  return base + pile;
+}
+
+/** The credit a candidate earns now, read off its own capacity. */
+export function candidateExpiryCredit(capacity: RoutingCapacity | undefined, now: number): number {
+  if (!capacity) return 0;
+  const observed = capacity.observedAt ? Date.parse(capacity.observedAt) : NaN;
+  return expiryCredit({
+    resetMs: routingResetMs(capacity, now),
+    usedPercent: capacity.usedPercent,
+    observedAtMs: Number.isFinite(observed) ? observed : undefined,
+    now,
+  });
+}
+
+/** Rows with nothing left sort behind every live row, however close their reset. */
+function routingRowLive(row: { usedPercent?: number }): boolean {
+  return row.usedPercent === undefined || row.usedPercent < 100 - EXPIRY_SPENT_REMAINING;
+}
+
 function sameRoutingIdentity(
   current: Pick<RoutingCandidate, "provider" | "model" | "customBotId">,
   candidate: Pick<RoutingCandidate, "provider" | "model" | "customBotId">,
@@ -1209,7 +1277,14 @@ export function rankRoutingCandidates(
       // offering the same brain are a leftover choice, so leftover must be
       // able to flip the winner even on deep work.
       const capacityWeight = familySplit ? 1 : tier === "deep" ? 0.25 : tier === "quick" ? 0.9 : 0.7;
-      if (settings.preferExcess) score += clamp(draw.delta, -50, 50) * 0.8 * capacityWeight;
+      // A pool inside its last day is spent first: its leftover evaporates at
+      // the reset. The credit replaces a negative pace term for that row only,
+      // because "behind pace" is exactly the state of a pool worth finishing.
+      const expiry = candidateExpiryCredit(candidate.capacity, request.now ?? Date.now());
+      if (expiry > 0) {
+        score += expiry * capacityWeight;
+        if (settings.preferExcess && draw.delta > 0) score += clamp(draw.delta, 0, 50) * 0.8 * capacityWeight;
+      } else if (settings.preferExcess) score += clamp(draw.delta, -50, 50) * 0.8 * capacityWeight;
       else if (draw.delta < 0) score += clamp(draw.delta, -50, 0) * 0.45 * capacityWeight;
       // Hoarding a quota that resets within hours is waste. The flat -70
       // assumes a weekly window and a vendor with days of runway left; here
@@ -1231,7 +1306,24 @@ export function rankRoutingCandidates(
       usedPercent: draw.usedPercent,
     });
   }
-  return ranked.sort((a, b) => b.score - a.score || a.label.localeCompare(b.label));
+  // A spent pool never goes first, however its score came out: the reserve
+  // taper hands a pool inside its last day no penalty at all, so a pool at
+  // 100% resetting in an hour could otherwise outscore a live one.
+  return ranked.sort((a, b) => {
+    const aLive = routingRowLive(a);
+    const bLive = routingRowLive(b);
+    if (aLive !== bLive) return aLive ? -1 : 1;
+    return b.score - a.score || a.label.localeCompare(b.label);
+  });
+}
+
+/** "2h", "45m", "1.5d": how long until the reset, for a reason a person reads. */
+export function expiryHoursLabel(resetMs: number | undefined): string {
+  if (resetMs === undefined || !Number.isFinite(resetMs) || resetMs <= 0) return "0m";
+  const hours = resetMs / 3_600_000;
+  if (hours < 1) return `${Math.max(1, Math.round(resetMs / 60_000))}m`;
+  if (hours < 24) return `${Math.round(hours * 10) / 10}h`.replace(/\.0h$/, "h");
+  return `${Math.round((hours / 24) * 10) / 10}d`;
 }
 
 /** provider/model, plus the bot id when a custom bot serves it. Identities only. */
@@ -1303,6 +1395,10 @@ export function routingDecisionLogDetail(input: {
   const winner = ranked[0];
   const runnerUp = ranked[1];
   const selected = input.selected ?? winner;
+  const now = request.now ?? Date.now();
+  const finishing = ranked
+    .filter((row) => candidateExpiryCredit(row.capacity, now) > 0)
+    .map((row) => `${routingIdentityLabel(row)}@${expiryHoursLabel(routingResetMs(row.capacity, now))}`);
   return [
     `source=${input.source}`,
     `tier=${tier}`,
@@ -1316,6 +1412,7 @@ export function routingDecisionLogDetail(input: {
     ...routingLogList("skipped", skipped),
     ...routingLogList("below_bar", belowBar),
     ...routingLogList("reserve", reserved),
+    ...routingLogList("finishing", finishing),
   ].join(" ");
 }
 
@@ -1330,14 +1427,17 @@ export function chooseRoutingDecision(
   const winner = rankRoutingCandidates(candidates, { ...request, tier: taskTier }, settings)[0];
   if (!winner) return null;
   const draw = weeklyDrawState(winner.capacity, request.now);
+  const expiry = candidateExpiryCredit(winner.capacity, request.now ?? Date.now());
   const capacityReason =
-    draw.delta === undefined
-      ? ""
-      : draw.delta >= 10
-        ? " · spare capacity"
-        : draw.delta <= -10
-          ? " · limited capacity"
-          : " · on pace";
+    expiry > 0
+      ? ` · finishing leftover (${expiryHoursLabel(draw.resetMs)} to reset)`
+      : draw.delta === undefined
+        ? ""
+        : draw.delta >= 10
+          ? " · spare capacity"
+          : draw.delta <= -10
+            ? " · limited capacity"
+            : " · on pace";
   const imageGenReason =
     detectsImageGenerationIntent(request.prompt) && candidateCanGenerateImages(winner) ? " · image generation" : "";
   return {

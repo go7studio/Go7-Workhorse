@@ -1222,6 +1222,45 @@ test("projectCapacitySnapshot freshness uses the six-hour cache age", () => {
   assert.equal(unknown.rows[0]?.meter.status, "unknown");
 });
 
+test("a snapshot built now from a meter read sixteen hours ago is stale, and the row says so", () => {
+  // 2026-09-22, 07:44: the desk served the Grok meter as fresh with observedAt
+  // 20:00 the previous evening, because freshness looked at when the snapshot
+  // was assembled and never at when the reading was taken. Four workers spent
+  // the pool that morning and the meter never moved.
+  const now = Date.parse("2026-09-22T11:44:00.000Z");
+  const reset = "2026-09-22T13:53:32.000Z";
+  const settings = {
+    watch: { ...DEFAULT_WATCH, lockDaily: false },
+    customBots: [],
+    usageBudgets: {},
+    llms: links({ grok: { connected: true } }),
+  };
+  const snapshotFor = (observedAt: string, resetsAt = reset) => {
+    const plans = {
+      grok: plan(6, { resetsAt, observedAt, products: [{ product: "weekly", label: "Weekly", usagePercent: 94, resetsAt }] }),
+    };
+    const rows = deskCallCatalog({ settings, usage: [], plans, permits: {}, now });
+    const snapshot = projectCapacitySnapshot(rows, { now, fetchedAt: now, plans, settings });
+    return { snapshot, grok: snapshot.rows.find((row) => row.id === "grok") };
+  };
+
+  const sixteenHoursAgo = new Date(now - 16 * 60 * 60 * 1000).toISOString();
+  const stale = snapshotFor(sixteenHoursAgo);
+  assert.equal(stale.grok?.meter.remainingPercent, 6);
+  assert.equal(stale.grok?.meter.stale, true, "a reading half a day old is a reading, not the state of the pool");
+  assert.equal(stale.snapshot.freshness, "stale", "assembled this second from that reading is not fresh");
+  assert.equal(stale.grok?.meter.hoursToReset, 2.2, "a harness can apply the finish-first rule from the row alone");
+
+  const fresh = snapshotFor(new Date(now - 60_000).toISOString());
+  assert.equal(fresh.snapshot.freshness, "fresh");
+  assert.equal(fresh.grok?.meter.stale, undefined, "a fresh row carries no stale mark, not stale: false");
+  assert.equal(fresh.grok?.meter.hoursToReset, 2.2);
+
+  // A reset that has passed is not hours to reset; the meter has simply not caught up.
+  const passed = snapshotFor(new Date(now - 60_000).toISOString(), "2026-09-22T09:00:00.000Z");
+  assert.equal(passed.grok?.meter.hoursToReset, undefined);
+});
+
 test("projectCapacitySnapshot does not copy free-text reasons or trap fields", () => {
   const row = {
     ...capacityRow({

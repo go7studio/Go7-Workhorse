@@ -7,6 +7,7 @@ import path from "node:path";
 import {
   RESCUE_REF_PREFIX,
   ensureManagedWorktree,
+  rescueRecordFile,
   folderLeftBehind,
   pruneOrphanWorktrees,
   rescueWorktree,
@@ -993,7 +994,7 @@ test("uncommitted work beside installed packages stays", () => {
   const pruned = pruneOrphanWorktrees(managed, [], durable(root));
 
   assert.deepEqual(pruned.removed, []);
-  assert.match(pruned.kept[0].reason, /installed packages \(node_modules/);
+  assert.match(pruned.kept[0].reason, /ignored files it holds \(node_modules\/?\), and nothing shows they are only a cache/);
   assert.equal(fs.readFileSync(path.join(wt, "node_modules", "left-pad", "index.js"), "utf8"), "// a fix made in place and nowhere else\n");
   assert.equal(git(repo, ["for-each-ref", RESCUE_REF_PREFIX]), "", "no ref for a folder that stays");
   fs.rmSync(root, { recursive: true, force: true });
@@ -1102,5 +1103,94 @@ test("a worker that made a branch comes back on it", async () => {
   assert.equal(back.ok, true);
   assert.equal(git(wt, ["symbolic-ref", "HEAD"]), "refs/heads/work");
   assert.equal(fs.readFileSync(path.join(wt, "tracked.txt"), "utf8"), "on a branch\n");
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test("a folder the rescue would let go of keeps unique files a cache folder's name would have cleared", () => {
+  const { root, repo, managed, wt } = repoWithWorktree("cache-names", { ".gitignore": "__pycache__/\n.turbo/\n" });
+  fs.mkdirSync(path.join(wt, "__pycache__"));
+  fs.writeFileSync(path.join(wt, "__pycache__", "only.txt"), "ONLY-PYC-BYTES");
+  fs.mkdirSync(path.join(wt, ".turbo"));
+  fs.writeFileSync(path.join(wt, ".turbo", "only.txt"), "ONLY-TURBO-BYTES");
+  fs.writeFileSync(path.join(wt, "tracked.txt"), "work in progress\n");
+
+  const pruned = pruneOrphanWorktrees(managed, [], durable(root));
+
+  assert.deepEqual(pruned.removed, []);
+  assert.match(pruned.kept[0].reason, /nothing shows they are only a cache/);
+  assert.equal(fs.readFileSync(path.join(wt, "__pycache__", "only.txt"), "utf8"), "ONLY-PYC-BYTES");
+  assert.equal(fs.readFileSync(path.join(wt, ".turbo", "only.txt"), "utf8"), "ONLY-TURBO-BYTES");
+  assert.equal(git(repo, ["for-each-ref", RESCUE_REF_PREFIX]), "", "no ref for a folder that stays");
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test("bytecode in __pycache__, named as Python names it, does not hold a folder back", () => {
+  const { root, repo, managed, wt } = repoWithWorktree("pycache", { ".gitignore": "__pycache__/\n", "tool.py": "print(1)\n" });
+  fs.mkdirSync(path.join(wt, "__pycache__"));
+  fs.writeFileSync(path.join(wt, "__pycache__", "tool.cpython-312.pyc"), "bytecode");
+  fs.writeFileSync(path.join(wt, "__pycache__", "tool.cpython-312.opt-1.pyc"), "bytecode");
+  fs.writeFileSync(path.join(wt, "tracked.txt"), "work in progress\n");
+
+  const pruned = pruneOrphanWorktrees(managed, [], durable(root));
+
+  assert.deepEqual(pruned.removed, ["sess_gone"]);
+  assert.equal(git(repo, ["show", `${RESCUE_REF_PREFIX}sess_gone:tracked.txt`]), "work in progress");
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test("resume restores only a rescue on the desk's own list, never a forged one", async () => {
+  const { root, repo, managed, wt } = repoWithWorktree("forged");
+  fs.writeFileSync(path.join(wt, "tracked.txt"), "real work\n");
+  assert.deepEqual(pruneOrphanWorktrees(managed, [], durable(root)).removed, ["sess_gone"]);
+  const listed = JSON.parse(fs.readFileSync(rescueRecordFile(managed), "utf8")) as { rescues: Array<{ session: string; commit: string }> };
+  assert.equal(listed.rescues.length, 1);
+  assert.equal(listed.rescues[0].commit, git(repo, ["rev-parse", `${RESCUE_REF_PREFIX}sess_gone`]), "the list names the commit the ref holds");
+
+  // Another tool copies everything a rescue commit carries: the desk's name,
+  // two parents, the mark and the session, at a higher number.
+  const base = git(repo, ["rev-parse", "HEAD"]);
+  const tree = git(repo, ["rev-parse", "HEAD^{tree}"]);
+  const env = { ...process.env, GIT_AUTHOR_NAME: "Go7 Workhorse", GIT_AUTHOR_EMAIL: "workhorse@localhost", GIT_COMMITTER_NAME: "Go7 Workhorse", GIT_COMMITTER_EMAIL: "workhorse@localhost" };
+  const index = execFileSync("git", ["commit-tree", tree, "-p", base, "-m", "index"], { cwd: repo, env, encoding: "utf8" }).trim();
+  const forged = execFileSync("git", ["commit-tree", tree, "-p", base, "-p", index], {
+    cwd: repo,
+    env,
+    encoding: "utf8",
+    input: "Workhorse kept sess_gone before removing its folder\n\nWorkhorse-Rescue: folder\nWorkhorse-Session: sess_gone\n",
+  }).trim();
+  git(repo, ["update-ref", `${RESCUE_REF_PREFIX}sess_gone-4`, forged]);
+
+  const back = await ensureManagedWorktree({ sessionId: "sess_gone", root: repo }, managed);
+
+  assert.equal(back.ok && back.restored, `${RESCUE_REF_PREFIX}sess_gone`);
+  assert.equal(fs.readFileSync(path.join(wt, "tracked.txt"), "utf8"), "real work\n");
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test("a rescue whose ref a person deleted is let go, and the folder is cut fresh", async () => {
+  const { root, repo, managed, wt } = repoWithWorktree("let-go");
+  fs.writeFileSync(path.join(wt, "tracked.txt"), "work in progress\n");
+  assert.deepEqual(pruneOrphanWorktrees(managed, [], durable(root)).removed, ["sess_gone"]);
+  git(repo, ["update-ref", "-d", `${RESCUE_REF_PREFIX}sess_gone`]);
+
+  const back = await ensureManagedWorktree({ sessionId: "sess_gone", root: repo }, managed);
+
+  assert.equal(back.ok, true);
+  assert.equal(back.ok && back.restored, undefined);
+  assert.equal(fs.readFileSync(path.join(wt, "tracked.txt"), "utf8"), "original\n");
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test("a long list of empty folders is kept and comes back", async () => {
+  const { root, repo, managed, wt } = repoWithWorktree("many-empty");
+  const names = Array.from({ length: 1000 }, (_, at) => `empty-${String(at).padStart(4, "0")}-${"x".repeat(140)}`);
+  for (const name of names) fs.mkdirSync(path.join(wt, name));
+
+  const pruned = pruneOrphanWorktrees(managed, [], { ...durable(root), resumable: new Set(["sess_gone"]) });
+
+  assert.deepEqual(pruned.removed, ["sess_gone"], "a message longer than a command line allows still goes to git");
+  const back = await ensureManagedWorktree({ sessionId: "sess_gone", root: repo }, managed);
+  assert.equal(back.ok, true);
+  assert.equal(names.every((name) => fs.statSync(path.join(wt, name)).isDirectory()), true);
   fs.rmSync(root, { recursive: true, force: true });
 });

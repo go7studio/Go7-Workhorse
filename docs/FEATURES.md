@@ -278,9 +278,10 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
 - A finished or interrupted worker's folder goes a week after the worker
   ends. Work no commit or remote holds is kept in git first, byte for byte and
   with what the worker staged, at `refs/workhorse/rescue/<chat>`, and resuming
-  or reusing the worker brings the folder back with that work uncommitted. A
-  folder git cannot save whole (a large file, a nested repository, a
-  submodule, uncommitted work beside installed packages) stays, named with the
+  or reusing the worker brings the folder back with that work uncommitted and
+  its staged changes staged. Only a rescue the desk wrote down is ever
+  restored. A folder git cannot save whole (a large file, a nested repository,
+  a submodule, ignored files nothing shows are a cache) stays, named with the
   reason, and Settings → Profile lists what the last sweep kept. Godot's editor
   cache and TypeScript's build record count as rebuildable.
 - A worker that ends with uncommitted files in its own folder says so in the

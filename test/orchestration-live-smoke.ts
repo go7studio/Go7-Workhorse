@@ -216,15 +216,50 @@ const app = await electron.launch({
   env: { ...process.env, WORKHORSE_USER_DATA_PATH: userData, WORKHORSE_VOLATILE_CREDENTIALS: "1" },
 });
 
+/** Views of Bot knowledge read off the desk before the ask: what the head's brief is built from. */
+const BOT_KNOWLEDGE_VIEWS = [
+  ["coding", "balanced"],
+  ["coding", "deep"],
+  ["data", "balanced"],
+  ["writing", "balanced"],
+  ["general", "quick"],
+] as const;
+type BotKnowledgeView = { domain: string; tier: string; note: string; rows: string[][]; screenshot: string };
+
+async function readBotKnowledge(page: Awaited<ReturnType<typeof app.firstWindow>>): Promise<BotKnowledgeView[]> {
+  const views: BotKnowledgeView[] = [];
+  await page.locator("button.sidebar-settings").first().click();
+  await page.getByRole("tab", { name: "Bot knowledge", exact: true }).first().click();
+  await page.locator("table.bot-knowledge-table").first().waitFor({ timeout: 10_000 });
+  for (const [domain, tier] of BOT_KNOWLEDGE_VIEWS) {
+    await page.getByLabel("Task domain").selectOption(domain);
+    await page.getByLabel("Route tier").selectOption(tier);
+    await page.waitForTimeout(600);
+    const screenshot = path.join(runDir, `00-bot-knowledge-${domain}-${tier}.png`);
+    await page.screenshot({ path: screenshot });
+    const rows = await page
+      .locator("table.bot-knowledge-table tr")
+      .evaluateAll((trs) => trs.map((tr) => [...tr.querySelectorAll("th,td")].map((cell) => (cell.textContent ?? "").replace(/\s+/g, " ").trim())));
+    const note = ((await page.locator(".settings-note").first().textContent()) ?? "").replace(/\s+/g, " ").trim();
+    views.push({ domain, tier, note, rows, screenshot });
+  }
+  await page.locator("button.sidebar-settings").first().click();
+  await page.waitForTimeout(500);
+  return views;
+}
+
 const startedAt = Date.now();
 let sentAt = 0;
 let failure: unknown;
+let botKnowledge: BotKnowledgeView[] | { error: string } = [];
 try {
   const page = await app.firstWindow();
   await page.waitForLoadState("domcontentloaded");
   // Vendor sign-ins and plan meters are read at start; give them a moment.
   await page.waitForTimeout(12_000);
   await page.screenshot({ path: path.join(runDir, "01-open.png") });
+  // A miss here is recorded, not fatal: the delegation run is the test.
+  botKnowledge = await readBotKnowledge(page).catch((error: unknown) => ({ error: String(error).slice(0, 400) }));
   await page.getByText(title, { exact: true }).first().click();
   await page.waitForTimeout(1_000);
   const composer = page.locator("textarea").last();
@@ -304,6 +339,9 @@ const evidence = {
     customBotId: worker.customBotId,
     effort: worker.effort,
     routingMode: worker.routingMode,
+    route: worker.routingDecision
+      ? { tier: worker.routingDecision.taskTier, score: worker.routingDecision.score, reason: clip(worker.routingDecision.reason, 600) }
+      : undefined,
     status: worker.agentRun?.status,
     error: worker.agentRun?.error,
     minutes: worker.agentRun?.finishedAt ? Math.round((worker.agentRun.finishedAt - worker.agentRun.startedAt) / 6_000) / 10 : undefined,
@@ -311,6 +349,7 @@ const evidence = {
     report: clip(worker.retainedReport ?? [...(worker.messages ?? [])].reverse().find((message: any) => message.role === "assistant")?.text, 500),
   })),
   finalReply: clip([...(head?.messages ?? [])].reverse().find((message: any) => message.role === "assistant")?.text, 2_500),
+  botKnowledge,
   usage: (saved.usage ?? [])
     .filter((event: any) => event.at >= startedAt)
     .map((event: any) => ({ provider: event.provider, model: event.model, inputTokens: event.inputTokens, outputTokens: event.outputTokens })),
@@ -323,7 +362,12 @@ const evidence = {
   scores: (() => {
     try {
       const cached = JSON.parse(fs.readFileSync(path.join(userData, "bot-scores", "lmarena.json"), "utf8"));
-      return { sha: cached.feed?.sha, fetchedAt: cached.feed?.fetchedAt, lastError: cached.lastError };
+      return {
+        sha: cached.feed?.sha,
+        fetchedAt: cached.feed?.fetchedAt,
+        pricedModels: Object.keys(cached.prices?.prices ?? {}).length,
+        lastError: cached.lastError,
+      };
     } catch {
       return null;
     }

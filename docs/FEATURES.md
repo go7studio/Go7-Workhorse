@@ -219,8 +219,7 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
   fan-out only when asked. On its spawns Auto scores every bot for the task's
   domain at the thinking level it would run at, drops bots under the tier's bar
   (Balanced 4, Deep 8 on the strict scale below, never above the best bot the
-  desk can call; Quick takes any bot and counts quality only one point off the
-  floor),
+  desk can call; Quick takes any bot and stops paying for quality at 4),
   and orders the rest by quality, cost, and plan terms: leftover about to
   expire, pace against the days left before the pool resets, the reserve, a 5h
   window close to full, and workers already running on the pool. Quality counts
@@ -237,9 +236,10 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
   typical finished run on this desk (the median fresh input, output and cache
   reads in its Usage ledger) is priced at them, and scaled by what the model's
   own runs take once it has three runs and the desk six. Each doubling of that
-  cost over the cheapest bot that clears the bar gives up quality: 0.9 points on
-  Quick, 0.35 on Balanced, 0.15 on Deep. Bot knowledge, `workhorse_find_bots`
-  and the head's brief show each bot's run cost.
+  cost over the cheapest bot that clears the bar and can take work now gives up
+  quality: 0.9 points on Quick, 0.35 on Balanced, 0.15 on Deep, with no cap, so
+  two dear bots keep their order. Bot knowledge, `workhorse_find_bots` and the
+  head's brief show each bot's run cost.
 - `workhorse_find_bots` is the orchestrator's search: give it the task and a
   squad size, and it returns the bots the desk would pick with each one's score,
   where the score came from, its plan terms, a squad spread over pools, and why

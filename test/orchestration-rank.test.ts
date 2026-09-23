@@ -113,6 +113,7 @@ test("quick work does not burn a frontier pool, and leftover about to expire is 
   const expiring = candidate("grok", "grok-4.6", 60, {
     capacity: { usedPercent: 60, resetsAt: new Date(now + 6 * 3_600_000).toISOString(), period: "weekly", observedAt },
   });
+  listPrices([["anthropic/claude-fable-5.1", 10, 50], ["x-ai/grok-4.6", 2, 6]]);
   const ranked = rankRoutingCandidates(
     [candidate("claude", "claude-fable-5-1", 20), expiring],
     ask("reply to this", { tier: "quick", taskDomain: "general" }),
@@ -120,10 +121,57 @@ test("quick work does not burn a frontier pool, and leftover about to expire is 
   );
   assert.equal(ranked[0]?.model, "grok-4.6");
   assert.equal(ranked[0]?.orchestration?.plan.expiring, true);
-  // Quick work takes any bot and stops paying for quality one point off the floor.
+  // Quick work takes any bot and stops paying for quality at 4.
   const fable = ranked.find((row) => row.provider === "claude")!.orchestration!;
   assert.equal(fable.fit.score, 8);
-  assert.equal(fable.points.quality, 2);
+  assert.equal(fable.points.quality, 4);
+});
+
+/** One board: thirty fillers ten points apart under the named rows. */
+function board(named: Array<[name: string, value: number]>) {
+  const rows = [...named, ...Array.from({ length: 30 }, (_, index) => [`m${index + 1}`, 1690 - 10 * index] as [string, number])]
+    .sort((a, b) => b[1] - a[1])
+    .map(([name, value], index) => ({ name, org: "lab", value, rank: index + 1 }));
+  return rows;
+}
+
+test("quick work takes a far better model a few cents dearer over the floor", () => {
+  applyBotScoresFeed({
+    version: 1,
+    source: "lmarena",
+    fetchedAt: "2026-09-23T00:00:00.000Z",
+    published: {},
+    tables: { "text:overall": board([["gemini-3.8-flash", 1700], ["gpt-5.6-luna", 1200]]) },
+  });
+  listPrices([["openai/gpt-5.6-luna", 0.2, 1.2], ["google/gemini-3.8-flash", 0.75, 3.75]]);
+  const ranked = rankRoutingCandidates(
+    [candidate("codex", "gpt-5.6-luna"), candidate("cursor", "gemini-3.8-flash")],
+    ask("reply to this", { tier: "quick", taskDomain: "general" }),
+    settings,
+  );
+  assert.equal(ranked[0]?.model, "gemini-3.8-flash", "10 against the floor is worth under two doublings");
+});
+
+test("dear models keep their order however cheap the cheapest row is", () => {
+  // GPT-6 Luna leads the writing board at about 2¢ a run; Opus 5 and Fable 5.1 read the desk table (8 and 9).
+  applyBotScoresFeed({
+    version: 1,
+    source: "lmarena",
+    fetchedAt: "2026-09-23T00:00:00.000Z",
+    published: {},
+    tables: { "text:creative_writing": board([["gpt-6-luna", 1700]]) },
+  });
+  listPrices([["openai/gpt-6-luna", 0.1, 0.5], ["anthropic/claude-opus-5", 5, 25], ["anthropic/claude-fable-5.1", 10, 50]]);
+  const ranked = rankRoutingCandidates(
+    [candidate("codex", "gpt-6-luna"), candidate("claude", "claude-opus-5"), candidate("claude", "claude-fable-5-1")],
+    ask("write the launch announcement", { tier: "balanced", taskDomain: "writing" }),
+    settings,
+  );
+  // Both dear rows are past the quality ceiling; Fable's run costs twice Opus's, so it ranks under it.
+  assert.deepEqual(
+    ranked.map((row) => row.model),
+    ["gpt-6-luna", "claude-opus-5", "claude-fable-5-1"],
+  );
 });
 
 test("workers already running on a pool send the next spawn to another pool", () => {

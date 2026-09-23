@@ -1257,19 +1257,20 @@ export function routingSkipReason(
 
 /**
  * Quality past bar + headroom buys nothing on that tier; cost and leftover
- * decide instead. Quick work stops paying for quality one point off the floor:
- * the strict scale puts many capable models at 1 or 2 on a board they trail,
- * and a quick reply does not need a board's leader.
+ * decide instead. Quick work takes any bot and stops paying for quality at 4,
+ * about a board's fortieth place: a quick reply does not need a leader, but a
+ * far better model a few cents dearer still beats the floor.
  */
-const ORCHESTRATION_HEADROOM: Record<RoutingTaskTier, number> = { quick: 1, balanced: 3, deep: 10 };
+const ORCHESTRATION_HEADROOM: Record<RoutingTaskTier, number> = { quick: 3, balanced: 3, deep: 10 };
 /**
  * Domain points given up for each doubling of what a typical run costs over the
- * cheapest row that clears the bar: list price per input and output token
- * times the desk's typical run, scaled by what the model's own runs take.
+ * cheapest row that clears the bar and can take work now: list price per input
+ * and output token times the desk's typical run, scaled by what the model's own
+ * runs take. Uncapped, so two dear models keep their order.
  */
 const ORCHESTRATION_COST_WEIGHT: Record<RoutingTaskTier, number> = { quick: 0.9, balanced: 0.35, deep: 0.15 };
-/** Past this many doublings a dearer row costs no more: 32 times the cheapest already rules it out of anything but deep work. */
-const MAX_COST_DOUBLINGS = 5;
+/** A run priced below this reads as this, so a free row cannot make every other one infinitely dear. */
+const MIN_RUN_COST_USD = 0.001;
 /** How much a pool's plan terms count against quality on each tier. */
 const ORCHESTRATION_PLAN_WEIGHT: Record<RoutingTaskTier, number> = { quick: 1.5, balanced: 1, deep: 0.5 };
 /** Share of a spawn's quality taken from Agent Arena (tools, long runs) when that arena rates the model. */
@@ -1600,9 +1601,13 @@ function rankOrchestrationCandidates(
   }
   const passing = clearing.filter((row) => !successorOf.has(row));
   // What a typical run costs at each row's list price, in doublings over the cheapest.
-  const cheapest = Math.min(...passing.map((row) => row.terms.cost.perRun));
-  const doublings = (row: Fit) =>
-    cheapest > 0 ? clamp(Math.log2(row.terms.cost.perRun / cheapest), 0, MAX_COST_DOUBLINGS) : row.terms.cost.perRun > 0 ? MAX_COST_DOUBLINGS : 0;
+  // A spent pool's price does not set the baseline for pools that can take the work.
+  const takingWork = passing.filter((row) =>
+    routingRowLive({ usedPercent: row.terms.plan.usedPercent, capacity: row.candidate.capacity }, now),
+  );
+  const runCost = (row: Fit) => Math.max(MIN_RUN_COST_USD, row.terms.cost.perRun);
+  const cheapest = Math.min(...(takingWork.length ? takingWork : passing).map(runCost));
+  const doublings = (row: Fit) => Math.max(0, Math.log2(runCost(row) / cheapest));
   const ceiling = bar + ORCHESTRATION_HEADROOM[context.tier];
   const preferred = request.preferred ?? [];
   const ranked: RankedRoutingCandidate[] = passing.map((row) => {

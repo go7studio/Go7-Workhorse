@@ -208,6 +208,12 @@ const DESK_TOOLS: { name: string; description: string; input_schema: Record<stri
         capabilities: { type: "array", items: { type: "string" }, description: "Desired expertise; free-form" },
         tools: { type: "array", items: { type: "string" }, description: "Required tools" },
         constraints: { type: "array", items: { type: "string" }, description: "Assignment boundaries" },
+        after: {
+          type: "array",
+          items: { type: "string" },
+          description:
+            "Names of this chat's workers that must finish first, such as a release note after the code it describes. The desk queues this one, starts it when they are done, and hands it their reports",
+        },
         files: { type: "array", items: { type: "string" }, description: "Files to attach to the worker" },
         chat: { type: "string", description: "Optional existing chat or vendor name to copy" },
         effort: { type: "string", description: "Optional override. Omit to keep a reused worker's thinking level; otherwise derived from quick, balanced, or deep" },

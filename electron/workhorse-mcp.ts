@@ -588,6 +588,12 @@ const TOOLS = [
         constraints: { type: "array", items: { type: "string" }, description: "Assignment boundaries" },
         paths: { type: "array", items: { type: "string" }, description: "Expected repo-relative paths used for scope checks and changed-file reporting. Separate from attached files." },
         exclude: { type: "array", items: { type: "string" }, description: "Provider, model, or bot terms this worker and its descendants must avoid" },
+        after: {
+          type: "array",
+          items: { type: "string" },
+          description:
+            "Names of this chat's workers that must finish first, such as a release note after the code it describes. The desk queues this one, starts it when they are done, and hands it their reports. If one of them does not finish, this one does not start.",
+        },
         files: { type: "array", items: { type: "string" }, description: "Files to attach to the worker" },
         effort: { type: "string", description: "Explicit user override only. Omit to keep a reused worker's thinking level; otherwise the desk derives it from task depth" },
         timeoutSeconds: { type: "number", description: "Ignored. The desk does not stop a worker on a runtime limit. The worker runs until it finishes or is cancelled." },
@@ -2366,6 +2372,8 @@ async function spawnAgent(
     constraints?: string[];
     paths?: string[];
     exclude?: string[];
+    /** This chat's workers that must finish before this one starts. */
+    after?: string[];
     files?: string[];
     traceId?: string;
   },
@@ -2535,6 +2543,7 @@ async function spawnAgent(
     constraints: spawnInput.constraints,
     paths: spawnInput.paths,
     exclude: spawnInput.exclude,
+    ...(spawnInput.after?.length ? { after: spawnInput.after } : {}),
     files: spawnInput.files,
     attachments,
     ...(spawnInput.traceId?.trim() ? { traceId: spawnInput.traceId.trim() } : {}),
@@ -2577,6 +2586,7 @@ async function spawnAgent(
       constraints: spawnInput.constraints,
       paths: spawnInput.paths,
       exclude: spawnInput.exclude,
+      ...(spawnInput.after?.length ? { after: spawnInput.after } : {}),
       files: spawnInput.files,
       attachments,
       ...(spawnInput.traceId?.trim() ? { traceId: spawnInput.traceId.trim() } : {}),
@@ -3525,6 +3535,11 @@ async function callDeskTool(name: string, args: Record<string, unknown>, from?: 
         constraints: Array.isArray(args.constraints) ? args.constraints.filter((item): item is string => typeof item === "string") : undefined,
         paths: Array.isArray(args.paths) ? args.paths.filter((item): item is string => typeof item === "string") : undefined,
         exclude: Array.isArray(args.exclude) ? args.exclude.filter((item): item is string => typeof item === "string") : undefined,
+        after: Array.isArray(args.after)
+          ? args.after.filter((item): item is string => typeof item === "string")
+          : typeof args.after === "string"
+            ? [args.after]
+            : undefined,
         files: Array.isArray(args.files) ? args.files.filter((item): item is string => typeof item === "string") : undefined,
         traceId: typeof args.traceId === "string" ? args.traceId : undefined,
         loop: args.loop,

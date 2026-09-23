@@ -4,6 +4,7 @@ import path from "node:path";
 import test from "node:test";
 import { applyAnthropicEvent, buildAnthropicBody, streamCustomHttp, type AnthropicStreamState } from "../electron/custom-http";
 import { lineupJoinPrompt, normalizeLineup } from "../src/lib/lineup";
+import { afterBlockedReason, afterBriefFor, resolveSpawnAfter, spawnContinuationHowToUse } from "../src/lib/subagents";
 import { asksForProse, inferTaskDomain } from "../src/lib/task-domain";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
@@ -81,6 +82,59 @@ test("the join says which bot ran each slice, and tells the head to read it", ()
   assert.match(prompt, /### 1\. Wren · Implement weeklyTotals.*\nran on: Grok · Grok 4\.7 Build Fast/);
   assert.match(prompt, /### 2\. Marlow · Release note.*\nran on: Cursor · Claude 4\.6 Sonnet/);
   assert.match(prompt, /use its `ran on` line above\. Do not name one from memory\./);
+});
+
+test("a spawn can wait for this chat's own workers, named the way the head knows them", () => {
+  const sessions = [
+    { id: "w1", parentId: "orch", workerName: "Wren" },
+    { id: "w2", parentId: "orch", workerName: "Dexter" },
+    { id: "w3", parentId: "orch", workerName: "Old", archivedAt: 5 },
+    { id: "x1", parentId: "other", workerName: "Marlow" },
+  ];
+  assert.deepEqual(resolveSpawnAfter(["wren", " Dexter ", "Wren"], "orch", sessions), {
+    ok: true,
+    waitFor: [
+      { id: "w1", name: "Wren" },
+      { id: "w2", name: "Dexter" },
+    ],
+  });
+  assert.deepEqual(resolveSpawnAfter("w2", "orch", sessions), { ok: true, waitFor: [{ id: "w2", name: "Dexter" }] }, "a chat id works too");
+  assert.deepEqual(resolveSpawnAfter(undefined, "orch", sessions), { ok: true, waitFor: [] });
+  assert.equal(resolveSpawnAfter(["Marlow"], "orch", sessions).ok, false, "another chat's worker is not this head's to wait on");
+  assert.equal(resolveSpawnAfter(["Old"], "orch", sessions).ok, false, "an archived worker is gone");
+  const missing = resolveSpawnAfter(["Wanda"], "orch", sessions);
+  assert.equal(missing.ok, false);
+  assert.match(missing.ok ? "" : missing.error, /after names Wanda, but this chat has no worker by that name/);
+});
+
+test("a queued slice starts with the earlier reports, and does not start on a failed one", () => {
+  const brief = afterBriefFor([
+    { name: "Wren", status: "completed", report: "weeklyTotals implemented.\n3/3 tests pass.", changedFiles: ["src/stats.mjs"] },
+  ]);
+  assert.match(brief, /^You started after these workers on this chat finished\. Read what they changed before you begin:\n- Wren \(completed\)\. Changed: src\/stats\.mjs\. Report: weeklyTotals implemented\. 3\/3 tests pass\.$/);
+  assert.match(afterBriefFor([{ name: "Wren", status: "completed", report: "x".repeat(2_000) }]), /x{1200}…$/, "a long report is cut");
+  assert.equal(afterBriefFor([]), "");
+  assert.equal(afterBlockedReason([{ name: "Wren", status: "completed" }]), undefined);
+  assert.equal(
+    afterBlockedReason([{ name: "Wren", status: "failed" }, { name: "Dexter", status: "completed" }]),
+    "Did not start: Wren failed, and this slice was to come after it.",
+  );
+  assert.match(spawnContinuationHowToUse("Marlow", false, ["Wren", "Dexter"]), /^Marlow starts when Wren and Dexter finish, and gets their reports\./);
+  assert.match(spawnContinuationHowToUse("Marlow", false), /^Worker is running in its own chat\./);
+});
+
+test("after reaches the desk from both spawn doors and holds the row as queued", () => {
+  const mcp = readFileSync(path.join(ROOT, "electron", "workhorse-mcp.ts"), "utf8");
+  assert.match(mcp, /after: \{\s*type: "array",\s*items: \{ type: "string" \},\s*description:\s*"Names of this chat's workers that must finish first/);
+  assert.equal((mcp.match(/\.\.\.\(spawnInput\.after\?\.length \? \{ after: spawnInput\.after \} : \{\}\),/g) ?? []).length, 2, "both bridge posts carry it");
+  const custom = readFileSync(path.join(ROOT, "electron", "custom-tools.ts"), "utf8");
+  assert.match(custom, /after: \{\s*type: "array",\s*items: \{ type: "string" \},\s*description:\s*"Names of this chat's workers that must finish first/, "a custom head sees it");
+  const store = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
+  assert.match(store, /const spawnAfter = resolveSpawnAfter\(payload\.after, parent\.id, latest\.sessions\);/);
+  assert.equal((store.match(/status: waitingAtStart \? "queued" : "running",/g) ?? []).length, 2, "the lineup and the reply both say queued");
+  assert.match(store, /void startWhenReady\(\)\.catch\(markChildFailure\);/);
+  assert.match(store, /fallback = await startWhenReady\(\);/);
+  assert.match(store, /text: afterNote \? `\$\{payload\.message\}\\n\\n\$\{afterNote\}` : payload\.message,/, "the waiting worker gets the earlier reports under its brief");
 });
 
 test("a release note is writing even when it names the code it announces", () => {

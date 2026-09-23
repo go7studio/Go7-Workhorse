@@ -860,10 +860,23 @@ test("spawn route= beats keyword inference; auditor, builder, size, attachments,
     inferRoutingTier(auditorSpawn.prompt, [], { role: auditorSpawn.role, parentTier: auditorSpawn.parentTier }),
     "deep",
   );
+  // A long brief is a careful head, not hard work: length alone keeps a worker balanced.
   assert.equal(
     inferRoutingTier(longWorker.prompt, [], { role: longWorker.role, parentTier: longWorker.parentTier }),
-    "deep",
+    "balanced",
   );
+  const background = " Background: the stub throws, the tests are fixed, keep the folder tidy.".repeat(30);
+  assert.equal(
+    inferRoutingTier(`Your only task: write a short, friendly release note (under 120 words) in docs/RELEASE.md.${background} No bugs in the note, please.`, [], { role: "worker" }),
+    "balanced",
+    "a marker buried in the background is not the slice",
+  );
+  assert.equal(
+    inferRoutingTier(`Your only task: find the root cause of the crash in src/queue.ts and fix it.${background}`, [], { role: "worker" }),
+    "deep",
+    "a hard slice stated up front still routes deep",
+  );
+  assert.equal(inferRoutingTier("x".repeat(1300)), "deep", "a long ask from a person still reads as a big one");
 
   const rows = [candidate("gpt-5.6-sol"), candidate("gpt-5.6-luna")];
   const workerPick = chooseRoutingDecision(rows, {

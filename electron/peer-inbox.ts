@@ -114,6 +114,8 @@ export type PeerAsk = {
   tools?: string[];
   constraints?: string[];
   exclude?: string[];
+  /** spawn: this chat's workers (by name) that must finish before this one starts. */
+  after?: string[];
   /** find-bots: the kind of work, when the caller knows it better than the task text says. */
   domain?: string;
   /** find-bots: inputs every pick must accept. */

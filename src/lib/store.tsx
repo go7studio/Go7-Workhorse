@@ -62,7 +62,7 @@ import {
   shiftQueuedPrompt,
   sidebarKeepsChat,
 } from "./chats";
-import { settledWorkers, workerJustSettled } from "./worker-settled";
+import { isTerminalRunStatus, settledWorkers, workerJustSettled } from "./worker-settled";
 import { foldersToCount, leftInFolderNote, workerLabel } from "./worker-folders";
 import { deskPersistBodyEqual, persistDelayMs } from "./desk-persist";
 import { restoredPanel } from "./restored-panel";
@@ -348,6 +348,9 @@ import {
   routingDecisionMatchesSpawn,
   constrainRouteCandidatesForSpawn,
   spawnContinuationHowToUse,
+  afterBlockedReason,
+  afterBriefFor,
+  resolveSpawnAfter,
   spawnExclusions,
   spawnTurnOf,
   spawnWaitsForReply,
@@ -1255,6 +1258,10 @@ function snapshotWriteInstance(
 
 /** Stable identity for "nothing is missing", so a redraw needs a real change. */
 const NO_MISSING_FOLDERS: ReadonlySet<string> = new Set<string>();
+
+/** How often a queued slice looks at the workers it comes after, and how long it waits for them. */
+const AFTER_POLL_MS = 2_000;
+const AFTER_WAIT_MS = 6 * 60 * 60_000;
 
 /**
  * Folders the operating system empties on its own. `/private/tmp` is swept on a
@@ -6168,6 +6175,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               await replyAsk({ error: "no parent chat to attach this subagent to" });
               return;
             }
+            // Named before anything is started or leased, so a wrong name
+            // costs the head one error and the desk nothing.
+            const spawnAfter = resolveSpawnAfter(payload.after, parent.id, latest.sessions);
+            if (!spawnAfter.ok) {
+              await replyAsk({ error: spawnAfter.error });
+              return;
+            }
             const resolvedSpec = resolveSpawnSpec(
               {
                 fromSessionId: parent.id,
@@ -6341,6 +6355,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             const childId = reusedWorker?.id || payload.childSessionId?.trim() || uid("sess");
             const assistantId = uid("msg");
             const startedAt = Date.now();
+            // A slice that comes after others is queued on the lineup until they end.
+            const waitingOn = spawnAfter.waitFor.filter((item) => item.id !== childId);
+            const waitingAtStart = waitingOn.some((item) => {
+              const earlier = latest.sessions.find((session) => session.id === item.id);
+              return Boolean(earlier) && !isTerminalRunStatus(earlier?.agentRun?.status);
+            });
             // The caller learns its child's seat from the spawn result, not
             // from a card the person has to answer. `log` is the main-log line
             // the Link helper records — identifiers and seats, no brief.
@@ -6681,7 +6701,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                                 folder: childCwd,
                                 vendor: vendorDisplayName(spec.provider),
                                 ...(spawnModelLabel ? { model: spawnModelLabel } : {}),
-                                status: "running",
+                                status: waitingAtStart ? "queued" : "running",
                                 startedAt,
                                 correlationId: childCorrelationId,
                                 // The caller is known here and was being dropped, so a
@@ -6756,6 +6776,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 return { ...current, sessions: admitted.sessions, leases };
               });
             };
+            // Filled in when a queued slice's turn comes: who finished first and what they said.
+            let afterNote = "";
+            let notStarted: string | undefined;
             const runChild = async () => {
               const spawnHead = window.workhorse?.gitHead && childCwd
                 ? await window.workhorse.gitHead(childCwd)
@@ -6771,7 +6794,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                     seed: spawnSeed,
                     handoff: spawnHandoff,
                     fromTitle: parent.title?.trim() || "another agent",
-                    text: payload.message,
+                    text: afterNote ? `${payload.message}\n\n${afterNote}` : payload.message,
                     folder: childCwd,
                     project: project?.name,
                     slice: payload.description,
@@ -6891,6 +6914,56 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               });
               return finalReport;
             };
+            /*
+             * A slice that comes after others starts when they have all ended.
+             * If one of them did not finish its work, this one never starts:
+             * its ground was never laid, and a run on it is spent for nothing.
+             * The head reads why in the join. A worker the person or the head
+             * stopped while it waited stays stopped.
+             */
+            const startWhenReady = async (): Promise<string> => {
+              if (waitingOn.length > 0) {
+                const deadline = Date.now() + AFTER_WAIT_MS;
+                const stillOpen = () =>
+                  waitingOn.filter((item) => {
+                    const earlier = stateRef.current.sessions.find((session) => session.id === item.id);
+                    return Boolean(earlier) && !isTerminalRunStatus(earlier?.agentRun?.status);
+                  });
+                while (stillOpen().length > 0 && Date.now() < deadline) {
+                  await new Promise((resolve) => setTimeout(resolve, AFTER_POLL_MS));
+                }
+                const sessionsNow = stateRef.current.sessions;
+                const rows = sessionsNow.find((session) => session.id === parent.id)?.lineup?.rows ?? [];
+                const finished = waitingOn.map((item) => {
+                  const earlier = sessionsNow.find((session) => session.id === item.id);
+                  return {
+                    name: item.name,
+                    status: earlier?.agentRun?.status ?? "completed",
+                    report: rows.find((row) => row.childId === item.id)?.report ?? childReportText(earlier) ?? "",
+                    ...(earlier?.agentRun?.changedFiles?.length ? { changedFiles: earlier.agentRun.changedFiles } : {}),
+                  };
+                });
+                const open = stillOpen();
+                notStarted = open.length > 0
+                  ? `Did not start: ${open.map((item) => item.name).join(", ")} had not finished after ${Math.round(AFTER_WAIT_MS / 3_600_000)} hours.`
+                  : afterBlockedReason(finished);
+                if (notStarted) {
+                  markChildFailure(new Error(notStarted));
+                  return "";
+                }
+                if (stateRef.current.sessions.find((session) => session.id === childId)?.agentRun?.status !== "running") return "";
+                afterNote = afterBriefFor(finished);
+                setState((current) => ({
+                  ...current,
+                  sessions: current.sessions.map((session) =>
+                    session.id === parent.id && session.lineup
+                      ? { ...session, lineup: setLineupRowStatus(session.lineup, childId, "running") }
+                      : session,
+                  ),
+                }));
+              }
+              return runChild();
+            };
             if (!waitForReply) {
               const startedBoard = boundLinkReply({
                 crew: spawnCrew,
@@ -6902,7 +6975,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                     folder: admitted.cwd,
                     vendor: vendorDisplayName(spec.provider),
                     ...(spawnModelLabel ? { model: spawnModelLabel } : {}),
-                    status: "running",
+                    status: waitingAtStart ? "queued" : "running",
                     startedAt,
                     ...(planStepId ? { planStepId } : {}),
                     ...(rationale ? { rationale } : {}),
@@ -6930,21 +7003,30 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                     access: accessReceipt,
                     routingMode: routedWorkerIsRouted ? "auto" : "manual",
                     ...(routedWorkerIsRouted && routeDecision ? { routingDecision: routeDecision } : {}),
-                    howToUse: spawnContinuationHowToUse(workerName, Boolean(priorWorker)),
+                    ...(waitingAtStart ? { waitingFor: waitingOn.map((item) => item.name) } : {}),
+                    howToUse: spawnContinuationHowToUse(
+                      workerName,
+                      Boolean(priorWorker),
+                      waitingAtStart ? waitingOn.map((item) => item.name) : [],
+                    ),
                   },
                   null,
                   2,
                 ),
               });
-              void runChild().catch(markChildFailure);
+              void startWhenReady().catch(markChildFailure);
               return;
             }
             let fallback = "";
             try {
-              fallback = await runChild();
+              fallback = await startWhenReady();
             } catch (error) {
               markChildFailure(error);
               throw error;
+            }
+            if (notStarted) {
+              await replyAsk({ error: notStarted });
+              return;
             }
             if (terminalFailure) {
               const failed = stateRef.current.sessions.find((item) => item.id === childId);

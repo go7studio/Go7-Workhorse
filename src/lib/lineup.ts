@@ -359,9 +359,23 @@ export function markLineupNotified(lineup: DeskLineup, now = Date.now()): DeskLi
   return { ...lineup, notifiedAt: now };
 }
 
+/** A head verifies before it reports. It relayed "3/3 green" unrun in three live runs out of four. */
+export const JOIN_CHECK_RULE =
+  "Before you write it, check the work where you can: run the project's own check (its tests, or its build when it has no tests) in the folder above, and open the files the workers changed. Say which results you checked yourself and which are only a worker's word.";
+
+/** The files the desk saw change, per worker, cut short so a big refactor does not bury the reports. */
+const JOIN_CHANGED_FILES = 12;
+
 export function lineupJoinPrompt(
   lineup: DeskLineup | undefined,
-  options?: { continuePlan?: boolean; parentTookOver?: boolean; usage?: UsageEvent[]; missionCap?: string },
+  options?: {
+    continuePlan?: boolean;
+    parentTookOver?: boolean;
+    usage?: UsageEvent[];
+    missionCap?: string;
+    /** Files each worker left changed, by child id, from git rather than from its report. */
+    changed?: Record<string, string[]>;
+  },
 ): string {
   const user = lineup?.userText?.trim() || "(unknown)";
   const id = lineup?.id?.trim() || "(none)";
@@ -390,6 +404,13 @@ export function lineupJoinPrompt(
     // Who ran the slice, from the desk's own record. A head writing "who did
     // what" from memory credited a coding slice to a model that never ran it.
     if (row.vendor || row.model) lines.push(`ran on: ${[row.vendor, row.model].filter(Boolean).join(" · ")}`);
+    // What changed on disk, from the desk's own diff. A report can say it
+    // touched nothing and still have rewritten a test.
+    const changed = options?.changed?.[row.childId] ?? [];
+    if (changed.length > 0) {
+      const more = changed.length - JOIN_CHANGED_FILES;
+      lines.push(`changed: ${changed.slice(0, JOIN_CHANGED_FILES).join(", ")}${more > 0 ? `, and ${more} more` : ""}`);
+    }
     // A slice that stopped short says why here, so the join is written from
     // the reason rather than from a report that trails off mid-sentence.
     if (row.error?.trim()) lines.push(`why: ${row.error.trim()}`);
@@ -418,6 +439,7 @@ export function lineupJoinPrompt(
     lines.push(
       "Answer the user in your own words as this chat’s bot. Write one combined review of what the crew found.",
       "This is a report join, not a new assignment. Do not spawn another worker or checker, even when a report says FAIL. Report unresolved findings and stop unless continuing an explicitly enabled Mission within its limits.",
+      JOIN_CHECK_RULE,
       "Start with blockers, then the rest. Name which worker found each item.",
       "When you say which bot or model did a slice, use its `ran on` line above. Do not name one from memory.",
       "Use the structured findings, then the prose reports for context.",
@@ -479,7 +501,7 @@ export function formatAwaitAgentsSnapshot(input: {
         running.length === 0
           ? input.reports?.some((row) => row.executionOwner === "parent")
             ? "Workers finished, but the parent took over. Do not claim a fully Workhorse-owned completion. Join the reports and say who did the finishing work."
-            : "All workers finished and their reports are above. Join them now for the user. Start with blockers, then the rest, and name which worker found each item. The desk will not send a separate join. Do not ask the user to pick 1/2/3."
+            : `All workers finished and their reports are above. Join them now for the user. ${JOIN_CHECK_RULE.replace("the folder above", "the project folder")} Start with blockers, then the rest, and name which worker found each item. The desk will not send a separate join. Do not ask the user to pick 1/2/3.`
           : "Workers are still running. Keep talking to the user. Do not ask them to pick. Do not sit on this tool.",
     },
     null,
@@ -1001,12 +1023,18 @@ export function maybeEnqueueLineupJoin(
   const missionCap = parent.lineup.mission
     ? missionCapError({ sessions, parentId, mission: parent.lineup.mission, usage })
     : undefined;
+  const changed: Record<string, string[]> = {};
+  for (const row of parent.lineup.rows) {
+    const files = sessions.find((session) => session.id === row.childId)?.agentRun?.changedFiles ?? [];
+    if (files.length > 0) changed[row.childId] = files;
+  }
   const queued = enqueuePrompt(broken, parentId, {
     text: lineupJoinPrompt(parent.lineup, {
       continuePlan: parent.planRun?.status === "running",
       parentTookOver: crewHasParentTakeover(sessions, parentId),
       ...(usage ? { usage } : {}),
       ...(missionCap ? { missionCap } : {}),
+      ...(Object.keys(changed).length > 0 ? { changed } : {}),
     }),
     hideUser: true,
     joinAttempt: 1,

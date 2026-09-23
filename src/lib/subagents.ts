@@ -516,11 +516,91 @@ export function formatParentCrewLine(crew: readonly ParentCrewMember[]): string 
     .join("; ")}`;
 }
 
-export function spawnContinuationHowToUse(workerName: string, reused: boolean): string {
+export function spawnContinuationHowToUse(workerName: string, reused: boolean, waitingFor: string[] = []): string {
   const who = reused
     ? `${workerName} picked this up with what it already knew.`
     : `${workerName} is new to this work.`;
-  return `Worker is running in its own chat. ${who} For the same topic pass worker="${workerName}" so it keeps what it learned. Leave worker empty to mint a new name for a new topic. A busy worker still gets a colleague. Spawn the rest with wait=false, then stop. The desk joins reports later. Do not sit on workhorse_await_agents or ask the user to pick.`;
+  const start = waitingFor.length > 0
+    ? `${workerName} starts when ${joinNames(waitingFor)} ${waitingFor.length === 1 ? "finishes" : "finish"}, and gets ${waitingFor.length === 1 ? "that report" : "their reports"}.`
+    : "Worker is running in its own chat.";
+  return `${start} ${who} For the same topic pass worker="${workerName}" so it keeps what it learned. Leave worker empty to mint a new name for a new topic. A busy worker still gets a colleague. Spawn the rest with wait=false, then stop. The desk joins reports later. Do not sit on workhorse_await_agents or ask the user to pick.`;
+}
+
+function joinNames(names: string[]): string {
+  if (names.length <= 1) return names[0] ?? "";
+  return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+}
+
+/** A worker a spawn waits on: its chat id and the name the head knows it by. */
+export type SpawnPrerequisite = { id: string; name: string };
+
+/**
+ * Who a spawn waits for, by the names the head gave them.
+ *
+ * A release note written beside the code it announces documented a function
+ * that did not exist yet: the head started both at once because it had no way
+ * to say one comes after the other. Only this chat's own workers can be named,
+ * by name or chat id.
+ */
+export function resolveSpawnAfter(
+  after: unknown,
+  parentId: string,
+  sessions: ReadonlyArray<Pick<Session, "id" | "parentId" | "workerName" | "archivedAt">>,
+): { ok: true; waitFor: SpawnPrerequisite[] } | { ok: false; error: string } {
+  const names = (Array.isArray(after) ? after : typeof after === "string" ? [after] : [])
+    .filter((item): item is string => typeof item === "string")
+    .map((item) => item.trim())
+    .filter(Boolean);
+  const waitFor: SpawnPrerequisite[] = [];
+  for (const name of names) {
+    const asked = name.toLowerCase();
+    const worker = sessions.find(
+      (session) =>
+        session.parentId === parentId &&
+        !session.archivedAt &&
+        (session.id === name || session.workerName?.trim().toLowerCase() === asked),
+    );
+    if (!worker) return { ok: false, error: `after names ${name}, but this chat has no worker by that name` };
+    if (!waitFor.some((item) => item.id === worker.id)) waitFor.push({ id: worker.id, name: worker.workerName?.trim() || name });
+  }
+  return { ok: true, waitFor };
+}
+
+/** How much of each earlier report a waiting worker is handed. */
+const AFTER_REPORT_CHARS = 1_200;
+
+/**
+ * What a worker that waited is told when its turn comes: who finished first,
+ * how, what they changed, and what they reported. It is added under the
+ * head's brief, never in place of it.
+ */
+export function afterBriefFor(
+  finished: Array<{ name: string; status: string; report: string; changedFiles?: string[] }>,
+): string {
+  if (finished.length === 0) return "";
+  const lines = ["You started after these workers on this chat finished. Read what they changed before you begin:"];
+  for (const item of finished) {
+    const report = item.report.replace(/\s+/g, " ").trim();
+    const said = report
+      ? `${report.slice(0, AFTER_REPORT_CHARS)}${report.length > AFTER_REPORT_CHARS ? "…" : ""}`
+      : "no report";
+    const changed = item.changedFiles?.length ? ` Changed: ${item.changedFiles.slice(0, 12).join(", ")}.` : "";
+    lines.push(`- ${item.name} (${item.status}).${changed} Report: ${said}`);
+  }
+  return lines.join("\n");
+}
+
+/**
+ * Why a waiting worker never started: one it waited on ended without
+ * finishing its work. Starting anyway would spend a run on a slice whose
+ * ground was never laid.
+ */
+export function afterBlockedReason(
+  finished: Array<{ name: string; status: string }>,
+): string | undefined {
+  const broken = finished.filter((item) => item.status !== "completed");
+  if (broken.length === 0) return undefined;
+  return `Did not start: ${broken.map((item) => `${item.name} ${item.status}`).join(", ")}, and this slice was to come after ${broken.length === 1 ? "it" : "them"}.`;
 }
 
 /**

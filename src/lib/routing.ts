@@ -774,6 +774,9 @@ export function describeRoutingMiss(
   return `no capable route${skipped}`;
 }
 
+/** How far into a worker's brief its slice is stated. The rest is the head's background. */
+const WORKER_SLICE_HEAD = 600;
+
 export function inferRoutingTier(
   prompt: string,
   attachments: ChatImage[] = [],
@@ -789,18 +792,24 @@ export function inferRoutingTier(
   if (extras?.role === "auditor") return "deep";
   const text = prompt.trim();
   const lower = text.toLowerCase();
+  const workerBrief = extras?.role === "builder" || extras?.role === "worker";
+  // A worker's depth is the slice it was given, not the background a careful
+  // head wrote around it. A MiniMax head's detailed brief for a 120-word
+  // release note routed Deep on its length alone and put Fable 5.1 on it, and
+  // a "no bugs" deep in the background reads as bug work.
+  const marked = workerBrief ? lower.slice(0, WORKER_SLICE_HEAD) : lower;
   // Hard-work markers route deep even in a short prompt. All three reviews
   // agreed the safe error is expensive (frontier on trivia), not harmful (a
   // light model on "list every concurrency bug and prove linearizability").
-  const deep = /\b(architect|migration|security|threat|root cause|debug|refactor|review|investigate|research|strategy|production|end[- ]to[- ]end|multi[- ]agent|bug|prove|concurrenc\w*|deadlock|race|lineariz\w*|crash|leak)\b/.test(lower);
-  const creative = /\b(creative|story|narrative|poem|fiction|worldbuild|invent a|brainstorm)\b/.test(lower);
+  const deep = /\b(architect|migration|security|threat|root cause|debug|refactor|review|investigate|research|strategy|production|end[- ]to[- ]end|multi[- ]agent|bug|prove|concurrenc\w*|deadlock|race|lineariz\w*|crash|leak)\b/.test(marked);
+  const creative = /\b(creative|story|narrative|poem|fiction|worldbuild|invent a|brainstorm)\b/.test(marked);
   // A short prompt with a quick keyword still is not quick when it reads like
   // code: "classify this function" deserves the balanced band, not Luna.
   const quick = text.length < 180 && !looksCodey(text) && /\b(reply|rename|format|translate|summari[sz]e|list|extract|classify|one[- ]line|quick)\b/.test(lower);
   const media = attachments.some((item) => item.kind === "audio" || item.kind === "video" || item.kind === "document");
   const long = text.length > 1200;
-  if (extras?.role === "builder" || extras?.role === "worker") {
-    if (deep || creative || long || (media && text.length > 240)) return "deep";
+  if (workerBrief) {
+    if (deep || creative || (media && text.length > 240)) return "deep";
     return "balanced";
   }
   if (deep || creative || long || (media && text.length > 240)) return "deep";

@@ -380,6 +380,8 @@ async function readBotKnowledge(page: Awaited<ReturnType<typeof app.firstWindow>
 const startedAt = Date.now();
 let sentAt = 0;
 let failure: unknown;
+/** Workers seen waiting on others. A vendor head's tool calls carry no names, but the lineup says who was queued. */
+const queuedSeen = new Set<string>();
 let botKnowledge: BotKnowledgeView[] | { error: string } = [];
 try {
   const page = await app.firstWindow();
@@ -417,6 +419,7 @@ try {
       }
       const head = saved.sessions?.find((session) => session.id === rootSessionId);
       const workers = (saved.sessions ?? []).filter((session) => session.parentId === rootSessionId);
+      for (const row of head?.lineup?.rows ?? []) if (row.status === "queued") queuedSeen.add(String(row.title));
       const workersDone = workers.length > 0 && workers.every((session) => session.agentRun && session.agentRun.status !== "running");
       const lastWorkerEnd = Math.max(0, ...workers.map((session) => session.agentRun?.finishedAt ?? 0));
       const headReplied = (head?.messages ?? []).some(
@@ -475,11 +478,14 @@ const evidence = {
     .filter((event) => event.type === "tool/call")
     .map((event) => `${sinceSent(event.at)}s ${event.name}`),
   usedFindBots: headEvents.some((event) => event.type === "tool/call" && event.name === "workhorse_find_bots"),
-  usedAfter: headEvents.some(
-    (event) =>
-      (event.type === "tool/call" && event.name === "workhorse_spawn_agent" && /"after"/.test(String(event.arguments ?? ""))) ||
-      (event.type === "tool/result" && /"waitingFor"/.test(String(event.text ?? ""))),
-  ),
+  usedAfter:
+    queuedSeen.size > 0 ||
+    headEvents.some(
+      (event) =>
+        (event.type === "tool/call" && event.name === "workhorse_spawn_agent" && /"after"/.test(String(event.arguments ?? ""))) ||
+        (event.type === "tool/result" && /"waitingFor"/.test(String(event.text ?? ""))),
+    ),
+  queuedWorkers: [...queuedSeen],
   checkedAfterReports: headEvents
     .filter((event) => event.type === "tool/call" && lastWorkerEnd > 0 && event.at > lastWorkerEnd)
     .map((event) => `${event.name} ${clip(event.arguments, 160)}`),

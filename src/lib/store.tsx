@@ -212,6 +212,7 @@ import {
 import { botKnowledgeSnapshot, orchestrationKnowledgeBrief, ORCHESTRATION_TASK_DOMAINS } from "./domain-benchmark";
 import type { TaskDomain } from "./types";
 import { applyBotScoresFeed, normalizeBotScoresFeed, type BotScoresView } from "./bot-scores";
+import { applyModelPrices, normalizeModelPricesFeed } from "./model-prices";
 import { findBots } from "./bot-search";
 import type { RoutingCandidate } from "./routing";
 import { orchestrationEnabled } from "./workhorse-rules";
@@ -6028,12 +6029,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             const routingRole = spawnRole === "helper" ? "worker" as const : spawnRole;
             const rankCoordinatorPick = orchestrationBench && coordinatorModel && !userLockedModel;
             const spawnAllowlist = spawnAllowlistForCaller(latest.sessions, caller.id);
+            const runDraws = orchestrationBench ? measureRunDraws(latest.usage, latest.sessions) : undefined;
             const routeCandidates = routeSpawn
               ? filterCandidatesBySpawnAllowlist(
                   constrainRouteCandidatesForSpawn(
                     withRunDraws(
                       routingCandidatesForDesk(latest.settings, routeStatuses, latest.deskPlans ?? plansRef.current),
-                      measureRunDraws(latest.usage, latest.sessions),
+                      runDraws,
                     ),
                     {
                       provider: payload.provider,
@@ -6067,6 +6069,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 : {}),
               effortHint: parseEffort(String(payload.effort ?? "")) ?? null,
               ...(orchestrationBench ? { activeLoad: activeRouteLoad(latest.sessions, recentRoutesRef.current) } : {}),
+              ...(runDraws?.typical ? { typicalRun: runDraws.typical } : {}),
               ...(coordinatorRows.length > 0
                 ? { preferred: coordinatorRows.map(({ provider, model, customBotId }) => ({ provider, model, customBotId })) }
                 : {}),
@@ -9194,8 +9197,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     if (!raw || typeof raw !== "object") return;
     const view = raw as Partial<BotScoresView>;
     const feed = normalizeBotScoresFeed(view.feed);
+    const prices = normalizeModelPricesFeed(view.prices);
     applyBotScoresFeed(feed);
-    setBotScores({ feed, status: { refreshing: false, ...(view.status ?? {}) } });
+    applyModelPrices(prices);
+    setBotScores({ feed, prices, status: { refreshing: false, ...(view.status ?? {}) } });
   }, []);
   useEffect(() => {
     if (!ready) return;

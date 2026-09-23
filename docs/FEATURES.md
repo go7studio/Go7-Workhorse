@@ -231,12 +231,15 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
   takes what Opus 4.7 or 4.6 would have, even when a coordinator named the
   older one. A model on another plan, or one the boards rate better at the
   task, keeps its place.
-- What a task takes from a plan is tracked. The desk measures each model's
-  finished worker runs from its own Usage ledger (median tokens a run: fresh
-  input, output and cache writes), and a model whose runs take twice the desk's
-  median costs one more price step, half as much one less, once it has three
-  runs and the desk six. Bot knowledge, `workhorse_find_bots` and the head's
-  brief show it.
+- What a task costs is weighed. Each model's input, output and cache-read list
+  prices come from OpenRouter's public model list (no key, read once a day with
+  the scores; a model it does not list reads its family's price tier). A
+  typical finished run on this desk (the median fresh input, output and cache
+  reads in its Usage ledger) is priced at them, and scaled by what the model's
+  own runs take once it has three runs and the desk six. Each doubling of that
+  cost over the cheapest bot that clears the bar gives up quality: 0.9 points on
+  Quick, 0.35 on Balanced, 0.15 on Deep. Bot knowledge, `workhorse_find_bots`
+  and the head's brief show each bot's run cost.
 - `workhorse_find_bots` is the orchestrator's search: give it the task and a
   squad size, and it returns the bots the desk would pick with each one's score,
   where the score came from, its plan terms, a squad spread over pools, and why

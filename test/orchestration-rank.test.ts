@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test, { afterEach } from "node:test";
 import { applyBotScoresFeed, type BotScoresFeed } from "../src/lib/bot-scores";
+import { applyModelPrices, pricesFromModelList } from "../src/lib/model-prices";
 import {
   activeRouteLoad,
   candidatesNamedBy,
@@ -17,7 +18,20 @@ import {
 import type { ProviderId, RoutingSettings, Session, UsageEvent } from "../src/lib/types";
 import { measureRunDraws, runDrawKey, type RunDraws } from "../src/lib/usage";
 
-afterEach(() => applyBotScoresFeed(null));
+afterEach(() => {
+  applyBotScoresFeed(null);
+  applyModelPrices(null);
+});
+
+/** OpenRouter's list prices for the desk's models, USD per token as it quotes them. */
+function listPrices(rows: Array<[id: string, inPerM: number, outPerM: number]>) {
+  applyModelPrices(
+    pricesFromModelList(
+      { data: rows.map(([id, inPerM, outPerM]) => ({ id, pricing: { prompt: String(inPerM / 1e6), completion: String(outPerM / 1e6) } })) },
+      "2026-09-23T00:00:00.000Z",
+    ),
+  );
+}
 
 // Thursday; the weekly pools below reset Monday, so 3/7 of the week is gone
 // and a pool at 20% used has spare leftover for the days left.
@@ -80,6 +94,8 @@ test("a pool inside its reserve with days to run gives way to an equal model wit
 });
 
 test("quality still wins when the gap is real, however cheap and idle the weaker bot is", () => {
+  // Sol lists at $2/$10; Composer publishes no price and reads its tier's.
+  listPrices([["openai/gpt-5.6-sol", 2, 10], ["minimax/minimax-m3", 0.3, 1.2]]);
   const ranked = rankRoutingCandidates(
     [candidate("codex", "gpt-5.6-sol", 60), candidate("cursor", "composer-2.5", 0), minimax(0)],
     ask("implement the parser", { tier: "balanced", taskDomain: "coding" }),
@@ -246,11 +262,41 @@ test("a model whose runs take more of the plan pays for it, once the desk has me
   const measured = rankRoutingCandidates(withRunDraws(rows, draws), request, settings);
   assert.equal(measured[0]?.model, "grok-4.6", "the leaner model takes it");
   const sol = measured.find((row) => row.provider === "codex")!.orchestration!;
-  assert.equal(sol.draw?.steps, 1, "twice the desk's median run is one cost step");
+  assert.equal(sol.draw?.applied, 2, "twice the desk's median run doubles what its typical run costs");
+  const grok = measured.find((row) => row.provider === "grok")!.orchestration!;
+  assert.ok(Math.abs(sol.cost.perRun - 4 * grok.cost.perRun) < 1e-9, "same price tier, four times the draw: four times the run cost");
   assert.ok(sol.why.includes("about 200k tokens a finished run over 5 runs, 2× the desk's median"));
   // Two runs are not enough to judge a model by.
   const few = withRunDraws(rows, { ...draws, byModel: { ...draws.byModel, [runDrawKey("grok", "grok-4.6")]: { medianTokens: 50_000, runs: 2 } } });
   assert.equal(few.find((row) => row.provider === "grok")?.draw, undefined);
+});
+
+test("at alike quality the cheaper list price takes the work, and a dearer model needs a real quality lead", () => {
+  const request = ask("implement the parser", { tier: "balanced", taskDomain: "coding" });
+  // Sol and Grok 4.6 score alike for coding; Grok's output tokens cost less.
+  listPrices([["openai/gpt-5.6-sol", 2, 10], ["x-ai/grok-4.6", 2, 6], ["anthropic/claude-opus-5", 5, 25]]);
+  const alike = rankRoutingCandidates([candidate("codex", "gpt-5.6-sol"), candidate("grok", "grok-4.6")], request, settings);
+  assert.equal(alike[0]?.model, "grok-4.6");
+  const sol = alike.find((row) => row.provider === "codex")!.orchestration!;
+  assert.ok(sol.why.includes("about $0.42 a typical run ($2/M in, $10/M out)"));
+  // Opus leads Sol by a point at two and a half times the run cost: the point is worth it.
+  const lead = rankRoutingCandidates([candidate("codex", "gpt-5.6-sol"), candidate("claude", "claude-opus-5")], request, settings);
+  assert.equal(lead[0]?.model, "claude-opus-5");
+  // At ten times the run cost it is not.
+  listPrices([["openai/gpt-5.6-sol", 2, 10], ["anthropic/claude-opus-5", 20, 100]]);
+  const dear = rankRoutingCandidates([candidate("codex", "gpt-5.6-sol"), candidate("claude", "claude-opus-5")], request, settings);
+  assert.equal(dear[0]?.model, "gpt-5.6-sol");
+});
+
+test("run costs are priced on this desk's own typical run once it has one", () => {
+  listPrices([["openai/gpt-5.6-sol", 2, 10]]);
+  const ranked = rankRoutingCandidates(
+    [candidate("codex", "gpt-5.6-sol")],
+    ask("implement the parser", { tier: "balanced", taskDomain: "coding", typicalRun: { input: 10_000, output: 1_000, cacheRead: 0, cacheWrite: 0 } }),
+    settings,
+  );
+  assert.ok(Math.abs(ranked[0]!.orchestration!.cost.perRun - 0.03) < 1e-9);
+  assert.ok(ranked[0]!.orchestration!.why.includes("about 3¢ a typical run ($2/M in, $10/M out)"));
 });
 
 test("a finished worker run's draw is what the ledger recorded for it while it ran", () => {

@@ -68,8 +68,13 @@ export type BotScoresStatus = {
   refreshing: boolean;
 };
 
-/** The cached table plus its status: what `scores:read` returns and `scores:updated` pushes. */
-export type BotScoresView = { feed: BotScoresFeed | null; status: BotScoresStatus };
+/** The cached tables plus their status: what `scores:read` returns and `scores:updated` pushes. */
+export type BotScoresView = {
+  feed: BotScoresFeed | null;
+  /** Per-token list prices (see model-prices.ts). Absent from a desk that never read them. */
+  prices?: import("./model-prices").ModelPricesFeed | null;
+  status: BotScoresStatus;
+};
 
 const TABLE_LABEL: Record<ArenaTable, string> = {
   "text:overall": "LMArena text",

@@ -7,6 +7,9 @@
  * files routing reads (about 0.7 MB together), reduce them to the rows it
  * uses, and keep them in userData. A new model on the leaderboard reaches the
  * desk the day it is published. The renderer never fetches.
+ *
+ * The same daily look reads OpenRouter's public model list (no key) for each
+ * model's input, output and cache-read price, reduced to one row per model.
  */
 
 import fs from "node:fs";
@@ -21,6 +24,7 @@ import {
   type BotScoresStatus,
   type BotScoresView,
 } from "../src/lib/bot-scores";
+import { MODEL_PRICES_URL, normalizeModelPricesFeed, pricesFromModelList, type ModelPricesFeed } from "../src/lib/model-prices";
 
 const HUB = "https://huggingface.co";
 const PROBE_TIMEOUT_MS = 15_000;
@@ -30,6 +34,10 @@ const FILE_BYTES_CAP = 16 * 1024 * 1024;
 /** How often the desk asks whether the dataset moved. */
 export const BOT_SCORES_CHECK_EVERY_MS = 24 * 60 * 60 * 1000;
 const CACHE_FILE = "lmarena.json";
+const PRICES_TIMEOUT_MS = 30_000;
+const PRICES_BYTES_CAP = 16 * 1024 * 1024;
+/** How a price error follows a leaderboard error in one status line. */
+const PRICE_ERROR_JOIN = " · prices:";
 const HEADERS = { "User-Agent": "Go7-Workhorse (bot scores)" };
 
 export type BotScoresHostOptions = {
@@ -52,7 +60,7 @@ export type BotScoresHost = {
   stop: () => void;
 };
 
-type CacheFile = { feed: BotScoresFeed | null; checkedAt?: string; lastError?: string };
+type CacheFile = { feed: BotScoresFeed | null; prices?: ModelPricesFeed | null; checkedAt?: string; lastError?: string };
 
 async function fetchWithTimeout(fetchImpl: typeof fetch, url: string, ms: number): Promise<Response> {
   const abort = new AbortController();
@@ -114,6 +122,7 @@ export function createBotScoresHost(options: BotScoresHostOptions): BotScoresHos
       const parsed = JSON.parse(fs.readFileSync(cachePath(), "utf8")) as Partial<CacheFile>;
       return {
         feed: normalizeBotScoresFeed(parsed.feed),
+        prices: normalizeModelPricesFeed(parsed.prices),
         ...(typeof parsed.checkedAt === "string" ? { checkedAt: parsed.checkedAt } : {}),
         ...(typeof parsed.lastError === "string" ? { lastError: parsed.lastError.slice(0, 180) } : {}),
       };
@@ -144,7 +153,7 @@ export function createBotScoresHost(options: BotScoresHostOptions): BotScoresHos
     refreshing: inFlight !== null,
   });
 
-  const view = (): BotScoresView => ({ feed: state.feed, status: status() });
+  const view = (): BotScoresView => ({ feed: state.feed, prices: state.prices ?? null, status: status() });
 
   const download = async (
     sha: string,
@@ -182,9 +191,43 @@ export function createBotScoresHost(options: BotScoresHostOptions): BotScoresHos
     return feed;
   };
 
+  /** Prices, when the last read is a day old (or forced). A failure keeps the last good table. */
+  const refreshPrices = async (force: boolean): Promise<boolean> => {
+    const fetched = state.prices ? Date.parse(state.prices.fetchedAt) : Number.NaN;
+    if (!force && Number.isFinite(fetched) && now() - fetched < BOT_SCORES_CHECK_EVERY_MS) return false;
+    // The leaderboard's own error, if any, stays beside a price error rather than under it.
+    const { lastError, ...rest } = state;
+    const scoresError = lastError?.split(PRICE_ERROR_JOIN)[0];
+    const kept = scoresError && !scoresError.startsWith("prices:") ? scoresError : undefined;
+    try {
+      const response = await fetchWithTimeout(fetchImpl, MODEL_PRICES_URL, PRICES_TIMEOUT_MS);
+      if (response.status !== 200) throw new Error(`HTTP ${response.status}`);
+      const body = await readCapped(response, PRICES_BYTES_CAP);
+      if (!body) throw new Error("reply too large");
+      const prices = pricesFromModelList(JSON.parse(Buffer.from(body).toString("utf8")), new Date(now()).toISOString());
+      if (!prices) throw new Error("no priced model in the reply");
+      const moved = JSON.stringify(prices.prices) !== JSON.stringify(state.prices?.prices);
+      state = { ...rest, prices, ...(kept ? { lastError: kept } : {}) };
+      save();
+      return moved;
+    } catch (error) {
+      const priceError = `prices: ${errorText(error)}`;
+      state = { ...rest, lastError: kept ? `${kept}${PRICE_ERROR_JOIN}${priceError.slice("prices:".length)}` : priceError };
+      save();
+      return false;
+    }
+  };
+
   const run = async (force: boolean): Promise<BotScoresView> => {
+    const scoresMoved = await refreshScores(force);
+    const pricesMoved = await refreshPrices(force);
+    if (scoresMoved || pricesMoved) options.onUpdate?.(view());
+    return view();
+  };
+
+  const refreshScores = async (force: boolean): Promise<boolean> => {
     const checked = state.checkedAt ? Date.parse(state.checkedAt) : Number.NaN;
-    if (!force && state.feed && Number.isFinite(checked) && now() - checked < BOT_SCORES_CHECK_EVERY_MS) return view();
+    if (!force && state.feed && Number.isFinite(checked) && now() - checked < BOT_SCORES_CHECK_EVERY_MS) return false;
     try {
       const response = await fetchWithTimeout(fetchImpl, `${HUB}/api/datasets/${ARENA_DATASET}`, PROBE_TIMEOUT_MS);
       if (response.status !== 200) throw new Error(`version check: HTTP ${response.status}`);
@@ -195,19 +238,18 @@ export function createBotScoresHost(options: BotScoresHostOptions): BotScoresHos
       const unchanged = state.feed?.sha === info.sha;
       if (!unchanged || force) {
         const feed = await download(info.sha, info.lastModified, info.files);
-        state = { feed, checkedAt: new Date(now()).toISOString() };
+        state = { feed, prices: state.prices ?? null, checkedAt: new Date(now()).toISOString() };
         save();
-        options.onUpdate?.(view());
-        return view();
+        return true;
       }
-      state = { feed: state.feed, checkedAt: new Date(now()).toISOString() };
+      state = { feed: state.feed, prices: state.prices ?? null, checkedAt: new Date(now()).toISOString() };
       save();
-      return view();
+      return false;
     } catch (error) {
       // Keep the last good table. Try again on the next look.
       state = { ...state, lastError: errorText(error) };
       save();
-      return view();
+      return false;
     }
   };
 

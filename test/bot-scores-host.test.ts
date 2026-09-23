@@ -6,6 +6,7 @@ import test from "node:test";
 import { parquetReadObjects } from "hyparquet";
 import { BOT_SCORES_CHECK_EVERY_MS, createBotScoresHost, datasetFilesFromInfo } from "../electron/bot-scores-host";
 import { arenaTablesFromRows, ARENA_CONFIGS, type BotScoresView } from "../src/lib/bot-scores";
+import { MODEL_PRICES_URL } from "../src/lib/model-prices";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
 const SHA_A = "a".repeat(40);
@@ -37,18 +38,34 @@ const ROWS: Record<string, Record<string, unknown>[]> = {
   agent: [{ model_name: "Minimax M3", organization: "minimax", score: -0.05, rank: 37n, observation_count: 9n, category: "overall", leaderboard_publish_date: "2026-09-13" }],
 };
 
+/** OpenRouter's list shape: price per token as a string. */
+function modelList(opusIn = "0.000004") {
+  return {
+    data: [
+      { id: "anthropic/claude-opus-5.5", pricing: { prompt: opusIn, completion: "0.00002", input_cache_read: "0.0000002" } },
+      { id: "minimax/minimax-m3", pricing: { prompt: "0.0000003", completion: "0.0000012" } },
+      { id: "minimax/minimax-m3:free", pricing: { prompt: "0", completion: "0" } },
+      { id: "~anthropic/claude-opus-latest", pricing: { prompt: "0.000004", completion: "0.00002" } },
+      { id: "vendor/unpriced-model" },
+    ],
+  };
+}
+
 function tempDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), "workhorse-bot-scores-"));
 }
 
 function harness(dir: string) {
-  const net = { sha: SHA_A, down: false, calls: [] as string[] };
+  const net = { sha: SHA_A, down: false, pricesDown: false, opusIn: "0.000004", calls: [] as string[] };
   const clock = { now: Date.parse("2026-09-23T12:00:00.000Z") };
   const updates: BotScoresView[] = [];
   const fetchImpl = (async (input: string | URL | Request) => {
     const href = String(input);
     net.calls.push(href);
     if (net.down) return new Response("unavailable", { status: 503 });
+    if (href === MODEL_PRICES_URL) {
+      return net.pricesDown ? new Response("unavailable", { status: 502 }) : new Response(JSON.stringify(modelList(net.opusIn)), { status: 200 });
+    }
     if (href === "https://huggingface.co/api/datasets/lmarena-ai/leaderboard-dataset") {
       return new Response(JSON.stringify(datasetInfo(net.sha)), { status: 200 });
     }
@@ -81,7 +98,7 @@ test("scores download once, are checked at most daily, and download again only w
     const { host, net, clock, updates } = harness(dir);
     const first = await host.refresh();
     assert.equal(first.feed?.sha, SHA_A);
-    assert.equal(net.calls.length, 1 + CONFIGS.length, "one commit check, then one file per arena");
+    assert.equal(net.calls.length, 2 + CONFIGS.length, "one commit check, one file per arena, and the price list");
     assert.equal(updates.length, 1);
     assert.equal(first.feed?.tables["text:overall"]?.[0]?.name, "claude-opus-5-high");
     assert.equal(first.feed?.tables["agent:overall"]?.[0]?.rank, 37);
@@ -94,15 +111,20 @@ test("scores download once, are checked at most daily, and download again only w
 
     clock.now += BOT_SCORES_CHECK_EVERY_MS + 1;
     await host.refresh();
-    assert.deepEqual(net.calls, ["https://huggingface.co/api/datasets/lmarena-ai/leaderboard-dataset"], "same commit: a check, no download");
+    assert.deepEqual(
+      net.calls,
+      ["https://huggingface.co/api/datasets/lmarena-ai/leaderboard-dataset", MODEL_PRICES_URL],
+      "same commit: a check, no download, and the day's price list",
+    );
+    assert.equal(updates.length, 1, "the same prices again are not news");
 
     net.calls.length = 0;
     net.sha = SHA_B;
     clock.now += BOT_SCORES_CHECK_EVERY_MS + 1;
     const moved = await host.refresh();
     assert.equal(moved.feed?.sha, SHA_B);
-    assert.equal(net.calls.length, 1 + CONFIGS.length);
-    assert.ok(net.calls.slice(1).every((url) => url.includes(`/resolve/${SHA_B}/`)), "files are read at the commit that was checked");
+    assert.equal(net.calls.length, 2 + CONFIGS.length);
+    assert.ok(net.calls.slice(1, -1).every((url) => url.includes(`/resolve/${SHA_B}/`)), "files are read at the commit that was checked");
     assert.equal(updates.length, 2);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
@@ -159,4 +181,32 @@ test("a real Agent Arena file decodes into the table routing reads", async () =>
   assert.ok(table.every((row) => Number.isFinite(row.value) && Number.isInteger(row.rank)));
   assert.ok(table.some((row) => /minimax m3/i.test(row.name)));
   assert.match(reduced.published["agent:overall"] ?? "", /^\d{4}-\d{2}-\d{2}$/);
+});
+
+test("prices are read once a day with the scores, one row per model, and a failed read keeps the last good table", async () => {
+  const dir = tempDir();
+  try {
+    const { host, net, clock, updates } = harness(dir);
+    const first = await host.refresh();
+    const prices = first.prices?.prices ?? {};
+    assert.deepEqual(Object.keys(prices).sort(), ["claude opus 5 5", "minimax m 3"], "free variants, floating aliases and unpriced rows are left out");
+    assert.deepEqual(prices["claude opus 5 5"], { id: "anthropic/claude-opus-5.5", inPerM: 4, outPerM: 20, cacheReadPerM: 0.2 });
+    assert.equal(prices["minimax m 3"]?.inPerM, 0.3);
+
+    net.pricesDown = true;
+    net.opusIn = "0.000005";
+    clock.now += BOT_SCORES_CHECK_EVERY_MS + 1;
+    const failed = await host.refresh();
+    assert.equal(failed.prices?.prices["claude opus 5 5"]?.inPerM, 4, "the last good prices still serve");
+    assert.match(failed.status.lastError ?? "", /^prices: HTTP 502$/);
+    assert.equal(harness(dir).host.view().prices?.prices["minimax m 3"]?.outPerM, 1.2, "a new launch starts from the cached prices");
+
+    net.pricesDown = false;
+    const repriced = await host.refresh({ force: true });
+    assert.equal(repriced.prices?.prices["claude opus 5 5"]?.inPerM, 5);
+    assert.equal(repriced.status.lastError, undefined, "a good read clears the price error");
+    assert.equal(updates.length, 2, "one notice for the first read, one for the refresh that changed a price");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });

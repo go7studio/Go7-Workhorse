@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { ORCHESTRATION_TASK_DOMAINS, botKnowledgeSnapshot, durationLabel } from "../lib/domain-benchmark";
 import { botScoresSummary, STRICT_SCALE_NOTE } from "../lib/bot-scores";
 import { activeRouteLoad } from "../lib/routing";
+import { MODEL_PRICES_SOURCE } from "../lib/model-prices";
 import { measureRunDraws } from "../lib/usage";
 import { useStore } from "../lib/store";
 import type { RoutingTaskTier, TaskDomain } from "../lib/types";
@@ -69,6 +70,7 @@ export function BotKnowledgePane() {
   );
   const now = Date.now();
   const summary = botScoresSummary(botScores?.feed ?? null);
+  const prices = botScores?.prices ?? null;
   const status = botScores?.status;
 
   return (
@@ -94,6 +96,14 @@ export function BotKnowledgePane() {
               </>
             ) : (
               <>Desk table only — the public leaderboard has not loaded yet.</>
+            )}
+            {prices ? (
+              <>
+                {" "}
+                Prices: {MODEL_PRICES_SOURCE} · {Object.keys(prices.prices).length} models · read {since(prices.fetchedAt, now)}.
+              </>
+            ) : (
+              <> Prices: each family&apos;s price tier until the public list loads.</>
             )}
             {status?.lastError ? <span className="bot-knowledge-error"> Last check failed: {status.lastError}</span> : null}
           </span>
@@ -141,6 +151,7 @@ export function BotKnowledgePane() {
             <th>#</th>
             <th>Model</th>
             <th>Score</th>
+            <th>Run</th>
             <th>Source</th>
             <th>Plan</th>
             <th>Why</th>
@@ -158,6 +169,7 @@ export function BotKnowledgePane() {
                 {row.score}/10
                 {row.agentic !== undefined ? <span className="bot-knowledge-agentic"> · agentic {row.agentic}</span> : null}
               </td>
+              <td>{row.runCost ? `${row.runCost}${row.priced ? "" : " (tier)"}` : "—"}</td>
               <td>
                 <span className={`bot-knowledge-origin ${row.origin}`}>{ORIGIN_LABEL[row.origin]}</span> {row.source}
               </td>
@@ -169,7 +181,8 @@ export function BotKnowledgePane() {
       </table>
       <p className="settings-note bot-knowledge-credit">
         Public scores: LMArena leaderboard dataset (huggingface.co/datasets/lmarena-ai/leaderboard-dataset), CC BY 4.0.
-        Checked once a day; downloaded only when it changes.
+        Checked once a day; downloaded only when it changes. Prices: openrouter.ai/api/v1/models, read once a day. Run
+        is what a typical finished run on this desk costs at that list price.
       </p>
     </div>
   );

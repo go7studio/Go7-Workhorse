@@ -29,6 +29,15 @@ import { outcomeVerification } from "./learning-policy";
 import { isAssignedEffort, modelsFor, normalizeModelId, withEffort, contextWindowFor } from "./models";
 import type { WatchPlans, WatchVendorStatus } from "./watch";
 import { compareVersions, deskModelKey, nameGeneration } from "./bot-scores";
+import {
+  DEFAULT_TYPICAL_RUN,
+  priceLabel,
+  resolveModelPrice,
+  runCostLabel,
+  typicalRunCost,
+  type ResolvedModelPrice,
+  type TypicalRun,
+} from "./model-prices";
 import { domainIntelligenceBar } from "./domain-benchmark-catalog";
 import { publishedAgenticScore, resolveDomainScore, type ResolvedDomainScore } from "./domain-score";
 import { detectsImageGenerationIntent, inferTaskDomain, looksCodey } from "./task-domain";
@@ -153,6 +162,8 @@ export type RoutingRequest = {
   activeLoad?: Record<string, number>;
   /** Thinking level the caller asked for. Scores are read for the run at that level. */
   effortHint?: EffortLevel | null;
+  /** What a typical finished run takes on this desk, part by part. Costs are priced on it. */
+  typicalRun?: TypicalRun;
 };
 
 export type RankedRoutingCandidate = RoutingCandidate & {
@@ -1251,20 +1262,24 @@ export function routingSkipReason(
  * and a quick reply does not need a board's leader.
  */
 const ORCHESTRATION_HEADROOM: Record<RoutingTaskTier, number> = { quick: 1, balanced: 3, deep: 10 };
-/** Domain points given up per cost step above the cheapest row that clears the bar. */
-const ORCHESTRATION_COST_WEIGHT: Record<RoutingTaskTier, number> = { quick: 0.9, balanced: 0.2, deep: 0.1 };
+/**
+ * Domain points given up for each doubling of what a typical run costs over the
+ * cheapest row that clears the bar: list price per input and output token
+ * times the desk's typical run, scaled by what the model's own runs take.
+ */
+const ORCHESTRATION_COST_WEIGHT: Record<RoutingTaskTier, number> = { quick: 0.9, balanced: 0.35, deep: 0.15 };
+/** Past this many doublings a dearer row costs no more: 32 times the cheapest already rules it out of anything but deep work. */
+const MAX_COST_DOUBLINGS = 5;
 /** How much a pool's plan terms count against quality on each tier. */
 const ORCHESTRATION_PLAN_WEIGHT: Record<RoutingTaskTier, number> = { quick: 1.5, balanced: 1, deep: 0.5 };
 /** Share of a spawn's quality taken from Agent Arena (tools, long runs) when that arena rates the model. */
 const ORCHESTRATION_AGENTIC_SHARE = 0.2;
 /**
- * Cost steps a model's measured draw adds or takes off: one for each doubling
- * of the desk's median run, since a cost step is roughly twice the price and
- * price times tokens is what a task takes from a plan. Capped both ways so a
- * few odd runs cannot swing a pick.
+ * How far a model's measured draw moves what its typical run costs: its median
+ * run over the desk's, capped both ways so a few odd runs cannot swing a pick.
  */
-const DRAW_STEPS_ADDED = 2;
-const DRAW_STEPS_TAKEN_OFF = 1;
+const DRAW_RATIO_CEILING = 4;
+const DRAW_RATIO_FLOOR = 0.5;
 /** Points a pool gives up for each worker already running on it, so a squad spreads over the desk. */
 const ORCHESTRATION_BUSY_POINTS = 0.6;
 /**
@@ -1350,8 +1365,10 @@ export type OrchestrationTerms = {
   agentic?: { score: number; source: string };
   /** Fit with the agentic share mixed in for a spawn. What ranking weighs. */
   quality: number;
-  /** This model's measured draw per run, and the cost steps it adds or takes off. */
-  draw?: CandidateRunDraw & { steps: number };
+  /** This model's measured draw per run, and the capped ratio that scales its run cost. */
+  draw?: CandidateRunDraw & { applied: number };
+  /** List price, and what a typical run on this desk costs at it. */
+  cost: ResolvedModelPrice & { perRun: number };
   /** Older rows of this model's line on the same plan that this row stands in for. */
   supersedes?: Array<Pick<RoutingCandidate, "provider" | "model" | "customBotId" | "label">>;
   /** The bar this spawn had to clear. */
@@ -1417,6 +1434,7 @@ function orchestrationFit(
     now: number;
     busy: number;
     effortHint?: EffortLevel | null;
+    typicalRun?: TypicalRun;
   },
 ): OrchestrationFit {
   const effort = effortForRoutingTier(candidate.provider, candidate.model, input.tier, input.effortHint ?? null);
@@ -1430,8 +1448,13 @@ function orchestrationFit(
   const why: string[] = [`${input.domain} ${fit.score}/10 (${fit.source})`];
   if (agentic && spawnWork) why.push(`agentic ${agentic.score}/10`);
   const runDraw = candidate.draw
-    ? { ...candidate.draw, steps: oneDecimal(clamp(Math.log2(candidate.draw.ratio), -DRAW_STEPS_TAKEN_OFF, DRAW_STEPS_ADDED)) }
+    ? { ...candidate.draw, applied: clamp(candidate.draw.ratio, DRAW_RATIO_FLOOR, DRAW_RATIO_CEILING) }
     : undefined;
+  const price = resolveModelPrice(candidate.provider, candidate.model, candidate.profile.cost);
+  const perRun = typicalRunCost(price, input.typicalRun ?? DEFAULT_TYPICAL_RUN) * (runDraw?.applied ?? 1);
+  why.push(
+    `about ${runCostLabel(perRun)} a typical run (${price.published ? priceLabel(price) : price.source})`,
+  );
   if (runDraw) {
     why.push(`about ${tokenCount(runDraw.medianTokens)} tokens a finished run over ${runDraw.runs} runs, ${oneDecimal(runDraw.ratio)}× the desk's median`);
   }
@@ -1491,6 +1514,7 @@ function orchestrationFit(
       ...(agentic ? { agentic } : {}),
       quality,
       ...(runDraw ? { draw: runDraw } : {}),
+      cost: { ...price, perRun },
       plan: {
         ...(draw.usedPercent !== undefined ? { usedPercent: draw.usedPercent } : {}),
         ...(draw.expectedUsedPercent !== undefined ? { expectedUsedPercent: oneDecimal(draw.expectedUsedPercent) } : {}),
@@ -1550,6 +1574,7 @@ function rankOrchestrationCandidates(
       now,
       busy: request.activeLoad?.[routingPoolKey(candidate)] ?? 0,
       effortHint: request.effortHint,
+      ...(request.typicalRun ? { typicalRun: request.typicalRun } : {}),
     }),
   }));
   const best = Math.max(...fits.map((row) => row.terms.fit.score));
@@ -1574,16 +1599,17 @@ function rankOrchestrationCandidates(
     }
   }
   const passing = clearing.filter((row) => !successorOf.has(row));
-  // Price tier plus what the model's own runs have measured on this desk.
-  const effectiveCost = (row: Fit) => row.candidate.profile.cost + (row.terms.draw?.steps ?? 0);
-  const cheapest = Math.min(...passing.map(effectiveCost));
+  // What a typical run costs at each row's list price, in doublings over the cheapest.
+  const cheapest = Math.min(...passing.map((row) => row.terms.cost.perRun));
+  const doublings = (row: Fit) =>
+    cheapest > 0 ? clamp(Math.log2(row.terms.cost.perRun / cheapest), 0, MAX_COST_DOUBLINGS) : row.terms.cost.perRun > 0 ? MAX_COST_DOUBLINGS : 0;
   const ceiling = bar + ORCHESTRATION_HEADROOM[context.tier];
   const preferred = request.preferred ?? [];
   const ranked: RankedRoutingCandidate[] = passing.map((row) => {
     const { candidate, terms, planPoints } = row;
     const displaced = [...successorOf].filter(([, successor]) => successor === row).map(([older]) => older.candidate);
     const qualityPoints = Math.min(terms.quality, ceiling);
-    const costPoints = ORCHESTRATION_COST_WEIGHT[context.tier] * Math.max(0, effectiveCost(row) - cheapest);
+    const costPoints = ORCHESTRATION_COST_WEIGHT[context.tier] * doublings(row);
     const planWeighted = ORCHESTRATION_PLAN_WEIGHT[context.tier] * planPoints;
     const considerate = oneDecimal(qualityPoints - costPoints + planWeighted);
     const coordinatorPick = preferred.some((item) => sameCandidateIdentity(item, candidate));
@@ -1631,7 +1657,7 @@ function rankOrchestrationCandidates(
     return (
       b.score - a.score ||
       (b.orchestration?.quality ?? 0) - (a.orchestration?.quality ?? 0) ||
-      a.profile.cost - b.profile.cost ||
+      (a.orchestration?.cost.perRun ?? 0) - (b.orchestration?.cost.perRun ?? 0) ||
       a.label.localeCompare(b.label)
     );
   });

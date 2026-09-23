@@ -1,4 +1,5 @@
 import { STRICT_SCALE_NOTE } from "./bot-scores";
+import { priceLabel, runCostLabel } from "./model-prices";
 import { botKnowledgeSnapshot, ORCHESTRATION_TASK_DOMAINS, planLineFor } from "./domain-benchmark";
 import {
   activeRouteLoad,
@@ -55,6 +56,8 @@ export type FindBotsPick = {
   /** This pool's plan overall: leftover, reset, pace. Never one spawn. */
   plan: string;
   why: string[];
+  /** What a typical run on this desk costs at the model's list price, and that price. */
+  cost: string;
   /** The number the desk orders picks by. */
   considerate: number;
 };
@@ -122,6 +125,7 @@ export function findBots(input: FindBotsInput, desk: FindBotsDesk): FindBotsResu
     role: "worker",
     useOrchestrationBenchmark: true,
     now,
+    ...(desk.draws?.typical ? { typicalRun: desk.draws.typical } : {}),
     ...(exclude.length ? { exclude } : {}),
     ...(requirements ? { requirements } : {}),
   };
@@ -138,6 +142,7 @@ export function findBots(input: FindBotsInput, desk: FindBotsDesk): FindBotsResu
       source: terms.fit.source,
       ...(terms.agentic ? { agentic: terms.agentic.score } : {}),
       plan: planLineFor(row, now, terms.plan),
+      cost: `${runCostLabel(terms.cost.perRun)} a typical run (${terms.cost.published ? priceLabel(terms.cost) : terms.cost.source})`,
       why: terms.why,
       considerate: terms.considerate,
     };
@@ -168,6 +173,7 @@ export function findBots(input: FindBotsInput, desk: FindBotsDesk): FindBotsResu
     exclude,
     ...(requirements ? { requirements } : {}),
     candidates,
+    ...(desk.draws ? { draws: desk.draws } : {}),
   });
   const scores = snapshot.scores
     ? `${snapshot.scores.source} (${snapshot.scores.license})${snapshot.scores.newestPublished ? `, published ${snapshot.scores.newestPublished}` : ""}; rows without a public score use the desk table. ${STRICT_SCALE_NOTE}`

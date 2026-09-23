@@ -13,6 +13,7 @@ import {
 } from "./cursor-lane";
 import { isGrokBotUrl } from "./custom-http-identity";
 import { estimateMessageTokens } from "./context-stats";
+import type { TypicalRun } from "./model-prices";
 import type { CustomBot, GrokPlanProduct, GrokPlanUsage, LlmLink, ProviderId, Session, Settings, UsageDraft, UsageEvent, UsagePlanWindow, UsageRange, UsageSource } from "./types";
 
 export type { UsagePlanWindow };
@@ -528,6 +529,8 @@ export type RunDraws = {
   byModel: Record<string, ModelRunDraw>;
   deskMedianTokens: number;
   deskRuns: number;
+  /** The desk's median run, part by part: what a typical run costs is priced on this. */
+  typical?: TypicalRun;
 };
 
 /** How a run's model is keyed: vendor, model id as the desk writes it, and the bot for a custom row. */
@@ -551,7 +554,7 @@ function median(values: number[]): number {
  * recorded no tokens are left out, and so is every other kind of chat.
  */
 export function measureRunDraws(usage: readonly UsageEvent[], sessions: readonly Session[]): RunDraws {
-  const runs = new Map<string, { key: string; start: number; end: number; tokens: number }>();
+  const runs = new Map<string, { key: string; start: number; end: number; tokens: number; parts: TypicalRun }>();
   for (const session of sessions) {
     const run = session.agentRun;
     if (!session.parentId || run?.status !== "completed" || !run.finishedAt) continue;
@@ -560,23 +563,38 @@ export function measureRunDraws(usage: readonly UsageEvent[], sessions: readonly
       start: run.startedAt,
       end: run.finishedAt + RUN_USAGE_GRACE_MS,
       tokens: 0,
+      parts: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     });
   }
   for (const event of usage) {
     const run = event.sessionId ? runs.get(event.sessionId) : undefined;
     if (!run || event.at < run.start || event.at > run.end) continue;
     run.tokens += eventTotal(event);
+    run.parts.input += event.inputTokens;
+    run.parts.output += event.outputTokens;
+    run.parts.cacheRead += event.cacheReadTokens;
+    run.parts.cacheWrite += event.cacheWriteTokens;
   }
   const perModel = new Map<string, number[]>();
   const all: number[] = [];
+  const measured: TypicalRun[] = [];
   for (const run of runs.values()) {
     if (run.tokens <= 0) continue;
     perModel.set(run.key, [...(perModel.get(run.key) ?? []), run.tokens]);
     all.push(run.tokens);
+    measured.push(run.parts);
   }
   const byModel: Record<string, ModelRunDraw> = {};
   for (const [key, tokens] of perModel) byModel[key] = { medianTokens: median(tokens), runs: tokens.length };
-  return { byModel, deskMedianTokens: all.length ? median(all) : 0, deskRuns: all.length };
+  const part = (name: keyof TypicalRun) => median(measured.map((run) => run[name]));
+  return {
+    byModel,
+    deskMedianTokens: all.length ? median(all) : 0,
+    deskRuns: all.length,
+    ...(measured.length
+      ? { typical: { input: part("input"), output: part("output"), cacheRead: part("cacheRead"), cacheWrite: part("cacheWrite") } }
+      : {}),
+  };
 }
 
 /** Billed spend for one chat. Total is in + out, same as Settings → Usage. */

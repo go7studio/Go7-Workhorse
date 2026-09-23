@@ -20,6 +20,7 @@ import {
   type RoutingRequest,
   type RoutingSkipReason,
 } from "./routing";
+import { runCostLabel } from "./model-prices";
 import { inferTaskDomain } from "./task-domain";
 import type {
   ModelInputCapabilities,
@@ -68,6 +69,10 @@ export type BotKnowledgeModelRow = {
   rank?: number;
   /** The number that order is sorted by. */
   considerate?: number;
+  /** What a typical run on this desk costs at the model's list price: "$0.42". */
+  runCost?: string;
+  /** The price is the model's own published one, not its family tier's. */
+  priced?: boolean;
   /** This pool's plan, overall: leftover, reset, pace. Never one spawn. */
   planLine: string;
   why: string[];
@@ -187,6 +192,7 @@ export function botKnowledgeSnapshot(input: {
     useOrchestrationBenchmark: true,
     now,
     ...(input.activeLoad ? { activeLoad: input.activeLoad } : {}),
+    ...(input.draws?.typical ? { typicalRun: input.draws.typical } : {}),
     ...(input.exclude?.length ? { exclude: input.exclude } : {}),
     ...(input.requirements ? { requirements: input.requirements } : {}),
   };
@@ -207,6 +213,8 @@ export function botKnowledgeSnapshot(input: {
       clearsBar: true,
       rank: index + 1,
       considerate: terms.considerate,
+      runCost: runCostLabel(terms.cost.perRun),
+      priced: terms.cost.published,
       planLine: planLineFor(row, now, terms.plan),
       why: terms.why,
     };
@@ -266,7 +274,7 @@ export function orchestrationKnowledgeBrief(snapshot: BotKnowledgeSnapshot): str
     lines.push("- (none can take this right now)");
   } else {
     for (const row of ranked.slice(0, 10)) {
-      lines.push(`${row.rank}. ${row.label} — ${snapshot.domain} ${row.score}/10 (${row.source}) — ${row.planLine}`);
+      lines.push(`${row.rank}. ${row.label} — ${snapshot.domain} ${row.score}/10 (${row.source}) — ${row.runCost ? `${row.runCost} a typical run${row.priced ? "" : " (price tier)"}` : "cost unknown"} — ${row.planLine}`);
     }
     if (ranked.length > 10) lines.push(`…and ${ranked.length - 10} more`);
   }

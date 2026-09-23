@@ -496,10 +496,10 @@ b605b1f52028  .session-file.out
 e14025700078  @keyframes file-pane-in
 f69cea891f99  @keyframes file-pane-out
 4fa00029d5b1  .session.has-workshop
-6f58dac0b8df  .session-workshop
-9bb868abcd7c  .session-workshop.out
-03dc89d222f4  @keyframes workshop-pane-in
-24b761a6f89d  @keyframes workshop-pane-out
+b8254ea4ba11  .session-workshop
+d02c62092e58  .session-workshop.out
+c5a275bbed0a  @keyframes workshop-pane-in
+767e57110e7e  @keyframes workshop-pane-out
 d50ca3ac0cb0  @media (prefers-reduced-motion: reduce) { .session-file, .session-file.out, .session-workshop, .session-workshop.out
 a50b43d10f13  .session-file .file-review
 cc58ec8ecdcd  .session-file .file-review-tabs
@@ -1556,7 +1556,7 @@ b98d565a4cf4  .claude-sign-in .actions
 9c8f8ebbd12d  .claude-sign-in-paste code
 05092d400317  .claude-sign-in-paste input
 43dee5924f29  .workshop-panel
-53b5c7d71e9e  .session-workshop .workshop-panel
+7a62edf9e507  .session-workshop .workshop-panel
 f1e3dcc67534  .workshop-panel-head
 b0af23351a69  .workshop-panel-head .row-meta
 c4cb78934166  .workshop-panel-actions

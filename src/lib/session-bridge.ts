@@ -59,12 +59,23 @@ function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" ? (value as Record<string, unknown>) : {};
 }
 
+/** Models echo desk guidance as "Preview: …"; strip a leading run so preview never feeds that back. */
+const PREVIEW_LABEL_RUN = /^(?:Preview\s*:\s*)+/i;
+
+export function collapsePreviewLabel(text: string): string {
+  let value = text.replace(/\s+/g, " ").trim();
+  while (PREVIEW_LABEL_RUN.test(value)) {
+    value = value.replace(PREVIEW_LABEL_RUN, "").trim();
+  }
+  return value;
+}
+
 function previewFrom(messages: unknown): string {
   if (!Array.isArray(messages)) return "";
   for (let i = messages.length - 1; i >= 0; i -= 1) {
     const item = asRecord(messages[i]);
     if (item.role === "system") continue;
-    const text = typeof item.text === "string" ? item.text.replace(/\s+/g, " ").trim() : "";
+    const text = typeof item.text === "string" ? collapsePreviewLabel(item.text) : "";
     if (text) return text.slice(0, 160);
   }
   return "";
@@ -75,7 +86,7 @@ export function chatPreview(messages: unknown): string {
 }
 
 function retainedPreview(report: unknown): string {
-  return typeof report === "string" ? report.replace(/\s+/g, " ").trim().slice(0, 160) : "";
+  return typeof report === "string" ? collapsePreviewLabel(report).slice(0, 160) : "";
 }
 
 function projectNames(state: LooseState): Map<string, string> {

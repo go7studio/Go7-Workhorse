@@ -1,9 +1,17 @@
+import {
+  botKnowledgeSortWeight,
+  MANUAL_RUBRIC_SOURCE,
+  resolveDomainBenchmarkScore,
+  type BotKnowledgeSettings,
+} from "./bot-knowledge-rubric";
 import { botScoresSummary, STRICT_SCALE_NOTE, type BotScoresSummary } from "./bot-scores";
+import { cursorWatchKeyLabel, cursorWatchLane } from "./cursor-lane";
 import {
   domainIntelligenceBar,
   FAMILY_ROUTING_PRIOR_SOURCE,
 } from "./domain-benchmark-catalog";
 import { publishedAgenticScore, resolveDomainScore, type DomainScoreOrigin, type ResolvedDomainScore } from "./domain-score";
+import { providerById } from "./providers";
 import {
   effortForRoutingTier,
   orchestrationTierNote,
@@ -31,9 +39,21 @@ import type {
   Settings,
   StoredRoutingProfile,
   TaskDomain,
+  UsageEvent,
+  WatchPermits,
 } from "./types";
-import type { RunDraws } from "./usage";
-import type { WatchPlans, WatchVendorStatus } from "./watch";
+import { leftoverForCard, type RunDraws } from "./usage";
+import {
+  botKnowledgeCallableCaption,
+  deskCallCatalog,
+  deskCallRowForCatalogModel,
+  deskRowForKey,
+  formatPlanLine,
+  formatPlanLineVisible,
+  type WatchPlans,
+  type WatchVendorStatus,
+} from "./watch";
+import { DEFAULT_SPENT_PERCENT } from "./watch-defaults";
 
 export { domainIntelligenceBar, FAMILY_ROUTING_PRIOR_SOURCE };
 
@@ -81,10 +101,19 @@ export type BotKnowledgeModelRow = {
   why: string[];
   /** Why routing would not call this row. */
   skip?: string;
+  /** Which vendor pool this row reads (Codex, Cursor · API, …). */
+  loginLabel: string;
+  callableLabel: string;
+  /** Selected task domains shown on this row (Bot knowledge multi-select). */
+  rowDomains?: TaskDomain[];
+  /** Short plan line for Settings (used · month/week/5h). */
+  planVisibleLine: string;
 };
 
 export type BotKnowledgeSnapshot = {
   domain: TaskDomain;
+  /** Domains in play when the Settings pane scores across more than one. */
+  domains?: TaskDomain[];
   tier: RoutingTaskTier;
   /** The bar this domain and tier ask for, after it is capped at the best callable row. */
   bar: number;
@@ -93,15 +122,112 @@ export type BotKnowledgeSnapshot = {
   scores: BotScoresSummary | null;
 };
 
+const DOMAIN_SHORT: Record<TaskDomain, string> = {
+  coding: "Coding",
+  "image-generation": "Image",
+  writing: "Writing",
+  visual: "Visual",
+  data: "Data",
+  general: "General",
+};
+
+function normalizeBotKnowledgeDomains(domain: TaskDomain, domains?: TaskDomain[]): TaskDomain[] {
+  const picked = domains?.filter((item) => ORCHESTRATION_TASK_DOMAINS.includes(item as OrchestrationTaskDomain)) ?? [];
+  if (picked.length > 0) return [...new Set(picked)];
+  return [domain];
+}
+
+function scoreBundleForDomains(
+  provider: ProviderId,
+  model: string,
+  domains: TaskDomain[],
+  routingOverride: StoredRoutingProfile | undefined,
+  botKnowledge: BotKnowledgeSettings | undefined,
+  customBotId: string | undefined,
+  effort?: string | null,
+): { score: number; source: string; origin: DomainScoreOrigin } {
+  if (domains.length === 1) {
+    const manual = resolveDomainBenchmarkScore({
+      provider,
+      model,
+      domain: domains[0],
+      routingOverride,
+      botKnowledge,
+      customBotId,
+    });
+    const family = routingProfileForModel(provider, model, routingOverride).intelligence;
+    const published = resolveDomainScore(provider, model, domains[0], family, effort);
+    if (manual.source === MANUAL_RUBRIC_SOURCE) {
+      return { score: manual.score, source: manual.source, origin: "desk-table" };
+    }
+    return published;
+  }
+  const parts = domains.map((item) =>
+    scoreBundleForDomains(provider, model, [item], routingOverride, botKnowledge, customBotId, effort),
+  );
+  const score = Math.min(...parts.map((item) => item.score));
+  const source = parts.map((item, index) => `${DOMAIN_SHORT[domains[index]]} ${item.score}/10 (${item.source})`).join(" · ");
+  const origin = parts.some((item) => item.origin === "public") ? "public" : parts[0].origin;
+  return { score, source, origin };
+}
+
+export function botKnowledgePoolLabel(provider: ProviderId, model: string, customBotName?: string): string {
+  if (provider === "custom") return customBotName?.trim() || "Custom";
+  if (provider === "cursor") return cursorWatchKeyLabel(cursorWatchLane(model));
+  return providerById(provider).name;
+}
+
 export function domainBenchmarkScore(
   provider: ProviderId,
   model: string,
   domain: TaskDomain,
   routingOverride?: StoredRoutingProfile,
+  botKnowledge?: BotKnowledgeSettings,
+  customBotId?: string,
   effort?: string | null,
 ): ResolvedDomainScore {
   const family = routingProfileForModel(provider, model, routingOverride).intelligence;
+  const manual = resolveDomainBenchmarkScore({
+    provider,
+    model,
+    domain,
+    routingOverride,
+    botKnowledge,
+    customBotId,
+  });
+  if (manual.source === MANUAL_RUBRIC_SOURCE) {
+    return { score: manual.score, source: manual.source, origin: "desk-table" };
+  }
   return resolveDomainScore(provider, model, domain, family, effort);
+}
+
+function planFieldsForModel(
+  input: {
+    settings: Settings;
+    plans: WatchPlans;
+    usage: UsageEvent[];
+    permits: WatchPermits;
+    spentPercent: number;
+    now: number;
+  },
+  row: Pick<RoutingCandidate, "provider" | "model" | "customBotId">,
+  catalog: ReturnType<typeof deskCallCatalog>,
+  customBotName?: string,
+): Pick<BotKnowledgeModelRow, "loginLabel" | "callable" | "callableLabel" | "planLine" | "planVisibleLine"> {
+  const call = deskCallRowForCatalogModel(catalog, {
+    provider: row.provider,
+    model: row.model,
+    customBotId: row.customBotId,
+  });
+  const loginLabel = call?.name ?? botKnowledgePoolLabel(row.provider, row.model, customBotName);
+  const vendorPlan = call ? leftoverForCard(deskRowForKey(call.id, input.settings), input.plans) : undefined;
+  return {
+    loginLabel,
+    callable: Boolean(call?.canCall),
+    callableLabel: call ? botKnowledgeCallableCaption(call) : "Not callable",
+    planLine: call ? formatPlanLine(call) : "plan leftover not loaded yet",
+    planVisibleLine: call ? formatPlanLineVisible(call, vendorPlan, input.spentPercent) : "plan not loaded",
+  };
 }
 
 export function orchestrationDomainForPrompt(
@@ -183,9 +309,32 @@ export function botKnowledgeSnapshot(input: {
   candidates?: RoutingCandidate[];
   /** What each model's finished runs took on this desk (see measureRunDraws). */
   draws?: RunDraws;
+  domains?: TaskDomain[];
+  usage?: UsageEvent[];
+  permits?: WatchPermits;
 }): BotKnowledgeSnapshot {
   const tier = input.tier ?? "balanced";
   const now = input.now ?? Date.now();
+  const scoreDomains = normalizeBotKnowledgeDomains(input.domain, input.domains);
+  const catalogWatch = input.settings.watch;
+  const spentPercent = Number.isFinite(catalogWatch?.spentPercent)
+    ? Math.min(50, Math.max(0, catalogWatch!.spentPercent as number))
+    : DEFAULT_SPENT_PERCENT;
+  const catalog = deskCallCatalog({
+    settings: input.settings,
+    usage: input.usage ?? [],
+    plans: input.plans,
+    permits: input.permits ?? {},
+    now,
+  });
+  const planInput = {
+    settings: input.settings,
+    plans: input.plans,
+    usage: input.usage ?? [],
+    permits: input.permits ?? {},
+    spentPercent,
+    now,
+  };
   const candidates = withRunDraws(input.candidates ?? routingCandidatesForDesk(input.settings, input.statuses, input.plans), input.draws);
   const request: RoutingRequest = {
     prompt: input.prompt ?? "",
@@ -199,10 +348,17 @@ export function botKnowledgeSnapshot(input: {
     ...(input.exclude?.length ? { exclude: input.exclude } : {}),
     ...(input.requirements ? { requirements: input.requirements } : {}),
   };
-  const ranked: RankedRoutingCandidate[] = rankRoutingCandidates(candidates, request, input.routing);
+  const ranked: RankedRoutingCandidate[] = rankRoutingCandidates(
+    candidates,
+    request,
+    input.routing,
+    input.settings.botKnowledge,
+  );
   const bar = ranked[0]?.orchestration?.bar ?? domainIntelligenceBar(tier);
   const models: BotKnowledgeModelRow[] = ranked.map((row, index) => {
     const terms = row.orchestration!;
+    const bot = input.settings.customBots.find((item) => item.id === row.customBotId);
+    const planFields = planFieldsForModel(planInput, row, catalog, bot?.name);
     return {
       provider: row.provider,
       model: row.model,
@@ -212,25 +368,50 @@ export function botKnowledgeSnapshot(input: {
       source: terms.fit.source,
       origin: terms.fit.origin,
       ...(terms.agentic ? { agentic: terms.agentic.score } : {}),
-      callable: true,
+      ...planFields,
+      rowDomains: scoreDomains,
       clearsBar: true,
       rank: index + 1,
       considerate: terms.considerate,
       runCost: runCostLabel(terms.cost.perRun),
       priced: terms.cost.published,
       speed: terms.speed.label,
-      planLine: planLineFor(row, now, terms.plan),
       why: terms.why,
     };
   });
+  if (scoreDomains.length > 1) {
+    for (const row of models) {
+      const bundle = scoreBundleForDomains(
+        row.provider,
+        row.model,
+        scoreDomains,
+        undefined,
+        input.settings.botKnowledge,
+        row.customBotId,
+      );
+      row.score = bundle.score;
+      row.source = bundle.source;
+      row.origin = bundle.origin;
+    }
+  }
   const rest: BotKnowledgeModelRow[] = [];
   for (const candidate of candidates) {
     if (ranked.some((row) => sameRow(row, candidate))) continue;
     const effort = effortForRoutingTier(candidate.provider, candidate.model, tier);
-    const fit = resolveDomainScore(candidate.provider, candidate.model, input.domain, candidate.profile.intelligence, effort);
+    const fit = scoreBundleForDomains(
+      candidate.provider,
+      candidate.model,
+      scoreDomains,
+      undefined,
+      input.settings.botKnowledge,
+      candidate.customBotId,
+      effort,
+    );
     const agentic = publishedAgenticScore(candidate.provider, candidate.model, effort);
     const skip = routingSkipReason(candidate, request, input.routing, input.requirements ?? {});
     const successor = ranked.find((row) => row.orchestration?.supersedes?.some((older) => sameRow(older, candidate)));
+    const bot = input.settings.customBots.find((item) => item.id === candidate.customBotId);
+    const planFields = planFieldsForModel(planInput, candidate, catalog, bot?.name);
     rest.push({
       provider: candidate.provider,
       model: candidate.model,
@@ -240,10 +421,11 @@ export function botKnowledgeSnapshot(input: {
       source: fit.source,
       origin: fit.origin,
       ...(agentic ? { agentic: agentic.score } : {}),
-      callable: !skip,
+      ...planFields,
+      callable: !skip && planFields.callable,
+      rowDomains: scoreDomains,
       clearsBar: false,
       ...(!skip && successor ? { supersededBy: successor.label } : {}),
-      planLine: planLineFor(candidate, now),
       why: [],
       skip: skip
         ? SKIP_TEXT[skip]
@@ -253,7 +435,26 @@ export function botKnowledgeSnapshot(input: {
     });
   }
   rest.sort((a, b) => b.score - a.score || a.label.localeCompare(b.label));
-  return { domain: input.domain, tier, bar, models: [...models, ...rest], scores: botScoresSummary() };
+  const combined = [...models, ...rest];
+  combined.sort((a, b) => {
+    const aWeight = botKnowledgeSortWeight(input.settings.botKnowledge, a.provider, a.model, a.customBotId);
+    const bWeight = botKnowledgeSortWeight(input.settings.botKnowledge, b.provider, b.model, b.customBotId);
+    return (
+      Number(b.callable) - Number(a.callable) ||
+      (a.rank ?? 999) - (b.rank ?? 999) ||
+      b.score - a.score ||
+      bWeight - aWeight ||
+      (a.loginLabel ?? a.label).localeCompare(b.loginLabel ?? b.label)
+    );
+  });
+  return {
+    domain: scoreDomains[0] ?? input.domain,
+    ...(scoreDomains.length > 1 ? { domains: scoreDomains } : {}),
+    tier,
+    bar,
+    models: combined,
+    scores: botScoresSummary(),
+  };
 }
 
 /**

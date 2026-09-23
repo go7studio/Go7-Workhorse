@@ -685,6 +685,11 @@ export type Session = {
   missionCaps?: MissionCaps;
   /** This-chat Orchestrate bot list. Empty means all bots. */
   spawnAllowlist?: string[];
+  /**
+   * Workshop add-ons turned on in this chat. Settings only installs and
+   * removes them. Missing means none are on here.
+   */
+  workshopPacks?: string[];
 };
 
 export type PermissionRequest = {
@@ -1028,6 +1033,8 @@ export type Settings = {
   usageBudgets: Partial<Record<ProviderId, number>>;
   watch: WatchSettings;
   routing: RoutingSettings;
+  /** Manual Bot knowledge rubrics per model. Catalog scores stay the default. */
+  botKnowledge?: import("./bot-knowledge-rubric").BotKnowledgeSettings;
   skills: SkillDiscoverySettings;
   learning: import("./learning-types").LearningSettings;
   agentSystems?: AgentSystemsSettings;

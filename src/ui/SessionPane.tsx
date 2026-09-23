@@ -168,6 +168,8 @@ const AssistantTurn = memo(function AssistantTurn({
   );
 });
 
+const EMPTY_WORKSHOP_PACKS: string[] = [];
+
 export function SessionPane() {
   const desk = useStoreSelector(selectSessionPaneDesk, sameSessionPaneDesk);
   const session = desk.session;
@@ -487,8 +489,11 @@ export function SessionPane() {
       className={`session${open ? " has-file" : ""}${workshopOpen ? " has-workshop" : ""}`}
       ref={pane}
       style={
-        open
-          ? { ["--file-pane" as string]: `${fileWidth}px` }
+        open || workshopOpen
+          ? {
+              ...(open ? { ["--file-pane" as string]: `${fileWidth}px` } : {}),
+              ...(workshopOpen ? { ["--workshop-pane" as string]: `${workshopWidth}px` } : {}),
+            }
           : undefined
       }
     >
@@ -711,7 +716,11 @@ export function SessionPane() {
             invert
             label="Resize workshop pane"
           />
-          <WorkshopPanel onClose={closeWorkshopPane} />
+          <WorkshopPanel
+            sessionId={session.id}
+            enabledIds={session.workshopPacks ?? EMPTY_WORKSHOP_PACKS}
+            onClose={closeWorkshopPane}
+          />
         </aside>
       ) : null}
     </section>

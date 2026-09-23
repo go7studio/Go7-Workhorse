@@ -2210,30 +2210,46 @@
 
 .session.has-workshop { position: relative; }
 .session-workshop {
-  position: absolute;
-  inset: 44px 0 0 auto;
-  z-index: var(--z-popover);
-  max-width: 100%;
+  position: relative;
+  flex: 0 0 auto;
+  min-width: 0;
   min-height: 0;
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  background: var(--bg-sidebar);
   border-left: 1px solid var(--line);
-  background: var(--bg-solid);
-  box-shadow: var(--shadow);
+  transform-origin: top right;
   animation: workshop-pane-in 200ms var(--ease) both;
 }
 .session-workshop.out {
   pointer-events: none;
+  transform-origin: top right;
   animation: workshop-pane-out 200ms var(--ease) both;
 }
 @keyframes workshop-pane-in {
-  from { opacity: 0; transform: translateX(100%); }
-  to { opacity: 1; transform: translateX(0); }
+  from {
+    opacity: 0;
+    max-width: 0;
+    transform: translateX(20px);
+  }
+  to {
+    opacity: 1;
+    max-width: var(--workshop-pane, 420px);
+    transform: translateX(0);
+  }
 }
 @keyframes workshop-pane-out {
-  from { opacity: 1; transform: translateX(0); }
-  to { opacity: 0; transform: translateX(100%); }
+  from {
+    opacity: 1;
+    max-width: var(--workshop-pane, 420px);
+    transform: translateX(0);
+  }
+  to {
+    opacity: 0;
+    max-width: 0;
+    transform: translateX(20px);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

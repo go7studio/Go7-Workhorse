@@ -4,7 +4,7 @@ import path from "node:path";
 import test from "node:test";
 import { deskCss } from "./desk-css";
 import { isSettingsSection, normalizeSettings } from "../src/lib/settings";
-import { DEFAULT_WORKSHOP_SETTINGS, fingerprintsForSources, type PackListing, type PackSource } from "../src/lib/workshop-pack";
+import { DEFAULT_WORKSHOP_SETTINGS, fingerprintsForSources, normalizeWorkshopPackIds, type PackListing, type PackSource } from "../src/lib/workshop-pack";
 import {
   availableSearchMatch,
   nextPacks,
@@ -99,7 +99,8 @@ test("the block installs, removes, and updates through the workshop bridge", () 
     assert.match(block, new RegExp(name), name);
   }
   assert.match(block, /placeholder="https:\/\/github\.com\/owner\/repo"/);
-  assert.match(block, /Sources changed\. Turn on to review\./);
+  assert.match(block, /Sources changed\. Turn it on from a chat\./);
+  assert.match(block, /dropWorkshopPackFromChats/);
   assert.match(block, /Add a Local Compute host under Settings → LLMs first\./);
   // Confirm needs a host and at least one checked source.
   assert.match(block, /disabled=\{busy \|\| !hostId \|\| checked\.length === 0\}/);
@@ -183,8 +184,8 @@ test("catalog search matches name and summary; empty query keeps every pack", ()
   assert.match(block, /workshop-catalog-search/);
   assert.match(block, /No packs match/);
   assert.match(block, /pack-card-grid/);
-  assert.match(block, /workshop-pack-status">Off</);
-  assert.match(block, /Installed · Off — Turn on when ready\./);
+  assert.match(block, /workshop-pack-status">\{enableHere \? "Off" : "Installed"\}/);
+  assert.match(block, /Installed\. Turn it on from a chat's Workshop\./);
 });
 
 test("a reconfirm after update turns every affected pack off", () => {
@@ -206,7 +207,7 @@ test("Workshop is a chat basic beside Review and Terminal", () => {
   const pane = readFileSync(path.join(ROOT, "src", "ui", "SessionPane.tsx"), "utf8");
   assert.match(pane, /const \[workshopOpen, setWorkshopOpen\] = useState\(false\)/);
   assert.match(pane, />\s*Workshop\s*</);
-  assert.match(pane, /<WorkshopPanel onClose=\{closeWorkshopPane\}/);
+  assert.match(pane, /<WorkshopPanel[\s\S]*onClose=\{closeWorkshopPane\}/);
   assert.match(pane, /session-workshop/);
   assert.match(pane, /has-workshop/);
   assert.match(pane, /WORKSHOP_PANE/);
@@ -221,8 +222,27 @@ test("Workshop is a chat basic beside Review and Terminal", () => {
 
   const panel = readFileSync(path.join(ROOT, "src", "ui", "WorkshopPanel.tsx"), "utf8");
   assert.match(panel, /useWorkshopLive/);
-  assert.match(panel, /surface="sheet"/);
-  assert.doesNotMatch(panel, /Turn off|updateWorkshop|job\.start|job\.stop|ssh/);
+  assert.match(panel, /PaintCard/);
+  assert.match(panel, /surface="chat"/);
+  assert.match(panel, /setSessionWorkshopPacks/);
+  assert.match(panel, /Turn off/);
+  assert.match(panel, /updateWorkshop/);
+  assert.doesNotMatch(panel, /job\.start|job\.stop|ssh/);
   assert.doesNotMatch(panel, /\blease\w*\(|\broute\w*\(|\bstart\w*\(|\bstop\w*\(/);
   assert.doesNotMatch(panel, /dangerouslySetInnerHTML|<iframe|<webview|eval\(|new Function/);
+  assert.match(css, /\.session-workshop\s*\{[^}]*position:\s*relative/);
+  assert.match(css, /\.session-workshop\s*\{[^}]*flex:\s*0 0 auto/);
+  assert.doesNotMatch(css.match(/\.session-workshop\s*\{[^}]+\}/)?.[0] ?? "", /position:\s*absolute/);
+  assert.match(css, /--workshop-pane/);
+  assert.match(pane, /--workshop-pane/);
+});
+
+test("a chat keeps only real pack ids, and uninstall drops that id from every chat", () => {
+  assert.equal(normalizeWorkshopPackIds(undefined), undefined);
+  assert.deepEqual(normalizeWorkshopPackIds(["box-monitor", "box-monitor", "Nope", ""]), ["box-monitor"]);
+  const store = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
+  assert.match(store, /const dropWorkshopPackFromChats = useCallback/);
+  assert.match(store, /stateRef\.current = next/);
+  assert.match(store, /workshopPacks: ids\.length > 0 \? ids : undefined/);
+  assert.match(store, /workshopPacks: nextIds\.length > 0 \? nextIds : undefined/);
 });

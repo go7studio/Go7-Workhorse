@@ -209,6 +209,7 @@ import {
   spawnEffortFor,
   withRunDraws,
 } from "./routing";
+import { mergeBotKnowledgeRubric, normalizeBotKnowledge } from "./bot-knowledge-rubric";
 import { botKnowledgeSnapshot, orchestrationKnowledgeBrief, ORCHESTRATION_TASK_DOMAINS } from "./domain-benchmark";
 import type { TaskDomain } from "./types";
 import { applyBotScoresFeed, normalizeBotScoresFeed, type BotScoresView } from "./bot-scores";
@@ -454,7 +455,7 @@ import {
 import { applyWorkhorseToggle, isConcreteTheme, isTheme, nextTheme } from "./theme";
 import { effectiveLearningMode, learningCaptures, normalizeLearning } from "./learning-policy";
 import { normalizeLocalComputeSettings } from "./local-compute";
-import { normalizeWorkshopSettings, type WorkshopSettings } from "./workshop-pack";
+import { normalizeWorkshopPackIds, normalizeWorkshopSettings, type WorkshopSettings } from "./workshop-pack";
 import { agentTurnEvidence, learningEvidenceId } from "./learning-agent-evidence";
 import { settleSessionGoals } from "./learning-goal";
 import { BACKFILL_SUMMARY_CHARS, backfillEventId } from "./learning-backfill";
@@ -633,11 +634,16 @@ export type Store = AppState & {
   setRetentionDays: (days: number) => void;
   updateWatch: (patch: Partial<WatchSettings>) => void;
   updateRouting: (patch: Partial<RoutingSettings>) => void;
+  saveBotKnowledgeRubric: (key: string, rubric: import("./bot-knowledge-rubric").BotKnowledgeRubricOverride | null) => void;
   updateSkillDiscovery: (patch: Partial<SkillDiscoverySettings>) => void;
   updateAgentSystems: (patch: Partial<AgentSystemsSettings>) => void;
   updateJudge: (patch: Partial<JudgeSettings>) => void;
   updateLocalCompute: (settings: import("./types").LocalComputeSettings) => void;
   updateWorkshop: (settings: WorkshopSettings) => Promise<void>;
+  /** Which installed add-ons this chat has turned on. Empty clears the field. */
+  setSessionWorkshopPacks: (sessionId: string, packIds: string[]) => void;
+  /** Uninstall, yank, or a forced off: the add-on leaves every chat immediately. */
+  dropWorkshopPackFromChats: (packId: string) => void;
   grantPlanExternalAgents: (sessionId: string, allow: boolean) => void;
   /** Public leaderboard scores the desk holds (LMArena), and the last check. Null outside the desktop app. */
   botScores: BotScoresView | null;
@@ -3067,12 +3073,18 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         // this on purpose: a worker starts a fresh session.
         contextNeed: session.contextUsed || undefined,
       };
-      const decision = chooseRoutingDecision(routeCandidates, routeRequest, current.settings.routing);
+      const decision = chooseRoutingDecision(
+        routeCandidates,
+        routeRequest,
+        current.settings.routing,
+        current.settings.botKnowledge,
+      );
       recordRoutingDecision({
         source: "chat",
         candidates: routeCandidates,
         request: routeRequest,
         settings: current.settings.routing,
+        botKnowledge: current.settings.botKnowledge,
         ...(decision ? { selected: decision } : {}),
       });
       if (decision) {
@@ -3091,6 +3103,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           candidates: routeCandidates,
           request: routeRequest,
           settings: current.settings.routing,
+          botKnowledge: current.settings.botKnowledge,
           selected: decision,
           mode: "live-auto",
           source: "chat",
@@ -3146,6 +3159,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         candidates: routeCandidates,
         request: routeRequest,
         settings: current.settings.routing,
+        botKnowledge: current.settings.botKnowledge,
         selected: session,
         mode: "shadow",
         source: "chat",
@@ -6075,7 +6089,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 : {}),
             };
             const routeDecision = routeSpawn
-              ? chooseRoutingDecision(routeCandidates, routeRequest, latest.settings.routing)
+              ? chooseRoutingDecision(
+                  routeCandidates,
+                  routeRequest,
+                  latest.settings.routing,
+                  latest.settings.botKnowledge,
+                )
               : null;
             if (routeDecision && orchestrationBench) {
               // Counted as load until its worker shows up as running, so the
@@ -6092,6 +6111,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 candidates: routeCandidates,
                 request: routeRequest,
                 settings: latest.settings.routing,
+                botKnowledge: latest.settings.botKnowledge,
                 ...(routeDecision ? { selected: routeDecision } : {}),
               });
             }
@@ -6500,6 +6520,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 candidates: routeCandidates,
                 request: routeRequest,
                 settings: latest.settings.routing,
+                botKnowledge: latest.settings.botKnowledge,
                 selected: spec,
                 mode: "live-auto",
                 source: "spawn",
@@ -9102,6 +9123,20 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }));
   }, []);
 
+  const saveBotKnowledgeRubric = useCallback(
+    (key: string, rubric: import("./bot-knowledge-rubric").BotKnowledgeRubricOverride | null) => {
+      setState((current) => {
+        const merged = mergeBotKnowledgeRubric(current.settings.botKnowledge, key, rubric);
+        const botKnowledge = normalizeBotKnowledge(merged);
+        const nextSettings = { ...current.settings };
+        if (botKnowledge.byModel && Object.keys(botKnowledge.byModel).length > 0) nextSettings.botKnowledge = botKnowledge;
+        else delete nextSettings.botKnowledge;
+        return { ...current, settings: nextSettings };
+      });
+    },
+    [],
+  );
+
   const updateSkillDiscovery = useCallback((patch: Partial<SkillDiscoverySettings>) => {
     setState((current) => ({
       ...current,
@@ -9175,6 +9210,42 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           ? next.activeSessionId
           : null,
     });
+  }, []);
+
+  const setSessionWorkshopPacks = useCallback((sessionId: string, packIds: string[]) => {
+    const ids = normalizeWorkshopPackIds(packIds) ?? [];
+    const current = stateRef.current;
+    let changed = false;
+    const sessions = current.sessions.map((session) => {
+      if (session.id !== sessionId) return session;
+      const prev = session.workshopPacks ?? [];
+      if (prev.length === ids.length && prev.every((id, index) => id === ids[index])) return session;
+      changed = true;
+      return { ...session, workshopPacks: ids.length > 0 ? ids : undefined };
+    });
+    if (!changed) return;
+    // Written onto the ref first so a following updateWorkshop snapshot keeps this chat's list.
+    const next = { ...current, sessions };
+    stateRef.current = next;
+    setState(next);
+  }, []);
+
+  const dropWorkshopPackFromChats = useCallback((packId: string) => {
+    const id = packId.trim();
+    if (!id) return;
+    const current = stateRef.current;
+    let changed = false;
+    const sessions = current.sessions.map((session) => {
+      const ids = session.workshopPacks;
+      if (!ids?.includes(id)) return session;
+      changed = true;
+      const nextIds = ids.filter((item) => item !== id);
+      return { ...session, workshopPacks: nextIds.length > 0 ? nextIds : undefined };
+    });
+    if (!changed) return;
+    const next = { ...current, sessions };
+    stateRef.current = next;
+    setState(next);
   }, []);
 
   const grantPlanExternalAgents = useCallback((sessionId: string, allow: boolean) => {
@@ -9566,11 +9637,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       setRetentionDays,
       updateWatch,
       updateRouting,
+      saveBotKnowledgeRubric,
       updateSkillDiscovery,
       updateAgentSystems,
       updateJudge,
       updateLocalCompute,
       updateWorkshop,
+      setSessionWorkshopPacks,
+      dropWorkshopPackFromChats,
       grantPlanExternalAgents,
       botScores,
       refreshBotScores,
@@ -9711,11 +9785,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       setRetentionDays,
       updateWatch,
       updateRouting,
+      saveBotKnowledgeRubric,
       updateSkillDiscovery,
       updateAgentSystems,
       updateJudge,
       updateLocalCompute,
       updateWorkshop,
+      setSessionWorkshopPacks,
+      dropWorkshopPackFromChats,
       grantPlanExternalAgents,
       botScores,
       refreshBotScores,

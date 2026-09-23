@@ -423,7 +423,7 @@ test("WorkshopBlock sheet hides link-head; Installed/Available accordion; Retry 
   // surface=sheet skips link-head / Workshop title (Manage packs is the one title).
   assert.match(block, /inSheet \? \(/);
   assert.match(block, /link-head/);
-  assert.match(block, /Install a pack, then Turn on\./);
+  assert.match(block, /Install a pack from Available\./);
   assert.match(block, /id="workshop-installed"/);
   assert.match(block, /id="workshop-available"/);
   assert.match(block, />\s*Installed\s*</);

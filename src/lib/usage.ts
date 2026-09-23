@@ -1134,6 +1134,24 @@ export function isShortPlanWindow(product: string): boolean {
   return SHORT_WINDOW.test(product);
 }
 
+/** When the short-rate window (5h / session / primary) is empty, spawns must stop even if weekly leftover remains. */
+export function burstWindowBlocksCall(
+  plan: GrokPlanUsage | undefined,
+  spentPercent = 0.5,
+): { blocked: true; windowLabel: string; resetsAt?: string } | { blocked: false } {
+  if (!plan) return { blocked: false };
+  const pool = planTimeWindows(plan).length > 0 ? planTimeWindows(plan) : (plan.products ?? []);
+  const burst = pool.find((item) => isShortPlanWindow(item.product) && !item.unlimited);
+  if (!burst) return { blocked: false };
+  const left = clampLeftover(100 - burst.usagePercent);
+  if (left > spentPercent) return { blocked: false };
+  const windowLabel =
+    burst.product === "five_hour" || burst.product === "primary" || burst.label === "5h"
+      ? "5-hour"
+      : burst.label?.trim() || "Short-rate";
+  return { blocked: true, windowLabel, ...(burst.resetsAt ? { resetsAt: burst.resetsAt } : {}) };
+}
+
 export function planWindowPreference(product: string): UsagePlanWindow {
   return isShortPlanWindow(product) ? "short" : "weekly";
 }

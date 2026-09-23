@@ -7,6 +7,7 @@ import { defaultModel, withEffort, type ModelChoice } from "./models";
 import { inboundAccess } from "./permissions";
 import { providerById } from "./providers";
 import type { AgentSystemsSettings, BotAccessDefaults, CustomBot, CustomLlm, DeskAccess, LlmLink, ProviderId, McpServerConfig, Profile, RoutingSettings, Session, Settings, SettingsSection, SkillDiscoverySettings } from "./types";
+import { normalizeBotKnowledge } from "./bot-knowledge-rubric";
 import { migrateCustomBotRatings } from "./routing";
 import { normalizeWatch } from "./watch";
 import { DEFAULT_WATCH } from "./watch-defaults";
@@ -438,6 +439,10 @@ export function normalizeSettings(raw: unknown): Settings {
     usageBudgets: normalizeUsageBudgets(record.usageBudgets),
     watch: normalizeWatch(record.watch),
     routing: normalizeRouting(record.routing),
+    ...((): { botKnowledge?: ReturnType<typeof normalizeBotKnowledge> } => {
+      const botKnowledge = normalizeBotKnowledge((record as { botKnowledge?: unknown }).botKnowledge);
+      return botKnowledge.byModel ? { botKnowledge } : {};
+    })(),
     skills: normalizeSkillDiscovery((record as { skills?: unknown }).skills),
     learning: normalizeLearning((record as { learning?: unknown }).learning),
     agentSystems: normalizeAgentSystems((record as { agentSystems?: unknown }).agentSystems),

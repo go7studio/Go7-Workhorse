@@ -30,6 +30,12 @@ import { isAssignedEffort, modelsFor, normalizeModelId, withEffort, contextWindo
 import type { WatchPlans, WatchVendorStatus } from "./watch";
 import { compareVersions, deskModelKey, nameGeneration } from "./bot-scores";
 import {
+  botKnowledgeRubricForModel,
+  botKnowledgeSortWeight,
+  MANUAL_RUBRIC_SOURCE,
+  type BotKnowledgeSettings,
+} from "./bot-knowledge-rubric";
+import {
   DEFAULT_TYPICAL_RUN,
   priceLabel,
   resolveModelPrice,
@@ -1168,11 +1174,12 @@ export function routingDecisionEvidence(input: {
   candidates: RoutingCandidate[];
   request: RoutingRequest;
   settings: RoutingSettings;
+  botKnowledge?: BotKnowledgeSettings;
   selected: Pick<RoutingCandidate, "provider" | "model" | "customBotId">;
   mode: RoutingEvidenceMode;
   source: RoutingEvidenceSource;
 }): RoutingDecisionEvidenceV1 | null {
-  const ranked = rankRoutingCandidates(input.candidates, input.request, input.settings);
+  const ranked = rankRoutingCandidates(input.candidates, input.request, input.settings, input.botKnowledge);
   const recommendation = ranked[0];
   if (!recommendation) return null;
   const runnerUp = ranked[1];
@@ -1494,10 +1501,20 @@ function orchestrationFit(
     busy: number;
     effortHint?: EffortLevel | null;
     typicalRun?: TypicalRun;
+    botKnowledge?: BotKnowledgeSettings;
   },
 ): OrchestrationFit {
   const effort = effortForRoutingTier(candidate.provider, candidate.model, input.tier, input.effortHint ?? null);
-  const fit = resolveDomainScore(candidate.provider, candidate.model, input.domain, candidate.profile.intelligence, effort);
+  const manual = botKnowledgeRubricForModel(
+    input.botKnowledge,
+    candidate.provider,
+    candidate.model,
+    candidate.customBotId,
+  )?.domainScores?.[input.domain];
+  const fit: ResolvedDomainScore =
+    manual !== undefined
+      ? { score: manual, source: MANUAL_RUBRIC_SOURCE, origin: "desk-table" }
+      : resolveDomainScore(candidate.provider, candidate.model, input.domain, candidate.profile.intelligence, effort);
   const agentic = publishedAgenticScore(candidate.provider, candidate.model, effort) ?? undefined;
   const spawnWork = input.role === "worker" || input.role === "builder" || input.role === "orchestrator";
   const quality =
@@ -1635,7 +1652,7 @@ function rankOrchestrationCandidates(
   scorable: RoutingCandidate[],
   request: RoutingRequest,
   settings: RoutingSettings,
-  context: { tier: RoutingTaskTier; domain: TaskDomain; wantsImageGen: boolean },
+  context: { tier: RoutingTaskTier; domain: TaskDomain; wantsImageGen: boolean; botKnowledge?: BotKnowledgeSettings },
 ): RankedRoutingCandidate[] {
   const now = request.now ?? Date.now();
   let pool = scorable;
@@ -1655,6 +1672,7 @@ function rankOrchestrationCandidates(
       busy: request.activeLoad?.[routingPoolKey(candidate)] ?? 0,
       effortHint: request.effortHint,
       ...(request.typicalRun ? { typicalRun: request.typicalRun } : {}),
+      botKnowledge: context.botKnowledge,
     }),
   }));
   const best = Math.max(...fits.map((row) => row.terms.fit.score));
@@ -1745,10 +1763,13 @@ function rankOrchestrationCandidates(
     const aLive = routingRowLive(a, now);
     const bLive = routingRowLive(b, now);
     if (aLive !== bLive) return aLive ? -1 : 1;
+    const aWeight = botKnowledgeSortWeight(context.botKnowledge, a.provider, a.model, a.customBotId);
+    const bWeight = botKnowledgeSortWeight(context.botKnowledge, b.provider, b.model, b.customBotId);
     return (
       b.score - a.score ||
       (b.orchestration?.quality ?? 0) - (a.orchestration?.quality ?? 0) ||
       (a.orchestration?.cost.perRun ?? 0) - (b.orchestration?.cost.perRun ?? 0) ||
+      bWeight - aWeight ||
       a.label.localeCompare(b.label)
     );
   });
@@ -1758,6 +1779,7 @@ export function rankRoutingCandidates(
   candidates: RoutingCandidate[],
   request: RoutingRequest,
   settings: RoutingSettings,
+  botKnowledge?: BotKnowledgeSettings,
 ): RankedRoutingCandidate[] {
   const tier =
     request.tier ??
@@ -1783,7 +1805,7 @@ export function rankRoutingCandidates(
     : 0;
   const scorable = candidates.filter((candidate) => !routingSkipReason(candidate, request, settings, required));
   if (request.useOrchestrationBenchmark) {
-    return rankOrchestrationCandidates(scorable, request, settings, { tier, domain, wantsImageGen });
+    return rankOrchestrationCandidates(scorable, request, settings, { tier, domain, wantsImageGen, botKnowledge });
   }
   const ranked: RankedRoutingCandidate[] = [];
   for (const candidate of candidates) {
@@ -1944,6 +1966,7 @@ export function routingDecisionLogDetail(input: {
   candidates: RoutingCandidate[];
   request: RoutingRequest;
   settings: RoutingSettings;
+  botKnowledge?: BotKnowledgeSettings;
   selected?: Pick<RoutingCandidate, "provider" | "model" | "customBotId">;
 }): string {
   const { candidates, request, settings } = input;
@@ -1953,7 +1976,7 @@ export function routingDecisionLogDetail(input: {
   const domain = request.taskDomain ?? inferTaskDomain(request.prompt, request.attachments);
   const required = mergeInputRequirements(request.attachments, request.requirements);
   const minimum = requiredIntelligence(tier);
-  const ranked = rankRoutingCandidates(candidates, { ...request, tier, taskDomain: domain }, settings);
+  const ranked = rankRoutingCandidates(candidates, { ...request, tier, taskDomain: domain }, settings, input.botKnowledge);
   const skipped: string[] = [];
   for (const candidate of candidates) {
     const reason = routingSkipReason(candidate, request, settings, required);
@@ -2001,11 +2024,12 @@ export function chooseRoutingDecision(
   candidates: RoutingCandidate[],
   request: RoutingRequest,
   settings: RoutingSettings,
+  botKnowledge?: BotKnowledgeSettings,
 ): RoutingDecision | null {
   const taskTier =
     request.tier ??
     inferRoutingTier(request.prompt, request.attachments, { role: request.role, parentTier: request.parentTier });
-  const winner = rankRoutingCandidates(candidates, { ...request, tier: taskTier }, settings)[0];
+  const winner = rankRoutingCandidates(candidates, { ...request, tier: taskTier }, settings, botKnowledge)[0];
   if (!winner) return null;
   const draw = weeklyDrawState(winner.capacity, request.now);
   const expiry = candidateExpiryCredit(winner.capacity, request.now ?? Date.now());

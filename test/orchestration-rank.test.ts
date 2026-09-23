@@ -68,7 +68,7 @@ function ask(prompt: string, extra: Partial<RoutingRequest> = {}): RoutingReques
   return { prompt, now, role: "worker", useOrchestrationBenchmark: true, ...extra };
 }
 
-test("a deep ask routes even in a domain where nothing on the desk scores near 10", () => {
+test("a deep ask routes even in a domain where nothing on the desk scores near the top", () => {
   const rows = [candidate("codex", "gpt-5.6-sol"), candidate("claude", "claude-opus-5"), minimax()];
   for (const [domain, prompt] of [
     ["data", "analyze the csv of weekly signups"],
@@ -82,31 +82,31 @@ test("a deep ask routes even in a domain where nothing on the desk scores near 1
 });
 
 test("a pool inside its reserve with days to run gives way to an equal model with room", () => {
+  // Opus 5 on two plans: the same model, two allowances.
   const ranked = rankRoutingCandidates(
-    [candidate("claude", "claude-opus-5", 90), candidate("codex", "gpt-5.6-sol", 20)],
+    [candidate("claude", "claude-opus-5", 90), candidate("cursor", "claude-opus-5", 20, { label: "Cursor Opus 5" })],
     ask("implement the parser", { tier: "balanced", taskDomain: "coding" }),
     settings,
   );
-  assert.equal(ranked[0]?.model, "gpt-5.6-sol");
-  const opus = ranked.find((row) => row.model === "claude-opus-5")!;
+  assert.equal(ranked[0]?.provider, "cursor");
+  const opus = ranked.find((row) => row.provider === "claude")!;
   assert.equal(opus.orchestration?.plan.reserve, true);
   assert.equal(opus.orchestration?.plan.pace, "behind");
   assert.ok(opus.orchestration!.why.some((line) => /reserve/.test(line)));
 });
 
 test("quality still wins when the gap is real, however cheap and idle the weaker bot is", () => {
-  // Sol lists at $2/$10; Composer publishes no price and reads its tier's.
-  listPrices([["openai/gpt-5.6-sol", 2, 10], ["minimax/minimax-m3", 0.3, 1.2]]);
+  // Sol lists at $2/$10 and is 60% spent; Grok 4.7 is cheaper and idle.
+  listPrices([["openai/gpt-5.6-sol", 2, 10], ["x-ai/grok-4.7", 2, 6], ["minimax/minimax-m3", 0.3, 1.2]]);
   const ranked = rankRoutingCandidates(
-    [candidate("codex", "gpt-5.6-sol", 60), candidate("cursor", "composer-2.5", 0), minimax(0)],
+    [candidate("codex", "gpt-5.6-sol", 60), candidate("grok", "grok-4.7", 0), candidate("cursor", "composer-2.5", 0), minimax(0)],
     ask("implement the parser", { tier: "balanced", taskDomain: "coding" }),
     settings,
   );
-  assert.equal(ranked[0]?.model, "gpt-5.6-sol");
   assert.deepEqual(
     ranked.map((row) => row.model),
-    ["gpt-5.6-sol", "composer-2.5"],
-    "MiniMax M3 is under the balanced coding bar, however cheap and idle",
+    ["gpt-5.6-sol", "grok-4.7"],
+    "Composer 2.5 and MiniMax M3 are under the balanced coding bar, however cheap and idle",
   );
 });
 
@@ -122,10 +122,10 @@ test("quick work does not burn a frontier pool, and leftover about to expire is 
   );
   assert.equal(ranked[0]?.model, "grok-4.6");
   assert.equal(ranked[0]?.orchestration?.plan.expiring, true);
-  // Quick work takes any bot and stops paying for quality at 4.
+  // Quick work takes any bot and stops paying for quality at 40.
   const fable = ranked.find((row) => row.provider === "claude")!.orchestration!;
-  assert.equal(fable.fit.score, 8);
-  assert.equal(fable.points.quality, 4);
+  assert.equal(fable.fit.score, 90);
+  assert.equal(fable.points.quality, 40);
 });
 
 /** One board: thirty fillers ten points apart under the named rows. */
@@ -150,11 +150,12 @@ test("quick work takes a far better model a few cents dearer over the floor", ()
     ask("reply to this", { tier: "quick", taskDomain: "general" }),
     settings,
   );
-  assert.equal(ranked[0]?.model, "gemini-3.8-flash", "10 against the floor is worth under two doublings");
+  assert.equal(ranked[0]?.model, "gemini-3.8-flash", "40 against the floor is worth more than two doublings");
 });
 
 test("dear models keep their order however cheap the cheapest row is", () => {
-  // GPT-6 Luna leads the writing board at about 2¢ a run; Opus 5 and Fable 5.1 read the desk table (8 and 9).
+  // GPT-6 Luna leads the writing board at about 2¢ a run but the Agent Arena
+  // has not rated it; Opus 5 and Fable 5.1 read the desk table (84 and 90).
   applyBotScoresFeed({
     version: 1,
     source: "lmarena",
@@ -168,25 +169,29 @@ test("dear models keep their order however cheap the cheapest row is", () => {
     ask("write the launch announcement", { tier: "balanced", taskDomain: "writing" }),
     settings,
   );
-  // Both dear rows are past the quality ceiling; Fable's run costs twice Opus's, so it ranks under it.
+  // Every point counts on balanced work. Fable's six-point lead outweighs its
+  // twice-dearer run, and both frontier rows stay far ahead of the cheap one.
   assert.deepEqual(
     ranked.map((row) => row.model),
-    ["gpt-6-luna", "claude-opus-5", "claude-fable-5-1"],
+    ["claude-fable-5-1", "claude-opus-5", "gpt-6-luna"],
   );
+  const [fable, opus] = ranked.map((row) => row.orchestration!);
+  assert.ok(fable!.points.cost > opus!.points.cost, "the dearer run still costs more points: doublings are not capped");
 });
 
 test("workers already running on a pool send the next spawn to another pool", () => {
-  // Sol and Grok 4.6 score alike for coding and cost alike.
-  const rows = [candidate("codex", "gpt-5.6-sol"), candidate("grok", "grok-4.6")];
+  // Sol on Codex and on Cursor: the same model and price, two pools.
+  const rows = [candidate("codex", "gpt-5.6-sol"), candidate("cursor", "gpt-5.6-sol", 20, { label: "Cursor Sol" })];
   const request = ask("implement the parser", { tier: "balanced", taskDomain: "coding" });
-  assert.equal(rankRoutingCandidates(rows, request, settings)[0]?.model, "gpt-5.6-sol");
+  const idle = rankRoutingCandidates(rows, request, settings);
+  assert.equal(idle[0]?.orchestration?.considerate, idle[1]?.orchestration?.considerate, "alike when both are idle");
   const busy = rankRoutingCandidates(rows, { ...request, activeLoad: { codex: 1 } }, settings);
-  assert.equal(busy[0]?.model, "grok-4.6");
+  assert.equal(busy[0]?.provider, "cursor");
   assert.equal(busy.find((row) => row.provider === "codex")?.orchestration?.plan.busy, 1);
-  // A real quality gap outlasts one worker, not a pile of them.
+  // A real quality gap outlasts a worker or two, not a pile of them.
   const gap = [candidate("codex", "gpt-5.6-sol"), candidate("claude", "claude-opus-5")];
-  assert.equal(rankRoutingCandidates(gap, { ...request, activeLoad: { claude: 1 } }, settings)[0]?.model, "claude-opus-5");
-  assert.equal(rankRoutingCandidates(gap, { ...request, activeLoad: { claude: 3 } }, settings)[0]?.model, "gpt-5.6-sol");
+  assert.equal(rankRoutingCandidates(gap, { ...request, activeLoad: { claude: 2 } }, settings)[0]?.model, "claude-opus-5");
+  assert.equal(rankRoutingCandidates(gap, { ...request, activeLoad: { claude: 5 } }, settings)[0]?.model, "gpt-5.6-sol");
 });
 
 test("a coordinator's named row is kept when it clears the bar, and ranked away when it does not", () => {
@@ -247,29 +252,36 @@ test("public scores decide the fit, and the decision says which score it read", 
   ]
     .sort((a, b) => b.value - a.value)
     .map((row, index) => ({ ...row, rank: index + 1 }));
+  const agents = [
+    { name: "GPT 5.6 Sol (xHigh)", org: "openai", value: 0.2 },
+    { name: "Claude Opus 5 (High)", org: "anthropic", value: 0.15 },
+    ...Array.from({ length: 30 }, (_, index) => ({ name: `Agent ${index + 1}`, org: "lab", value: 0.14 - 0.01 * index })),
+  ].map((row, index) => ({ ...row, rank: index + 1 }));
   const feed: BotScoresFeed = {
     version: 1,
     source: "lmarena",
     fetchedAt: "2026-08-12T00:00:00.000Z",
     published: {},
-    tables: { "webdev:overall": board },
+    tables: { "webdev:overall": board, "agent:overall": agents },
   };
   applyBotScoresFeed(feed);
   const rows = [candidate("codex", "gpt-5.6-sol"), candidate("claude", "claude-opus-5")];
   const request = ask("implement the parser", { tier: "deep", taskDomain: "coding" });
   const decision = chooseRoutingDecision(rows, request, settings);
   assert.equal(decision?.model, "gpt-5.6-sol");
-  assert.match(decision!.reason, /coding 10\/10/);
+  assert.match(decision!.reason, /coding 100\/100/, "first on Code Arena and on the Agent Arena");
   const opus = rankRoutingCandidates(rows, request, settings).find((row) => row.provider === "claude")!.orchestration!;
   assert.equal(opus.fit.origin, "public");
-  assert.equal(opus.fit.score, 8.3, "eighty points behind with 46 to a point");
-  assert.match(opus.fit.source, /^LMArena Code Arena #\d+ \(high run\)$/);
+  assert.equal(opus.fit.score, 85, "eighty points behind on Code Arena, second on the Agent Arena: half each");
+  assert.match(opus.fit.source, /^LMArena Code Arena #\d+ \(high run\) · LMArena Agent Arena #2 \(high run\)$/);
+  assert.equal(opus.quality, opus.fit.score, "the Agent Arena is in the score, not added on top");
 });
 
 test("an older model on the same plan gives way to a newer one that scores at least as well", () => {
   const onCursor = (model: string, label: string) => candidate("cursor", model, 20, { label });
   const rows = [onCursor("claude-opus-4-7", "Opus 4.7"), onCursor("claude-opus-5-5", "Opus 5.5"), onCursor("claude-4.6-opus", "Opus 4.6")];
-  const request = ask("implement the parser", { tier: "balanced", taskDomain: "coding" });
+  // Quick work takes any bot, so the older rows clear the bar and are there to give way.
+  const request = ask("rename the helper", { tier: "quick", taskDomain: "coding" });
   const ranked = rankRoutingCandidates(rows, request, settings);
   assert.deepEqual(ranked.map((row) => row.model), ["claude-opus-5-5"]);
   assert.deepEqual(ranked[0]!.orchestration!.supersedes!.map((row) => row.label).sort(), ["Opus 4.6", "Opus 4.7"]);
@@ -280,16 +292,16 @@ test("an older model on the same plan gives way to a newer one that scores at le
 });
 
 test("a newer model does not displace one on another plan, or one that is better at the task", () => {
-  const request = ask("implement the parser", { tier: "balanced", taskDomain: "coding" });
+  const request = ask("rename the helper", { tier: "quick", taskDomain: "coding" });
   const plans = rankRoutingCandidates(
     [candidate("claude", "claude-opus-5"), candidate("cursor", "claude-opus-4-8", 20, { label: "Cursor Opus 4.8" })],
     request,
     settings,
   );
   assert.equal(plans.length, 2, "two plans, two allowances: both stay");
-  // In chat answers Sonnet 4.6 still reads better than Sonnet 5 on the desk table.
+  // In chat answers Grok 4.5 still reads better than Grok 4.6 on the desk table.
   const general = rankRoutingCandidates(
-    [candidate("claude", "claude-sonnet-5"), candidate("claude", "claude-sonnet-4-6")],
+    [candidate("grok", "grok-4.6"), candidate("grok", "grok-4.5")],
     ask("reply to this", { tier: "quick", taskDomain: "general" }),
     settings,
   );
@@ -297,42 +309,43 @@ test("a newer model does not displace one on another plan, or one that is better
 });
 
 test("a model whose runs take more of the plan pays for it, once the desk has measured enough runs", () => {
-  const rows = [candidate("codex", "gpt-5.6-sol"), candidate("grok", "grok-4.6")];
+  // Sol on Codex and on Cursor: the same model and price on two pools.
+  const rows = [candidate("codex", "gpt-5.6-sol"), candidate("cursor", "gpt-5.6-sol", 20, { label: "Cursor Sol" })];
   const request = ask("implement the parser", { tier: "balanced", taskDomain: "coding" });
-  assert.equal(rankRoutingCandidates(rows, request, settings)[0]?.model, "gpt-5.6-sol", "alike on quality and price");
   const draws: RunDraws = {
     byModel: {
       [runDrawKey("codex", "gpt-5.6-sol")]: { medianTokens: 200_000, runs: 5 },
-      [runDrawKey("grok", "grok-4.6")]: { medianTokens: 50_000, runs: 5 },
+      [runDrawKey("cursor", "gpt-5.6-sol")]: { medianTokens: 50_000, runs: 5 },
     },
     deskMedianTokens: 100_000,
     deskRuns: 12,
   };
   const measured = rankRoutingCandidates(withRunDraws(rows, draws), request, settings);
-  assert.equal(measured[0]?.model, "grok-4.6", "the leaner model takes it");
-  const sol = measured.find((row) => row.provider === "codex")!.orchestration!;
-  assert.equal(sol.draw?.applied, 2, "twice the desk's median run doubles what its typical run costs");
-  const grok = measured.find((row) => row.provider === "grok")!.orchestration!;
-  assert.ok(Math.abs(sol.cost.perRun - 4 * grok.cost.perRun) < 1e-9, "same price tier, four times the draw: four times the run cost");
-  assert.ok(sol.why.includes("about 200k tokens a finished run over 5 runs, 2× the desk's median"));
+  assert.equal(measured[0]?.provider, "cursor", "the leaner runs take it");
+  const codex = measured.find((row) => row.provider === "codex")!.orchestration!;
+  assert.equal(codex.draw?.applied, 2, "twice the desk's median run doubles what its typical run costs");
+  const cursor = measured.find((row) => row.provider === "cursor")!.orchestration!;
+  assert.ok(Math.abs(codex.cost.perRun - 4 * cursor.cost.perRun) < 1e-9, "same price, four times the draw: four times the run cost");
+  assert.ok(codex.why.includes("about 200k tokens a finished run over 5 runs, 2× the desk's median"));
   // Two runs are not enough to judge a model by.
-  const few = withRunDraws(rows, { ...draws, byModel: { ...draws.byModel, [runDrawKey("grok", "grok-4.6")]: { medianTokens: 50_000, runs: 2 } } });
-  assert.equal(few.find((row) => row.provider === "grok")?.draw, undefined);
+  const few = withRunDraws(rows, { ...draws, byModel: { ...draws.byModel, [runDrawKey("cursor", "gpt-5.6-sol")]: { medianTokens: 50_000, runs: 2 } } });
+  assert.equal(few.find((row) => row.provider === "cursor")?.draw, undefined);
 });
 
 test("at alike quality the cheaper list price takes the work, and a dearer model needs a real quality lead", () => {
   const request = ask("implement the parser", { tier: "balanced", taskDomain: "coding" });
-  // Sol and Grok 4.6 score alike for coding; Grok's output tokens cost less.
-  listPrices([["openai/gpt-5.6-sol", 2, 10], ["x-ai/grok-4.6", 2, 6], ["anthropic/claude-opus-5", 5, 25]]);
-  const alike = rankRoutingCandidates([candidate("codex", "gpt-5.6-sol"), candidate("grok", "grok-4.6")], request, settings);
-  assert.equal(alike[0]?.model, "grok-4.6");
-  const sol = alike.find((row) => row.provider === "codex")!.orchestration!;
-  assert.ok(sol.why.includes("about $0.42 a typical run ($2/M in, $10/M out)"));
-  // Opus leads Sol by a point at two and a half times the run cost: the point is worth it.
+  // GPT-6 Sol reads GPT-5.6 Sol's row; on another pool, and GPT-5.6 Sol's output costs less.
+  listPrices([["openai/gpt-6-sol", 2, 10], ["openai/gpt-5.6-sol", 2, 6], ["anthropic/claude-opus-5", 5, 25]]);
+  const alike = rankRoutingCandidates([candidate("codex", "gpt-6-sol"), candidate("cursor", "gpt-5.6-sol", 20, { label: "Cursor Sol" })], request, settings);
+  assert.equal(alike[0]?.model, "gpt-5.6-sol");
+  const dearer = alike.find((row) => row.provider === "codex")!.orchestration!;
+  assert.ok(dearer.why.includes("about $0.42 a typical run ($2/M in, $10/M out)"));
+  // Opus leads Sol by 23 points at two and a half times the run cost: well worth it.
+  listPrices([["openai/gpt-5.6-sol", 2, 10], ["anthropic/claude-opus-5", 5, 25]]);
   const lead = rankRoutingCandidates([candidate("codex", "gpt-5.6-sol"), candidate("claude", "claude-opus-5")], request, settings);
   assert.equal(lead[0]?.model, "claude-opus-5");
-  // At twenty times the run cost it is not.
-  listPrices([["openai/gpt-5.6-sol", 2, 10], ["anthropic/claude-opus-5", 40, 200]]);
+  // At a hundred and fifty times the run cost it is not.
+  listPrices([["openai/gpt-5.6-sol", 2, 10], ["anthropic/claude-opus-5", 300, 1500]]);
   const dear = rankRoutingCandidates([candidate("codex", "gpt-5.6-sol"), candidate("claude", "claude-opus-5")], request, settings);
   assert.equal(dear[0]?.model, "gpt-5.6-sol");
 });
@@ -416,16 +429,30 @@ test("a run's speed is its output over its wall time, and estimated rows are not
 test("each tier says what it weighs", () => {
   assert.equal(
     orchestrationTierNote("quick"),
-    "Quick: any bot; quality counts up to 4; each doubling of run cost −0.9; each doubling of speed +0.6; plan terms ×1.5.",
+    "Quick: any bot; quality counts up to 40; each doubling of run cost −9; each doubling of speed +6; plan terms ×1.5.",
   );
   assert.equal(
     orchestrationTierNote("balanced"),
-    "Balanced: 4/10 to qualify; quality counts up to 7; each doubling of run cost −0.35; each doubling of speed +0.25; plan terms ×1.",
+    "Balanced: 30/100 to qualify; every point of quality counts; each doubling of run cost −3.5; each doubling of speed +2.5; plan terms ×1.",
   );
   assert.equal(
     orchestrationTierNote("deep"),
-    "Deep: 8/10 to qualify; all of its quality counts; each doubling of run cost −0.15; speed does not count; plan terms ×0.5.",
+    "Deep: 70/100 to qualify; every point of quality counts; each doubling of run cost −1.5; speed does not count; plan terms ×0.5.",
   );
+});
+
+test("on balanced work the frontier is never ranked level with a model half as good", () => {
+  // GPT-6 Astra once sat below GPT-5.6 Sol on balanced coding: quality stopped counting at 7 of 10.
+  listPrices([["openai/gpt-6-astra", 10, 50], ["openai/gpt-5.6-sol", 2, 10]]);
+  const ranked = rankRoutingCandidates(
+    [candidate("codex", "gpt-6-astra"), candidate("cursor", "gpt-5.6-sol", 20, { label: "Cursor Sol" })],
+    ask("implement the parser", { tier: "balanced", taskDomain: "coding" }),
+    settings,
+  );
+  assert.deepEqual(ranked.map((row) => row.model), ["gpt-6-astra", "gpt-5.6-sol"]);
+  const [astra, sol] = ranked.map((row) => row.orchestration!);
+  assert.equal(astra!.points.quality, 90);
+  assert.equal(sol!.points.quality, 48);
 });
 
 test("quick work takes the faster bot, and deep work takes the better one however slow", () => {
@@ -445,7 +472,7 @@ test("quick work takes the faster bot, and deep work takes the better one howeve
   assert.equal(quick[0]?.model, "gpt-5.6-sol");
   const sol = quick[0]!.orchestration!;
   assert.equal(sol.speed.doublings, 1);
-  assert.equal(sol.points.speed, 0.6);
+  assert.equal(sol.points.speed, 6);
   assert.ok(sol.why.includes("80 tok/s here, 2× the desk's median"));
   const deep = rankRoutingCandidates(rows, ask("design the storage layer", { tier: "deep", taskDomain: "coding" }), settings);
   assert.equal(deep[0]?.model, "claude-opus-5");

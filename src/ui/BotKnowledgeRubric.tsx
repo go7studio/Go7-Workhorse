@@ -163,7 +163,7 @@ export function BotKnowledgeRubricSheet({
               const base = catalog[domain];
               const edited = domainScores[domain];
               const shown = displayScore(domain);
-              const catalogLine = `Catalog ${base.score}/10 · ${base.source}`;
+              const catalogLine = `Without yours: ${base.score}/100 · ${base.source}`;
               return (
                 <li key={domain}>
                   <div className="bk-rubric-domain-head">
@@ -172,7 +172,7 @@ export function BotKnowledgeRubricSheet({
                       {edited !== undefined && edited !== base.score ? (
                         <span className="bk-rubric-edited">Manual</span>
                       ) : null}
-                      <output>{shown}/10</output>
+                      <output>{shown}/100</output>
                     </span>
                   </div>
                   <p className="bk-rubric-catalog" title={catalogLine}>
@@ -182,7 +182,7 @@ export function BotKnowledgeRubricSheet({
                     <input
                       type="range"
                       min={0}
-                      max={10}
+                      max={100}
                       step={1}
                       value={shown}
                       aria-label={`${DOMAIN_LABEL[domain]} score`}
@@ -205,7 +205,7 @@ export function BotKnowledgeRubricSheet({
         </div>
         <footer className="bk-rubric-foot">
           <button type="button" className="ghost" onClick={reset}>
-            Reset to catalog
+            Reset to the boards
           </button>
           <div className="bk-rubric-foot-actions">
             <button type="button" className="ghost" onClick={onClose}>

@@ -1283,19 +1283,21 @@ export function routingSkipReason(
 }
 
 /**
- * Quality past bar + headroom buys nothing on that tier; cost and leftover
- * decide instead. Quick work takes any bot and stops paying for quality at 4,
- * about a board's fortieth place: a quick reply does not need a leader, but a
- * far better model a few cents dearer still beats the floor.
+ * The most quality counts for on each tier, out of 100. Quick work stops
+ * paying for quality at 40, about a board's twelfth place: a quick reply does
+ * not need a leader, so cost and speed decide it. Balanced and deep work count
+ * every point, so the frontier is never ranked level with a model half as
+ * good; GPT-6 Astra once sat below GPT-5.6 Sol on balanced coding because
+ * quality stopped counting at 7 of 10.
  */
-const ORCHESTRATION_HEADROOM: Record<RoutingTaskTier, number> = { quick: 3, balanced: 3, deep: 10 };
+const ORCHESTRATION_QUALITY_CAP: Record<RoutingTaskTier, number> = { quick: 40, balanced: 100, deep: 100 };
 /**
  * Domain points given up for each doubling of what a typical run costs over the
  * cheapest row that clears the bar and can take work now: list price per input
  * and output token times the desk's typical run, scaled by what the model's own
  * runs take. Uncapped, so two dear models keep their order.
  */
-const ORCHESTRATION_COST_WEIGHT: Record<RoutingTaskTier, number> = { quick: 0.9, balanced: 0.35, deep: 0.15 };
+const ORCHESTRATION_COST_WEIGHT: Record<RoutingTaskTier, number> = { quick: 9, balanced: 3.5, deep: 1.5 };
 /** A run priced below this reads as this, so a free row cannot make every other one infinitely dear. */
 const MIN_RUN_COST_USD = 0.001;
 /** How much a pool's plan terms count against quality on each tier. */
@@ -1305,7 +1307,7 @@ const ORCHESTRATION_PLAN_WEIGHT: Record<RoutingTaskTier, number> = { quick: 1.5,
  * lost for each halving): what a quick job is for, a tiebreaker on balanced
  * work, and nothing on deep work, where the best answer is worth the wait.
  */
-const ORCHESTRATION_SPEED_WEIGHT: Record<RoutingTaskTier, number> = { quick: 0.6, balanced: 0.25, deep: 0 };
+const ORCHESTRATION_SPEED_WEIGHT: Record<RoutingTaskTier, number> = { quick: 6, balanced: 2.5, deep: 0 };
 /** How far measured speed can move a row, in doublings either way. */
 const MAX_SPEED_DOUBLINGS = 2;
 
@@ -1324,25 +1326,23 @@ export function orchestrationTierWeights(tier: RoutingTaskTier): OrchestrationTi
   return {
     tier,
     bar,
-    qualityCap: Math.min(10, bar + ORCHESTRATION_HEADROOM[tier]),
+    qualityCap: ORCHESTRATION_QUALITY_CAP[tier],
     costPerDoubling: ORCHESTRATION_COST_WEIGHT[tier],
     speedPerDoubling: ORCHESTRATION_SPEED_WEIGHT[tier],
     planWeight: ORCHESTRATION_PLAN_WEIGHT[tier],
   };
 }
 
-/** One sentence per tier: "Quick: any bot; quality counts up to 4; …". */
+/** One sentence per tier: "Quick: any bot; quality counts up to 40; …". */
 export function orchestrationTierNote(tier: RoutingTaskTier): string {
   const weights = orchestrationTierWeights(tier);
   const name = tier === "quick" ? "Quick" : tier === "deep" ? "Deep" : "Balanced";
-  const bar = weights.bar <= 1 ? "any bot" : `${weights.bar}/10 to qualify`;
-  const quality = weights.qualityCap >= 10 ? "all of its quality counts" : `quality counts up to ${weights.qualityCap}`;
+  const bar = weights.bar <= 1 ? "any bot" : `${weights.bar}/100 to qualify`;
+  const quality = weights.qualityCap >= 100 ? "every point of quality counts" : `quality counts up to ${weights.qualityCap}`;
   const speed = weights.speedPerDoubling > 0 ? `each doubling of speed +${weights.speedPerDoubling}` : "speed does not count";
   return `${name}: ${bar}; ${quality}; each doubling of run cost −${weights.costPerDoubling}; ${speed}; plan terms ×${weights.planWeight}.`;
 }
 
-/** Share of a spawn's quality taken from Agent Arena (tools, long runs) when that arena rates the model. */
-const ORCHESTRATION_AGENTIC_SHARE = 0.2;
 /**
  * How far a model's measured draw moves what its typical run costs: its median
  * run over the desk's, capped both ways so a few odd runs cannot swing a pick.
@@ -1350,13 +1350,20 @@ const ORCHESTRATION_AGENTIC_SHARE = 0.2;
 const DRAW_RATIO_CEILING = 4;
 const DRAW_RATIO_FLOOR = 0.5;
 /** Points a pool gives up for each worker already running on it, so a squad spreads over the desk. */
-const ORCHESTRATION_BUSY_POINTS = 0.6;
+const ORCHESTRATION_BUSY_POINTS = 6;
 /**
  * Points a 5h window takes off as it fills past the tight mark, at 100%. A
- * worker that stalls mid-task costs more than a point of quality on the strict
- * scale, so a window about to stall one outweighs it.
+ * worker that stalls mid-task for hours costs more than a wide gap in
+ * quality, so a window about to stall one outweighs Opus 5's lead over
+ * GPT-5.6 Sol on coding.
  */
-const SHORT_WINDOW_POINTS = 3;
+const SHORT_WINDOW_POINTS = 60;
+/** What a pool's plan terms are worth, out of 100: leftover about to expire, pace, the reserve, no meter. */
+const EXPIRING_POINTS_MAX = 15;
+const EXCESS_PACE_POINTS = 7.5;
+const BEHIND_PACE_POINTS = 5;
+const RESERVE_POINTS = 20;
+const UNMETERED_POINTS = 2.5;
 /** A 5h window at or past this is close to stalling a worker mid-task... */
 const SHORT_WINDOW_TIGHT_PERCENT = 90;
 /** ...unless it resets this soon. */
@@ -1525,13 +1532,10 @@ function orchestrationFit(
       ? { score: manual, source: MANUAL_RUBRIC_SOURCE, origin: "desk-table" }
       : resolveDomainScore(candidate.provider, candidate.model, input.domain, candidate.profile.intelligence, effort);
   const agentic = publishedAgenticScore(candidate.provider, candidate.model, effort) ?? undefined;
-  const spawnWork = input.role === "worker" || input.role === "builder" || input.role === "orchestrator";
-  const quality =
-    agentic && spawnWork
-      ? oneDecimal((1 - ORCHESTRATION_AGENTIC_SHARE) * fit.score + ORCHESTRATION_AGENTIC_SHARE * agentic.score)
-      : fit.score;
-  const why: string[] = [`${input.domain} ${fit.score}/10 (${fit.source})`];
-  if (agentic && spawnWork) why.push(`agentic ${agentic.score}/10`);
+  // The domain score already carries the Agent Arena (see resolveDomainScore),
+  // and a score set on the rubric is the owner's word for the whole thing.
+  const quality = fit.score;
+  const why: string[] = [`${input.domain} ${fit.score}/100 (${fit.source})`];
   const runDraw = candidate.draw
     ? { ...candidate.draw, applied: clamp(candidate.draw.ratio, DRAW_RATIO_FLOOR, DRAW_RATIO_CEILING) }
     : undefined;
@@ -1570,24 +1574,24 @@ function orchestrationFit(
   let expiring = false;
   let reserve = false;
   if (unmetered) {
-    planPoints += 0.25;
+    planPoints += UNMETERED_POINTS;
     why.push("no meter to spend down");
   } else if (input.settings.capacityAware && draw.usedPercent !== undefined) {
     const expiry = candidateExpiryCredit(candidate.capacity, input.now);
     if (expiry > 0) {
       expiring = true;
-      planPoints += Math.min(1.5, expiry / 32);
+      planPoints += Math.min(EXPIRING_POINTS_MAX, (expiry / 32) * 10);
       why.push(`${Math.round(100 - draw.usedPercent)}% left expires in ${expiryHoursLabel(resetMs)}`);
     } else if (draw.delta !== undefined) {
       const delta = clamp(draw.delta, -50, 50);
-      if (input.settings.preferExcess) planPoints += (delta / 50) * 0.75;
-      else if (delta < 0) planPoints += (delta / 50) * 0.5;
+      if (input.settings.preferExcess) planPoints += (delta / 50) * EXCESS_PACE_POINTS;
+      else if (delta < 0) planPoints += (delta / 50) * BEHIND_PACE_POINTS;
     }
     if (draw.usedPercent >= 100 - input.settings.reservePercent) {
       const weight = reservePenaltyWeight(draw.resetMs);
       if (weight > 0) {
         reserve = true;
-        planPoints -= 2 * weight;
+        planPoints -= RESERVE_POINTS * weight;
         why.push(`inside the ${input.settings.reservePercent}% reserve`);
       }
     }
@@ -1652,7 +1656,7 @@ function sameCandidateIdentity(
  * for this domain at the thinking level it would run at; rows under the tier's
  * bar drop out, and the bar never sits above the best row, so a domain nobody
  * on the desk is great at still routes to the best there is. The rest are
- * ordered by quality (capped at the tier's headroom, so quick work does not
+ * ordered by quality (capped on quick work, so a quick job does not
  * burn a frontier pool), less the cost premium, plus the plan terms weighted
  * by tier: leftover about to expire, pace against the days left, the reserve,
  * a 5h window close to full, and workers already running on the pool.
@@ -1714,7 +1718,7 @@ function rankOrchestrationCandidates(
   const runCost = (row: Fit) => Math.max(MIN_RUN_COST_USD, row.terms.cost.perRun);
   const cheapest = Math.min(...(takingWork.length ? takingWork : passing).map(runCost));
   const doublings = (row: Fit) => Math.max(0, Math.log2(runCost(row) / cheapest));
-  const ceiling = bar + ORCHESTRATION_HEADROOM[context.tier];
+  const ceiling = ORCHESTRATION_QUALITY_CAP[context.tier];
   const preferred = request.preferred ?? [];
   const ranked: RankedRoutingCandidate[] = passing.map((row) => {
     const { candidate, terms, planPoints } = row;
@@ -2055,7 +2059,7 @@ export function chooseRoutingDecision(
   const imageGenReason =
     detectsImageGenerationIntent(request.prompt) && candidateCanGenerateImages(winner) ? " · image generation" : "";
   const fitReason = winner.orchestration
-    ? ` · ${winner.orchestration.domain} ${winner.orchestration.fit.score}/10${winner.orchestration.coordinatorPick ? " · coordinator's pick" : ""}`
+    ? ` · ${winner.orchestration.domain} ${winner.orchestration.fit.score}/100${winner.orchestration.coordinatorPick ? " · coordinator's pick" : ""}`
     : "";
   return {
     at: request.now ?? Date.now(),

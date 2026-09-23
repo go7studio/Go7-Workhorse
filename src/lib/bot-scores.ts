@@ -296,27 +296,40 @@ type PreparedFeed = {
   cache: Map<string, ScoreHit | null>;
 };
 
-function round1(value: number): number {
-  return Math.round(value * 10) / 10;
-}
+/** Every score orchestration reads is out of this. */
+export const SCORE_SCALE = 100;
 
-/** The place on a board, counting each model once, that scores {@link MIDFIELD_SCORE}. */
+/** The place on a board, counting each model once, the scale is measured against. */
 export const MIDFIELD_PLACE = 25;
-export const MIDFIELD_SCORE = 5;
+
+/**
+ * Where a board's scores fall off, in parts of the rating gap from its leader
+ * to its 25th-best: half the scale is gone at 0.55 of the way, and the curve
+ * is steep either side of it. The leaders stay together near the top and the
+ * middle of the board drops hard.
+ */
+const FALL_OFF_MIDPOINT = 0.55;
+const FALL_OFF_STEEPNESS = 5;
 
 /** One line for anyone reading the scores: a head's brief, find_bots, the Bot knowledge pane. */
 export const STRICT_SCALE_NOTE =
-  "Strict scale: 10 is only a board's leader, about 7 its tenth-best, 5 its 25th-best; desk-table rows are rounded down and never 10.";
+  "Scores are out of 100 and steep: only a board's leader scores 100, the 25th-best about 10. A domain score is half its own board and half the Agent Arena, because every worker is an agent; desk-table rows are rounded down and never above 90.";
+
+/** 0–100 for a distance from a board's leader, in parts of the gap to its 25th-best. */
+export function fallOffScore(distance: number): number {
+  const curve = (at: number) => 1 / (1 + Math.exp(FALL_OFF_STEEPNESS * (at - FALL_OFF_MIDPOINT)));
+  return (SCORE_SCALE * curve(Math.max(0, distance))) / curve(0);
+}
 
 /**
- * 1–10 from a leaderboard value, strictly. Only the board's leader scores 10.
- * The 25th-best model scores 5, counting each model once however many runs it
- * has, and every other row sits on the straight line through those two, down
- * to 1. A point is a fifth of the rating gap between first and 25th, so a
- * tight board and a wide one grade alike, the tenth-best lands near 7, and a
- * model far down the board reaches the floor instead of sitting mid-scale. A
- * board with fewer than 25 models places its last one in proportion. Agent
- * Arena's scores are on their own scale and grade the same way.
+ * 0–100 from a leaderboard value, steeply. Only the board's leader scores 100.
+ * Each model counts once however many runs it has. A row's distance is its
+ * rating gap to the leader over the gap from the leader to the 25th-best, so
+ * a tight board and a wide one grade alike, and the score falls off that
+ * distance on an S-curve: the models near the top stay near 100, the 25th-best
+ * lands near 10, and anything far down reaches the floor of 1. A board with
+ * fewer than 25 models places its last one in proportion. Agent Arena's
+ * scores are on their own scale and grade the same way.
  */
 function tableScorer(rows: ArenaRow[]): (value: number) => number {
   const bestByModel = new Map<string, number>();
@@ -327,12 +340,13 @@ function tableScorer(rows: ArenaRow[]): (value: number) => number {
   const ranked = [...bestByModel.values()].sort((a, b) => b - a);
   const top = ranked[0]!;
   const anchor = Math.min(MIDFIELD_PLACE - 1, ranked.length - 1);
-  const drop = ((10 - MIDFIELD_SCORE) * anchor) / (MIDFIELD_PLACE - 1);
-  const unit = drop > 0 ? (top - ranked[anchor]!) / drop : 0;
+  const gap = top - ranked[anchor]!;
+  const reach = anchor / (MIDFIELD_PLACE - 1);
   return (value) => {
-    if (value >= top) return 10;
-    if (!(unit > 0)) return 9.9;
-    return Math.min(9.9, Math.max(1, round1(10 - (top - value) / unit)));
+    if (value >= top) return SCORE_SCALE;
+    if (!(gap > 0)) return SCORE_SCALE - 1;
+    const distance = ((top - value) / gap) * reach;
+    return Math.min(SCORE_SCALE - 1, Math.max(1, Math.round(fallOffScore(distance))));
   };
 }
 

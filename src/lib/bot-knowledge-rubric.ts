@@ -1,4 +1,4 @@
-import { domainBenchmarkScoreFromCatalog } from "./domain-benchmark-catalog";
+import { resolveDomainScore } from "./domain-score";
 import { routingProfileForModel } from "./routing";
 import type { ProviderId, StoredRoutingProfile, TaskDomain } from "./types";
 
@@ -21,7 +21,12 @@ export type BotKnowledgeRubricOverride = {
 
 export type BotKnowledgeSettings = {
   byModel?: Record<string, BotKnowledgeRubricOverride>;
+  /** Scores are out of 100. A save without this was made out of 10 and is read times ten. */
+  scale?: typeof RUBRIC_SCALE;
 };
+
+/** Rubric scores are on the same 0–100 as the boards. */
+export const RUBRIC_SCALE = 100;
 
 export function botKnowledgeModelKey(provider: ProviderId, model: string, customBotId?: string): string {
   if (provider === "custom" && customBotId) return `custom:${customBotId}:${model}`;
@@ -30,7 +35,7 @@ export function botKnowledgeModelKey(provider: ProviderId, model: string, custom
 
 function clampScore(value: number): number {
   if (!Number.isFinite(value)) return 0;
-  return Math.min(10, Math.max(0, Math.round(value)));
+  return Math.min(RUBRIC_SCALE, Math.max(0, Math.round(value)));
 }
 
 function clampSortWeight(value: number): number {
@@ -42,6 +47,8 @@ export function normalizeBotKnowledge(raw: unknown): BotKnowledgeSettings {
   if (!raw || typeof raw !== "object") return {};
   const record = raw as Partial<BotKnowledgeSettings>;
   if (!record.byModel || typeof record.byModel !== "object") return {};
+  // The first rubric was out of 10. Its scores keep their place on the new scale.
+  const factor = record.scale === RUBRIC_SCALE ? 1 : RUBRIC_SCALE / 10;
   const byModel: Record<string, BotKnowledgeRubricOverride> = {};
   for (const [key, entry] of Object.entries(record.byModel)) {
     const trimmed = key.trim();
@@ -50,7 +57,7 @@ export function normalizeBotKnowledge(raw: unknown): BotKnowledgeSettings {
     if (entry.domainScores && typeof entry.domainScores === "object") {
       for (const domain of RUBRIC_DOMAINS) {
         const score = Number((entry.domainScores as Record<string, unknown>)[domain]);
-        if (Number.isFinite(score)) domainScores[domain] = clampScore(score);
+        if (Number.isFinite(score)) domainScores[domain] = clampScore(score * factor);
       }
     }
     const sortWeight = entry.sortWeight === undefined ? undefined : clampSortWeight(Number(entry.sortWeight));
@@ -62,7 +69,7 @@ export function normalizeBotKnowledge(raw: unknown): BotKnowledgeSettings {
       ...(hasWeight ? { sortWeight } : {}),
     };
   }
-  return Object.keys(byModel).length > 0 ? { byModel } : {};
+  return Object.keys(byModel).length > 0 ? { byModel, scale: RUBRIC_SCALE } : {};
 }
 
 export function botKnowledgeRubricForModel(
@@ -98,9 +105,10 @@ export function resolveDomainBenchmarkScore(input: {
     return { score: manual, source: MANUAL_RUBRIC_SOURCE };
   }
   const family = routingProfileForModel(input.provider, input.model, input.routingOverride).intelligence;
-  return domainBenchmarkScoreFromCatalog(input.provider, input.model, input.domain, family);
+  return resolveDomainScore(input.provider, input.model, input.domain, family);
 }
 
+/** What the boards (or, without them, the desk table) say for this model: the score a rubric edit replaces. */
 export function catalogDomainBenchmarkScore(
   provider: ProviderId,
   model: string,
@@ -108,7 +116,7 @@ export function catalogDomainBenchmarkScore(
   routingOverride?: StoredRoutingProfile,
 ): { score: number; source: string } {
   const family = routingProfileForModel(provider, model, routingOverride).intelligence;
-  return domainBenchmarkScoreFromCatalog(provider, model, domain, family);
+  return resolveDomainScore(provider, model, domain, family);
 }
 
 export function mergeBotKnowledgeRubric(
@@ -137,5 +145,5 @@ export function mergeBotKnowledgeRubric(
       };
     }
   }
-  return Object.keys(next).length > 0 ? { byModel: next } : {};
+  return Object.keys(next).length > 0 ? { byModel: next, scale: RUBRIC_SCALE } : {};
 }

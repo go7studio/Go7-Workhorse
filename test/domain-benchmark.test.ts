@@ -3,6 +3,7 @@ import test from "node:test";
 import { botKnowledgeSnapshot } from "../src/lib/domain-benchmark";
 import { DEFAULT_SETTINGS } from "../src/lib/settings";
 import { rankRoutingCandidates, routingProfileForModel } from "../src/lib/routing";
+import { mergeBotKnowledgeRubric, normalizeBotKnowledge } from "../src/lib/bot-knowledge-rubric";
 import type { GrokPlanUsage, Settings } from "../src/lib/types";
 
 const links = (over: Partial<Settings["llms"]> = {}): Settings["llms"] => ({
@@ -103,7 +104,7 @@ test("bot knowledge manual rubric overrides catalog score for list and source", 
     llms: links({ grok: { connected: true, enabled: true, launchable: true } }),
     botKnowledge: {
       byModel: {
-        "grok:grok-4.7": { domainScores: { data: 9 } },
+        "grok:grok-4.7": { domainScores: { data: 90 } },
       },
     },
   };
@@ -117,7 +118,7 @@ test("bot knowledge manual rubric overrides catalog score for list and source", 
   });
   const grok = snapshot.models.find((row) => row.provider === "grok" && row.model === "grok-4.7");
   assert.ok(grok);
-  assert.equal(grok?.score, 9);
+  assert.equal(grok?.score, 90);
   assert.match(grok?.source ?? "", /Your rubric on this desk/);
 });
 
@@ -126,8 +127,8 @@ test("orchestration benchmark election reads manual rubric scores", () => {
   const routing = DEFAULT_SETTINGS.routing;
   const botKnowledge = {
     byModel: {
-      "grok:grok-4.6": { domainScores: { coding: 10 } },
-      "codex:gpt-5.6-sol": { domainScores: { coding: 4 } },
+      "grok:grok-4.6": { domainScores: { coding: 100 } },
+      "codex:gpt-5.6-sol": { domainScores: { coding: 40 } },
     },
   };
   const rows = [
@@ -161,4 +162,14 @@ test("orchestration benchmark election reads manual rubric scores", () => {
     botKnowledge,
   );
   assert.equal(ranked[0]?.model, "grok-4.6");
+});
+
+test("a rubric saved out of 10 keeps its place out of 100, and a new save says its scale", () => {
+  const legacy = normalizeBotKnowledge({ byModel: { "grok:grok-4.7": { domainScores: { data: 9, coding: 4 }, sortWeight: 3 } } });
+  assert.deepEqual(legacy, { byModel: { "grok:grok-4.7": { domainScores: { coding: 40, data: 90 }, sortWeight: 3 } }, scale: 100 });
+  assert.deepEqual(normalizeBotKnowledge(legacy), legacy, "reading it again does not multiply it again");
+  const saved = mergeBotKnowledgeRubric(legacy, "codex:gpt-6-astra", { domainScores: { writing: 92, general: 250 } });
+  assert.equal(saved.scale, 100);
+  assert.deepEqual(saved.byModel?.["codex:gpt-6-astra"], { domainScores: { writing: 92, general: 100 } }, "a score is held to 0-100");
+  assert.deepEqual(mergeBotKnowledgeRubric(saved, "codex:gpt-6-astra", null).byModel, legacy.byModel);
 });

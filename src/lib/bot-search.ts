@@ -51,14 +51,18 @@ export type FindBotsPick = {
   /** The thinking level this pick would run at. */
   effort: string | null;
   fit: string;
+  /** The domain score, out of 100: its board mixed with the Agent Arena, or the owner's rubric. */
+  score: number;
   source: string;
-  /** Agent Arena, 1–10, when that arena rates this model. */
+  /** Agent Arena, out of 100, when that arena rates this model. */
   agentic?: number;
   /** This pool's plan overall: leftover, reset, pace. Never one spawn. */
   plan: string;
   why: string[];
   /** What a typical run on this desk costs at the model's list price, and that price. */
   cost: string;
+  /** The same run cost alone: "$1.84", "7¢". */
+  runCost: string;
   /** How fast it runs here, or its family's rating until this desk has timed it. */
   speed: string;
   /** The number the desk orders picks by. */
@@ -143,23 +147,27 @@ export function findBots(input: FindBotsInput, desk: FindBotsDesk): FindBotsResu
       ...(bot ? { bot } : {}),
       label: row.label,
       effort: terms.effort,
-      fit: `${terms.domain} ${terms.fit.score}/10`,
+      fit: `${terms.domain} ${terms.fit.score}/100`,
+      score: terms.fit.score,
       source: terms.fit.source,
       ...(terms.agentic ? { agentic: terms.agentic.score } : {}),
       plan: planLineFor(row, now, terms.plan),
       cost: `${runCostLabel(terms.cost.perRun)} a typical run (${terms.cost.published ? priceLabel(terms.cost) : terms.cost.source})`,
+      runCost: runCostLabel(terms.cost.perRun),
       speed: terms.speed.label,
       why: terms.why,
       considerate: terms.considerate,
     };
   };
-  const ranked = rankRoutingCandidates(candidates, { ...request, activeLoad: baseLoad }, desk.settings.routing);
+  const ranked = rankRoutingCandidates(candidates, { ...request, activeLoad: baseLoad }, desk.settings.routing, desk.settings.botKnowledge);
   // The squad is picked the way a wave of real spawns is routed: after each
   // pick its pool carries one more worker, so the next pick sees it as busier.
   const squad: FindBotsPick[] = [];
   const load = { ...baseLoad };
   for (let index = 0; index < squadSize; index += 1) {
-    const next = index === 0 ? ranked[0] : rankRoutingCandidates(candidates, { ...request, activeLoad: load }, desk.settings.routing)[0];
+    const next = index === 0
+      ? ranked[0]
+      : rankRoutingCandidates(candidates, { ...request, activeLoad: load }, desk.settings.routing, desk.settings.botKnowledge)[0];
     if (!next) break;
     squad.push(pickOf(next));
     const key = routingPoolKey(next);
@@ -195,10 +203,35 @@ export function findBots(input: FindBotsInput, desk: FindBotsDesk): FindBotsResu
     notPicked: snapshot.models
       .filter((row) => !row.clearsBar)
       .slice(0, 12)
-      .map((row) => ({ label: row.label, reason: row.skip ?? `${row.score}/10` })),
+      .map((row) => ({ label: row.label, reason: row.skip ?? `${row.score}/100` })),
     howToUse:
       squad.length > 0
         ? "Spawn one worker per squad row with workhorse_spawn_agent, passing that row's provider and model with the slice's prompt. A named row that clears the bar is kept. Leave provider and model unset to let the desk pick by the same terms. Plan terms describe each pool overall, never one spawn."
         : "No bot on this desk can take this right now. Say so rather than spawning.",
   };
+}
+
+/** The kinds of work the plain bot list ranks, in the order a head most often staffs them. */
+const DIGEST_DOMAINS: readonly TaskDomain[] = ["coding", "writing", "data", "general", "visual"];
+const DIGEST_PICKS = 3;
+
+/**
+ * Who the desk would pick for each kind of work, best first, with each pick's
+ * score and what a typical run costs: the lines the plain bot list carries on
+ * an Orchestrate or Mission chat. A MiniMax head read workhorse_list_bots on
+ * every live run and never called workhorse_find_bots, so it staffed from
+ * names and leftover alone. The list now carries the ranking a spawn uses.
+ */
+export function findBotsDigest(desk: FindBotsDesk, tier: RoutingTaskTier = "balanced"): string[] {
+  const lines: string[] = [];
+  for (const domain of DIGEST_DOMAINS) {
+    const picks = findBots({ domain, tier, squad: 1 }, desk).picks.slice(0, DIGEST_PICKS);
+    if (picks.length === 0) continue;
+    lines.push(`- ${domain}: ${picks.map((pick) => `${pick.label} ${pick.score}/100, ${pick.runCost} a run`).join("; ")}`);
+  }
+  if (lines.length === 0) return [];
+  return [
+    `Who the desk would pick at ${tier}, best first, with each one's score out of 100 and what a typical run costs. workhorse_find_bots ranks any slice at any tier:`,
+    ...lines,
+  ];
 }

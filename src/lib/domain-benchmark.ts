@@ -108,6 +108,8 @@ export type BotKnowledgeModelRow = {
   rowDomains?: TaskDomain[];
   /** Short plan line for Settings (used · month/week/5h). */
   planVisibleLine: string;
+  /** Time to reset, pace, a tight 5h window and workers already on the pool, for a head's brief. */
+  planTerms?: string;
 };
 
 export type BotKnowledgeSnapshot = {
@@ -166,7 +168,7 @@ function scoreBundleForDomains(
     scoreBundleForDomains(provider, model, [item], routingOverride, botKnowledge, customBotId, effort),
   );
   const score = Math.min(...parts.map((item) => item.score));
-  const source = parts.map((item, index) => `${DOMAIN_SHORT[domains[index]]} ${item.score}/10 (${item.source})`).join(" · ");
+  const source = parts.map((item, index) => `${DOMAIN_SHORT[domains[index]]} ${item.score}/100 (${item.source})`).join(" · ");
   const origin = parts.some((item) => item.origin === "public") ? "public" : parts[0].origin;
   return { score, source, origin };
 }
@@ -258,6 +260,25 @@ export function durationLabel(ms: number): string {
   return `${Math.floor(hours / 24)}d ${hours % 24}h`;
 }
 
+/** What a pool's plan says past its leftover: time to reset, pace, a tight 5h window, workers already on it. */
+export function planTermsFor(
+  candidate: Pick<RoutingCandidate, "capacity" | "shortWindow" | "paceUnmetered" | "profile">,
+  now: number,
+  plan?: OrchestrationTerms["plan"],
+): string {
+  if (candidate.profile.local || candidate.paceUnmetered) return "";
+  const parts: string[] = [];
+  const reset = routingResetMs(candidate.capacity, now);
+  if (Number.isFinite(reset)) parts.push(`resets in ${durationLabel(reset)}`);
+  if (plan?.expiring) parts.push("expiring — spend it");
+  else if (plan?.reserve) parts.push("inside the reserve");
+  else if (plan?.pace) parts.push(plan.pace);
+  const short = candidate.shortWindow?.usedPercent;
+  if (short !== undefined && short >= 50) parts.push(`5h window ${Math.round(short)}% used`);
+  if (plan?.busy) parts.push(`${plan.busy} running here`);
+  return parts.join(" · ");
+}
+
 /** One pool's plan in words: leftover over its period, time to reset, pace, and a tight 5h window. */
 export function planLineFor(
   candidate: Pick<RoutingCandidate, "capacity" | "shortWindow" | "paceUnmetered" | "profile">,
@@ -270,16 +291,8 @@ export function planLineFor(
   if (draw.usedPercent === undefined) return "leftover not read yet";
   const period =
     candidate.capacity?.period === "monthly" ? "this month" : candidate.capacity?.period === "weekly" ? "this week" : "this period";
-  const parts = [`${Math.max(0, Math.round(100 - draw.usedPercent))}% left ${period}`];
-  const reset = routingResetMs(candidate.capacity, now);
-  if (Number.isFinite(reset)) parts.push(`resets in ${durationLabel(reset)}`);
-  if (plan?.expiring) parts.push("expiring — spend it");
-  else if (plan?.reserve) parts.push("inside the reserve");
-  else if (plan?.pace) parts.push(plan.pace);
-  const short = candidate.shortWindow?.usedPercent;
-  if (short !== undefined && short >= 50) parts.push(`5h window ${Math.round(short)}% used`);
-  if (plan?.busy) parts.push(`${plan.busy} running here`);
-  return parts.join(" · ");
+  const terms = planTermsFor(candidate, now, plan);
+  return [`${Math.max(0, Math.round(100 - draw.usedPercent))}% left ${period}`, ...(terms ? [terms] : [])].join(" · ");
 }
 
 function sameRow(a: Pick<RoutingCandidate, "provider" | "model" | "customBotId">, b: Pick<RoutingCandidate, "provider" | "model" | "customBotId">) {
@@ -369,6 +382,10 @@ export function botKnowledgeSnapshot(input: {
       origin: terms.fit.origin,
       ...(terms.agentic ? { agentic: terms.agentic.score } : {}),
       ...planFields,
+      ...((): { planTerms?: string } => {
+        const planTerms = planTermsFor(row, now, terms.plan);
+        return planTerms ? { planTerms } : {};
+      })(),
       rowDomains: scoreDomains,
       clearsBar: true,
       rank: index + 1,
@@ -431,7 +448,7 @@ export function botKnowledgeSnapshot(input: {
         ? SKIP_TEXT[skip]
         : successor
           ? `gives way to ${successor.label}, newer on the same plan`
-          : `under the ${bar}/10 bar for ${input.domain}`,
+          : `under the ${bar}/100 bar for ${input.domain}`,
     });
   }
   rest.sort((a, b) => b.score - a.score || a.label.localeCompare(b.label));
@@ -469,7 +486,7 @@ export function orchestrationKnowledgeBrief(snapshot: BotKnowledgeSnapshot): str
     : "Scores: the desk's own table (no public leaderboard loaded yet).";
   const lines = [
     "Bot knowledge (orchestration): scores and plan terms for this ask. Keys and URLs are not here.",
-    `Task domain: ${snapshot.domain}. Tier: ${snapshot.tier}. Bar: ${snapshot.bar}/10.`,
+    `Task domain: ${snapshot.domain}. Tier: ${snapshot.tier}. Bar: ${snapshot.bar}/100.`,
     scores,
     STRICT_SCALE_NOTE,
     orchestrationTierNote(snapshot.tier),
@@ -480,7 +497,7 @@ export function orchestrationKnowledgeBrief(snapshot: BotKnowledgeSnapshot): str
     lines.push("- (none can take this right now)");
   } else {
     for (const row of ranked.slice(0, 10)) {
-      lines.push(`${row.rank}. ${row.label} — ${snapshot.domain} ${row.score}/10 (${row.source}) — ${row.runCost ? `${row.runCost} a typical run${row.priced ? "" : " (price tier)"}` : "cost unknown"} · ${row.speed ?? "speed unknown"} — ${row.planLine}`);
+      lines.push(`${row.rank}. ${row.label} — ${snapshot.domain} ${row.score}/100 (${row.source}) — ${row.runCost ? `${row.runCost} a typical run${row.priced ? "" : " (price tier)"}` : "cost unknown"} · ${row.speed ?? "speed unknown"} — ${row.planLine}${row.planTerms ? ` · ${row.planTerms}` : ""}`);
     }
     if (ranked.length > 10) lines.push(`…and ${ranked.length - 10} more`);
   }
@@ -492,16 +509,17 @@ export function orchestrationKnowledgeBrief(snapshot: BotKnowledgeSnapshot): str
     .sort((a, b) => order(a) - order(b))
     .slice(0, 8);
   if (below.length > 0) {
-    lines.push(`Not picked: ${below.map((row) => `${row.label} (${row.skip ?? `${row.score}/10`})`).join("; ")}.`);
+    lines.push(`Not picked: ${below.map((row) => `${row.label} (${row.skip ?? `${row.score}/100`})`).join("; ")}.`);
   }
   lines.push(
     "To staff several workers, call workhorse_find_bots with the task and a squad size: it returns picks with reasons and spreads them over pools.",
     "Name provider and model on a spawn to keep a pick that clears the bar. Leave them unset and the desk picks by these terms.",
+    "When one slice needs another's result, such as a release note for new code, pass after with that worker's name: the desk starts it when that worker is done.",
   );
   return lines.join("\n");
 }
 
-/** Every domain's score for a desk roster row: "coding 9.3, image-generation 2, …". */
+/** Every domain's score for a desk roster row, out of 100: "coding 97, image-generation 1, …". */
 export function domainScoresForDeskRow(
   provider: ProviderId,
   model: string,

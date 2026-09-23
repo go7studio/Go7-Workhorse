@@ -4,7 +4,7 @@ import {
   botKnowledgeSnapshot,
   domainIntelligenceBar,
 } from "../lib/domain-benchmark";
-import { activeRouteLoad } from "../lib/routing";
+import { activeRouteLoad, orchestrationTierNote } from "../lib/routing";
 import { useStore } from "../lib/store";
 import type { RoutingTaskTier, TaskDomain } from "../lib/types";
 import { measureRunDraws } from "../lib/usage";
@@ -30,18 +30,23 @@ function rowMotionKey(row: { provider: string; model: string; customBotId?: stri
   return `${row.provider}:${row.model}:${row.customBotId ?? ""}`;
 }
 
+/** Ten ticks, ten points each: the one a score or bar of 0–100 lands on. */
+function tickOf(points: number): number {
+  return Math.max(1, Math.round(points / 10));
+}
+
 function ScoreMark({ score, bar }: { score: number; bar: number }) {
   const meets = score >= bar;
   return (
     <div className={`bk-score${meets ? " meets" : " below"}`}>
       <strong>
         {score}
-        <span>/10</span>
+        <span>/100</span>
       </strong>
       <span className="bk-ticks" aria-hidden="true">
         {Array.from({ length: 10 }, (_, index) => {
           const step = index + 1;
-          const tone = [step <= score ? "fill" : "", step === bar ? "bar" : ""].filter(Boolean).join(" ");
+          const tone = [step <= Math.round(score / 10) ? "fill" : "", step === tickOf(bar) ? "bar" : ""].filter(Boolean).join(" ");
           return <i key={step} className={tone} />;
         })}
       </span>
@@ -196,12 +201,12 @@ export function BotKnowledgePane() {
           <span className="bk-ticks" aria-hidden="true">
             {Array.from({ length: 10 }, (_, index) => {
               const step = index + 1;
-              const tone = [step <= bar ? "fill" : "", step === bar ? "bar" : ""].filter(Boolean).join(" ");
+              const tone = [step <= tickOf(bar) ? "fill" : "", step === tickOf(bar) ? "bar" : ""].filter(Boolean).join(" ");
               return <i key={step} className={tone} />;
             })}
           </span>
           <p>
-            Intelligence bar for this view: <strong>{bar}</strong>/10
+            Intelligence bar for this view: <strong>{bar}</strong>/100 · {orchestrationTierNote(tier)}
             {domains.length > 1 ? (
               <>
                 {" "}

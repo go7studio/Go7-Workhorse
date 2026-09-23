@@ -1230,7 +1230,7 @@ test("non-image prompts keep the same ranking winners as before image-gen prefer
 
 test("the desk table says which board, sibling, or estimate each number was read from", () => {
   const sol = domainBenchmarkScoreFromCatalog("codex", "gpt-5.6-sol", "coding", 10);
-  assert.equal(sol.source, "LMArena, Sept 2026, strict scale, rounded down");
+  assert.equal(sol.source, "LMArena, Sept 2026, out of 100 with the Agent Arena mixed in, rounded down");
   const grokText = domainBenchmarkScoreFromCatalog("grok", "grok-4.7", "general", 10);
   assert.match(grokText.source, /read from Grok 4\.6, the nearest rated sibling/);
   const composer = domainBenchmarkScoreFromCatalog("cursor", "composer-2.5", "coding", 8);

@@ -346,7 +346,7 @@
   border: 1px solid var(--line);
   border-radius: var(--radius-6);
   background: var(--bg);
-  font-size: var(--text-10);
+  font-size: var(--text-11);
   font-weight: 520;
   letter-spacing: 0.01em;
   color: var(--text-secondary);
@@ -365,7 +365,7 @@
   border: 1px solid var(--line);
   border-radius: var(--radius-6);
   background: var(--bg);
-  font-size: var(--text-10);
+  font-size: var(--text-11);
   font-weight: 560;
   letter-spacing: 0.01em;
   color: var(--text-secondary);
@@ -392,7 +392,7 @@
   margin: 0;
   padding: 0;
   border: 1px solid var(--line);
-  border-radius: var(--radius-8);
+  border-radius: var(--radius-6);
   background: var(--bg);
   color: var(--text-secondary);
   cursor: pointer;
@@ -413,7 +413,7 @@
   min-height: 32px;
   padding: 7px 8px;
   border: 1px solid var(--line);
-  border-radius: var(--radius-8);
+  border-radius: var(--radius-6);
   background: var(--bg);
   font-size: var(--text-11);
   line-height: var(--leading-11);
@@ -441,7 +441,7 @@
 
 .bk-rubric-backdrop {
   position: absolute;
-  z-index: 5;
+  z-index: var(--z-sheet);
   inset: 0;
   display: flex;
   align-items: flex-start;
@@ -515,9 +515,9 @@
   width: 32px;
   height: 32px;
   border: 0;
-  border-radius: var(--radius-8);
+  border-radius: var(--radius-6);
   background: transparent;
-  font-size: 22px;
+  font-size: var(--text-20);
   line-height: 1;
   color: var(--text-tertiary);
   cursor: pointer;
@@ -767,7 +767,7 @@
 .bk-ticks i {
   display: block;
   height: 8px;
-  border-radius: 2px;
+  border-radius: var(--radius-pill);
   background: rgba(127, 127, 127, 0.28);
   transition: background-color var(--motion-120) var(--ease), box-shadow var(--motion-120) var(--ease);
 }

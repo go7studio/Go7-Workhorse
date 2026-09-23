@@ -1119,7 +1119,11 @@ function routingStrengths(row: DeskCallRow): string[] {
   return [line];
 }
 
-export function formatDeskRoster(rows: DeskCallRow[]): string {
+/**
+ * What workhorse_list_bots answers. `ranked` is who the desk would pick for
+ * each kind of work (see findBotsDigest), given to a chat that staffs workers.
+ */
+export function formatDeskRoster(rows: DeskCallRow[], extra: { ranked?: string[] } = {}): string {
   const attached = rows.filter((row) => row.status !== "not_connected" && row.status !== "disabled");
   const held = attached.filter((row) => !row.canCall);
   const callable = callableDeskRows(attached);
@@ -1151,6 +1155,7 @@ export function formatDeskRoster(rows: DeskCallRow[]): string {
     lines.push(
       `Callable now: ${callable.map((row) => row.name).join(", ")}. For ordinary work, leave provider, model, and effort unset so the desk routes by task fit and capacity. Grok 4.6 on Grok and Cursor is one family — leave the vendor unset and the desk picks by leftover. Use a named row only for an explicit user assignment or requested full lineup.`,
     );
+    if (extra.ranked?.length) lines.push(...extra.ranked);
   } else {
     lines.push("Nothing is callable right now.");
   }
@@ -1162,6 +1167,7 @@ export function formatDeskRoster(rows: DeskCallRow[]): string {
       leftoverMeans: "Plan remaining for that vendor across all chats, not this spawn or prompt.",
       summary: lines.join("\n"),
       bots: attached.map((row) => ({ ...row, strengths: routingStrengths(row) })),
+      ...(callable.length > 0 && extra.ranked?.length ? { ranked: extra.ranked } : {}),
       routingRule:
         "Workhorse chooses from callable bots by task fit and capacity. A pool inside 24 hours of its reset is spent first, because leftover that expires is free. Explicit user assignments win.",
     },

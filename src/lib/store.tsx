@@ -214,7 +214,7 @@ import { botKnowledgeSnapshot, orchestrationKnowledgeBrief, ORCHESTRATION_TASK_D
 import type { TaskDomain } from "./types";
 import { applyBotScoresFeed, normalizeBotScoresFeed, type BotScoresView } from "./bot-scores";
 import { applyModelPrices, normalizeModelPricesFeed } from "./model-prices";
-import { findBots } from "./bot-search";
+import { findBots, findBotsDigest } from "./bot-search";
 import type { RoutingCandidate } from "./routing";
 import { orchestrationEnabled } from "./workhorse-rules";
 import type {
@@ -4434,7 +4434,28 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               });
               const fromId = payload.fromSessionId?.trim() || "";
               const allowlist = fromId ? spawnAllowlistForCaller(latest.sessions, fromId) : undefined;
-              await replyAsk({ text: formatDeskRoster(filterCatalogBySpawnAllowlist(catalog, allowlist)) });
+              // A chat that staffs workers gets who the desk would pick, with
+              // scores and prices, in the list it actually reads.
+              const listing = latest.sessions.find((item) => item.id === fromId);
+              const plans = latest.deskPlans ?? plansRef.current;
+              const ranked = listing && orchestrationEnabled(listing.crewModes)
+                ? findBotsDigest({
+                    settings: latest.settings,
+                    statuses: watchVendorStatuses({
+                      settings: latest.settings,
+                      usage: latest.usage,
+                      plans,
+                      permits: latest.watchPermits,
+                      dayMarks: latest.watchDayMarks,
+                    }),
+                    plans,
+                    sessions: latest.sessions,
+                    recent: recentRoutesRef.current,
+                    draws: measureRunDraws(latest.usage, latest.sessions),
+                    ...(allowlist ? { narrow: (rows: RoutingCandidate[]) => filterCandidatesBySpawnAllowlist(rows, allowlist) } : {}),
+                  })
+                : [];
+              await replyAsk({ text: formatDeskRoster(filterCatalogBySpawnAllowlist(catalog, allowlist), { ranked }) });
               return;
             }
             if (action === "find-bots") {

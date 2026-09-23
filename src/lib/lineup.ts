@@ -437,6 +437,8 @@ export function lineupJoinPrompt(
     );
   } else {
     lines.push(
+      // A MiniMax head twice said a slice it never spawned was one "the desk never started".
+      `Those are all ${count} worker${count === 1 ? "" : "s"} this wave started. A slice you meant to start that is not listed was never spawned: say you did not start it, never that the desk dropped it.`,
       "Answer the user in your own words as this chat’s bot. Write one combined review of what the crew found.",
       "This is a report join, not a new assignment. Do not spawn another worker or checker, even when a report says FAIL. Report unresolved findings and stop unless continuing an explicitly enabled Mission within its limits.",
       JOIN_CHECK_RULE,

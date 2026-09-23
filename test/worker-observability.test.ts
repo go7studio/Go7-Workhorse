@@ -470,6 +470,7 @@ test("the join lists what each worker changed and asks the head to check before 
   assert.match(queued!.text, /child=kid_run\s+status=completed\nran on: Codex\nchanged: src\/stats\.mjs, test\/stats\.test\.mjs\n/);
   assert.match(queued!.text, /run the project's own check \(its tests, or its build when it has no tests\) in the folder above/);
   assert.match(queued!.text, /Say which results you checked yourself and which are only a worker's word\./);
+  assert.match(queued!.text, /Those are all 1 worker this wave started\. A slice you meant to start that is not listed was never spawned: say you did not start it, never that the desk dropped it\./);
 
   const settledLineup = settled.find((session) => session.id === "orch")!.lineup;
   const many = lineupJoinPrompt(settledLineup, { changed: { kid_run: Array.from({ length: 15 }, (_, index) => `f${index}.ts`) } });

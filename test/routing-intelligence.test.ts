@@ -62,6 +62,11 @@ test("the 1-10 table orders the mid-field the 1-5 scale collapsed", () => {
   assert.equal(intelligence("claude", "claude-opus-5"), 10);
   assert.equal(intelligence("codex", "gpt-5.6-sol"), 10);
   assert.equal(intelligence("codex", "gpt-6-astra"), 10, "GPT-6 Astra sits with Sol, ahead of the 5.6 rows it would otherwise miss");
+  assert.deepEqual(
+    [intelligence("codex", "gpt-6-luna"), routingProfileForModel("codex", "gpt-6-luna").speed, routingProfileForModel("codex", "gpt-6-luna").cost],
+    [5, 5, 1],
+    "GPT-6 Luna is the family's light model, not Astra",
+  );
   assert.equal(intelligence("custom", "openai/gpt-6-astra"), 10, "a host path to the same model is the same tier");
   assert.notEqual(intelligence("custom", "mygpt-6"), 10, "the tier starts at a token boundary");
   assert.notEqual(intelligence("codex", "gpt-60"), 10);

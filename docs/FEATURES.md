@@ -220,11 +220,21 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
   domain at the thinking level it would run at, drops bots under the tier's bar
   (Balanced 4, Deep 8 on the strict scale below, never above the best bot the
   desk can call; Quick takes any bot and stops paying for quality at 4),
-  and orders the rest by quality, cost, and plan terms: leftover about to
+  and orders the rest by quality, cost, speed and plan terms: leftover about to
   expire, pace against the days left before the pool resets, the reserve, a 5h
-  window close to full, and workers already running on the pool. Quality counts
-  most on Deep and least on Quick, where a cheaper bot that clears the bar wins.
-  A wave of spawns spreads over pools instead of piling onto one.
+  window close to full, and workers already running on the pool. A wave of
+  spawns spreads over pools instead of piling onto one.
+- Each tier weighs those differently, and Bot knowledge, `workhorse_find_bots`
+  and the head's brief say how. Quick is fast and cheap first: any bot, quality
+  counts up to 4, each doubling of run cost costs 0.9 points and each doubling
+  of speed earns 0.6, plan terms count 1.5 times. Balanced needs 4, counts
+  quality up to 7, and weighs cost 0.35, speed 0.25 and plan terms once. Deep
+  needs 8, counts all of its quality, weighs cost 0.15, ignores speed, and plan
+  terms count half.
+- Speed is measured here: output tokens a second over each model's finished
+  worker runs, from billed ledger rows only, against the desk's median. Until
+  a model has three runs on the desk it reads its family's speed rating (5 of 5
+  is one doubling up, 1 of 5 one down).
 - An older model on the same plan gives way to a newer one of its line that
   can take the work and scores at least as well at it: on Cursor, Opus 5.5
   takes what Opus 4.7 or 4.6 would have, even when a coordinator named the

@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { ORCHESTRATION_TASK_DOMAINS, botKnowledgeSnapshot, durationLabel } from "../lib/domain-benchmark";
 import { botScoresSummary, STRICT_SCALE_NOTE } from "../lib/bot-scores";
-import { activeRouteLoad } from "../lib/routing";
+import { activeRouteLoad, orchestrationTierNote } from "../lib/routing";
 import { MODEL_PRICES_SOURCE } from "../lib/model-prices";
 import { measureRunDraws } from "../lib/usage";
 import { useStore } from "../lib/store";
@@ -142,8 +142,8 @@ export function BotKnowledgePane() {
         </label>
       </div>
       <p className="settings-note">
-        Bar for this domain and tier: <strong>{snapshot.bar}</strong>/10 — never above the best bot this desk can call.{" "}
-        {STRICT_SCALE_NOTE}
+        {orchestrationTierNote(tier)} Bar for this domain: <strong>{snapshot.bar}</strong>/10, never above the best bot
+        this desk can call. {STRICT_SCALE_NOTE}
       </p>
       <table className="bot-knowledge-table">
         <thead>
@@ -152,6 +152,7 @@ export function BotKnowledgePane() {
             <th>Model</th>
             <th>Score</th>
             <th>Run</th>
+            <th>Speed</th>
             <th>Source</th>
             <th>Plan</th>
             <th>Why</th>
@@ -170,6 +171,7 @@ export function BotKnowledgePane() {
                 {row.agentic !== undefined ? <span className="bot-knowledge-agentic"> · agentic {row.agentic}</span> : null}
               </td>
               <td>{row.runCost ? `${row.runCost}${row.priced ? "" : " (tier)"}` : "—"}</td>
+              <td>{row.speed ?? "—"}</td>
               <td>
                 <span className={`bot-knowledge-origin ${row.origin}`}>{ORIGIN_LABEL[row.origin]}</span> {row.source}
               </td>

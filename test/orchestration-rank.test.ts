@@ -10,6 +10,7 @@ import {
   rankRoutingCandidates,
   RECENT_ROUTE_MS,
   routingPoolKey,
+  orchestrationTierNote,
   routingProfileForModel,
   withRunDraws,
   type RoutingCandidate,
@@ -330,8 +331,8 @@ test("at alike quality the cheaper list price takes the work, and a dearer model
   // Opus leads Sol by a point at two and a half times the run cost: the point is worth it.
   const lead = rankRoutingCandidates([candidate("codex", "gpt-5.6-sol"), candidate("claude", "claude-opus-5")], request, settings);
   assert.equal(lead[0]?.model, "claude-opus-5");
-  // At ten times the run cost it is not.
-  listPrices([["openai/gpt-5.6-sol", 2, 10], ["anthropic/claude-opus-5", 20, 100]]);
+  // At twenty times the run cost it is not.
+  listPrices([["openai/gpt-5.6-sol", 2, 10], ["anthropic/claude-opus-5", 40, 200]]);
   const dear = rankRoutingCandidates([candidate("codex", "gpt-5.6-sol"), candidate("claude", "claude-opus-5")], request, settings);
   assert.equal(dear[0]?.model, "gpt-5.6-sol");
 });
@@ -384,6 +385,75 @@ test("a finished worker run's draw is what the ledger recorded for it while it r
   assert.deepEqual(draws.byModel[runDrawKey("codex", "gpt-5.6-sol")], { medianTokens: 20_000, runs: 3 });
   assert.equal(draws.deskRuns, 3, "the head, a failed run and a run with nothing recorded are not measured");
   assert.equal(draws.deskMedianTokens, 20_000);
+});
+
+test("a run's speed is its output over its wall time, and estimated rows are not measured", () => {
+  const run = (id: string, seconds: number) =>
+    ({ id, parentId: "head", provider: "grok", model: "grok-4.6", agentRun: { status: "completed", startedAt: 0, finishedAt: seconds * 1000 } }) as Session;
+  const out = (sessionId: string, outputTokens: number, source?: UsageEvent["source"]): UsageEvent => ({
+    id: `${sessionId}-${outputTokens}-${source ?? ""}`,
+    at: 1_000,
+    provider: "grok",
+    model: "grok-4.6",
+    sessionId,
+    inputTokens: 1_000,
+    outputTokens,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+    ...(source ? { source } : {}),
+  });
+  const draws = measureRunDraws(
+    [out("fast", 6_000, "turn"), out("slow", 3_000, "turn"), out("slow", 90_000, "estimate"), out("short", 900, "turn"), out("guessed", 5_000, "estimate")],
+    [run("fast", 60), run("slow", 100), run("short", 5), run("guessed", 60)],
+  );
+  const grok = draws.byModel[runDrawKey("grok", "grok-4.6")]!;
+  // fast: 6,000 in 60s = 100/s; slow: 3,000 in 100s = 30/s; a 5-second run is too short to time.
+  assert.equal(grok.runs, 3, "a run the desk only estimated is not measured at all");
+  assert.equal(grok.outputPerSecond, 65);
+  assert.equal(draws.deskOutputPerSecond, 65);
+});
+
+test("each tier says what it weighs", () => {
+  assert.equal(
+    orchestrationTierNote("quick"),
+    "Quick: any bot; quality counts up to 4; each doubling of run cost −0.9; each doubling of speed +0.6; plan terms ×1.5.",
+  );
+  assert.equal(
+    orchestrationTierNote("balanced"),
+    "Balanced: 4/10 to qualify; quality counts up to 7; each doubling of run cost −0.35; each doubling of speed +0.25; plan terms ×1.",
+  );
+  assert.equal(
+    orchestrationTierNote("deep"),
+    "Deep: 8/10 to qualify; all of its quality counts; each doubling of run cost −0.15; speed does not count; plan terms ×0.5.",
+  );
+});
+
+test("quick work takes the faster bot, and deep work takes the better one however slow", () => {
+  // Same list price, so only quality and speed differ: Opus 5 codes better, Sol runs four times faster here.
+  listPrices([["openai/gpt-5.6-sol", 2, 10], ["anthropic/claude-opus-5", 2, 10]]);
+  const draws: RunDraws = {
+    byModel: {
+      [runDrawKey("codex", "gpt-5.6-sol")]: { medianTokens: 100_000, runs: 5, outputPerSecond: 80 },
+      [runDrawKey("claude", "claude-opus-5")]: { medianTokens: 100_000, runs: 5, outputPerSecond: 20 },
+    },
+    deskMedianTokens: 100_000,
+    deskRuns: 12,
+    deskOutputPerSecond: 40,
+  };
+  const rows = withRunDraws([candidate("codex", "gpt-5.6-sol"), candidate("claude", "claude-opus-5")], draws);
+  const quick = rankRoutingCandidates(rows, ask("rename the helper", { tier: "quick", taskDomain: "coding" }), settings);
+  assert.equal(quick[0]?.model, "gpt-5.6-sol");
+  const sol = quick[0]!.orchestration!;
+  assert.equal(sol.speed.doublings, 1);
+  assert.equal(sol.points.speed, 0.6);
+  assert.ok(sol.why.includes("80 tok/s here, 2× the desk's median"));
+  const deep = rankRoutingCandidates(rows, ask("design the storage layer", { tier: "deep", taskDomain: "coding" }), settings);
+  assert.equal(deep[0]?.model, "claude-opus-5");
+  assert.equal(deep[0]?.orchestration?.points.speed, 0);
+  // Without timed runs a row reads its family's speed rating.
+  const unmeasured = rankRoutingCandidates([candidate("codex", "gpt-5.6-luna")], ask("rename the helper", { tier: "quick", taskDomain: "coding" }), settings);
+  assert.equal(unmeasured[0]?.orchestration?.speed.label, "speed 5/5 (family)");
+  assert.equal(unmeasured[0]?.orchestration?.speed.doublings, 1);
 });
 
 test("pool load counts running workers and routes handed out a moment ago", () => {

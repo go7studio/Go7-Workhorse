@@ -96,6 +96,9 @@ export type CandidateRunDraw = {
   runs: number;
   /** That median over the desk's median run, whatever model ran it. */
   ratio: number;
+  /** Median output tokens a second over this model's finished runs, and that over the desk's. */
+  outputPerSecond?: number;
+  speedRatio?: number;
 };
 
 /** Runs a model needs on the ledger before its draw counts, and runs the desk needs for a median worth comparing with. */
@@ -108,7 +111,14 @@ export function withRunDraws(candidates: RoutingCandidate[], draws: RunDraws | u
   return candidates.map((candidate) => {
     const measured = draws.byModel[runDrawKey(candidate.provider, candidate.model, candidate.customBotId)];
     if (!measured || measured.runs < DRAW_MIN_MODEL_RUNS) return candidate;
-    return { ...candidate, draw: { ...measured, ratio: measured.medianTokens / draws.deskMedianTokens } };
+    const speedRatio =
+      measured.outputPerSecond !== undefined && draws.deskOutputPerSecond
+        ? measured.outputPerSecond / draws.deskOutputPerSecond
+        : undefined;
+    return {
+      ...candidate,
+      draw: { ...measured, ratio: measured.medianTokens / draws.deskMedianTokens, ...(speedRatio !== undefined ? { speedRatio } : {}) },
+    };
   });
 }
 
@@ -507,7 +517,8 @@ export function routingProfileForModel(
   } else if (/(?:^|[^a-z0-9])gpt-6(?:$|[-.])/.test(slug)) {
     // GPT-6 Astra: Codex's newest flagship, rated with Sol until someone rates it.
     // A host path such as "openai/gpt-6-astra" counts; "mygpt-6" does not.
-    base = profile(10, 2, 5, { strengths: CODE });
+    // GPT-6 Luna is the light one of the family, fast and cheap like 5.6 Luna.
+    base = slug.includes("luna") ? profile(5, 5, 1) : profile(10, 2, 5, { strengths: CODE });
   } else if (slug.includes("5.6-sol")) {
     base = profile(10, 2, 5, { strengths: CODE });
   } else if (slug.includes("5.6-terra")) {
@@ -1273,6 +1284,47 @@ const ORCHESTRATION_COST_WEIGHT: Record<RoutingTaskTier, number> = { quick: 0.9,
 const MIN_RUN_COST_USD = 0.001;
 /** How much a pool's plan terms count against quality on each tier. */
 const ORCHESTRATION_PLAN_WEIGHT: Record<RoutingTaskTier, number> = { quick: 1.5, balanced: 1, deep: 0.5 };
+/**
+ * Domain points gained for each doubling of speed over the desk's median (or
+ * lost for each halving): what a quick job is for, a tiebreaker on balanced
+ * work, and nothing on deep work, where the best answer is worth the wait.
+ */
+const ORCHESTRATION_SPEED_WEIGHT: Record<RoutingTaskTier, number> = { quick: 0.6, balanced: 0.25, deep: 0 };
+/** How far measured speed can move a row, in doublings either way. */
+const MAX_SPEED_DOUBLINGS = 2;
+
+/** What each tier weighs, for anyone reading a ranking: the bar, the quality cap, and what cost, speed and plan terms are worth. */
+export type OrchestrationTierWeights = {
+  tier: RoutingTaskTier;
+  bar: number;
+  qualityCap: number;
+  costPerDoubling: number;
+  speedPerDoubling: number;
+  planWeight: number;
+};
+
+export function orchestrationTierWeights(tier: RoutingTaskTier): OrchestrationTierWeights {
+  const bar = domainIntelligenceBar(tier);
+  return {
+    tier,
+    bar,
+    qualityCap: Math.min(10, bar + ORCHESTRATION_HEADROOM[tier]),
+    costPerDoubling: ORCHESTRATION_COST_WEIGHT[tier],
+    speedPerDoubling: ORCHESTRATION_SPEED_WEIGHT[tier],
+    planWeight: ORCHESTRATION_PLAN_WEIGHT[tier],
+  };
+}
+
+/** One sentence per tier: "Quick: any bot; quality counts up to 4; …". */
+export function orchestrationTierNote(tier: RoutingTaskTier): string {
+  const weights = orchestrationTierWeights(tier);
+  const name = tier === "quick" ? "Quick" : tier === "deep" ? "Deep" : "Balanced";
+  const bar = weights.bar <= 1 ? "any bot" : `${weights.bar}/10 to qualify`;
+  const quality = weights.qualityCap >= 10 ? "all of its quality counts" : `quality counts up to ${weights.qualityCap}`;
+  const speed = weights.speedPerDoubling > 0 ? `each doubling of speed +${weights.speedPerDoubling}` : "speed does not count";
+  return `${name}: ${bar}; ${quality}; each doubling of run cost −${weights.costPerDoubling}; ${speed}; plan terms ×${weights.planWeight}.`;
+}
+
 /** Share of a spawn's quality taken from Agent Arena (tools, long runs) when that arena rates the model. */
 const ORCHESTRATION_AGENTIC_SHARE = 0.2;
 /**
@@ -1370,6 +1422,12 @@ export type OrchestrationTerms = {
   draw?: CandidateRunDraw & { applied: number };
   /** List price, and what a typical run on this desk costs at it. */
   cost: ResolvedModelPrice & { perRun: number };
+  /**
+   * Speed in doublings over the desk's median: measured from this model's own
+   * finished runs when there are enough, otherwise its family's speed rating
+   * (5 of 5 is one doubling up, 1 of 5 one down).
+   */
+  speed: { doublings: number; measured: boolean; outputPerSecond?: number; rating: number; label: string };
   /** Older rows of this model's line on the same plan that this row stands in for. */
   supersedes?: Array<Pick<RoutingCandidate, "provider" | "model" | "customBotId" | "label">>;
   /** The bar this spawn had to clear. */
@@ -1392,7 +1450,7 @@ export type OrchestrationTerms = {
     busy: number;
   };
   /** Domain points: quality after the tier's headroom, the cost premium, and the plan terms after the tier's weight. */
-  points: { quality: number; cost: number; plan: number };
+  points: { quality: number; cost: number; speed: number; plan: number };
   /** The number rows are ordered by. */
   considerate: number;
   /** A coordinator named this row and it cleared the bar. */
@@ -1459,6 +1517,26 @@ function orchestrationFit(
   if (runDraw) {
     why.push(`about ${tokenCount(runDraw.medianTokens)} tokens a finished run over ${runDraw.runs} runs, ${oneDecimal(runDraw.ratio)}× the desk's median`);
   }
+  const measuredSpeed = runDraw?.speedRatio !== undefined && runDraw.outputPerSecond !== undefined;
+  const speed = measuredSpeed
+    ? {
+        doublings: oneDecimal(clamp(Math.log2(runDraw!.speedRatio!), -MAX_SPEED_DOUBLINGS, MAX_SPEED_DOUBLINGS)),
+        measured: true,
+        outputPerSecond: runDraw!.outputPerSecond!,
+        rating: candidate.profile.speed,
+        label: `${Math.round(runDraw!.outputPerSecond!)} tok/s here`,
+      }
+    : {
+        doublings: (candidate.profile.speed - 3) / 2,
+        measured: false,
+        rating: candidate.profile.speed,
+        label: `speed ${candidate.profile.speed}/5 (family)`,
+      };
+  why.push(
+    speed.measured
+      ? `${speed.label}, ${oneDecimal(runDraw!.speedRatio!)}× the desk's median`
+      : `${speed.label}, until three runs here time it`,
+  );
   const unmetered = Boolean(candidate.paceUnmetered || candidate.profile.local);
   const draw = weeklyDrawState(candidate.capacity, input.now);
   const resetMs = routingResetMs(candidate.capacity, input.now);
@@ -1516,6 +1594,7 @@ function orchestrationFit(
       quality,
       ...(runDraw ? { draw: runDraw } : {}),
       cost: { ...price, perRun },
+      speed,
       plan: {
         ...(draw.usedPercent !== undefined ? { usedPercent: draw.usedPercent } : {}),
         ...(draw.expectedUsedPercent !== undefined ? { expectedUsedPercent: oneDecimal(draw.expectedUsedPercent) } : {}),
@@ -1615,8 +1694,10 @@ function rankOrchestrationCandidates(
     const displaced = [...successorOf].filter(([, successor]) => successor === row).map(([older]) => older.candidate);
     const qualityPoints = Math.min(terms.quality, ceiling);
     const costPoints = ORCHESTRATION_COST_WEIGHT[context.tier] * doublings(row);
+    const speedWeight = ORCHESTRATION_SPEED_WEIGHT[context.tier];
+    const speedPoints = speedWeight > 0 ? speedWeight * terms.speed.doublings : 0;
     const planWeighted = ORCHESTRATION_PLAN_WEIGHT[context.tier] * planPoints;
-    const considerate = oneDecimal(qualityPoints - costPoints + planWeighted);
+    const considerate = oneDecimal(qualityPoints - costPoints + speedPoints + planWeighted);
     const coordinatorPick = preferred.some((item) => sameCandidateIdentity(item, candidate));
     const draw = weeklyDrawState(candidate.capacity, now);
     return {
@@ -1638,7 +1719,12 @@ function rankOrchestrationCandidates(
             }
           : {}),
         bar,
-        points: { quality: oneDecimal(qualityPoints), cost: oneDecimal(costPoints), plan: oneDecimal(planWeighted) },
+        points: {
+          quality: oneDecimal(qualityPoints),
+          cost: oneDecimal(costPoints),
+          speed: oneDecimal(speedPoints),
+          plan: oneDecimal(planWeighted),
+        },
         considerate,
         coordinatorPick,
         why: [

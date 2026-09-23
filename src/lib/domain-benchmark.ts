@@ -6,6 +6,7 @@ import {
 import { publishedAgenticScore, resolveDomainScore, type DomainScoreOrigin, type ResolvedDomainScore } from "./domain-score";
 import {
   effortForRoutingTier,
+  orchestrationTierNote,
   rankRoutingCandidates,
   routingCandidatesForDesk,
   routingProfileForModel,
@@ -73,6 +74,8 @@ export type BotKnowledgeModelRow = {
   runCost?: string;
   /** The price is the model's own published one, not its family tier's. */
   priced?: boolean;
+  /** "56 tok/s here" when this desk has timed its runs, else the family's rating. */
+  speed?: string;
   /** This pool's plan, overall: leftover, reset, pace. Never one spawn. */
   planLine: string;
   why: string[];
@@ -215,6 +218,7 @@ export function botKnowledgeSnapshot(input: {
       considerate: terms.considerate,
       runCost: runCostLabel(terms.cost.perRun),
       priced: terms.cost.published,
+      speed: terms.speed.label,
       planLine: planLineFor(row, now, terms.plan),
       why: terms.why,
     };
@@ -267,6 +271,7 @@ export function orchestrationKnowledgeBrief(snapshot: BotKnowledgeSnapshot): str
     `Task domain: ${snapshot.domain}. Tier: ${snapshot.tier}. Bar: ${snapshot.bar}/10.`,
     scores,
     STRICT_SCALE_NOTE,
+    orchestrationTierNote(snapshot.tier),
     "Plan terms describe each vendor pool overall, never one spawn.",
     "Callable, in the order the desk would pick:",
   ];
@@ -274,7 +279,7 @@ export function orchestrationKnowledgeBrief(snapshot: BotKnowledgeSnapshot): str
     lines.push("- (none can take this right now)");
   } else {
     for (const row of ranked.slice(0, 10)) {
-      lines.push(`${row.rank}. ${row.label} — ${snapshot.domain} ${row.score}/10 (${row.source}) — ${row.runCost ? `${row.runCost} a typical run${row.priced ? "" : " (price tier)"}` : "cost unknown"} — ${row.planLine}`);
+      lines.push(`${row.rank}. ${row.label} — ${snapshot.domain} ${row.score}/10 (${row.source}) — ${row.runCost ? `${row.runCost} a typical run${row.priced ? "" : " (price tier)"}` : "cost unknown"} · ${row.speed ?? "speed unknown"} — ${row.planLine}`);
     }
     if (ranked.length > 10) lines.push(`…and ${ranked.length - 10} more`);
   }

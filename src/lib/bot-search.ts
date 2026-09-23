@@ -4,6 +4,7 @@ import { botKnowledgeSnapshot, ORCHESTRATION_TASK_DOMAINS, planLineFor } from ".
 import {
   activeRouteLoad,
   inferRoutingTier,
+  orchestrationTierNote,
   rankRoutingCandidates,
   routingCandidatesForDesk,
   routingPoolKey,
@@ -58,6 +59,8 @@ export type FindBotsPick = {
   why: string[];
   /** What a typical run on this desk costs at the model's list price, and that price. */
   cost: string;
+  /** How fast it runs here, or its family's rating until this desk has timed it. */
+  speed: string;
   /** The number the desk orders picks by. */
   considerate: number;
 };
@@ -65,6 +68,8 @@ export type FindBotsPick = {
 export type FindBotsResult = {
   domain: TaskDomain;
   tier: RoutingTaskTier;
+  /** What this tier weighs: the bar, the quality cap, cost, speed and plan terms. */
+  weighs: string;
   bar: number;
   scores: string;
   picks: FindBotsPick[];
@@ -143,6 +148,7 @@ export function findBots(input: FindBotsInput, desk: FindBotsDesk): FindBotsResu
       ...(terms.agentic ? { agentic: terms.agentic.score } : {}),
       plan: planLineFor(row, now, terms.plan),
       cost: `${runCostLabel(terms.cost.perRun)} a typical run (${terms.cost.published ? priceLabel(terms.cost) : terms.cost.source})`,
+      speed: terms.speed.label,
       why: terms.why,
       considerate: terms.considerate,
     };
@@ -181,6 +187,7 @@ export function findBots(input: FindBotsInput, desk: FindBotsDesk): FindBotsResu
   return {
     domain,
     tier,
+    weighs: orchestrationTierNote(tier),
     bar: snapshot.bar,
     scores,
     picks: ranked.slice(0, FIND_BOTS_MAX_PICKS).map(pickOf),

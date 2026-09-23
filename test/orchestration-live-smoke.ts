@@ -21,6 +21,7 @@ import { createBotScoresHost } from "../electron/bot-scores-host";
  *   WORKHORSE_ORCH_HEAD_MODEL=<head's model id>
  *   WORKHORSE_ORCH_HEAD_API=anthropic-messages | openai-completions
  *   WORKHORSE_ORCH_VENDORS=grok,codex,cursor,claude:off   (optional)
+ *   WORKHORSE_ORCH_LOOK_ONLY=1   (optional: read Bot knowledge, ask nothing)
  *   npx tsx test/orchestration-live-smoke.ts
  *
  * Workers run on the vendors this machine is signed into, and spend from those
@@ -37,6 +38,7 @@ if (!headBaseUrl || !headModel) {
   throw new Error("Name the head with WORKHORSE_ORCH_HEAD_BASE_URL and WORKHORSE_ORCH_HEAD_MODEL; no live call was made.");
 }
 const timeoutMinutes = Math.max(5, Number(process.env.WORKHORSE_ORCH_TIMEOUT_MINUTES ?? 25));
+const lookOnly = process.env.WORKHORSE_ORCH_LOOK_ONLY === "1";
 // Which signed-in vendors this profile treats as connected, as an owner's desk
 // would after Connect: "grok,codex,cursor,claude:off". A fresh profile has none,
 // which leaves the head alone with its own bot.
@@ -218,6 +220,7 @@ const app = await electron.launch({
 
 /** Views of Bot knowledge read off the desk before the ask: what the head's brief is built from. */
 const BOT_KNOWLEDGE_VIEWS = [
+  ["coding", "quick"],
   ["coding", "balanced"],
   ["coding", "deep"],
   ["data", "balanced"],
@@ -260,43 +263,46 @@ try {
   await page.screenshot({ path: path.join(runDir, "01-open.png") });
   // A miss here is recorded, not fatal: the delegation run is the test.
   botKnowledge = await readBotKnowledge(page).catch((error: unknown) => ({ error: String(error).slice(0, 400) }));
-  await page.getByText(title, { exact: true }).first().click();
-  await page.waitForTimeout(1_000);
-  const composer = page.locator("textarea").last();
-  await composer.fill(prompt);
-  await page.waitForTimeout(250);
-  if ((await composer.inputValue()) !== prompt) throw new Error("The ask did not reach the composer.");
-  await composer.press("Enter");
-  sentAt = Date.now();
-  await page.waitForTimeout(3_000);
-  await page.screenshot({ path: path.join(runDir, "02-sent.png") });
-
-  const deadline = Date.now() + timeoutMinutes * 60_000;
-  let settledSince = 0;
-  while (Date.now() < deadline) {
-    const allow = page.getByRole("button", { name: "Allow for session", exact: true }).first();
-    if (await allow.isVisible().catch(() => false)) await allow.click();
-    if (await page.getByRole("button", { name: /^Elevate(?: to )?/ }).first().isVisible().catch(() => false)) {
-      throw new Error("The run asked for elevation instead of staying inside the project.");
-    }
-    const saved = readSaved();
-    if (!saved) {
-      await page.waitForTimeout(1_000);
-      continue;
-    }
-    const head = saved.sessions?.find((session) => session.id === rootSessionId);
-    const workers = (saved.sessions ?? []).filter((session) => session.parentId === rootSessionId);
-    const workersDone = workers.length > 0 && workers.every((session) => session.agentRun && session.agentRun.status !== "running");
-    const lastWorkerEnd = Math.max(0, ...workers.map((session) => session.agentRun?.finishedAt ?? 0));
-    const headReplied = (head?.messages ?? []).some(
-      (message: any) => message.role === "assistant" && message.createdAt > Math.max(sentAt, lastWorkerEnd) && String(message.text ?? "").trim(),
-    );
-    const headIdle = head?.status !== "running";
-    const settled = headIdle && ((workersDone && headReplied) || (workers.length === 0 && headReplied && Date.now() - sentAt > 180_000));
-    settledSince = settled ? settledSince || Date.now() : 0;
-    // A final reply can be followed by one more join turn; wait a little before calling it.
-    if (settledSince && Date.now() - settledSince > 20_000) break;
+  // Look-only: Bot knowledge is read and nothing is asked of the head.
+  if (!lookOnly) {
+    await page.getByText(title, { exact: true }).first().click();
+    await page.waitForTimeout(1_000);
+    const composer = page.locator("textarea").last();
+    await composer.fill(prompt);
+    await page.waitForTimeout(250);
+    if ((await composer.inputValue()) !== prompt) throw new Error("The ask did not reach the composer.");
+    await composer.press("Enter");
+    sentAt = Date.now();
     await page.waitForTimeout(3_000);
+    await page.screenshot({ path: path.join(runDir, "02-sent.png") });
+
+    const deadline = Date.now() + timeoutMinutes * 60_000;
+    let settledSince = 0;
+    while (Date.now() < deadline) {
+      const allow = page.getByRole("button", { name: "Allow for session", exact: true }).first();
+      if (await allow.isVisible().catch(() => false)) await allow.click();
+      if (await page.getByRole("button", { name: /^Elevate(?: to )?/ }).first().isVisible().catch(() => false)) {
+        throw new Error("The run asked for elevation instead of staying inside the project.");
+      }
+      const saved = readSaved();
+      if (!saved) {
+        await page.waitForTimeout(1_000);
+        continue;
+      }
+      const head = saved.sessions?.find((session) => session.id === rootSessionId);
+      const workers = (saved.sessions ?? []).filter((session) => session.parentId === rootSessionId);
+      const workersDone = workers.length > 0 && workers.every((session) => session.agentRun && session.agentRun.status !== "running");
+      const lastWorkerEnd = Math.max(0, ...workers.map((session) => session.agentRun?.finishedAt ?? 0));
+      const headReplied = (head?.messages ?? []).some(
+        (message: any) => message.role === "assistant" && message.createdAt > Math.max(sentAt, lastWorkerEnd) && String(message.text ?? "").trim(),
+      );
+      const headIdle = head?.status !== "running";
+      const settled = headIdle && ((workersDone && headReplied) || (workers.length === 0 && headReplied && Date.now() - sentAt > 180_000));
+      settledSince = settled ? settledSince || Date.now() : 0;
+      // A final reply can be followed by one more join turn; wait a little before calling it.
+      if (settledSince && Date.now() - settledSince > 20_000) break;
+      await page.waitForTimeout(3_000);
+    }
   }
   await page.screenshot({ path: path.join(runDir, "03-final.png") });
 } catch (error) {

@@ -516,6 +516,69 @@ export function rollup(events: UsageEvent[]): UsageTotals {
   return events.reduce(add, { ...EMPTY });
 }
 
+/** One model's measured draw per finished worker run, from this desk's own ledger. */
+export type ModelRunDraw = {
+  /** Median tokens a finished run took: fresh input, output and cache writes, as Usage totals them. */
+  medianTokens: number;
+  runs: number;
+};
+
+/** Every measured model, and the desk's median run across all of them. */
+export type RunDraws = {
+  byModel: Record<string, ModelRunDraw>;
+  deskMedianTokens: number;
+  deskRuns: number;
+};
+
+/** How a run's model is keyed: vendor, model id as the desk writes it, and the bot for a custom row. */
+export function runDrawKey(provider: ProviderId, model: string, customBotId?: string): string {
+  return `${provider}|${normalizeModelId(provider, model).toLowerCase()}|${customBotId ?? ""}`;
+}
+
+/** Events a minute past a run's finish still belong to it: a vendor reports usage after its last word. */
+const RUN_USAGE_GRACE_MS = 60_000;
+
+function median(values: number[]): number {
+  const sorted = [...values].sort((a, b) => a - b);
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[middle]! : (sorted[middle - 1]! + sorted[middle]!) / 2;
+}
+
+/**
+ * What each model's finished worker runs took, read from the desk's ledger. A
+ * run is a worker chat whose last run completed; its draw is every event on
+ * that chat from the run's start to a minute after it finished. Runs that
+ * recorded no tokens are left out, and so is every other kind of chat.
+ */
+export function measureRunDraws(usage: readonly UsageEvent[], sessions: readonly Session[]): RunDraws {
+  const runs = new Map<string, { key: string; start: number; end: number; tokens: number }>();
+  for (const session of sessions) {
+    const run = session.agentRun;
+    if (!session.parentId || run?.status !== "completed" || !run.finishedAt) continue;
+    runs.set(session.id, {
+      key: runDrawKey(session.provider, session.model, session.customBotId),
+      start: run.startedAt,
+      end: run.finishedAt + RUN_USAGE_GRACE_MS,
+      tokens: 0,
+    });
+  }
+  for (const event of usage) {
+    const run = event.sessionId ? runs.get(event.sessionId) : undefined;
+    if (!run || event.at < run.start || event.at > run.end) continue;
+    run.tokens += eventTotal(event);
+  }
+  const perModel = new Map<string, number[]>();
+  const all: number[] = [];
+  for (const run of runs.values()) {
+    if (run.tokens <= 0) continue;
+    perModel.set(run.key, [...(perModel.get(run.key) ?? []), run.tokens]);
+    all.push(run.tokens);
+  }
+  const byModel: Record<string, ModelRunDraw> = {};
+  for (const [key, tokens] of perModel) byModel[key] = { medianTokens: median(tokens), runs: tokens.length };
+  return { byModel, deskMedianTokens: all.length ? median(all) : 0, deskRuns: all.length };
+}
+
 /** Billed spend for one chat. Total is in + out, same as Settings → Usage. */
 export function chatSpend(events: UsageEvent[], sessionId: string | undefined): UsageTotals {
   if (!sessionId) return { ...EMPTY };

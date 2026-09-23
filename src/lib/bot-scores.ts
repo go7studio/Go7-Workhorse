@@ -195,11 +195,15 @@ function effortWord(value: string | null | undefined): EffortWord | undefined {
   return (EFFORT_ORDER as readonly string[]).includes(word) ? (word as EffortWord) : undefined;
 }
 
+const CLAUDE_FAMILIES = new Set(["opus", "sonnet", "haiku", "fable", "mythos"]);
+
 /**
  * A model name as comparable tokens, with the thinking level it ran at pulled
  * out. `claude-fable-5.1-max`, `Claude Fable 5.1 (Max)` and the desk's
  * `claude-fable-5-1` at max all come out as `claude fable 5 1` + `max`.
- * Dates, context tags and harness notes are dropped; nothing else is guessed.
+ * Dates, context tags, a trailing preview tag and harness notes are dropped,
+ * and Cursor's `claude-4.6-opus` order becomes the boards' `claude opus 4 6`;
+ * nothing else is guessed.
  */
 export function arenaNameKey(raw: string): { base: string; effort?: EffortWord } {
   let text = raw.trim().toLowerCase().replace(/^hf:/, "");
@@ -229,13 +233,21 @@ export function arenaNameKey(raw: string): { base: string; effort?: EffortWord }
       tokens.pop();
       continue;
     }
-    if (/^\d{8}$/.test(last)) {
+    // A date, or the preview tag a model drops when it ships: one model either way.
+    if (/^\d{8}$/.test(last) || last === "preview") {
       tokens.pop();
       continue;
     }
     break;
   }
-  return { base: tokens.filter((token) => !/^\d{8}$/.test(token)).join(" "), ...(effort ? { effort } : {}) };
+  const kept = tokens.filter((token) => !/^\d{8}$/.test(token));
+  // Cursor writes `claude-4.6-opus` for the board's `claude-opus-4-6`: one model, one name.
+  const family = kept[kept.length - 1] ?? "";
+  if (kept[0] === "claude" && CLAUDE_FAMILIES.has(family) && kept.length > 2 && kept.slice(1, -1).every((token) => /^\d+$/.test(token))) {
+    kept.splice(kept.length - 1, 1);
+    kept.splice(1, 0, family);
+  }
+  return { base: kept.join(" "), ...(effort ? { effort } : {}) };
 }
 
 /** The comparable key for a desk model. Cursor's own prefix is not part of the brain's name. */
@@ -248,8 +260,30 @@ export function deskModelKey(provider: ProviderId, model: string): { base: strin
 type PreparedTable = {
   rows: ArenaRow[];
   byBase: Map<string, Array<{ row: ArenaRow; effort?: EffortWord }>>;
+  /** Every rated generation of each model line, for a newer one the board has not rated yet. */
+  byLine: Map<string, Array<{ base: string; version: number[] }>>;
   score: (value: number) => number;
 };
+
+/**
+ * A model name's line (its words) and version (its numbers): `claude opus 5 5`
+ * is the line `claude opus` at 5.5, and `gpt 5 6 sol` the line `gpt sol` at 5.6.
+ */
+export function nameGeneration(base: string): { line: string; version: number[] } | null {
+  const tokens = base.split(" ").filter(Boolean);
+  const version = tokens.filter((token) => /^\d+$/.test(token)).map(Number);
+  const line = tokens.filter((token) => !/^\d+$/.test(token)).join(" ");
+  return version.length > 0 && line ? { line, version } : null;
+}
+
+/** Negative when `a` is the earlier version, positive when the later, 0 when the same. */
+export function compareVersions(a: readonly number[], b: readonly number[]): number {
+  for (let index = 0; index < Math.max(a.length, b.length); index += 1) {
+    const diff = (a[index] ?? 0) - (b[index] ?? 0);
+    if (diff !== 0) return diff;
+  }
+  return 0;
+}
 
 type PreparedFeed = {
   feed: BotScoresFeed;
@@ -257,33 +291,44 @@ type PreparedFeed = {
   cache: Map<string, ScoreHit | null>;
 };
 
-function stdev(values: number[]): number {
-  if (values.length === 0) return 0;
-  const mean = values.reduce((sum, value) => sum + value, 0) / values.length;
-  return Math.sqrt(values.reduce((sum, value) => sum + (value - mean) ** 2, 0) / values.length);
-}
-
 function round1(value: number): number {
   return Math.round(value * 10) / 10;
 }
 
+/** The place on a board, counting each model once, that scores {@link MIDFIELD_SCORE}. */
+export const MIDFIELD_PLACE = 25;
+export const MIDFIELD_SCORE = 5;
+
+/** One line for anyone reading the scores: a head's brief, find_bots, the Bot knowledge pane. */
+export const STRICT_SCALE_NOTE =
+  "Strict scale: 10 is only a board's leader, about 7 its tenth-best, 5 its 25th-best; desk-table rows are rounded down and never 10.";
+
 /**
- * 1–10 from a leaderboard value. Ratings: 10 is the arena's leader, and each
- * point below is 1.5 standard deviations of that arena's top fifty, so a point
- * means the same distance in a tight arena and a wide one. Agent Arena scores
- * are on their own scale and are placed between its lowest and highest row.
+ * 1–10 from a leaderboard value, strictly. Only the board's leader scores 10.
+ * The 25th-best model scores 5, counting each model once however many runs it
+ * has, and every other row sits on the straight line through those two, down
+ * to 1. A point is a fifth of the rating gap between first and 25th, so a
+ * tight board and a wide one grade alike, the tenth-best lands near 7, and a
+ * model far down the board reaches the floor instead of sitting mid-scale. A
+ * board with fewer than 25 models places its last one in proportion. Agent
+ * Arena's scores are on their own scale and grade the same way.
  */
-function tableScorer(key: ArenaTable, rows: ArenaRow[]): (value: number) => number {
-  const values = rows.map((row) => row.value);
-  const top = Math.max(...values);
-  if (key === "agent:overall") {
-    const low = Math.min(...values);
-    const span = top - low;
-    return (value) => (span > 0 ? round1(1 + (9 * (value - low)) / span) : 10);
+function tableScorer(rows: ArenaRow[]): (value: number) => number {
+  const bestByModel = new Map<string, number>();
+  for (const row of rows) {
+    const model = arenaNameKey(row.name).base || row.name;
+    bestByModel.set(model, Math.max(row.value, bestByModel.get(model) ?? Number.NEGATIVE_INFINITY));
   }
-  const leaders = [...values].sort((a, b) => b - a).slice(0, 50);
-  const unit = Math.max(8, 1.5 * stdev(leaders));
-  return (value) => round1(Math.min(10, Math.max(1, 10 - (top - value) / unit)));
+  const ranked = [...bestByModel.values()].sort((a, b) => b - a);
+  const top = ranked[0]!;
+  const anchor = Math.min(MIDFIELD_PLACE - 1, ranked.length - 1);
+  const drop = ((10 - MIDFIELD_SCORE) * anchor) / (MIDFIELD_PLACE - 1);
+  const unit = drop > 0 ? (top - ranked[anchor]!) / drop : 0;
+  return (value) => {
+    if (value >= top) return 10;
+    if (!(unit > 0)) return 9.9;
+    return Math.min(9.9, Math.max(1, round1(10 - (top - value) / unit)));
+  };
 }
 
 function prepare(feed: BotScoresFeed): PreparedFeed {
@@ -292,14 +337,19 @@ function prepare(feed: BotScoresFeed): PreparedFeed {
     const rows = feed.tables[key];
     if (!rows?.length) continue;
     const byBase = new Map<string, Array<{ row: ArenaRow; effort?: EffortWord }>>();
+    const byLine = new Map<string, Array<{ base: string; version: number[] }>>();
     for (const row of rows) {
       const { base, effort } = arenaNameKey(row.name);
       if (!base) continue;
       const list = byBase.get(base) ?? [];
+      if (list.length === 0) {
+        const generation = nameGeneration(base);
+        if (generation) byLine.set(generation.line, [...(byLine.get(generation.line) ?? []), { base, version: generation.version }]);
+      }
       list.push({ row, ...(effort ? { effort } : {}) });
       byBase.set(base, list);
     }
-    tables[key] = { rows, byBase, score: tableScorer(key, rows) };
+    tables[key] = { rows, byBase, byLine, score: tableScorer(rows) };
   }
   return { feed, tables, cache: new Map() };
 }
@@ -315,7 +365,30 @@ export function activeBotScoresFeed(): BotScoresFeed | null {
   return active?.feed ?? null;
 }
 
-type ScoreHit = { score: number; row: ArenaRow; runEffort?: EffortWord; table: ArenaTable };
+type ScoreHit = {
+  score: number;
+  row: ArenaRow;
+  runEffort?: EffortWord;
+  table: ArenaTable;
+  /** The row is an earlier generation's: the board has not rated this one yet. */
+  earlier?: true;
+};
+
+/**
+ * The latest generation of this model's line the board has rated, when the
+ * board has not rated this one. Only an earlier version stands in: an older
+ * model never borrows a newer one's score.
+ */
+function earlierGeneration(table: PreparedTable, base: string): string | undefined {
+  const generation = nameGeneration(base);
+  if (!generation) return undefined;
+  let best: { base: string; version: number[] } | undefined;
+  for (const rated of table.byLine.get(generation.line) ?? []) {
+    if (compareVersions(rated.version, generation.version) >= 0) continue;
+    if (!best || compareVersions(rated.version, best.version) > 0) best = rated;
+  }
+  return best?.base;
+}
 
 /** The run closest to the thinking level the desk would use. Exact, then the plain row, then nearest. */
 function pickRun(
@@ -337,18 +410,37 @@ function pickRun(
   })[0]!;
 }
 
-function lookup(key: ArenaTable, provider: ProviderId, model: string, effort?: string | null): ScoreHit | null {
+/**
+ * This model's row on one board, at the run nearest the desk's thinking level.
+ * Without a row of its own it reads its latest rated earlier generation,
+ * unless `ownOnly` asks for the model's own evidence alone.
+ */
+function lookup(
+  key: ArenaTable,
+  provider: ProviderId,
+  model: string,
+  effort?: string | null,
+  ownOnly = false,
+): ScoreHit | null {
   const feed = active;
   const table = feed?.tables[key];
   if (!feed || !table) return null;
-  const cacheKey = `${key}|${provider}|${model}|${effort ?? ""}`;
+  const cacheKey = `${key}|${provider}|${model}|${effort ?? ""}|${ownOnly ? "own" : "any"}`;
   if (feed.cache.has(cacheKey)) return feed.cache.get(cacheKey)!;
   const desk = deskModelKey(provider, model);
-  const runs = table.byBase.get(desk.base);
+  const own = table.byBase.get(desk.base);
+  const earlier = own?.length || ownOnly ? undefined : earlierGeneration(table, desk.base);
+  const runs = own?.length ? own : earlier ? table.byBase.get(earlier) : undefined;
   let hit: ScoreHit | null = null;
   if (runs?.length) {
     const run = pickRun(runs, effortWord(effort) ?? desk.effort);
-    hit = { score: table.score(run.row.value), row: run.row, table: key, ...(run.effort ? { runEffort: run.effort } : {}) };
+    hit = {
+      score: table.score(run.row.value),
+      row: run.row,
+      table: key,
+      ...(run.effort ? { runEffort: run.effort } : {}),
+      ...(earlier ? { earlier: true as const } : {}),
+    };
   }
   feed.cache.set(cacheKey, hit);
   return hit;
@@ -364,17 +456,20 @@ function bestForOrg(key: ArenaTable, org: string): ScoreHit | null {
 
 function describe(hit: ScoreHit): string {
   const run = hit.runEffort ? ` (${hit.runEffort} run)` : "";
-  return `${TABLE_LABEL[hit.table]} #${hit.row.rank}${run}`;
+  const earlier = hit.earlier ? `, read from ${hit.row.name}: the board has not rated this generation yet` : "";
+  return `${TABLE_LABEL[hit.table]} #${hit.row.rank}${run}${earlier}`;
 }
 
 export type PublishedScore = { score: number; source: string };
 
 /**
  * A public score for this model on this kind of work, or null when no arena
- * covers it. Coding averages the text arena's coding category with Code Arena.
- * Data reads the math category, the closest public signal for data work.
- * Image generation is scored for the vendor's image product, and only for a
- * vendor whose chat can generate images on the desk.
+ * covers it. Coding reads Code Arena, where models build working apps with
+ * tools; the text arena's coding category, which grades chat answers about
+ * code, answers only for a model Code Arena has not rated. Data reads the math
+ * category, the closest public signal for data work. Image generation is
+ * scored for the vendor's image product, and only for a vendor whose chat can
+ * generate images on the desk.
  */
 export function publishedDomainScore(
   provider: ProviderId,
@@ -384,12 +479,13 @@ export function publishedDomainScore(
 ): PublishedScore | null {
   if (!active) return null;
   if (domain === "coding") {
-    const hits = [lookup("text:coding", provider, model, effort), lookup("webdev:overall", provider, model, effort)].filter(
-      (hit): hit is ScoreHit => hit !== null,
-    );
-    if (hits.length === 0) return null;
-    const score = round1(hits.reduce((sum, hit) => sum + hit.score, 0) / hits.length);
-    return { score, source: hits.map(describe).join(" · ") };
+    // The model's own row on either board beats an earlier generation's on either.
+    const hit =
+      lookup("webdev:overall", provider, model, effort, true) ??
+      lookup("text:coding", provider, model, effort, true) ??
+      lookup("webdev:overall", provider, model, effort) ??
+      lookup("text:coding", provider, model, effort);
+    return hit ? { score: hit.score, source: describe(hit) } : null;
   }
   if (domain === "image-generation") {
     if (provider !== "grok") return null;

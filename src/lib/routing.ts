@@ -14,7 +14,7 @@ import type {
   StoredRoutingProfile,
   TaskDomain,
 } from "./types";
-import { isLocalEndpoint } from "./usage";
+import { isLocalEndpoint, runDrawKey, type RunDraws } from "./usage";
 import {
   customBotAttached,
   customBotEnabled,
@@ -28,6 +28,7 @@ import { cursorWatchLane } from "./cursor-lane";
 import { outcomeVerification } from "./learning-policy";
 import { isAssignedEffort, modelsFor, normalizeModelId, withEffort, contextWindowFor } from "./models";
 import type { WatchPlans, WatchVendorStatus } from "./watch";
+import { compareVersions, deskModelKey, nameGeneration } from "./bot-scores";
 import { domainIntelligenceBar } from "./domain-benchmark-catalog";
 import { publishedAgenticScore, resolveDomainScore, type ResolvedDomainScore } from "./domain-score";
 import { detectsImageGenerationIntent, inferTaskDomain, looksCodey } from "./task-domain";
@@ -73,7 +74,44 @@ export type RoutingCandidate = VendorLaunchState & {
    * A pool with days of leftover still stalls a worker when this one is full.
    */
   shortWindow?: RoutingCapacity;
+  /**
+   * What this model's finished worker runs took on this desk, against the
+   * desk's median run. Set only once the ledger holds enough runs to say.
+   */
+  draw?: CandidateRunDraw;
 };
+
+export type CandidateRunDraw = {
+  /** Median tokens a finished worker run on this model took. */
+  medianTokens: number;
+  runs: number;
+  /** That median over the desk's median run, whatever model ran it. */
+  ratio: number;
+};
+
+/** Runs a model needs on the ledger before its draw counts, and runs the desk needs for a median worth comparing with. */
+const DRAW_MIN_MODEL_RUNS = 3;
+const DRAW_MIN_DESK_RUNS = 6;
+
+/** Each row with the draw its model has shown on this desk's own finished runs, when there are enough of them. */
+export function withRunDraws(candidates: RoutingCandidate[], draws: RunDraws | undefined): RoutingCandidate[] {
+  if (!draws || draws.deskRuns < DRAW_MIN_DESK_RUNS || draws.deskMedianTokens <= 0) return candidates;
+  return candidates.map((candidate) => {
+    const measured = draws.byModel[runDrawKey(candidate.provider, candidate.model, candidate.customBotId)];
+    if (!measured || measured.runs < DRAW_MIN_MODEL_RUNS) return candidate;
+    return { ...candidate, draw: { ...measured, ratio: measured.medianTokens / draws.deskMedianTokens } };
+  });
+}
+
+/** `newer` is a later version of the same model line as `older`: Opus 5.5 over Opus 4.7, Grok 4.7 over Grok 4.6. */
+export function isNewerGeneration(
+  newer: Pick<RoutingCandidate, "provider" | "model">,
+  older: Pick<RoutingCandidate, "provider" | "model">,
+): boolean {
+  const a = nameGeneration(deskModelKey(newer.provider, newer.model).base);
+  const b = nameGeneration(deskModelKey(older.provider, older.model).base);
+  return Boolean(a && b && a.line === b.line && compareVersions(a.version, b.version) > 0);
+}
 
 export type RoutingJobRole = "orchestrator" | "worker" | "auditor" | "builder";
 
@@ -496,14 +534,17 @@ export function routingProfileForModel(
   } else if (slug.includes("haiku")) {
     base = profile(5, 5, 1);
   } else if (slug.includes("minimax-m3")) {
-    // Balanced band. Rated 7 it sat one point under the bar of 8, so no amount
-    // of spare capacity could put ordinary coding on it and every balanced pick
-    // went to a paid seat. The bar stays at 8; the rating is what was wrong.
-    base = profile(8, 4, 2, { strengths: CODE });
+    // Mid-field, not the balanced band, and not a coding specialist. The public
+    // boards put it around 40th in Code Arena, 80th in the text arena, and
+    // 34th of 43 in Agent Arena: behind Luna on code and agent work. It was
+    // lifted to 8 once so ordinary coding could reach a cheap plan; quick work
+    // still can, and orchestration reads its board scores directly.
+    base = profile(6, 4, 2);
   } else if (slug.includes("local") || slug.includes("ollama") || slug.includes("lmstudio")) {
     base = profile(4, 4, 1, { local: true });
   } else if (slug.includes("minimax")) {
-    base = profile(6, 4, 2);
+    // Last generation, well behind M3 on every board.
+    base = profile(5, 4, 2);
   } else if (slug.includes("composer")) {
     base = profile(8, 4, 2, { strengths: CODE });
   } else if (slug === "auto" || slug === "auto-smart" || slug.startsWith("auto-")) {
@@ -1203,16 +1244,35 @@ export function routingSkipReason(
   return undefined;
 }
 
-/** Quality past bar + headroom buys nothing on that tier; cost and leftover decide instead. */
-const ORCHESTRATION_HEADROOM: Record<RoutingTaskTier, number> = { quick: 2, balanced: 3, deep: 10 };
+/**
+ * Quality past bar + headroom buys nothing on that tier; cost and leftover
+ * decide instead. Quick work stops paying for quality one point off the floor:
+ * the strict scale puts many capable models at 1 or 2 on a board they trail,
+ * and a quick reply does not need a board's leader.
+ */
+const ORCHESTRATION_HEADROOM: Record<RoutingTaskTier, number> = { quick: 1, balanced: 3, deep: 10 };
 /** Domain points given up per cost step above the cheapest row that clears the bar. */
 const ORCHESTRATION_COST_WEIGHT: Record<RoutingTaskTier, number> = { quick: 0.9, balanced: 0.2, deep: 0.1 };
 /** How much a pool's plan terms count against quality on each tier. */
 const ORCHESTRATION_PLAN_WEIGHT: Record<RoutingTaskTier, number> = { quick: 1.5, balanced: 1, deep: 0.5 };
 /** Share of a spawn's quality taken from Agent Arena (tools, long runs) when that arena rates the model. */
 const ORCHESTRATION_AGENTIC_SHARE = 0.2;
+/**
+ * Cost steps a model's measured draw adds or takes off: one for each doubling
+ * of the desk's median run, since a cost step is roughly twice the price and
+ * price times tokens is what a task takes from a plan. Capped both ways so a
+ * few odd runs cannot swing a pick.
+ */
+const DRAW_STEPS_ADDED = 2;
+const DRAW_STEPS_TAKEN_OFF = 1;
 /** Points a pool gives up for each worker already running on it, so a squad spreads over the desk. */
 const ORCHESTRATION_BUSY_POINTS = 0.6;
+/**
+ * Points a 5h window takes off as it fills past the tight mark, at 100%. A
+ * worker that stalls mid-task costs more than a point of quality on the strict
+ * scale, so a window about to stall one outweighs it.
+ */
+const SHORT_WINDOW_POINTS = 3;
 /** A 5h window at or past this is close to stalling a worker mid-task... */
 const SHORT_WINDOW_TIGHT_PERCENT = 90;
 /** ...unless it resets this soon. */
@@ -1290,6 +1350,10 @@ export type OrchestrationTerms = {
   agentic?: { score: number; source: string };
   /** Fit with the agentic share mixed in for a spawn. What ranking weighs. */
   quality: number;
+  /** This model's measured draw per run, and the cost steps it adds or takes off. */
+  draw?: CandidateRunDraw & { steps: number };
+  /** Older rows of this model's line on the same plan that this row stands in for. */
+  supersedes?: Array<Pick<RoutingCandidate, "provider" | "model" | "customBotId" | "label">>;
   /** The bar this spawn had to clear. */
   bar: number;
   plan: {
@@ -1329,6 +1393,13 @@ function oneDecimal(value: number): number {
   return Math.round(value * 10) / 10;
 }
 
+/** "84k", "1.2M". */
+function tokenCount(tokens: number): string {
+  if (tokens >= 1_000_000) return `${oneDecimal(tokens / 1_000_000)}M`;
+  if (tokens >= 1_000) return `${Math.round(tokens / 1_000)}k`;
+  return String(Math.round(tokens));
+}
+
 type OrchestrationFit = {
   terms: Omit<OrchestrationTerms, "bar" | "points" | "considerate" | "coordinatorPick">;
   /** Raw plan points. The ranker weights them by tier. */
@@ -1358,6 +1429,12 @@ function orchestrationFit(
       : fit.score;
   const why: string[] = [`${input.domain} ${fit.score}/10 (${fit.source})`];
   if (agentic && spawnWork) why.push(`agentic ${agentic.score}/10`);
+  const runDraw = candidate.draw
+    ? { ...candidate.draw, steps: oneDecimal(clamp(Math.log2(candidate.draw.ratio), -DRAW_STEPS_TAKEN_OFF, DRAW_STEPS_ADDED)) }
+    : undefined;
+  if (runDraw) {
+    why.push(`about ${tokenCount(runDraw.medianTokens)} tokens a finished run over ${runDraw.runs} runs, ${oneDecimal(runDraw.ratio)}× the desk's median`);
+  }
   const unmetered = Boolean(candidate.paceUnmetered || candidate.profile.local);
   const draw = weeklyDrawState(candidate.capacity, input.now);
   const resetMs = routingResetMs(candidate.capacity, input.now);
@@ -1394,7 +1471,7 @@ function orchestrationFit(
     short.usedPercent >= SHORT_WINDOW_TIGHT_PERCENT &&
     !(Number.isFinite(shortResetMs) && shortResetMs <= SHORT_WINDOW_GRACE_MS)
   ) {
-    planPoints -= 1.5 * clamp((short.usedPercent - SHORT_WINDOW_TIGHT_PERCENT) / (100 - SHORT_WINDOW_TIGHT_PERCENT), 0, 1);
+    planPoints -= SHORT_WINDOW_POINTS * clamp((short.usedPercent - SHORT_WINDOW_TIGHT_PERCENT) / (100 - SHORT_WINDOW_TIGHT_PERCENT), 0, 1);
     why.push(`5h window ${Math.round(short.usedPercent)}% used`);
   }
   if (input.busy > 0) {
@@ -1413,6 +1490,7 @@ function orchestrationFit(
       fit,
       ...(agentic ? { agentic } : {}),
       quality,
+      ...(runDraw ? { draw: runDraw } : {}),
       plan: {
         ...(draw.usedPercent !== undefined ? { usedPercent: draw.usedPercent } : {}),
         ...(draw.expectedUsedPercent !== undefined ? { expectedUsedPercent: oneDecimal(draw.expectedUsedPercent) } : {}),
@@ -1476,13 +1554,36 @@ function rankOrchestrationCandidates(
   }));
   const best = Math.max(...fits.map((row) => row.terms.fit.score));
   const bar = Math.min(domainIntelligenceBar(context.tier), best);
-  const passing = fits.filter((row) => row.terms.fit.score >= bar);
-  const cheapest = Math.min(...passing.map((row) => row.candidate.profile.cost));
+  const clearing = fits.filter((row) => row.terms.fit.score >= bar);
+  // An older generation of a model on the same plan gives way to a newer one
+  // that can take the work and scores at least as well here: the same
+  // allowance buys the better, and usually leaner, model.
+  type Fit = (typeof fits)[number];
+  const successorOf = new Map<Fit, Fit>();
+  for (const older of clearing) {
+    const successors = clearing.filter(
+      (newer) =>
+        newer !== older &&
+        routingPoolKey(newer.candidate) === routingPoolKey(older.candidate) &&
+        isNewerGeneration(newer.candidate, older.candidate) &&
+        newer.terms.quality >= older.terms.quality &&
+        routingRowLive({ usedPercent: newer.terms.plan.usedPercent, capacity: newer.candidate.capacity }, now),
+    );
+    if (successors.length > 0) {
+      successorOf.set(older, successors.reduce((a, b) => (isNewerGeneration(b.candidate, a.candidate) ? b : a)));
+    }
+  }
+  const passing = clearing.filter((row) => !successorOf.has(row));
+  // Price tier plus what the model's own runs have measured on this desk.
+  const effectiveCost = (row: Fit) => row.candidate.profile.cost + (row.terms.draw?.steps ?? 0);
+  const cheapest = Math.min(...passing.map(effectiveCost));
   const ceiling = bar + ORCHESTRATION_HEADROOM[context.tier];
   const preferred = request.preferred ?? [];
-  const ranked: RankedRoutingCandidate[] = passing.map(({ candidate, terms, planPoints }) => {
+  const ranked: RankedRoutingCandidate[] = passing.map((row) => {
+    const { candidate, terms, planPoints } = row;
+    const displaced = [...successorOf].filter(([, successor]) => successor === row).map(([older]) => older.candidate);
     const qualityPoints = Math.min(terms.quality, ceiling);
-    const costPoints = ORCHESTRATION_COST_WEIGHT[context.tier] * Math.max(0, candidate.profile.cost - cheapest);
+    const costPoints = ORCHESTRATION_COST_WEIGHT[context.tier] * Math.max(0, effectiveCost(row) - cheapest);
     const planWeighted = ORCHESTRATION_PLAN_WEIGHT[context.tier] * planPoints;
     const considerate = oneDecimal(qualityPoints - costPoints + planWeighted);
     const coordinatorPick = preferred.some((item) => sameCandidateIdentity(item, candidate));
@@ -1495,11 +1596,25 @@ function rankOrchestrationCandidates(
       usedPercent: draw.usedPercent,
       orchestration: {
         ...terms,
+        ...(displaced.length
+          ? {
+              supersedes: displaced.map((older) => ({
+                provider: older.provider,
+                model: older.model,
+                ...(older.customBotId ? { customBotId: older.customBotId } : {}),
+                label: older.label,
+              })),
+            }
+          : {}),
         bar,
         points: { quality: oneDecimal(qualityPoints), cost: oneDecimal(costPoints), plan: oneDecimal(planWeighted) },
         considerate,
         coordinatorPick,
-        why: coordinatorPick ? ["the coordinator's pick, and it clears the bar", ...terms.why] : terms.why,
+        why: [
+          ...(coordinatorPick ? ["the coordinator's pick, and it clears the bar"] : []),
+          ...terms.why,
+          ...(displaced.length ? [`stands in for ${displaced.map((older) => older.label).join(", ")}: older, same plan`] : []),
+        ],
       },
     };
   });

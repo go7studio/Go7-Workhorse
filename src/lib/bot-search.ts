@@ -1,3 +1,4 @@
+import { STRICT_SCALE_NOTE } from "./bot-scores";
 import { botKnowledgeSnapshot, ORCHESTRATION_TASK_DOMAINS, planLineFor } from "./domain-benchmark";
 import {
   activeRouteLoad,
@@ -5,12 +6,14 @@ import {
   rankRoutingCandidates,
   routingCandidatesForDesk,
   routingPoolKey,
+  withRunDraws,
   type RankedRoutingCandidate,
   type RoutingCandidate,
   type RoutingRequest,
 } from "./routing";
 import { inferTaskDomain } from "./task-domain";
 import type { ModelInputCapabilities, ProviderId, RoutingTaskTier, Session, Settings, TaskDomain } from "./types";
+import type { RunDraws } from "./usage";
 import type { WatchPlans, WatchVendorStatus } from "./watch";
 
 /**
@@ -77,6 +80,8 @@ export type FindBotsDesk = {
   now?: number;
   /** Narrow the desk first, e.g. to the calling chat's Orchestrate list. */
   narrow?: (candidates: RoutingCandidate[]) => RoutingCandidate[];
+  /** What each model's finished runs took on this desk (see measureRunDraws). */
+  draws?: RunDraws;
 };
 
 function isDomain(value: unknown): value is TaskDomain {
@@ -107,7 +112,7 @@ export function findBots(input: FindBotsInput, desk: FindBotsDesk): FindBotsResu
     : [];
   const requirements = requirementsOf(input.needs);
   const now = desk.now ?? Date.now();
-  const all = routingCandidatesForDesk(desk.settings, desk.statuses, desk.plans);
+  const all = withRunDraws(routingCandidatesForDesk(desk.settings, desk.statuses, desk.plans), desk.draws);
   const candidates = desk.narrow ? desk.narrow(all) : all;
   const baseLoad = activeRouteLoad(desk.sessions, desk.recent ?? [], now);
   const request: RoutingRequest = {
@@ -165,8 +170,8 @@ export function findBots(input: FindBotsInput, desk: FindBotsDesk): FindBotsResu
     candidates,
   });
   const scores = snapshot.scores
-    ? `${snapshot.scores.source} (${snapshot.scores.license})${snapshot.scores.newestPublished ? `, published ${snapshot.scores.newestPublished}` : ""}; rows without a public score use the desk table`
-    : "the desk's own table (no public leaderboard loaded yet)";
+    ? `${snapshot.scores.source} (${snapshot.scores.license})${snapshot.scores.newestPublished ? `, published ${snapshot.scores.newestPublished}` : ""}; rows without a public score use the desk table. ${STRICT_SCALE_NOTE}`
+    : `the desk's own table (no public leaderboard loaded yet). ${STRICT_SCALE_NOTE}`;
   return {
     domain,
     tier,

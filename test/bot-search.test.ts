@@ -77,7 +77,14 @@ test("find_bots says why a bot was not picked, clamps the squad, and honours the
   const result = findBots({ task: "implement the parser", domain: "coding", tier: "balanced", squad: 40 }, desk());
   assert.ok(result.squad.length <= FIND_BOTS_MAX_SQUAD);
   assert.ok(result.notPicked.some((row) => row.label === "Grok Bot" && /never takes desk work/.test(row.reason)));
-  assert.ok(result.notPicked.some((row) => /under the 7\/10 bar for coding/.test(row.reason)), "a weak coder is named with its bar");
+  assert.ok(
+    result.notPicked.some((row) => row.label === "MiniMax" && /under the 4\/10 bar for coding/.test(row.reason)),
+    "a weak coder is named with its bar",
+  );
+  assert.ok(
+    result.notPicked.some((row) => row.label === "Opus 4.8" && /gives way to Opus 5, newer on the same plan/.test(row.reason)),
+    "an older generation on the same plan names the one it gives way to",
+  );
   assert.equal(findBots({ task: "implement the parser", squad: 0 }, desk()).squad.length, 1);
   const narrowed = findBots(
     { task: "implement the parser", squad: 2 },
@@ -99,7 +106,8 @@ test("the orchestrator's brief lists picks with their plan terms and points at f
       now,
     }),
   );
-  assert.match(brief, /Task domain: coding\. Tier: balanced\. Bar: 7\/10\./);
+  assert.match(brief, /Task domain: coding\. Tier: balanced\. Bar: 4\/10\./);
+  assert.match(brief, /Strict scale: 10 is only a board's leader/);
   assert.match(brief, /^1\. .+ — coding \d+(\.\d)?\/10 \(.+\) — \d+% left this week · resets in 4d 0h/m);
   assert.match(brief, /workhorse_find_bots/);
   assert.match(brief, /Grok Bot \(Grok Bot never takes desk work\)/);

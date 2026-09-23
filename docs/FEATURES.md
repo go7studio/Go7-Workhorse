@@ -218,12 +218,25 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
 - Orchestrate makes this chat the orchestrator, and it must spawn desk workers,
   fan-out only when asked. On its spawns Auto scores every bot for the task's
   domain at the thinking level it would run at, drops bots under the tier's bar
-  (Quick 4, Balanced 7, Deep 8.5, never above the best bot the desk can call),
+  (Balanced 4, Deep 8 on the strict scale below, never above the best bot the
+  desk can call; Quick takes any bot and counts quality only one point off the
+  floor),
   and orders the rest by quality, cost, and plan terms: leftover about to
   expire, pace against the days left before the pool resets, the reserve, a 5h
   window close to full, and workers already running on the pool. Quality counts
   most on Deep and least on Quick, where a cheaper bot that clears the bar wins.
   A wave of spawns spreads over pools instead of piling onto one.
+- An older model on the same plan gives way to a newer one of its line that
+  can take the work and scores at least as well at it: on Cursor, Opus 5.5
+  takes what Opus 4.7 or 4.6 would have, even when a coordinator named the
+  older one. A model on another plan, or one the boards rate better at the
+  task, keeps its place.
+- What a task takes from a plan is tracked. The desk measures each model's
+  finished worker runs from its own Usage ledger (median tokens a run: fresh
+  input, output and cache writes), and a model whose runs take twice the desk's
+  median costs one more price step, half as much one less, once it has three
+  runs and the desk six. Bot knowledge, `workhorse_find_bots` and the head's
+  brief show it.
 - `workhorse_find_bots` is the orchestrator's search: give it the task and a
   squad size, and it returns the bots the desk would pick with each one's score,
   where the score came from, its plan terms, a squad spread over pools, and why
@@ -628,16 +641,25 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
   reach say why. No API keys, credential ids, or base URLs. Cursor Auto is
   omitted; Grok 4.7 on Grok Build and on Cursor stay one family for leftover.
 - Scores come from the public LMArena leaderboard dataset (CC BY 4.0), no key
-  needed. Coding averages the text arena's coding category with Code Arena;
+  needed. Coding reads Code Arena, where models build working apps with tools
+  (the text arena's coding category only for a model Code Arena has not rated);
   writing reads creative writing, data reads math, visual reads the vision
   arena, image generation reads text-to-image for Grok's image product, and
   general reads the text arena. Each score is matched to the run at the
-  thinking level the desk would use, and placed on 1–10 against that arena's
-  leader. The desk checks the dataset's commit once a day and downloads it
-  (about 0.7 MB) only when it changed, so a newly ranked model is scored the
-  day LMArena publishes it; **Check now** asks at once. A bot the leaderboard
-  does not rank yet uses the desk's own table, marked as such, and an unknown
-  custom bot keeps its family prior.
+  thinking level the desk would use. The desk checks the dataset's commit once a
+  day and downloads it (about 0.7 MB) only when it changed, so a newly ranked
+  model is scored the day LMArena publishes it; **Check now** asks at once.
+- The scale is strict. Only a board's leader scores 10; its 25th-best model
+  scores 5, counting each model once, and every other model sits on the line
+  through those two, down to 1, so the tenth-best lands near 7 and a model far
+  down the board lands near the floor. Agent Arena grades the same way. A new
+  generation a board has not rated yet reads the latest earlier one of its line
+  that it has (Opus 5.5 reads Opus 5, Grok 4.7's chat scores read Grok 4.6), and
+  its source says so. A bot with no rated line uses the desk's own table, which
+  is on the same scale, rounded down, never 10, and says which board or sibling
+  each number was read from. An unknown custom bot keeps its family prior moved
+  onto that scale: a frontier family is 8, the balanced band 5, an unrated
+  model 2.
 - The profile shows the Workhorse mark as tiny moving blobs of the bots you have
   called. Spend sets how many of each colour, and blobs merge without mixing.
 - Hover it for Your Workhorse and what it is made of. With no spend yet it keeps

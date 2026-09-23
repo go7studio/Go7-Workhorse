@@ -76,8 +76,9 @@ test("the 1-10 table orders the mid-field the 1-5 scale collapsed", () => {
   assert.equal(intelligence("cursor", "composer-2.5"), 8);
   assert.equal(intelligence("codex", "gpt-5.5"), 8);
   // The flagship open models sit in the balanced band, so ordinary coding can
-  // reach them. The bar for balanced is still 8.
-  assert.equal(intelligence("custom", "MiniMax-M3"), 8);
+  // reach them. The bar for balanced is still 8. MiniMax M3 is not one of them:
+  // the public boards put it behind Luna on code and agent work.
+  assert.equal(intelligence("custom", "MiniMax-M3"), 6);
   assert.equal(intelligence("custom", "hf:moonshotai/Kimi-K3"), 8);
   assert.equal(intelligence("custom", "hf:zai-org/GLM-5.2"), 8);
   // The rest of Synthetic's catalog, below the flagships and above nothing.
@@ -104,8 +105,8 @@ test("slug order: the specific name wins before the generic one", () => {
   const intelligence = (model: string) => routingProfileForModel("custom", model).intelligence;
   assert.equal(intelligence("claude-sonnet-4-6"), 8, "sonnet-4-6 before sonnet");
   assert.equal(intelligence("claude-sonnet-5"), 9);
-  assert.equal(intelligence("MiniMax-M3"), 8, "minimax-m3 before minimax");
-  assert.equal(intelligence("MiniMax-M2.7"), 6, "generic minimax is last gen");
+  assert.equal(intelligence("MiniMax-M3"), 6, "minimax-m3 before minimax");
+  assert.equal(intelligence("MiniMax-M2.7"), 5, "generic minimax is last gen");
   assert.equal(intelligence("hf:moonshotai/Kimi-K3"), 8, "kimi-k3 before kimi");
   assert.equal(intelligence("kimi-k2"), 7, "an older Kimi is not the flagship");
   assert.equal(intelligence("hf:zai-org/GLM-5.2"), 8, "glm-5.2 before glm-5");

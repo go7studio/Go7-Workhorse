@@ -1,7 +1,8 @@
 import { useMemo, useState } from "react";
 import { ORCHESTRATION_TASK_DOMAINS, botKnowledgeSnapshot, durationLabel } from "../lib/domain-benchmark";
-import { botScoresSummary } from "../lib/bot-scores";
+import { botScoresSummary, STRICT_SCALE_NOTE } from "../lib/bot-scores";
 import { activeRouteLoad } from "../lib/routing";
+import { measureRunDraws } from "../lib/usage";
 import { useStore } from "../lib/store";
 import type { RoutingTaskTier, TaskDomain } from "../lib/types";
 import { watchVendorStatuses } from "../lib/watch";
@@ -47,8 +48,10 @@ export function BotKnowledgePane() {
     () => watchVendorStatuses({ settings, usage, plans, permits: watchPermits, dayMarks: watchDayMarks }),
     [settings, usage, plans, watchPermits, watchDayMarks],
   );
-  // Running workers change on every token; the load they put on each pool does not.
+  // Running workers change on every token; the load they put on each pool does not,
+  // and neither do the runs that have finished.
   const loadKey = JSON.stringify(activeRouteLoad(sessions));
+  const drawsKey = useMemo(() => JSON.stringify(measureRunDraws(usage, sessions)), [usage, sessions]);
   const snapshot = useMemo(
     () =>
       botKnowledgeSnapshot({
@@ -59,9 +62,10 @@ export function BotKnowledgePane() {
         domain,
         tier,
         activeLoad: JSON.parse(loadKey) as Record<string, number>,
+        draws: JSON.parse(drawsKey) as ReturnType<typeof measureRunDraws>,
       }),
     // botScores: a new leaderboard re-scores every row.
-    [settings, statuses, plans, domain, tier, loadKey, botScores],
+    [settings, statuses, plans, domain, tier, loadKey, drawsKey, botScores],
   );
   const now = Date.now();
   const summary = botScoresSummary(botScores?.feed ?? null);
@@ -73,8 +77,9 @@ export function BotKnowledgePane() {
         <h2>Bot knowledge</h2>
         <p className="settings-pane-lead">
           What orchestration reads when Orchestrate or Mission is on: each bot&apos;s score for the kind of work, where
-          that score came from, and its plan terms — leftover, time to reset, pace, and workers already on it. Plan terms
-          are the vendor pool overall, never one spawn. No keys or URLs.
+          that score came from, its plan terms — leftover, time to reset, pace, and workers already on it — and, once
+          it has finished a few runs here, the tokens a run takes. An older model gives way to a newer one of its line on
+          the same plan. Plan terms are the vendor pool overall, never one spawn. No keys or URLs.
         </p>
       </header>
       <div className="settings-row bot-knowledge-source">
@@ -127,7 +132,8 @@ export function BotKnowledgePane() {
         </label>
       </div>
       <p className="settings-note">
-        Bar for this domain and tier: <strong>{snapshot.bar}</strong>/10 — never above the best bot this desk can call.
+        Bar for this domain and tier: <strong>{snapshot.bar}</strong>/10 — never above the best bot this desk can call.{" "}
+        {STRICT_SCALE_NOTE}
       </p>
       <table className="bot-knowledge-table">
         <thead>

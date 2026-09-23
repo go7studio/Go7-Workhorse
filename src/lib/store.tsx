@@ -207,6 +207,7 @@ import {
   shouldRouteSessionTurn,
   shouldShadowRouteSessionTurn,
   spawnEffortFor,
+  withRunDraws,
 } from "./routing";
 import { botKnowledgeSnapshot, orchestrationKnowledgeBrief, ORCHESTRATION_TASK_DOMAINS } from "./domain-benchmark";
 import type { TaskDomain } from "./types";
@@ -385,6 +386,7 @@ import {
   backfillCursorUsage,
   estimateFromSessionTurn,
   joinCursorLedgerEvents,
+  measureRunDraws,
   normalizeUsage,
   occupancyFromUsage,
   rangeStart,
@@ -2599,6 +2601,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           tier: inferRoutingTier(originalText, images, { role: "orchestrator" }),
           prompt: originalText,
           activeLoad: activeRouteLoad(stateRef.current.sessions, recentRoutesRef.current),
+          draws: measureRunDraws(stateRef.current.usage, stateRef.current.sessions),
         }),
       );
       vendorText = `${brief}\n\n${vendorText}`;
@@ -4437,6 +4440,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                   plans,
                   sessions: latest.sessions,
                   recent: recentRoutesRef.current,
+                  draws: measureRunDraws(latest.usage, latest.sessions),
                   ...(allowlist ? { narrow: (rows: RoutingCandidate[]) => filterCandidatesBySpawnAllowlist(rows, allowlist) } : {}),
                 },
               );
@@ -6027,7 +6031,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             const routeCandidates = routeSpawn
               ? filterCandidatesBySpawnAllowlist(
                   constrainRouteCandidatesForSpawn(
-                    routingCandidatesForDesk(latest.settings, routeStatuses, latest.deskPlans ?? plansRef.current),
+                    withRunDraws(
+                      routingCandidatesForDesk(latest.settings, routeStatuses, latest.deskPlans ?? plansRef.current),
+                      measureRunDraws(latest.usage, latest.sessions),
+                    ),
                     {
                       provider: payload.provider,
                       ...(rankCoordinatorPick ? {} : { model: payload.model }),

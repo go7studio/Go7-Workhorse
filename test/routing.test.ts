@@ -1215,10 +1215,13 @@ test("non-image prompts keep the same ranking winners as before image-gen prefer
   assert.equal(deep?.model, "gpt-5.6-sol");
 });
 
-test("domain benchmark cites a public source per catalog row, not one generic desk stamp", () => {
+test("the desk table says which board, sibling, or estimate each number was read from", () => {
   const sol = domainBenchmarkScoreFromCatalog("codex", "gpt-5.6-sol", "coding", 10);
-  assert.match(sol.source, /SWE-bench Verified/);
-  assert.notEqual(sol.source, "Go7 Workhorse domain benchmark (public desk table)");
+  assert.equal(sol.source, "LMArena, Sept 2026, strict scale, rounded down");
+  const grokText = domainBenchmarkScoreFromCatalog("grok", "grok-4.7", "general", 10);
+  assert.match(grokText.source, /read from Grok 4\.6, the nearest rated sibling/);
+  const composer = domainBenchmarkScoreFromCatalog("cursor", "composer-2.5", "coding", 8);
+  assert.match(composer.source, /^No LMArena board rates it/);
   const unknown = domainBenchmarkScoreFromCatalog("custom", "my-unrated-bot", "coding", 6);
   assert.equal(unknown.source, FAMILY_ROUTING_PRIOR_SOURCE);
 });

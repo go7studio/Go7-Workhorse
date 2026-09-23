@@ -1,4 +1,4 @@
-import { botScoresSummary, type BotScoresSummary } from "./bot-scores";
+import { botScoresSummary, STRICT_SCALE_NOTE, type BotScoresSummary } from "./bot-scores";
 import {
   domainIntelligenceBar,
   FAMILY_ROUTING_PRIOR_SOURCE,
@@ -12,6 +12,7 @@ import {
   routingResetMs,
   routingSkipReason,
   weeklyDrawState,
+  withRunDraws,
   type OrchestrationTerms,
   type RankedRoutingCandidate,
   type RoutingCandidate,
@@ -29,6 +30,7 @@ import type {
   StoredRoutingProfile,
   TaskDomain,
 } from "./types";
+import type { RunDraws } from "./usage";
 import type { WatchPlans, WatchVendorStatus } from "./watch";
 
 export { domainIntelligenceBar, FAMILY_ROUTING_PRIOR_SOURCE };
@@ -58,7 +60,10 @@ export type BotKnowledgeModelRow = {
   agentic?: number;
   /** Routing would consider this row at all. */
   callable: boolean;
+  /** In the pick order: clears the bar, and no newer generation on its plan stands in for it. */
   clearsBar: boolean;
+  /** The newer model of this line, on the same plan, that takes this row's work. */
+  supersededBy?: string;
   /** Place in the order an Orchestrate spawn would pick, from 1. */
   rank?: number;
   /** The number that order is sorted by. */
@@ -168,10 +173,12 @@ export function botKnowledgeSnapshot(input: {
   requirements?: Partial<ModelInputCapabilities>;
   /** The rows to read, when the caller already narrowed the desk (a chat's Orchestrate list). */
   candidates?: RoutingCandidate[];
+  /** What each model's finished runs took on this desk (see measureRunDraws). */
+  draws?: RunDraws;
 }): BotKnowledgeSnapshot {
   const tier = input.tier ?? "balanced";
   const now = input.now ?? Date.now();
-  const candidates = input.candidates ?? routingCandidatesForDesk(input.settings, input.statuses, input.plans);
+  const candidates = withRunDraws(input.candidates ?? routingCandidatesForDesk(input.settings, input.statuses, input.plans), input.draws);
   const request: RoutingRequest = {
     prompt: input.prompt ?? "",
     taskDomain: input.domain,
@@ -211,6 +218,7 @@ export function botKnowledgeSnapshot(input: {
     const fit = resolveDomainScore(candidate.provider, candidate.model, input.domain, candidate.profile.intelligence, effort);
     const agentic = publishedAgenticScore(candidate.provider, candidate.model, effort);
     const skip = routingSkipReason(candidate, request, input.routing, input.requirements ?? {});
+    const successor = ranked.find((row) => row.orchestration?.supersedes?.some((older) => sameRow(older, candidate)));
     rest.push({
       provider: candidate.provider,
       model: candidate.model,
@@ -222,9 +230,14 @@ export function botKnowledgeSnapshot(input: {
       ...(agentic ? { agentic: agentic.score } : {}),
       callable: !skip,
       clearsBar: false,
+      ...(!skip && successor ? { supersededBy: successor.label } : {}),
       planLine: planLineFor(candidate, now),
       why: [],
-      skip: skip ? SKIP_TEXT[skip] : `under the ${bar}/10 bar for ${input.domain}`,
+      skip: skip
+        ? SKIP_TEXT[skip]
+        : successor
+          ? `gives way to ${successor.label}, newer on the same plan`
+          : `under the ${bar}/10 bar for ${input.domain}`,
     });
   }
   rest.sort((a, b) => b.score - a.score || a.label.localeCompare(b.label));
@@ -245,6 +258,7 @@ export function orchestrationKnowledgeBrief(snapshot: BotKnowledgeSnapshot): str
     "Bot knowledge (orchestration): scores and plan terms for this ask. Keys and URLs are not here.",
     `Task domain: ${snapshot.domain}. Tier: ${snapshot.tier}. Bar: ${snapshot.bar}/10.`,
     scores,
+    STRICT_SCALE_NOTE,
     "Plan terms describe each vendor pool overall, never one spawn.",
     "Callable, in the order the desk would pick:",
   ];
@@ -256,7 +270,13 @@ export function orchestrationKnowledgeBrief(snapshot: BotKnowledgeSnapshot): str
     }
     if (ranked.length > 10) lines.push(`…and ${ranked.length - 10} more`);
   }
-  const below = snapshot.models.filter((row) => !row.clearsBar).slice(0, 6);
+  // What a head must never name comes first, then older models it should not
+  // name over their successors, then the ones too weak for this domain.
+  const order = (row: BotKnowledgeModelRow) => (!row.callable ? 0 : row.supersededBy ? 1 : 2);
+  const below = snapshot.models
+    .filter((row) => !row.clearsBar)
+    .sort((a, b) => order(a) - order(b))
+    .slice(0, 8);
   if (below.length > 0) {
     lines.push(`Not picked: ${below.map((row) => `${row.label} (${row.skip ?? `${row.score}/10`})`).join("; ")}.`);
   }

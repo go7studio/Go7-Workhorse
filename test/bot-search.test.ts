@@ -117,7 +117,9 @@ test("the orchestrator's brief lists picks with their plan terms and points at f
     /^1\. .+ — coding \d+\/100 \(.+\) — .+ — \d+% leftover of this week's plan overall \(\d+% used this week so far — the whole week pool, not this prompt\) · resets in 4d 0h/m,
   );
   assert.match(brief, /workhorse_find_bots/);
-  assert.match(brief, /pass after with that worker's name: the desk starts it when that worker is done/);
+  // A MiniMax head meant to "chain the docs slice after the fixes", waited for the reports, and never started it.
+  assert.match(brief, /Start every slice in this turn\. When one needs another's result, .+ spawn it now with after set to that worker's name/);
+  assert.match(brief, /Once the reports are in, the desk starts no new work, so a slice left for later is never done\./);
   assert.match(brief, /Grok Bot \(Grok Bot never takes desk work\)/);
   assert.doesNotMatch(brief, /sk-test|api\.minimax\.io|127\.0\.0\.1/, "no keys or URLs in a brief");
 });

@@ -514,7 +514,7 @@ export function orchestrationKnowledgeBrief(snapshot: BotKnowledgeSnapshot): str
   lines.push(
     "To staff several workers, call workhorse_find_bots with the task and a squad size: it returns picks with reasons and spreads them over pools.",
     "Name provider and model on a spawn to keep a pick that clears the bar. Leave them unset and the desk picks by these terms.",
-    "When one slice needs another's result, such as a release note for new code, pass after with that worker's name: the desk starts it when that worker is done.",
+    "Start every slice in this turn. When one needs another's result, such as a guide for new code, spawn it now with after set to that worker's name: the desk holds it and starts it when that worker is done. Once the reports are in, the desk starts no new work, so a slice left for later is never done.",
   );
   return lines.join("\n");
 }

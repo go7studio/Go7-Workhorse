@@ -10,6 +10,8 @@ export function looksCodey(text: string): boolean {
     /```/.test(text) ||
     /\b[\w./-]+\.(ts|tsx|js|jsx|mjs|py|go|rs|rb|java|cs|cpp|cc|h|swift|kt|gd|sql|sh|bash|yml|yaml|toml|json)\b/i.test(text) ||
     /\b(function|class|import|const|async|await|struct|enum|interface|typedef|regex|compile|typecheck|stack trace|traceback|segfault|null pointer|exception|unit test|test suite|lint|refactor|implement|component|api|endpoint|mutex|thread|queue|algorithm)\b/i.test(text) ||
+    // A language, framework or engine named in the ask is code work even when no code word is.
+    /\b(typescript|javascript|python|rust|golang|kotlin|react|vue|svelte|node\.?js|electron|gdscript|godot|css|html|frontend|backend|codebase|repo|repository)\b/i.test(text) ||
     /=>|::|\(\)|\{\}|\[\]/.test(text)
   );
 }

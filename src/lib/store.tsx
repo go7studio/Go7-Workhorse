@@ -189,12 +189,16 @@ import {
   reconcileTaskStoreOnRestart,
 } from "./external-task";
 import {
+  activeRouteLoad,
+  candidatesNamedBy,
   chooseRoutingDecision,
   describeRoutingMiss,
   inferRoutingTier,
   inferTaskDomain,
   outcomesFromLearningEvents,
+  RECENT_ROUTE_MS,
   routingCandidatesForDesk,
+  routingPoolKey,
   routingDecisionEvidence,
   routingDecisionLogDetail,
   routingIdentityExcluded,
@@ -204,6 +208,9 @@ import {
   spawnEffortFor,
 } from "./routing";
 import { botKnowledgeSnapshot, orchestrationKnowledgeBrief } from "./domain-benchmark";
+import { applyBotScoresFeed, normalizeBotScoresFeed, type BotScoresView } from "./bot-scores";
+import { findBots } from "./bot-search";
+import type { RoutingCandidate } from "./routing";
 import { orchestrationEnabled } from "./workhorse-rules";
 import type {
   AgentRun,
@@ -331,6 +338,7 @@ import {
   type WorkerNameReservation,
   type WorkerRecord,
   shouldAutoRouteSpawn,
+  parseProviderId,
   userLockedSpawnModel,
   routingDecisionMatchesSpawn,
   constrainRouteCandidatesForSpawn,
@@ -626,6 +634,10 @@ export type Store = AppState & {
   updateLocalCompute: (settings: import("./types").LocalComputeSettings) => void;
   updateWorkshop: (settings: WorkshopSettings) => Promise<void>;
   grantPlanExternalAgents: (sessionId: string, allow: boolean) => void;
+  /** Public leaderboard scores the desk holds (LMArena), and the last check. Null outside the desktop app. */
+  botScores: BotScoresView | null;
+  /** Check the leaderboard now; download it if it moved. */
+  refreshBotScores: () => Promise<void>;
   agentRuntimes: import("./external-catalog").AgentRuntimeStatus[];
   agentCatalog: import("./external-catalog").ExternalAgent[];
   refreshAgentRuntimes: () => Promise<void>;
@@ -1281,6 +1293,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const draftPersistTimer = useRef<number | null>(null);
   const composerDraftsRef = useRef<Record<string, ComposerDraftSnap>>({});
   const plansRef = useRef<import("./watch").WatchPlans>({});
+  /** Orchestration routes handed out in the last few seconds, per pool. */
+  const recentRoutesRef = useRef<Array<{ key: string; at: number }>>([]);
   // Read by the refresh loop, which is declared with no deps so it can be
   // called from the routing paths. Mirrors customMeterHealth, like plansRef.
   const meterHealthRef = useRef<Record<string, CustomMeterHealth | undefined>>({});
@@ -2582,6 +2596,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           domain,
           tier: inferRoutingTier(originalText, images, { role: "orchestrator" }),
           prompt: originalText,
+          activeLoad: activeRouteLoad(stateRef.current.sessions, recentRoutesRef.current),
         }),
       );
       vendorText = `${brief}\n\n${vendorText}`;
@@ -4395,6 +4410,37 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               await replyAsk({ text: formatDeskRoster(filterCatalogBySpawnAllowlist(catalog, allowlist)) });
               return;
             }
+            if (action === "find-bots") {
+              const fromId = payload.fromSessionId?.trim() || "";
+              const allowlist = fromId ? spawnAllowlistForCaller(latest.sessions, fromId) : undefined;
+              const plans = latest.deskPlans ?? plansRef.current;
+              const result = findBots(
+                {
+                  task: payload.message === "find-bots" ? "" : payload.message,
+                  domain: payload.domain,
+                  tier: payload.route,
+                  squad: payload.limit,
+                  exclude: payload.exclude,
+                  needs: payload.needs,
+                },
+                {
+                  settings: latest.settings,
+                  statuses: watchVendorStatuses({
+                    settings: latest.settings,
+                    usage: latest.usage,
+                    plans,
+                    permits: latest.watchPermits,
+                    dayMarks: latest.watchDayMarks,
+                  }),
+                  plans,
+                  sessions: latest.sessions,
+                  recent: recentRoutesRef.current,
+                  ...(allowlist ? { narrow: (rows: RoutingCandidate[]) => filterCandidatesBySpawnAllowlist(rows, allowlist) } : {}),
+                },
+              );
+              await replyAsk({ text: JSON.stringify(result, null, 2) });
+              return;
+            }
             if (action === "plan") {
               const fromId = payload.fromSessionId?.trim() || "";
               const session = latest.sessions.find((item) => item.id === fromId);
@@ -5974,6 +6020,29 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             const spawnRole = nestedPolicy.role ??
               (payload.role === "auditor" ? "auditor" as const : routeSpawn ? "worker" as const : undefined);
             const routingRole = spawnRole === "helper" ? "worker" as const : spawnRole;
+            const rankCoordinatorPick = orchestrationBench && coordinatorModel && !userLockedModel;
+            const spawnAllowlist = spawnAllowlistForCaller(latest.sessions, caller.id);
+            const routeCandidates = routeSpawn
+              ? filterCandidatesBySpawnAllowlist(
+                  constrainRouteCandidatesForSpawn(
+                    routingCandidatesForDesk(latest.settings, routeStatuses, latest.deskPlans ?? plansRef.current),
+                    {
+                      provider: payload.provider,
+                      ...(rankCoordinatorPick ? {} : { model: payload.model }),
+                    },
+                  ),
+                  spawnAllowlist,
+                )
+              : [];
+            // A coordinator that read the desk (workhorse_find_bots) and named a
+            // row keeps it when that row clears the domain bar; otherwise the
+            // desk ranks as if nothing was named.
+            const coordinatorRows = rankCoordinatorPick
+              ? candidatesNamedBy(routeCandidates, {
+                  provider: parseProviderId(typeof payload.provider === "string" ? payload.provider : undefined) ?? undefined,
+                  model: String(payload.model),
+                })
+              : [];
             const routeRequest = {
               prompt: payload.message,
               attachments: payload.attachments,
@@ -5982,23 +6051,24 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               outcomes: outcomesFromLearningEvents(learningOutcomeEvents),
               exclude: effectiveExclusions,
               useOrchestrationBenchmark: orchestrationBench,
+              effortHint: parseEffort(String(payload.effort ?? "")) ?? null,
+              ...(orchestrationBench ? { activeLoad: activeRouteLoad(latest.sessions, recentRoutesRef.current) } : {}),
+              ...(coordinatorRows.length > 0
+                ? { preferred: coordinatorRows.map(({ provider, model, customBotId }) => ({ provider, model, customBotId })) }
+                : {}),
             };
-            const spawnAllowlist = spawnAllowlistForCaller(latest.sessions, caller.id);
-            const routeCandidates = routeSpawn
-              ? filterCandidatesBySpawnAllowlist(
-                  constrainRouteCandidatesForSpawn(
-                    routingCandidatesForDesk(latest.settings, routeStatuses, latest.deskPlans ?? plansRef.current),
-                    {
-                      provider: payload.provider,
-                      ...(orchestrationBench && coordinatorModel && !userLockedModel ? {} : { model: payload.model }),
-                    },
-                  ),
-                  spawnAllowlist,
-                )
-              : [];
             const routeDecision = routeSpawn
               ? chooseRoutingDecision(routeCandidates, routeRequest, latest.settings.routing)
               : null;
+            if (routeDecision && orchestrationBench) {
+              // Counted as load until its worker shows up as running, so the
+              // next spawn in the same wave sees this pool as taken.
+              const at = Date.now();
+              recentRoutesRef.current = [
+                ...recentRoutesRef.current.filter((item) => at - item.at <= RECENT_ROUTE_MS),
+                { key: routingPoolKey(routeDecision), at },
+              ];
+            }
             if (routeSpawn) {
               recordRoutingDecision({
                 source: "spawn",
@@ -9090,6 +9160,31 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }));
   }, []);
 
+  // Public leaderboard scores. Main downloads and caches them; this applies the
+  // table routing reads and keeps the status the Bot knowledge pane shows.
+  const [botScores, setBotScores] = useState<BotScoresView | null>(null);
+  const applyBotScoresView = useCallback((raw: unknown) => {
+    if (!raw || typeof raw !== "object") return;
+    const view = raw as Partial<BotScoresView>;
+    const feed = normalizeBotScoresFeed(view.feed);
+    applyBotScoresFeed(feed);
+    setBotScores({ feed, status: { refreshing: false, ...(view.status ?? {}) } });
+  }, []);
+  useEffect(() => {
+    if (!ready) return;
+    void window.workhorse?.scoresRead?.().then(applyBotScoresView).catch(() => undefined);
+    return window.workhorse?.onScoresUpdated?.(applyBotScoresView);
+  }, [ready, applyBotScoresView]);
+  const refreshBotScores = useCallback(async () => {
+    if (!window.workhorse?.scoresRefresh) return;
+    setBotScores((current) => (current ? { ...current, status: { ...current.status, refreshing: true } } : current));
+    try {
+      applyBotScoresView(await window.workhorse.scoresRefresh());
+    } catch {
+      setBotScores((current) => (current ? { ...current, status: { ...current.status, refreshing: false } } : current));
+    }
+  }, [applyBotScoresView]);
+
   const [agentRuntimes, setAgentRuntimes] = useState<import("./external-catalog").AgentRuntimeStatus[]>([]);
   const [agentCatalog, setAgentCatalog] = useState<import("./external-catalog").ExternalAgent[]>([]);
 
@@ -9445,6 +9540,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       updateLocalCompute,
       updateWorkshop,
       grantPlanExternalAgents,
+      botScores,
+      refreshBotScores,
       agentRuntimes,
       agentCatalog,
       refreshAgentRuntimes,
@@ -9588,6 +9685,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       updateLocalCompute,
       updateWorkshop,
       grantPlanExternalAgents,
+      botScores,
+      refreshBotScores,
       agentRuntimes,
       agentCatalog,
       refreshAgentRuntimes,

@@ -255,8 +255,13 @@ export function domainBenchmarkScoreFromCatalog(
   return { score: clampScore(familyIntelligence), source: FAMILY_ROUTING_PRIOR_SOURCE };
 }
 
+/**
+ * The domain score an Orchestrate or Mission spawn must reach on each tier.
+ * Ranking never holds a bar above the best model the desk can call, so a
+ * domain nobody on the desk is great at still routes to the best there is.
+ */
 export function domainIntelligenceBar(tier: import("./types").RoutingTaskTier): number {
-  if (tier === "deep") return 10;
+  if (tier === "deep") return 8.5;
   if (tier === "quick") return 4;
-  return 8;
+  return 7;
 }

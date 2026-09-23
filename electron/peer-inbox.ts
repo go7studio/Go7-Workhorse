@@ -27,6 +27,8 @@ export type PeerAction =
   | "cancel-agent"
   | "list-agents"
   | "list-external-agents"
+  /** Rank the desk's bots for a task and suggest a squad. See src/lib/bot-search.ts. */
+  | "find-bots"
   /** A read route answered from the desk's live state. See src/lib/link-read.ts. */
   | "link-read";
 
@@ -112,6 +114,10 @@ export type PeerAsk = {
   tools?: string[];
   constraints?: string[];
   exclude?: string[];
+  /** find-bots: the kind of work, when the caller knows it better than the task text says. */
+  domain?: string;
+  /** find-bots: inputs every pick must accept. */
+  needs?: { images?: boolean; documents?: boolean; audio?: boolean; video?: boolean };
   files?: string[];
   attachments?: ChatImage[];
   planOperation?: "import" | "view" | "approve" | "start" | "pause" | "resume" | "revise" | "reopen" | "status" | "evidence" | "complete" | "block" | "cancel";

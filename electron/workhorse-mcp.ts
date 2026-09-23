@@ -553,7 +553,7 @@ const TOOLS = [
   {
     name: "workhorse_spawn_agent",
     description:
-      "Dispatch a bounded Workhorse worker. For an unassigned slice, leave provider, model, effort, chat, and worker unset so the desk auto-selects from task fit and current capacity. Explicit user assignments win. Use workhorse_delegate for an ordinary single task. If workhorse_list_bots said an explicitly assigned vendor is not callable, do not call it.",
+      "Dispatch a bounded Workhorse worker. For an unassigned slice, leave provider, model, effort, chat, and worker unset so the desk auto-selects from task fit and current capacity. Explicit user assignments win. A squad row from workhorse_find_bots may be passed as provider and model; the desk keeps that pick while it clears the domain bar. Use workhorse_delegate for an ordinary single task. If workhorse_list_bots said an explicitly assigned vendor is not callable, do not call it.",
     inputSchema: {
       type: "object",
       properties: {
@@ -564,8 +564,14 @@ const TOOLS = [
           description:
             "Name of a worker already on this chat (Wren, Wanda). Pass it to continue the same topic with what that worker learned. Leave empty to mint a new name for a new topic — a new worker starts with a clear head. Do not name an idle worker just to save a start. A busy worker still gets a colleague.",
         },
-        provider: { type: "string", description: "Explicit user override only: grok, codex, claude, cursor, or custom" },
-        model: { type: "string", description: "Explicit user override only, such as gpt-5.6-terra" },
+        provider: {
+          type: "string",
+          description: "grok, codex, claude, cursor, or custom. Only for a user's assignment or a workhorse_find_bots pick; otherwise unset",
+        },
+        model: {
+          type: "string",
+          description: "Such as gpt-5.6-terra. Only for a user's assignment or a workhorse_find_bots pick; otherwise unset",
+        },
         permission: { type: "string", description: "Ignored. This chat's Permission is the person's setting; the worker copies it. Do not pass permission." },
         sandbox: { type: "string", description: "Ignored. This chat's Sandbox is the person's setting; the worker copies it. Do not pass sandbox." },
         route: { type: "string", description: "auto, quick, balanced, or deep" },
@@ -689,6 +695,33 @@ const TOOLS = [
       properties: {
         provider: { type: "string", description: "Optional vendor or custom account id" },
         callableOnly: { type: "boolean", description: "If true, return only rows you can call now" },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "workhorse_find_bots",
+    description:
+      "Search this desk for who should take a task. Returns the bots the desk would pick, in order: each with its score for the task's domain and where that score came from (a public leaderboard, or the desk's own table), its plan terms (leftover, time to reset, pace, 5h window, workers already on it), and a squad spread over pools. Call it before staffing workers, then pass each squad row's provider and model on workhorse_spawn_agent. Nothing is spawned or reserved.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        task: { type: "string", description: "The work, as a sentence or the slice prompt. Domain and depth are read from it." },
+        squad: { type: "number", description: "How many workers you mean to start, 1-8. Default 1." },
+        domain: { type: "string", description: "Optional: coding, image-generation, writing, visual, data, or general. Wins over the task text." },
+        tier: { type: "string", description: "Optional: quick, balanced, or deep. Wins over the task text." },
+        needs: {
+          type: "object",
+          description: "Inputs every pick must accept.",
+          properties: {
+            images: { type: "boolean" },
+            documents: { type: "boolean" },
+            audio: { type: "boolean" },
+            video: { type: "boolean" },
+          },
+          additionalProperties: false,
+        },
+        exclude: { type: "array", items: { type: "string" }, description: "Provider, model, or bot terms to leave out" },
       },
       additionalProperties: false,
     },
@@ -1687,6 +1720,45 @@ async function listBots(from?: string): Promise<string> {
     /* fall back to the last saved file */
   }
   return formatDeskRoster(deskRoster());
+}
+
+/**
+ * The desk ranks from its live plans and running workers, so the search needs
+ * the desk. There is no saved-file fallback: yesterday's leftover would rank a
+ * squad wrong.
+ */
+async function findBotsOnDesk(args: Record<string, unknown>, from?: string): Promise<string> {
+  const task = typeof args.task === "string" ? args.task.trim().slice(0, 4000) : "";
+  const tier = args.tier === "quick" || args.tier === "balanced" || args.tier === "deep" ? args.tier : undefined;
+  const squad = typeof args.squad === "number" && Number.isFinite(args.squad) ? Math.round(args.squad) : undefined;
+  const exclude = Array.isArray(args.exclude)
+    ? args.exclude.filter((item): item is string => typeof item === "string" && Boolean(item.trim()))
+    : undefined;
+  const rawNeeds = args.needs && typeof args.needs === "object" ? (args.needs as Record<string, unknown>) : undefined;
+  const needs = rawNeeds
+    ? {
+        ...(rawNeeds.images === true ? { images: true } : {}),
+        ...(rawNeeds.documents === true ? { documents: true } : {}),
+        ...(rawNeeds.audio === true ? { audio: true } : {}),
+        ...(rawNeeds.video === true ? { video: true } : {}),
+      }
+    : undefined;
+  return postBridge(
+    "/bots",
+    botsAsk(
+      {
+        action: "find-bots",
+        message: task || "find-bots",
+        ...(typeof args.domain === "string" ? { domain: args.domain } : {}),
+        ...(tier ? { route: tier } : {}),
+        ...(squad ? { limit: squad } : {}),
+        ...(exclude?.length ? { exclude } : {}),
+        ...(needs && Object.keys(needs).length ? { needs } : {}),
+      },
+      from,
+    ),
+    { timeoutMs: 8_000, inbox: false },
+  );
 }
 
 function setupInput(args: Record<string, unknown>): BotSetupInput {
@@ -3467,6 +3539,9 @@ async function callDeskTool(name: string, args: Record<string, unknown>, from?: 
   }
   if (name === "workhorse_query_capacity") {
     return queryCapacity(args);
+  }
+  if (name === "workhorse_find_bots") {
+    return findBotsOnDesk(args, from);
   }
   if (name === "workhorse_list_agents") {
     return listBots(from);

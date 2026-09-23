@@ -211,6 +211,28 @@
   color: var(--text-tertiary);
 }
 
+.bot-knowledge-origin {
+  display: inline-block;
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: var(--text-11);
+  color: var(--text-secondary);
+}
+
+.bot-knowledge-origin.public {
+  color: var(--text-primary);
+}
+
+.bot-knowledge-agentic,
+.bot-knowledge-credit {
+  color: var(--text-tertiary);
+}
+
+.bot-knowledge-error {
+  color: var(--danger);
+}
+
 /* Routing's preview: what auto-route would hand each kind of task. */
 .settings-picks {
   margin: 0 0 14px;

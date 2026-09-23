@@ -190,8 +190,11 @@ const DESK_TOOLS: { name: string; description: string; input_schema: Record<stri
           description:
             "Name of a worker already on this chat (Wren, Wanda). Pass it to continue the same topic with what that worker learned. Leave empty to mint a new name for a new topic — a new worker starts with a clear head. Do not name an idle worker just to save a start. A busy worker still gets a colleague.",
         },
-        provider: { type: "string", description: "grok, codex, claude, or custom" },
-        model: { type: "string", description: "Optional model id" },
+        provider: {
+          type: "string",
+          description: "grok, codex, claude, cursor, or custom. Only for a user's assignment or a workhorse_find_bots pick",
+        },
+        model: { type: "string", description: "Model id. Only for a user's assignment or a workhorse_find_bots pick" },
         permission: { type: "string", description: "Ignored. This chat's Permission is the person's setting; the worker copies it. Do not pass permission." },
         sandbox: { type: "string", description: "Ignored. This chat's Sandbox is the person's setting; the worker copies it. Do not pass sandbox." },
         route: { type: "string", description: "auto, quick, balanced, or deep" },
@@ -245,6 +248,48 @@ const DESK_TOOLS: { name: string; description: string; input_schema: Record<stri
     description:
       "List built-in vendors and custom desk slots with leftover/Watch status. leftoverPercent is that vendor’s plan remaining overall, not this prompt. Do not spawn or ask a row whose canCall is false.",
     input_schema: { type: "object", properties: {} },
+  },
+  {
+    name: "workhorse_find_bots",
+    description:
+      "Search this desk for who should take a task. Returns the bots the desk would pick, in order, with each one's score for the task's domain and its source, its plan terms (leftover, time to reset, pace, 5h window, workers already on it), and a squad spread over pools. Call it before staffing workers, then spawn one worker per squad row with that row's provider and model. Nothing is spawned or reserved.",
+    input_schema: {
+      type: "object",
+      properties: {
+        task: { type: "string", description: "The work, as a sentence or the slice prompt" },
+        squad: { type: "number", description: "How many workers you mean to start, 1-8. Default 1." },
+        domain: { type: "string", description: "Optional: coding, image-generation, writing, visual, data, or general" },
+        tier: { type: "string", description: "Optional: quick, balanced, or deep" },
+        needs: {
+          type: "object",
+          description: "Inputs every pick must accept",
+          properties: {
+            images: { type: "boolean" },
+            documents: { type: "boolean" },
+            audio: { type: "boolean" },
+            video: { type: "boolean" },
+          },
+        },
+        exclude: { type: "array", items: { type: "string" }, description: "Provider, model, or bot terms to leave out" },
+      },
+    },
+  },
+  {
+    name: "workhorse_continue_mission",
+    description:
+      "Mission chats only. After a worker wave has reported, continue the mission with only the work that remains. Workhorse keeps the mission's criteria, exclusions, and coordinating brain.",
+    input_schema: {
+      type: "object",
+      properties: {
+        previousWorkerIds: { type: "array", items: { type: "string" }, description: "Worker ids from the pass that just finished" },
+        previousPass: { type: "number", description: "Pass number that wave reported" },
+        remainingWork: { type: "string", description: "What remains after weighing the evidence" },
+        evidence: { type: "array", items: { type: "string" }, description: "Optional verified facts" },
+        description: { type: "string", description: "Short 3-5 word label" },
+        route: { type: "string", description: "Omit to keep the prior brain; auto, quick, balanced, or deep opts into routing" },
+      },
+      required: ["previousWorkerIds", "remainingWork"],
+    },
   },
   {
     name: "workhorse_probe_runtime",

@@ -48,6 +48,7 @@ is a licensing question, not a formatting one.
 | `fast-sha256` | 1.3.0 | Unlicense |
 | `hono` | 4.13.7 | MIT |
 | `http-errors` | 2.0.1 | MIT |
+| `hyparquet` | 1.31.1 | MIT |
 | `iconv-lite` | 0.7.3 | MIT |
 | `ip-address` | 10.5.0 | MIT |
 | `is-docker` | 3.0.0 | MIT |

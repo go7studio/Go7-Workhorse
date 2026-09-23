@@ -28,7 +28,8 @@ import { cursorWatchLane } from "./cursor-lane";
 import { outcomeVerification } from "./learning-policy";
 import { isAssignedEffort, modelsFor, normalizeModelId, withEffort, contextWindowFor } from "./models";
 import type { WatchPlans, WatchVendorStatus } from "./watch";
-import { domainBenchmarkScoreFromCatalog, domainIntelligenceBar } from "./domain-benchmark-catalog";
+import { domainIntelligenceBar } from "./domain-benchmark-catalog";
+import { publishedAgenticScore, resolveDomainScore, type ResolvedDomainScore } from "./domain-score";
 import { detectsImageGenerationIntent, inferTaskDomain, looksCodey } from "./task-domain";
 
 export { detectsImageGenerationIntent, inferTaskDomain, looksCodey } from "./task-domain";
@@ -67,6 +68,11 @@ export type RoutingCandidate = VendorLaunchState & {
   paceUnmetered?: boolean;
   /** Tokens this model can hold. A candidate that cannot hold the conversation is skipped. */
   contextWindow?: number;
+  /**
+   * The short rate window beside the weekly or monthly pool (a 5h session).
+   * A pool with days of leftover still stalls a worker when this one is full.
+   */
+  shortWindow?: RoutingCapacity;
 };
 
 export type RoutingJobRole = "orchestrator" | "worker" | "auditor" | "builder";
@@ -98,8 +104,17 @@ export type RoutingRequest = {
   contextNeed?: number;
   /** What the work is about. Omit to infer from the prompt. */
   taskDomain?: TaskDomain;
-  /** Orchestrate or Mission: rank spawns by domain benchmark, then cost, then leftover. */
+  /** Orchestrate or Mission: rank spawns by domain score and the plan terms of each pool. */
   useOrchestrationBenchmark?: boolean;
+  /**
+   * The rows a coordinator named on the spawn. Orchestration keeps its pick
+   * when one of them clears the domain bar, and ranks as usual when none does.
+   */
+  preferred?: Array<Pick<RoutingCandidate, "provider" | "model" | "customBotId">>;
+  /** Workers already running (or just assigned) per `routingPoolKey`. Each one costs that pool a little. */
+  activeLoad?: Record<string, number>;
+  /** Thinking level the caller asked for. Scores are read for the run at that level. */
+  effortHint?: EffortLevel | null;
 };
 
 export type RankedRoutingCandidate = RoutingCandidate & {
@@ -107,6 +122,8 @@ export type RankedRoutingCandidate = RoutingCandidate & {
   expectedUsedPercent?: number;
   capacityDelta?: number;
   usedPercent?: number;
+  /** Why an Orchestrate or Mission spawn ranked this row where it did. */
+  orchestration?: OrchestrationTerms;
 };
 
 export const ROUTING_EVIDENCE_VERSION = 1;
@@ -240,6 +257,7 @@ export function routingCandidatesForDesk(
       const product = namedProduct ?? sharedProduct ?? plan?.products.find((item) => `${item.product} ${item.label}`.toLowerCase().includes(slug));
       const laneCapacity =
         provider === "cursor" ? status.get(cursorWatchLane(model.id)) : capacity;
+      const shortWindow = shortWindowOf(plan);
       candidates.push({
         provider,
         model: model.id,
@@ -257,6 +275,7 @@ export function routingCandidatesForDesk(
           period: plan?.period ?? laneCapacity?.period ?? capacity?.period,
           ...(plan?.observedAt ? { observedAt: plan.observedAt } : {}),
         },
+        ...(shortWindow ? { shortWindow } : {}),
       });
     }
   }
@@ -296,6 +315,7 @@ export function routingCandidatesForDesk(
       const localByUrl = isLocalEndpoint(bot.baseUrl);
       const routed = routingProfileForModel("custom", model, customModelRoutingOverride(bot, model));
       const profile = localByUrl && !routed.local ? { ...routed, local: true } : routed;
+      const shortWindow = profile.local ? undefined : shortWindowOf(plan);
       candidates.push({
         provider: "custom",
         model,
@@ -315,10 +335,31 @@ export function routingCandidatesForDesk(
         // get, and a 0%-used local bot already outscored a metered model that
         // fit better. No gauge means no gauge.
         capacity: paceUnmetered || profile.local ? {} : customBotCapacity(product, plan, capacity),
+        ...(shortWindow ? { shortWindow } : {}),
       });
     }
   }
   return candidates;
+}
+
+/**
+ * The 5h session window a plan reports beside its main pool, if it reports
+ * one. Claude and Codex name it `session` / `five_hour`; hosts that only
+ * label products say "5h".
+ */
+function shortWindowOf(plan: GrokPlanUsage | undefined): RoutingCapacity | undefined {
+  const product = plan?.products.find(
+    (item) =>
+      item.product === "session" ||
+      item.product === "five_hour" ||
+      /(^|[^a-z0-9])5\s?h([^a-z0-9]|$)|5-hour|five hour/i.test(`${item.product} ${item.label ?? ""}`),
+  );
+  if (!product || product.unlimited || !Number.isFinite(product.usagePercent)) return undefined;
+  return {
+    usedPercent: product.usagePercent,
+    ...(product.resetsAt ? { resetsAt: product.resetsAt } : {}),
+    ...(plan?.observedAt ? { observedAt: plan.observedAt } : {}),
+  };
 }
 
 /**
@@ -1162,6 +1203,325 @@ export function routingSkipReason(
   return undefined;
 }
 
+/** Quality past bar + headroom buys nothing on that tier; cost and leftover decide instead. */
+const ORCHESTRATION_HEADROOM: Record<RoutingTaskTier, number> = { quick: 2, balanced: 3, deep: 10 };
+/** Domain points given up per cost step above the cheapest row that clears the bar. */
+const ORCHESTRATION_COST_WEIGHT: Record<RoutingTaskTier, number> = { quick: 0.9, balanced: 0.2, deep: 0.1 };
+/** How much a pool's plan terms count against quality on each tier. */
+const ORCHESTRATION_PLAN_WEIGHT: Record<RoutingTaskTier, number> = { quick: 1.5, balanced: 1, deep: 0.5 };
+/** Share of a spawn's quality taken from Agent Arena (tools, long runs) when that arena rates the model. */
+const ORCHESTRATION_AGENTIC_SHARE = 0.2;
+/** Points a pool gives up for each worker already running on it, so a squad spreads over the desk. */
+const ORCHESTRATION_BUSY_POINTS = 0.6;
+/** A 5h window at or past this is close to stalling a worker mid-task... */
+const SHORT_WINDOW_TIGHT_PERCENT = 90;
+/** ...unless it resets this soon. */
+const SHORT_WINDOW_GRACE_MS = 20 * 60 * 1000;
+
+/** Which allowance a candidate draws on. Two workers on one pool share its leftover and its rate window. */
+export function routingPoolKey(candidate: Pick<RoutingCandidate, "provider" | "model" | "customBotId">): string {
+  if (candidate.provider === "custom") return `bot:${candidate.customBotId ?? candidate.model.toLowerCase()}`;
+  if (candidate.provider === "cursor") return cursorWatchLane(candidate.model);
+  return candidate.provider;
+}
+
+/** How long a fresh route counts as load before its worker shows up as running. */
+export const RECENT_ROUTE_MS = 45_000;
+
+/**
+ * Workers on each pool right now: running desk workers, plus routes handed out
+ * in the last few seconds whose workers have not started yet. A wave of
+ * parallel spawns then spreads over the desk instead of piling onto one pool.
+ */
+export function activeRouteLoad(
+  sessions: ReadonlyArray<{
+    provider: ProviderId;
+    model: string;
+    customBotId?: string;
+    agentRun?: { status?: string } | null;
+  }>,
+  recent: ReadonlyArray<{ key: string; at: number }> = [],
+  now = Date.now(),
+): Record<string, number> {
+  const load: Record<string, number> = {};
+  for (const session of sessions) {
+    if (session.agentRun?.status !== "running") continue;
+    const key = routingPoolKey(session);
+    load[key] = (load[key] ?? 0) + 1;
+  }
+  for (const item of recent) {
+    if (now - item.at > RECENT_ROUTE_MS) continue;
+    load[item.key] = (load[item.key] ?? 0) + 1;
+  }
+  return load;
+}
+
+/**
+ * The rows a coordinator's model name refers to: the exact id, the desk's
+ * display name, or a model family named without a vendor.
+ */
+export function candidatesNamedBy(
+  candidates: RoutingCandidate[],
+  input: { provider?: ProviderId; model?: string },
+): RoutingCandidate[] {
+  const raw = input.model?.trim().toLowerCase() ?? "";
+  if (!raw) return [];
+  const family = spawnModelFamilyKey(raw);
+  return candidates.filter((row) => {
+    if (input.provider && row.provider !== input.provider) return false;
+    const id = normalizeModelId(row.provider, row.model).toLowerCase();
+    if (id === raw || row.model.toLowerCase() === raw || row.label.toLowerCase() === raw) return true;
+    if (normalizeModelId(row.provider, raw).toLowerCase() === id) return true;
+    return family !== null && routingModelFamily(row) === family;
+  });
+}
+
+export type OrchestrationPace = "spare" | "on pace" | "behind";
+
+/** The terms one pool is judged on for one Orchestrate or Mission spawn. */
+export type OrchestrationTerms = {
+  domain: TaskDomain;
+  tier: RoutingTaskTier;
+  /** Thinking level this route would run at. Scores are read for that run. */
+  effort: EffortLevel | null;
+  /** Domain score (1–10) and where it came from. The bar is read against this. */
+  fit: ResolvedDomainScore;
+  /** Agent Arena score, when that arena rates this model. */
+  agentic?: { score: number; source: string };
+  /** Fit with the agentic share mixed in for a spawn. What ranking weighs. */
+  quality: number;
+  /** The bar this spawn had to clear. */
+  bar: number;
+  plan: {
+    usedPercent?: number;
+    expectedUsedPercent?: number;
+    resetsInMs?: number;
+    period?: RoutingCapacity["period"];
+    pace?: OrchestrationPace;
+    /** Leftover that disappears at a reset inside the next day. */
+    expiring: boolean;
+    /** Inside the reserve the owner set aside, with days still to run. */
+    reserve: boolean;
+    /** No meter: a local box, or a plan whose gauge never moves. */
+    unmetered: boolean;
+    shortWindowUsedPercent?: number;
+    shortWindowResetsInMs?: number;
+    /** Workers already running on this pool. */
+    busy: number;
+  };
+  /** Domain points: quality after the tier's headroom, the cost premium, and the plan terms after the tier's weight. */
+  points: { quality: number; cost: number; plan: number };
+  /** The number rows are ordered by. */
+  considerate: number;
+  /** A coordinator named this row and it cleared the bar. */
+  coordinatorPick: boolean;
+  why: string[];
+};
+
+function paceOf(delta: number | undefined): OrchestrationPace | undefined {
+  if (delta === undefined || !Number.isFinite(delta)) return undefined;
+  if (delta >= 10) return "spare";
+  if (delta <= -10) return "behind";
+  return "on pace";
+}
+
+function oneDecimal(value: number): number {
+  return Math.round(value * 10) / 10;
+}
+
+type OrchestrationFit = {
+  terms: Omit<OrchestrationTerms, "bar" | "points" | "considerate" | "coordinatorPick">;
+  /** Raw plan points. The ranker weights them by tier. */
+  planPoints: number;
+};
+
+/** Fit and plan terms for one candidate, before the ranker knows the bar or the cheapest row. */
+function orchestrationFit(
+  candidate: RoutingCandidate,
+  input: {
+    tier: RoutingTaskTier;
+    domain: TaskDomain;
+    role?: RoutingJobRole;
+    settings: RoutingSettings;
+    now: number;
+    busy: number;
+    effortHint?: EffortLevel | null;
+  },
+): OrchestrationFit {
+  const effort = effortForRoutingTier(candidate.provider, candidate.model, input.tier, input.effortHint ?? null);
+  const fit = resolveDomainScore(candidate.provider, candidate.model, input.domain, candidate.profile.intelligence, effort);
+  const agentic = publishedAgenticScore(candidate.provider, candidate.model, effort) ?? undefined;
+  const spawnWork = input.role === "worker" || input.role === "builder" || input.role === "orchestrator";
+  const quality =
+    agentic && spawnWork
+      ? oneDecimal((1 - ORCHESTRATION_AGENTIC_SHARE) * fit.score + ORCHESTRATION_AGENTIC_SHARE * agentic.score)
+      : fit.score;
+  const why: string[] = [`${input.domain} ${fit.score}/10 (${fit.source})`];
+  if (agentic && spawnWork) why.push(`agentic ${agentic.score}/10`);
+  const unmetered = Boolean(candidate.paceUnmetered || candidate.profile.local);
+  const draw = weeklyDrawState(candidate.capacity, input.now);
+  const resetMs = routingResetMs(candidate.capacity, input.now);
+  let planPoints = 0;
+  let expiring = false;
+  let reserve = false;
+  if (unmetered) {
+    planPoints += 0.25;
+    why.push("no meter to spend down");
+  } else if (input.settings.capacityAware && draw.usedPercent !== undefined) {
+    const expiry = candidateExpiryCredit(candidate.capacity, input.now);
+    if (expiry > 0) {
+      expiring = true;
+      planPoints += Math.min(1.5, expiry / 32);
+      why.push(`${Math.round(100 - draw.usedPercent)}% left expires in ${expiryHoursLabel(resetMs)}`);
+    } else if (draw.delta !== undefined) {
+      const delta = clamp(draw.delta, -50, 50);
+      if (input.settings.preferExcess) planPoints += (delta / 50) * 0.75;
+      else if (delta < 0) planPoints += (delta / 50) * 0.5;
+    }
+    if (draw.usedPercent >= 100 - input.settings.reservePercent) {
+      const weight = reservePenaltyWeight(draw.resetMs);
+      if (weight > 0) {
+        reserve = true;
+        planPoints -= 2 * weight;
+        why.push(`inside the ${input.settings.reservePercent}% reserve`);
+      }
+    }
+  }
+  const short = candidate.shortWindow;
+  const shortResetMs = routingResetMs(short, input.now);
+  if (
+    short?.usedPercent !== undefined &&
+    short.usedPercent >= SHORT_WINDOW_TIGHT_PERCENT &&
+    !(Number.isFinite(shortResetMs) && shortResetMs <= SHORT_WINDOW_GRACE_MS)
+  ) {
+    planPoints -= 1.5 * clamp((short.usedPercent - SHORT_WINDOW_TIGHT_PERCENT) / (100 - SHORT_WINDOW_TIGHT_PERCENT), 0, 1);
+    why.push(`5h window ${Math.round(short.usedPercent)}% used`);
+  }
+  if (input.busy > 0) {
+    planPoints -= ORCHESTRATION_BUSY_POINTS * input.busy;
+    why.push(`${input.busy} worker${input.busy === 1 ? "" : "s"} already on this pool`);
+  }
+  const pace = unmetered ? undefined : paceOf(draw.delta);
+  if (pace && !expiring) {
+    why.push(pace === "spare" ? "spare leftover for the time left" : pace === "behind" ? "spending faster than its pace" : "on pace");
+  }
+  return {
+    terms: {
+      domain: input.domain,
+      tier: input.tier,
+      effort,
+      fit,
+      ...(agentic ? { agentic } : {}),
+      quality,
+      plan: {
+        ...(draw.usedPercent !== undefined ? { usedPercent: draw.usedPercent } : {}),
+        ...(draw.expectedUsedPercent !== undefined ? { expectedUsedPercent: oneDecimal(draw.expectedUsedPercent) } : {}),
+        ...(Number.isFinite(resetMs) ? { resetsInMs: resetMs } : {}),
+        ...(candidate.capacity?.period ? { period: candidate.capacity.period } : {}),
+        ...(pace ? { pace } : {}),
+        expiring,
+        reserve,
+        unmetered,
+        ...(short?.usedPercent !== undefined ? { shortWindowUsedPercent: short.usedPercent } : {}),
+        ...(Number.isFinite(shortResetMs) ? { shortWindowResetsInMs: shortResetMs } : {}),
+        busy: input.busy,
+      },
+      why,
+    },
+    planPoints,
+  };
+}
+
+function sameCandidateIdentity(
+  a: Pick<RoutingCandidate, "provider" | "model" | "customBotId">,
+  b: Pick<RoutingCandidate, "provider" | "model" | "customBotId">,
+): boolean {
+  return a.provider === b.provider && a.model === b.model && (a.customBotId ?? "") === (b.customBotId ?? "");
+}
+
+/**
+ * Orchestrate and Mission spawns. Every row that can take the work is scored
+ * for this domain at the thinking level it would run at; rows under the tier's
+ * bar drop out, and the bar never sits above the best row, so a domain nobody
+ * on the desk is great at still routes to the best there is. The rest are
+ * ordered by quality (capped at the tier's headroom, so quick work does not
+ * burn a frontier pool), less the cost premium, plus the plan terms weighted
+ * by tier: leftover about to expire, pace against the days left, the reserve,
+ * a 5h window close to full, and workers already running on the pool.
+ */
+function rankOrchestrationCandidates(
+  scorable: RoutingCandidate[],
+  request: RoutingRequest,
+  settings: RoutingSettings,
+  context: { tier: RoutingTaskTier; domain: TaskDomain; wantsImageGen: boolean },
+): RankedRoutingCandidate[] {
+  const now = request.now ?? Date.now();
+  let pool = scorable;
+  if (context.domain === "image-generation" || context.wantsImageGen) {
+    const makers = pool.filter((candidate) => candidateCanGenerateImages(candidate));
+    if (makers.length > 0) pool = makers;
+  }
+  if (pool.length === 0) return [];
+  const fits = pool.map((candidate) => ({
+    candidate,
+    ...orchestrationFit(candidate, {
+      tier: context.tier,
+      domain: context.domain,
+      role: request.role,
+      settings,
+      now,
+      busy: request.activeLoad?.[routingPoolKey(candidate)] ?? 0,
+      effortHint: request.effortHint,
+    }),
+  }));
+  const best = Math.max(...fits.map((row) => row.terms.fit.score));
+  const bar = Math.min(domainIntelligenceBar(context.tier), best);
+  const passing = fits.filter((row) => row.terms.fit.score >= bar);
+  const cheapest = Math.min(...passing.map((row) => row.candidate.profile.cost));
+  const ceiling = bar + ORCHESTRATION_HEADROOM[context.tier];
+  const preferred = request.preferred ?? [];
+  const ranked: RankedRoutingCandidate[] = passing.map(({ candidate, terms, planPoints }) => {
+    const qualityPoints = Math.min(terms.quality, ceiling);
+    const costPoints = ORCHESTRATION_COST_WEIGHT[context.tier] * Math.max(0, candidate.profile.cost - cheapest);
+    const planWeighted = ORCHESTRATION_PLAN_WEIGHT[context.tier] * planPoints;
+    const considerate = oneDecimal(qualityPoints - costPoints + planWeighted);
+    const coordinatorPick = preferred.some((item) => sameCandidateIdentity(item, candidate));
+    const draw = weeklyDrawState(candidate.capacity, now);
+    return {
+      ...candidate,
+      score: considerate,
+      expectedUsedPercent: draw.expectedUsedPercent,
+      capacityDelta: draw.delta,
+      usedPercent: draw.usedPercent,
+      orchestration: {
+        ...terms,
+        bar,
+        points: { quality: oneDecimal(qualityPoints), cost: oneDecimal(costPoints), plan: oneDecimal(planWeighted) },
+        considerate,
+        coordinatorPick,
+        why: coordinatorPick ? ["the coordinator's pick, and it clears the bar", ...terms.why] : terms.why,
+      },
+    };
+  });
+  // A coordinator that read the desk and named a row keeps it, as long as the
+  // row clears the bar and its pool can still take work.
+  const picked = (row: RankedRoutingCandidate) => row.orchestration?.coordinatorPick === true && routingRowLive(row, now);
+  return ranked.sort((a, b) => {
+    const aPick = picked(a);
+    const bPick = picked(b);
+    if (aPick !== bPick) return aPick ? -1 : 1;
+    const aLive = routingRowLive(a, now);
+    const bLive = routingRowLive(b, now);
+    if (aLive !== bLive) return aLive ? -1 : 1;
+    return (
+      b.score - a.score ||
+      (b.orchestration?.quality ?? 0) - (a.orchestration?.quality ?? 0) ||
+      a.profile.cost - b.profile.cost ||
+      a.label.localeCompare(b.label)
+    );
+  });
+}
+
 export function rankRoutingCandidates(
   candidates: RoutingCandidate[],
   request: RoutingRequest,
@@ -1191,37 +1551,7 @@ export function rankRoutingCandidates(
     : 0;
   const scorable = candidates.filter((candidate) => !routingSkipReason(candidate, request, settings, required));
   if (request.useOrchestrationBenchmark) {
-    const domainBar = domainIntelligenceBar(tier);
-    const orchestrationRows: RankedRoutingCandidate[] = [];
-    for (const candidate of scorable) {
-      const { score: domainScore } = domainBenchmarkScoreFromCatalog(
-        candidate.provider,
-        candidate.model,
-        domain,
-        candidate.profile.intelligence,
-      );
-      if (domainScore < domainBar) continue;
-      orchestrationRows.push({
-        ...candidate,
-        score: domainScore,
-      });
-    }
-    const sortNow = request.now ?? Date.now();
-    return orchestrationRows.sort((a, b) => {
-      const aDomain = domainBenchmarkScoreFromCatalog(a.provider, a.model, domain, a.profile.intelligence).score;
-      const bDomain = domainBenchmarkScoreFromCatalog(b.provider, b.model, domain, b.profile.intelligence).score;
-      if (bDomain !== aDomain) return bDomain - aDomain;
-      if (a.profile.cost !== b.profile.cost) return a.profile.cost - b.profile.cost;
-      const aLive = routingRowLive(a, sortNow);
-      const bLive = routingRowLive(b, sortNow);
-      if (aLive !== bLive) return aLive ? -1 : 1;
-      const aDraw = weeklyDrawState(a.capacity, request.now);
-      const bDraw = weeklyDrawState(b.capacity, request.now);
-      const aLeft = aDraw.usedPercent ?? 50;
-      const bLeft = bDraw.usedPercent ?? 50;
-      if (aLeft !== bLeft) return aLeft - bLeft;
-      return a.label.localeCompare(b.label);
-    });
+    return rankOrchestrationCandidates(scorable, request, settings, { tier, domain, wantsImageGen });
   }
   const ranked: RankedRoutingCandidate[] = [];
   for (const candidate of candidates) {
@@ -1459,6 +1789,9 @@ export function chooseRoutingDecision(
             : " · on pace";
   const imageGenReason =
     detectsImageGenerationIntent(request.prompt) && candidateCanGenerateImages(winner) ? " · image generation" : "";
+  const fitReason = winner.orchestration
+    ? ` · ${winner.orchestration.domain} ${winner.orchestration.fit.score}/10${winner.orchestration.coordinatorPick ? " · coordinator's pick" : ""}`
+    : "";
   return {
     at: request.now ?? Date.now(),
     taskTier,
@@ -1467,7 +1800,7 @@ export function chooseRoutingDecision(
     effort: effortForRoutingTier(winner.provider, winner.model, taskTier),
     customBotId: winner.customBotId,
     score: winner.score,
-    reason: `${taskTier === "deep" ? "Deep" : taskTier === "quick" ? "Quick" : "Balanced"} · ${effortForRoutingTier(winner.provider, winner.model, taskTier) ?? "fixed"} effort${capacityReason}${imageGenReason}`,
+    reason: `${taskTier === "deep" ? "Deep" : taskTier === "quick" ? "Quick" : "Balanced"} · ${effortForRoutingTier(winner.provider, winner.model, taskTier) ?? "fixed"} effort${capacityReason}${imageGenReason}${fitReason}`,
     usedPercent: draw.usedPercent,
     expectedUsedPercent: draw.expectedUsedPercent,
   };

@@ -294,4 +294,13 @@ contextBridge.exposeInMainWorld("workhorse", {
       ipcRenderer.removeListener("workshop:changed", listener);
     };
   },
+  scoresRead: () => ipcRenderer.invoke("scores:read"),
+  scoresRefresh: () => ipcRenderer.invoke("scores:refresh"),
+  onScoresUpdated: (handler: (view: unknown) => void) => {
+    const listener = (_event: unknown, view: unknown) => handler(view);
+    ipcRenderer.on("scores:updated", listener);
+    return () => {
+      ipcRenderer.removeListener("scores:updated", listener);
+    };
+  },
 });

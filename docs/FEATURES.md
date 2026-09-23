@@ -215,10 +215,23 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
 - **Composer + menu** Orchestrate, Mission, and Debug pin on the chat in any
   combination. Each pin is a chip next to +; multiple pins collapse to a count
   you can expand.
-- Orchestrate makes this chat the orchestrator, and it must spawn desk workers.
-  Auto ranks by domain benchmark (then cost, then leftover) on orchestration
-  spawns, fan-out only when asked. A model name locks only when the user named
-  it in their ask; a model the coordinator writes on the spawn still ranks.
+- Orchestrate makes this chat the orchestrator, and it must spawn desk workers,
+  fan-out only when asked. On its spawns Auto scores every bot for the task's
+  domain at the thinking level it would run at, drops bots under the tier's bar
+  (Quick 4, Balanced 7, Deep 8.5, never above the best bot the desk can call),
+  and orders the rest by quality, cost, and plan terms: leftover about to
+  expire, pace against the days left before the pool resets, the reserve, a 5h
+  window close to full, and workers already running on the pool. Quality counts
+  most on Deep and least on Quick, where a cheaper bot that clears the bar wins.
+  A wave of spawns spreads over pools instead of piling onto one.
+- `workhorse_find_bots` is the orchestrator's search: give it the task and a
+  squad size, and it returns the bots the desk would pick with each one's score,
+  where the score came from, its plan terms, a squad spread over pools, and why
+  the rest were not picked. It spawns and reserves nothing. Custom bots such as
+  MiniMax M3 get it too, so any chat's head can staff a squad.
+- A model name locks only when the user named it in their ask. A model the
+  coordinator writes on the spawn is kept when it clears the domain bar (a
+  `workhorse_find_bots` pick, say) and ranked away when it does not.
 - Either pin also hands the chat the spawn rules. An unpinned chat gets them
   the moment it is asked for workers, and opens lighter for not carrying them.
 - If the ask is phrased in a way the desk does not read as a request for
@@ -598,11 +611,23 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
   Learning, Usage, Watch.
 - **Bot knowledge** shows what orchestration reads on an Orchestrate or Mission
   chat: task domain (coding, image generation, writing, visual, data, general),
-  the intelligence bar for that domain, every connected catalog and custom model
-  in benchmark order with score and public source, and each row's plan leftover
-  overall — never one spawn. No API keys, credential ids, or base URLs. Cursor
-  Auto is omitted; Grok 4.7 on Grok Build and on Cursor stay one family for
-  leftover. Unknown custom bots keep the family unrated prior.
+  the bar for that domain and tier, every connected catalog and custom model in
+  the order a spawn would pick it, with its score, where the score came from,
+  its Agent Arena score when it has one, and its plan terms (leftover, time to
+  reset, pace, 5h window, workers running there). Rows under the bar or out of
+  reach say why. No API keys, credential ids, or base URLs. Cursor Auto is
+  omitted; Grok 4.7 on Grok Build and on Cursor stay one family for leftover.
+- Scores come from the public LMArena leaderboard dataset (CC BY 4.0), no key
+  needed. Coding averages the text arena's coding category with Code Arena;
+  writing reads creative writing, data reads math, visual reads the vision
+  arena, image generation reads text-to-image for Grok's image product, and
+  general reads the text arena. Each score is matched to the run at the
+  thinking level the desk would use, and placed on 1–10 against that arena's
+  leader. The desk checks the dataset's commit once a day and downloads it
+  (about 0.7 MB) only when it changed, so a newly ranked model is scored the
+  day LMArena publishes it; **Check now** asks at once. A bot the leaderboard
+  does not rank yet uses the desk's own table, marked as such, and an unknown
+  custom bot keeps its family prior.
 - The profile shows the Workhorse mark as tiny moving blobs of the bots you have
   called. Spend sets how many of each colour, and blobs merge without mixing.
 - Hover it for Your Workhorse and what it is made of. With no spend yet it keeps

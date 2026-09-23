@@ -40,7 +40,8 @@ test("Workshop manage: Settings tab secondary, rail Manage primary; not a dock, 
   assert.match(settings, /id: "workshop", label: "Workshop"/);
   assert.match(settings, /section === "workshop" && <WorkshopBlock/);
   const types = read("src/lib/types.ts");
-  assert.match(types, /export type SettingsSection = "profile" \| "llms" \| "skills" \| "workshop" \| "routing" \| "learning" \| "usage" \| "watch"/);
+  assert.match(types, /"bot-knowledge"/);
+  assert.match(types, /export type SettingsSection[\s\S]*"watch"/);
   assert.match(types, /export type Panel = "settings" \| "add-bot" \| null/);
   const skills = read("src/ui/SkillsPane.tsx");
   assert.doesNotMatch(skills, /WorkshopBlock/);

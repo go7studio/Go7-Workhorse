@@ -460,5 +460,15 @@ function normalizeUsageBudgets(raw: unknown): Settings["usageBudgets"] {
 }
 
 export function isSettingsSection(value: unknown): value is SettingsSection {
-  return value === "profile" || value === "llms" || value === "skills" || value === "workshop" || value === "routing" || value === "learning" || value === "usage" || value === "watch";
+  return (
+    value === "profile" ||
+    value === "llms" ||
+    value === "skills" ||
+    value === "workshop" ||
+    value === "bot-knowledge" ||
+    value === "routing" ||
+    value === "learning" ||
+    value === "usage" ||
+    value === "watch"
+  );
 }

@@ -192,6 +192,25 @@
   width: auto;
 }
 
+.bot-knowledge-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-12);
+  margin-top: 12px;
+}
+
+.bot-knowledge-table th,
+.bot-knowledge-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+}
+
+.bot-knowledge-table tr.below-bar td {
+  color: var(--text-tertiary);
+}
+
 /* Routing's preview: what auto-route would hand each kind of task. */
 .settings-picks {
   margin: 0 0 14px;

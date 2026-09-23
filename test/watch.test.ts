@@ -89,6 +89,7 @@ test("watch is one daily limit, off until you turn it on", () => {
   assert.equal(settings.watch.desktopNotify, true);
   assert.equal(settings.watch.dailyLimitPercent, 100 / 7);
   assert.equal(isSettingsSection("watch"), true);
+  assert.equal(isSettingsSection("bot-knowledge"), true);
   assert.equal(normalizeWatch({ desktopNotify: true }).desktopNotify, true);
   assert.equal(normalizeWatch({ desktopNotify: false }).desktopNotify, false);
   assert.equal(isDesktopWatchNotice({ kind: "daily" }), true);

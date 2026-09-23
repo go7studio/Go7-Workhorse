@@ -259,6 +259,7 @@ test("a short codey ask is not quick, and the domain is coding", () => {
   assert.equal(inferTaskDomain("write the launch blog post for the new referral system"), "writing");
   assert.equal(inferTaskDomain("analyze the csv and plot a histogram of rows per day"), "data");
   assert.equal(inferTaskDomain("compare these screenshots of the settings panel"), "visual");
+  assert.equal(inferTaskDomain("generate a detailed image of a chicken wing"), "image-generation");
   assert.equal(inferTaskDomain("what should we do next"), "general");
   assert.equal(inferTaskDomain("write a function that parses the manifest.json"), "coding", "code words beat write words");
 });

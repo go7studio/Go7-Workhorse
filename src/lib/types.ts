@@ -724,7 +724,16 @@ export type Sheet = "project" | "reference" | null;
 
 export type Panel = "settings" | "add-bot" | null;
 
-export type SettingsSection = "profile" | "llms" | "skills" | "workshop" | "routing" | "learning" | "usage" | "watch";
+export type SettingsSection =
+  | "profile"
+  | "llms"
+  | "skills"
+  | "workshop"
+  | "bot-knowledge"
+  | "routing"
+  | "learning"
+  | "usage"
+  | "watch";
 
 export type SkillOrigin = "grok" | "codex" | "claude" | "cursor" | "workhorse";
 
@@ -876,7 +885,7 @@ export type ModelInputCapabilities = {
 };
 
 /** What a prompt is mostly about. Routing tie-breaks toward models strong there. */
-export type TaskDomain = "coding" | "writing" | "visual" | "data" | "general";
+export type TaskDomain = "coding" | "image-generation" | "writing" | "visual" | "data" | "general";
 
 export type ModelRoutingProfile = {
   /** 1 is lightweight; 5 is frontier reasoning. */

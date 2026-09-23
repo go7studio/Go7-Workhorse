@@ -27,12 +27,14 @@ import { routingProfileForModel } from "../lib/routing";
 import { formatExternalAgentRef } from "../lib/agent-runtime";
 import { LocalComputeBlock } from "./LocalComputeBlock";
 import { GrokBotWakeSetup } from "./GrokBotWakeSetup";
+import { BotKnowledgePane } from "./BotKnowledgePane";
 
 const SECTIONS: { id: SettingsSection; label: string }[] = [
   { id: "profile", label: "Profile" },
   { id: "llms", label: "LLMs" },
   { id: "skills", label: "Skills" },
   { id: "workshop", label: "Workshop" },
+  { id: "bot-knowledge", label: "Bot knowledge" },
   { id: "routing", label: "Routing" },
   { id: "learning", label: "Learning" },
   { id: "usage", label: "Usage" },
@@ -466,6 +468,8 @@ export function Settings() {
       {section === "skills" && <SkillsPane />}
 
       {section === "workshop" && <WorkshopBlock />}
+
+      {section === "bot-knowledge" && <BotKnowledgePane />}
 
       {section === "routing" && <RoutingPane />}
 

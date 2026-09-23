@@ -28,6 +28,10 @@ import { cursorWatchLane } from "./cursor-lane";
 import { outcomeVerification } from "./learning-policy";
 import { isAssignedEffort, modelsFor, normalizeModelId, withEffort, contextWindowFor } from "./models";
 import type { WatchPlans, WatchVendorStatus } from "./watch";
+import { domainBenchmarkScoreFromCatalog, domainIntelligenceBar } from "./domain-benchmark-catalog";
+import { detectsImageGenerationIntent, inferTaskDomain, looksCodey } from "./task-domain";
+
+export { detectsImageGenerationIntent, inferTaskDomain, looksCodey } from "./task-domain";
 
 export type RoutingCapacity = {
   usedPercent?: number;
@@ -94,6 +98,8 @@ export type RoutingRequest = {
   contextNeed?: number;
   /** What the work is about. Omit to infer from the prompt. */
   taskDomain?: TaskDomain;
+  /** Orchestrate or Mission: rank spawns by domain benchmark, then cost, then leftover. */
+  useOrchestrationBenchmark?: boolean;
 };
 
 export type RankedRoutingCandidate = RoutingCandidate & {
@@ -607,27 +613,6 @@ export function mergeInputRequirements(
   return required;
 }
 
-/**
- * Ask to *produce* an image from text. Conservative: needs a generation verb
- * plus an image noun, and skips analyze/describe-this-image phrasing.
- */
-export function detectsImageGenerationIntent(prompt: string): boolean {
-  const text = prompt.trim().toLowerCase();
-  if (!text) return false;
-  if (
-    /\b(analy[sz]e|describe|explain|inspect|review|ocr|transcribe|caption|what(?:'s| is)|tell me about)\b/.test(text) &&
-    /\b(image|picture|photo|screenshot|illustration|drawing)\b/.test(text)
-  ) {
-    return false;
-  }
-  const imageNoun = /\b(image|picture|illustration|photo|drawing|artwork)\b/.test(text);
-  if (!imageNoun) return false;
-  return (
-    /\b(generate|create|draw|imagine|paint|render|sketch)\b/.test(text) ||
-    /\bmake\b[\s\S]{0,40}\b(image|picture|illustration|photo|drawing|artwork)\b/.test(text)
-  );
-}
-
 /** Stock image generators only. Never infer from profile.inputs.images. */
 function candidateCanGenerateImages(candidate: RoutingCandidate): boolean {
   return candidate.provider === "grok";
@@ -677,43 +662,6 @@ export function describeRoutingMiss(
     if (roomy.length === 0) return `no vendor window holds this conversation${skipped}`;
   }
   return `no capable route${skipped}`;
-}
-
-/**
- * Does this prompt look like it is about code? One definition serves two
- * rules: the quick tier must not swallow a short-but-codey ask, and the
- * domain tie-break should send code work to models strong at it. Sol's
- * killer example was 76 characters with "list" in it and a lock-free queue
- * to reason about.
- */
-export function looksCodey(text: string): boolean {
-  return (
-    /```/.test(text) ||
-    /\b[\w./-]+\.(ts|tsx|js|jsx|mjs|py|go|rs|rb|java|cs|cpp|cc|h|swift|kt|gd|sql|sh|bash|yml|yaml|toml|json)\b/i.test(text) ||
-    /\b(function|class|import|const|async|await|struct|enum|interface|typedef|regex|compile|typecheck|stack trace|traceback|segfault|null pointer|exception|unit test|test suite|lint|refactor|implement|component|api|endpoint|mutex|thread|queue|algorithm)\b/i.test(text) ||
-    /=>|::|\(\)|\{\}|\[\]/.test(text)
-  );
-}
-
-/** What the prompt is mostly about. Explicit request fields win over inference. */
-export function inferTaskDomain(prompt: string, attachments: ChatImage[] = []): TaskDomain {
-  const text = prompt.trim();
-  if (!text && attachments.length === 0) return "general";
-  if (looksCodey(text)) return "coding";
-  const lower = text.toLowerCase();
-  if (/\b(csv|sql|spreadsheet|dataset|dashboard|pivot|rows|columns|chart|plot|histogram|median|regression|analy[sz]e the (data|numbers))\b/.test(lower)) {
-    return "data";
-  }
-  if (
-    attachments.some((item) => item.kind === "image") ||
-    /\b(screenshots?|mockups?|illustration|figma|visual|pixel|artwork|storyboard)\b/.test(lower)
-  ) {
-    return "visual";
-  }
-  if (/\b(write|draft|rewrite|blog|article|essay|email|newsletter|copy|caption|tagline|announcement|readme|docs?|documentation|prose|tone|headline|post)\b/.test(lower)) {
-    return "writing";
-  }
-  return "general";
 }
 
 export function inferRoutingTier(
@@ -1016,7 +964,7 @@ function extraPoolAssignment(
     profile.cost >= 5 &&
     (profile.strengths?.includes("visual") === true || profile.strengths?.includes("writing") === true);
   if (!extraPool) return 0;
-  if (domain === "visual" || domain === "writing") return 4;
+  if (domain === "visual" || domain === "writing" || domain === "image-generation") return 4;
   return tier === "deep" ? -2 : -6;
 }
 
@@ -1242,6 +1190,39 @@ export function rankRoutingCandidates(
     ? Math.min(...eligible.map((candidate) => candidate.profile.cost))
     : 0;
   const scorable = candidates.filter((candidate) => !routingSkipReason(candidate, request, settings, required));
+  if (request.useOrchestrationBenchmark) {
+    const domainBar = domainIntelligenceBar(tier);
+    const orchestrationRows: RankedRoutingCandidate[] = [];
+    for (const candidate of scorable) {
+      const { score: domainScore } = domainBenchmarkScoreFromCatalog(
+        candidate.provider,
+        candidate.model,
+        domain,
+        candidate.profile.intelligence,
+      );
+      if (domainScore < domainBar) continue;
+      orchestrationRows.push({
+        ...candidate,
+        score: domainScore,
+      });
+    }
+    const sortNow = request.now ?? Date.now();
+    return orchestrationRows.sort((a, b) => {
+      const aDomain = domainBenchmarkScoreFromCatalog(a.provider, a.model, domain, a.profile.intelligence).score;
+      const bDomain = domainBenchmarkScoreFromCatalog(b.provider, b.model, domain, b.profile.intelligence).score;
+      if (bDomain !== aDomain) return bDomain - aDomain;
+      if (a.profile.cost !== b.profile.cost) return a.profile.cost - b.profile.cost;
+      const aLive = routingRowLive(a, sortNow);
+      const bLive = routingRowLive(b, sortNow);
+      if (aLive !== bLive) return aLive ? -1 : 1;
+      const aDraw = weeklyDrawState(a.capacity, request.now);
+      const bDraw = weeklyDrawState(b.capacity, request.now);
+      const aLeft = aDraw.usedPercent ?? 50;
+      const bLeft = bDraw.usedPercent ?? 50;
+      if (aLeft !== bLeft) return aLeft - bLeft;
+      return a.label.localeCompare(b.label);
+    });
+  }
   const ranked: RankedRoutingCandidate[] = [];
   for (const candidate of candidates) {
     if (routingSkipReason(candidate, request, settings, required)) continue;

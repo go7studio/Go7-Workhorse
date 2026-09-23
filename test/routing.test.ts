@@ -40,6 +40,7 @@ import { applyVendorCatalog, modelsFor, parseEffortFromText, resetVendorCatalog 
 import { normalizeSettings } from "../src/lib/settings";
 import type { RoutingSettings } from "../src/lib/types";
 import { constrainRouteCandidatesForSpawn, listedChatFollowThrough, resolveSpawnSpec, shouldAutoRouteSpawn } from "../src/lib/subagents";
+import { domainBenchmarkScoreFromCatalog, FAMILY_ROUTING_PRIOR_SOURCE } from "../src/lib/domain-benchmark-catalog";
 import { customBotModels } from "../src/lib/custom-bots";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -704,7 +705,11 @@ test("Settings draws one bar on every tab and no second title", () => {
   // Usage used to draw its own "Usage" heading and tab row, so choosing it
   // shifted the page; the window title already says Settings.
   const settingsUi = readFileSync(path.join(ROOT, "src", "ui", "Settings.tsx"), "utf8");
+  const botKnowledge = readFileSync(path.join(ROOT, "src", "ui", "BotKnowledgePane.tsx"), "utf8");
   const usage = readFileSync(path.join(ROOT, "src", "ui", "UsagePane.tsx"), "utf8");
+  assert.match(settingsUi, /id: "bot-knowledge", label: "Bot knowledge"/);
+  assert.match(settingsUi, /BotKnowledgePane/);
+  assert.match(botKnowledge, /botKnowledgeSnapshot/);
   assert.match(settingsUi, /className="settings-bar"/);
   assert.match(usage, /className="settings-bar"/);
   assert.doesNotMatch(settingsUi, /<h2>Settings<\/h2>/);
@@ -1208,4 +1213,85 @@ test("non-image prompts keep the same ranking winners as before image-gen prefer
   );
   assert.equal(quick?.model, "gpt-5.6-luna");
   assert.equal(deep?.model, "gpt-5.6-sol");
+});
+
+test("domain benchmark cites a public source per catalog row, not one generic desk stamp", () => {
+  const sol = domainBenchmarkScoreFromCatalog("codex", "gpt-5.6-sol", "coding", 10);
+  assert.match(sol.source, /SWE-bench Verified/);
+  assert.notEqual(sol.source, "Go7 Workhorse domain benchmark (public desk table)");
+  const unknown = domainBenchmarkScoreFromCatalog("custom", "my-unrated-bot", "coding", 6);
+  assert.equal(unknown.source, FAMILY_ROUTING_PRIOR_SOURCE);
+});
+
+test("orchestration benchmark picks different winners for coding and image-generation slices", () => {
+  const now = Date.parse("2026-08-13T00:00:00Z");
+  const rows = [
+    candidate("gpt-5.6-sol", 10, {
+      provider: "codex",
+      label: "GPT-5.6 Sol",
+      profile: { ...routingProfileForModel("codex", "gpt-5.6-sol"), cost: 5 },
+    }),
+    candidate("grok-4.6", 10, {
+      provider: "grok",
+      label: "Grok 4.6",
+      profile: { ...routingProfileForModel("grok", "grok-4.6"), cost: 5 },
+    }),
+  ];
+  const coding = chooseRoutingDecision(
+    rows,
+    {
+      prompt: "Implement the lock-free queue in Rust with unit tests",
+      tier: "balanced",
+      useOrchestrationBenchmark: true,
+      now,
+    },
+    settings,
+  );
+  const image = chooseRoutingDecision(
+    rows,
+    {
+      prompt: "generate a detailed image of a chicken wing",
+      tier: "balanced",
+      useOrchestrationBenchmark: true,
+      now,
+    },
+    settings,
+  );
+  assert.equal(coding?.provider, "codex");
+  assert.equal(coding?.model, "gpt-5.6-sol");
+  assert.equal(image?.provider, "grok");
+  assert.equal(image?.model, "grok-4.6");
+  assert.notEqual(coding?.model, image?.model);
+});
+
+test("a coordinator-named model on the spawn still goes through orchestration ranking", () => {
+  assert.equal(
+    shouldAutoRouteSpawn({ routingEnabled: true, model: "MiniMax-M3", coordinatorModel: true }),
+    true,
+  );
+  assert.equal(
+    shouldAutoRouteSpawn({
+      routingEnabled: true,
+      model: "MiniMax-M3",
+      coordinatorModel: true,
+      userLockedModel: "MiniMax-M3",
+    }),
+    false,
+  );
+  const now = Date.parse("2026-08-13T00:00:00Z");
+  const rows = [
+    candidate("gpt-5.6-sol", 10, { provider: "codex", label: "GPT-5.6 Sol" }),
+    candidate("grok-4.6", 10, { provider: "grok", label: "Grok 4.6" }),
+  ];
+  const ranked = chooseRoutingDecision(
+    rows,
+    {
+      prompt: "generate a detailed image of a lighthouse",
+      tier: "balanced",
+      useOrchestrationBenchmark: true,
+      now,
+    },
+    settings,
+  );
+  assert.equal(ranked?.model, "grok-4.6");
 });

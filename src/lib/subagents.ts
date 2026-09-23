@@ -655,6 +655,10 @@ export function shouldAutoRouteSpawn(input: {
   model?: unknown;
   chat?: unknown;
   customBotId?: unknown;
+  /** Orchestrator wrote model on the spawn; still rank unless the user named it in their ask. */
+  coordinatorModel?: boolean;
+  /** Model the user named in their ask to this chat; locks routing when set. */
+  userLockedModel?: unknown;
 }): boolean {
   if (isExternalAgentAddress(input.provider) || isExternalAgentAddress(input.model) || isExternalAgentAddress(input.chat)) {
     return false;
@@ -662,6 +666,8 @@ export function shouldAutoRouteSpawn(input: {
   if (!input.routingEnabled) return false;
   if (namedSpawnPick(input.chat) || namedSpawnPick(input.customBotId)) return false;
   if (namedSpawnPick(input.model)) {
+    const locked = namedSpawnPick(input.userLockedModel);
+    if (input.coordinatorModel && !locked) return true;
     const family = spawnModelFamilyKey(input.model);
     const provider = parseProviderId(typeof input.provider === "string" ? input.provider : undefined);
     // grok-4.7 without a vendor is a family, not a Grok Build lock. Cursor
@@ -671,6 +677,26 @@ export function shouldAutoRouteSpawn(input: {
     return false;
   }
   return true;
+}
+
+/** Model name the user explicitly assigned in their ask (not the orchestrator's spawn field). */
+export function userLockedSpawnModel(
+  messages: Array<{ role?: string; text?: string; hideUser?: boolean }> | undefined,
+): string | undefined {
+  if (!messages?.length) return undefined;
+  const lastUser = [...messages].reverse().find((item) => item.role === "user" && !item.hideUser && item.text?.trim());
+  const text = lastUser?.text?.trim() ?? "";
+  if (!text) return undefined;
+  const lower = text.toLowerCase();
+  const useModel =
+    text.match(/\buse\s+([a-z0-9][a-z0-9._:/-]{2,})\b/i)?.[1] ??
+    text.match(/\bwith\s+([a-z0-9][a-z0-9._:/-]{2,})\b/i)?.[1];
+  if (useModel && !/^(the|a|an|this|that|high|low|medium|auto)$/i.test(useModel)) return useModel.trim();
+  if (/\bgpt-5\.6-(sol|terra|luna)\b/i.test(lower)) return lower.match(/\bgpt-5\.6-(sol|terra|luna)\b/i)![0];
+  if (/\bgrok-4\.[567]\b/i.test(lower)) return lower.match(/\bgrok-4\.[567]\b/i)![0];
+  if (/\bminimax-m3\b/i.test(lower)) return "MiniMax-M3";
+  if (/\bcomposer[\d.-]*/i.test(lower)) return text.match(/\bcomposer[\d.-]*/i)![0];
+  return undefined;
 }
 
 /** Keep Auto inside a named vendor; a family name without a vendor ranks those vendors. */

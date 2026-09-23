@@ -216,7 +216,9 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
   combination. Each pin is a chip next to +; multiple pins collapse to a count
   you can expand.
 - Orchestrate makes this chat the orchestrator, and it must spawn desk workers.
-  Auto ranks, fan-out only when asked.
+  Auto ranks by domain benchmark (then cost, then leftover) on orchestration
+  spawns, fan-out only when asked. A model name locks only when the user named
+  it in their ask; a model the coordinator writes on the spawn still ranks.
 - Either pin also hands the chat the spawn rules. An unpinned chat gets them
   the moment it is asked for workers, and opens lighter for not carrying them.
 - If the ask is phrased in a way the desk does not read as a request for
@@ -592,8 +594,15 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
 
 ## Settings
 
-- Eight sections: Profile, LLMs, Skills, Workshop, Routing, Learning, Usage,
-  Watch.
+- Nine sections: Profile, LLMs, Skills, Workshop, Bot knowledge, Routing,
+  Learning, Usage, Watch.
+- **Bot knowledge** shows what orchestration reads on an Orchestrate or Mission
+  chat: task domain (coding, image generation, writing, visual, data, general),
+  the intelligence bar for that domain, every connected catalog and custom model
+  in benchmark order with score and public source, and each row's plan leftover
+  overall — never one spawn. No API keys, credential ids, or base URLs. Cursor
+  Auto is omitted; Grok 4.7 on Grok Build and on Cursor stay one family for
+  leftover. Unknown custom bots keep the family unrated prior.
 - The profile shows the Workhorse mark as tiny moving blobs of the bots you have
   called. Spend sets how many of each colour, and blobs merge without mixing.
 - Hover it for Your Workhorse and what it is made of. With no spend yet it keeps

@@ -192,6 +192,7 @@ import {
   chooseRoutingDecision,
   describeRoutingMiss,
   inferRoutingTier,
+  inferTaskDomain,
   outcomesFromLearningEvents,
   routingCandidatesForDesk,
   routingDecisionEvidence,
@@ -202,6 +203,8 @@ import {
   shouldShadowRouteSessionTurn,
   spawnEffortFor,
 } from "./routing";
+import { botKnowledgeSnapshot, orchestrationKnowledgeBrief } from "./domain-benchmark";
+import { orchestrationEnabled } from "./workhorse-rules";
 import type {
   AgentRun,
   AgentSystemsSettings,
@@ -328,6 +331,7 @@ import {
   type WorkerNameReservation,
   type WorkerRecord,
   shouldAutoRouteSpawn,
+  userLockedSpawnModel,
   routingDecisionMatchesSpawn,
   constrainRouteCandidatesForSpawn,
   spawnContinuationHowToUse,
@@ -2554,6 +2558,33 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const policy = stateRef.current.settings.skills ?? DEFAULT_SETTINGS.skills;
       const catalog = policy.suggestFromWording === false ? [] : skillsForAutoLoad(deskSkillsRef.current, policy);
       vendorText = withSkillDiscoveryHint(vendorText, originalText, catalog);
+    }
+    if (
+      liveSession &&
+      !liveSession.parentId &&
+      orchestrationEnabled(liveSession.crewModes) &&
+      deskRoleOf(liveSession) === "orchestrator"
+    ) {
+      const statuses = watchVendorStatuses({
+        settings: stateRef.current.settings,
+        usage: stateRef.current.usage,
+        plans: plansRef.current,
+        permits: stateRef.current.watchPermits,
+        dayMarks: stateRef.current.watchDayMarks,
+      });
+      const domain = inferTaskDomain(originalText, images);
+      const brief = orchestrationKnowledgeBrief(
+        botKnowledgeSnapshot({
+          settings: stateRef.current.settings,
+          routing: stateRef.current.settings.routing,
+          statuses,
+          plans: plansRef.current,
+          domain,
+          tier: inferRoutingTier(originalText, images, { role: "orchestrator" }),
+          prompt: originalText,
+        }),
+      );
+      vendorText = `${brief}\n\n${vendorText}`;
     }
     const haltPlan = options?.afterGoalHalt
       ? "send-now"
@@ -5900,11 +5931,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               ? payload.route
               : undefined;
             const effectiveExclusions = spawnExclusions(caller, payload.exclude, isNested);
+            const orchestrationBench = orchestrationEnabled(caller.crewModes);
+            const userLockedModel = userLockedSpawnModel(caller.messages);
+            const coordinatorModel = typeof payload.model === "string" && Boolean(payload.model.trim());
             const routeSpawn = shouldAutoRouteSpawn({
               routingEnabled: latest.settings.routing.enabled,
               provider: payload.provider,
               model: payload.model,
               chat: payload.chat,
+              coordinatorModel: orchestrationBench && coordinatorModel,
+              userLockedModel,
             });
             if (routeSpawn) refreshPlansForRouting(latest.deskPlans ?? plansRef.current);
             const routeStatuses = routeSpawn
@@ -5945,13 +5981,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               role: routingRole,
               outcomes: outcomesFromLearningEvents(learningOutcomeEvents),
               exclude: effectiveExclusions,
+              useOrchestrationBenchmark: orchestrationBench,
             };
             const spawnAllowlist = spawnAllowlistForCaller(latest.sessions, caller.id);
             const routeCandidates = routeSpawn
               ? filterCandidatesBySpawnAllowlist(
                   constrainRouteCandidatesForSpawn(
                     routingCandidatesForDesk(latest.settings, routeStatuses, latest.deskPlans ?? plansRef.current),
-                    { provider: payload.provider, model: payload.model },
+                    {
+                      provider: payload.provider,
+                      ...(orchestrationBench && coordinatorModel && !userLockedModel ? {} : { model: payload.model }),
+                    },
                   ),
                   spawnAllowlist,
                 )

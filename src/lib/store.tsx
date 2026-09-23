@@ -120,6 +120,7 @@ import {
   contextWindowFor,
   defaultModel,
   findChoice,
+  modelName,
   normalizeModelId,
   parseEffort,
   parseEffortFromText,
@@ -207,7 +208,8 @@ import {
   shouldShadowRouteSessionTurn,
   spawnEffortFor,
 } from "./routing";
-import { botKnowledgeSnapshot, orchestrationKnowledgeBrief } from "./domain-benchmark";
+import { botKnowledgeSnapshot, orchestrationKnowledgeBrief, ORCHESTRATION_TASK_DOMAINS } from "./domain-benchmark";
+import type { TaskDomain } from "./types";
 import { applyBotScoresFeed, normalizeBotScoresFeed, type BotScoresView } from "./bot-scores";
 import { findBots } from "./bot-search";
 import type { RoutingCandidate } from "./routing";
@@ -6051,6 +6053,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               outcomes: outcomesFromLearningEvents(learningOutcomeEvents),
               exclude: effectiveExclusions,
               useOrchestrationBenchmark: orchestrationBench,
+              // The head may say what kind of work a slice is; it knows better
+              // than a prompt that mentions code files while asking for prose.
+              ...((ORCHESTRATION_TASK_DOMAINS as readonly string[]).includes(String(payload.domain))
+                ? { taskDomain: payload.domain as TaskDomain }
+                : {}),
               effortHint: parseEffort(String(payload.effort ?? "")) ?? null,
               ...(orchestrationBench ? { activeLoad: activeRouteLoad(latest.sessions, recentRoutesRef.current) } : {}),
               ...(coordinatorRows.length > 0
@@ -6222,6 +6229,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               }),
             };
             const routedWorkerIsRouted = routingDecisionMatchesSpawn(routeDecision, spec);
+            // The model this worker runs on, in the desk's words: it rides on the
+            // lineup row into the join, so the head reports who did what from the
+            // record rather than from memory.
+            const spawnModelLabel =
+              spec.provider === "custom"
+                ? [latest.settings.customBots.find((bot) => bot.id === spec.customBotId)?.name, modelName("custom", spec.model)]
+                    .filter(Boolean)
+                    .join(" · ")
+                : modelName(spec.provider, spec.model);
             if (routingIdentityExcluded({
               provider: spec.provider,
               model: spec.model,
@@ -6633,6 +6649,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                                 slice: payload.description?.trim() || spec.title,
                                 folder: childCwd,
                                 vendor: vendorDisplayName(spec.provider),
+                                ...(spawnModelLabel ? { model: spawnModelLabel } : {}),
                                 status: "running",
                                 startedAt,
                                 correlationId: childCorrelationId,
@@ -6853,6 +6870,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                     slice: payload.description?.trim() || spec.title,
                     folder: admitted.cwd,
                     vendor: vendorDisplayName(spec.provider),
+                    ...(spawnModelLabel ? { model: spawnModelLabel } : {}),
                     status: "running",
                     startedAt,
                     ...(planStepId ? { planStepId } : {}),
@@ -6873,6 +6891,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                     folder: admitted.cwd,
                     lineup: startedBoard.lineup,
                     worker: workerName,
+                    // Which bot took the slice, so the caller never has to infer it.
+                    bot: [vendorDisplayName(spec.provider), spawnModelLabel].filter(Boolean).join(" · "),
                     reused: Boolean(priorWorker),
                     crew: startedBoard.crew,
                     crewCount: startedBoard.crewCount,

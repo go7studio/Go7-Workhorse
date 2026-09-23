@@ -51,6 +51,11 @@ export type CustomHttpConfig = {
 
 export type CustomHttpTool = { name: string; description: string; input_schema: Record<string, unknown> };
 
+/** A thinking block exactly as an Anthropic-style host sent it. */
+export type CustomThinkingBlock =
+  | { type: "thinking"; thinking: string; signature?: string }
+  | { type: "redacted_thinking"; data: string };
+
 export type CustomChatMessage = {
   role: "user" | "assistant";
   text: string;
@@ -59,6 +64,12 @@ export type CustomChatMessage = {
   toolResults?: CustomToolResult[];
   /** Provider-required replay for a thinking assistant tool-call row. */
   reasoning?: string;
+  /**
+   * The thinking blocks that led to this row's tool calls. Anthropic-style
+   * hosts (MiniMax among them) ask for them back unchanged on the next tool
+   * round; without them the model starts each round without its own plan.
+   */
+  thinking?: CustomThinkingBlock[];
 };
 
 export type CustomHttpUsage = {
@@ -337,6 +348,8 @@ export function buildAnthropicBody(input: {
       if (item.role === "assistant") {
         if (item.toolUses?.length) {
           const content: Record<string, unknown>[] = [];
+          // Thinking first and unchanged, as the host sent it.
+          for (const block of item.thinking ?? []) content.push({ ...block });
           if (item.text.trim()) content.push({ type: "text", text: item.text });
           for (const tool of item.toolUses) {
             content.push({ type: "tool_use", id: tool.id, name: tool.name, input: tool.input ?? {} });
@@ -576,10 +589,40 @@ export function customStreamError(payload: unknown): string | null {
   return typed === "error" ? "Custom model returned an error" : null;
 }
 
+/** Where applyAnthropicEvent keeps a tool call and the thinking blocks of one response as they stream in. */
+export type AnthropicStreamState = {
+  id?: string;
+  name?: string;
+  json: string;
+  block?: string;
+  /** The thinking block being streamed now. */
+  open?: { thinking: string; signature?: string };
+  /** Finished thinking blocks, in order. */
+  blocks?: CustomThinkingBlock[];
+};
+
+function thinkingBlocksFrom(content: unknown): CustomThinkingBlock[] {
+  if (!Array.isArray(content)) return [];
+  const blocks: CustomThinkingBlock[] = [];
+  for (const raw of content) {
+    const block = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+    if (block.type === "thinking" && typeof block.thinking === "string") {
+      blocks.push({
+        type: "thinking",
+        thinking: block.thinking,
+        ...(typeof block.signature === "string" && block.signature ? { signature: block.signature } : {}),
+      });
+    } else if (block.type === "redacted_thinking" && typeof block.data === "string") {
+      blocks.push({ type: "redacted_thinking", data: block.data });
+    }
+  }
+  return blocks;
+}
+
 export function applyAnthropicEvent(
   payload: unknown,
   handlers: CustomHttpHandlers,
-  pending?: { id?: string; name?: string; json: string; block?: string },
+  pending?: AnthropicStreamState,
 ): { text: string; thought: string; usage?: CustomHttpUsage; stop?: boolean; stopReason?: string; tool?: CustomToolUse } {
   const root = payload && typeof payload === "object" ? (payload as Record<string, unknown>) : {};
   const type = typeof root.type === "string" ? root.type : "";
@@ -591,7 +634,9 @@ export function applyAnthropicEvent(
   if (type === "content_block_delta") {
     if (delta.type === "thinking_delta" && typeof delta.thinking === "string") thought = delta.thinking;
     else if (typeof delta.thinking === "string") thought = delta.thinking;
-    else if (delta.type === "text_delta" && typeof delta.text === "string") {
+    else if (delta.type === "signature_delta" && typeof delta.signature === "string" && pending?.open) {
+      pending.open.signature = `${pending.open.signature ?? ""}${delta.signature}`;
+    } else if (delta.type === "text_delta" && typeof delta.text === "string") {
       if (inThought) thought = delta.text;
       else text = delta.text;
     } else if (delta.type === "input_json_delta" && typeof delta.partial_json === "string" && pending) {
@@ -600,6 +645,7 @@ export function applyAnthropicEvent(
       if (inThought) thought = delta.text;
       else text = delta.text;
     }
+    if (thought && pending?.open) pending.open.thinking += thought;
   }
   if (type === "content_block_start") {
     const block = root.content_block && typeof root.content_block === "object" ? (root.content_block as Record<string, unknown>) : {};
@@ -607,6 +653,15 @@ export function applyAnthropicEvent(
     if (block.type === "text" && typeof block.text === "string") text = block.text;
     if ((block.type === "thinking" || block.type === "redacted_thinking") && typeof block.thinking === "string") {
       thought = block.thinking;
+    }
+    if (pending && block.type === "thinking") {
+      pending.open = {
+        thinking: typeof block.thinking === "string" ? block.thinking : "",
+        ...(typeof block.signature === "string" && block.signature ? { signature: block.signature } : {}),
+      };
+    }
+    if (pending && block.type === "redacted_thinking" && typeof block.data === "string") {
+      (pending.blocks ??= []).push({ type: "redacted_thinking", data: block.data });
     }
     const started = parseAnthropicToolUseBlock(block);
     if (started && pending) {
@@ -633,6 +688,14 @@ export function applyAnthropicEvent(
     pending.json = "";
     pending.block = undefined;
   } else if (type === "content_block_stop" && pending) {
+    if (pending.block === "thinking" && pending.open) {
+      (pending.blocks ??= []).push({
+        type: "thinking",
+        thinking: pending.open.thinking,
+        ...(pending.open.signature ? { signature: pending.open.signature } : {}),
+      });
+      pending.open = undefined;
+    }
     pending.block = undefined;
   }
   if (type === "message" || type === "message_delta") {
@@ -640,6 +703,11 @@ export function applyAnthropicEvent(
     const fromBlocks = textFromBlocks(message.content);
     text = fromBlocks.text;
     thought = fromBlocks.thought;
+    // A host that answers in one piece carries its thinking blocks here.
+    if (pending && type === "message" && !pending.blocks?.length) {
+      const blocks = thinkingBlocksFrom(message.content);
+      if (blocks.length) pending.blocks = blocks;
+    }
     if (Array.isArray(message.content)) {
       for (const block of message.content) {
         const parsed = parseAnthropicToolUseBlock(block);
@@ -745,7 +813,7 @@ export async function streamCustomHttp(
   },
   handlers: CustomHttpHandlers = {},
   fetchImpl: typeof fetch = fetch,
-): Promise<{ text: string; thought?: string; usage?: CustomHttpUsage; toolUses?: CustomToolUse[]; stopReason?: string }> {
+): Promise<{ text: string; thought?: string; thinking?: CustomThinkingBlock[]; usage?: CustomHttpUsage; toolUses?: CustomToolUse[]; stopReason?: string }> {
   const model = config.model.trim();
   const baseUrl = config.baseUrl.trim();
   const shim = grokBotDeskShim();
@@ -770,7 +838,7 @@ export async function streamCustomHttp(
   const run = async (
     payload: Record<string, unknown>,
     attempt = 0,
-  ): Promise<{ text: string; thought?: string; usage?: CustomHttpUsage; toolUses?: CustomToolUse[]; stopReason?: string }> => {
+  ): Promise<{ text: string; thought?: string; thinking?: CustomThinkingBlock[]; usage?: CustomHttpUsage; toolUses?: CustomToolUse[]; stopReason?: string }> => {
     const response = await fetchWithinOrigin(fetchImpl, url, {
       method: "POST",
       headers,
@@ -812,12 +880,7 @@ export async function streamCustomHttp(
     let usage: CustomHttpUsage | undefined;
     const toolUses: CustomToolUse[] = [];
     let stopReason: string | undefined;
-    const pending = {
-      id: undefined as string | undefined,
-      name: undefined as string | undefined,
-      json: "",
-      block: undefined as string | undefined,
-    };
+    const pending: AnthropicStreamState = { json: "" };
     const openAiPending: OpenAiToolCallState = new Map();
     const remember = (tool?: CustomToolUse) => {
       if (!tool) return;
@@ -934,7 +997,14 @@ export async function streamCustomHttp(
       if (delta) handlers.onChunk?.(delta);
     }
     if (usage) handlers.onUsage?.(usage);
-    return { text, ...(reasoning ? { thought: reasoning } : {}), usage, toolUses, stopReason };
+    return {
+      text,
+      ...(reasoning ? { thought: reasoning } : {}),
+      ...(pending.blocks?.length ? { thinking: pending.blocks } : {}),
+      usage,
+      toolUses,
+      stopReason,
+    };
   };
 
   try {

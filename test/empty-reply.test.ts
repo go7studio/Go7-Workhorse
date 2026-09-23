@@ -206,6 +206,16 @@ test("a dispatch turn names the workers it started", () => {
   const seven = ["Grok", "Codex", "Claude", "Composer", "Cursor Grok", "MiniMax", "Kimi"].map(started);
   assert.equal(dispatchSummary(seven), "Started 7 workers: Grok, Codex, Claude, Composer and 3 more.");
 
+  // With the worker and its bot on the reply, the line says who runs each slice.
+  const named = (title: string, worker: string, bot: string) => ({
+    name: "workhorse_spawn_agent",
+    content: JSON.stringify({ started: true, title, worker, bot, childSessionId: "sess_x" }),
+  });
+  assert.equal(
+    dispatchSummary([named("Implement weeklyTotals", "Wren", "Grok · Grok 4.7"), named("Release note", "Marlow", "Cursor · Claude 4.6 Sonnet")]),
+    "Started 2 workers: Wren on Grok · Grok 4.7 (Implement weeklyTotals), Marlow on Cursor · Claude 4.6 Sonnet (Release note).",
+  );
+
   // Nothing to say when nothing started, and a failed spawn is not a start.
   assert.equal(dispatchSummary([]), "");
   assert.equal(dispatchSummary([{ name: "workhorse_spawn_agent", content: "{}", isError: true }]), "");

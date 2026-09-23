@@ -575,6 +575,10 @@ const TOOLS = [
         permission: { type: "string", description: "Ignored. This chat's Permission is the person's setting; the worker copies it. Do not pass permission." },
         sandbox: { type: "string", description: "Ignored. This chat's Sandbox is the person's setting; the worker copies it. Do not pass sandbox." },
         route: { type: "string", description: "auto, quick, balanced, or deep" },
+        domain: {
+          type: "string",
+          description: "Optional: coding, image-generation, writing, visual, data, or general. The kind of work this slice is; omit to read it from the prompt",
+        },
         chat: { type: "string", description: "Optional existing chat or vendor name to copy (Codex, Terra, Test)" },
         planStepId: { type: "string", description: "Optional executable plan step id" },
         rationale: { type: "string", description: "Why this agent fits this step" },
@@ -683,7 +687,7 @@ const TOOLS = [
   {
     name: "workhorse_list_bots",
     description:
-      "Inspect attached desk capacity. This is not required before workhorse_delegate and is not an instruction to choose a model. leftoverPercent is that vendor’s plan remaining overall, not this prompt. For ordinary delegated work, leave routing fields unset and let Workhorse select; explicit user assignments win.",
+      "Inspect attached desk capacity. This is not required before workhorse_delegate and is not an instruction to choose a model. leftoverPercent is that vendor’s plan remaining overall, not this prompt. For ordinary delegated work, leave routing fields unset and let Workhorse select; explicit user assignments win. To choose who should take a task, call workhorse_find_bots.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
   },
   {
@@ -2351,6 +2355,8 @@ async function spawnAgent(
     missionContinuation?: { previousWorkerIds: string[]; completedWorkerIds: string[]; previousPass: number };
     loop?: unknown;
     route?: "auto" | "quick" | "balanced" | "deep";
+    /** The kind of work this slice is. Omit to read it from the prompt. */
+    domain?: string;
     role?: "auditor";
     planStepId?: string;
     rationale?: string;
@@ -2518,6 +2524,7 @@ async function spawnAgent(
     missionIteration: spawnInput.missionIteration,
     missionContinuation: spawnInput.missionContinuation,
     route: spawnInput.route,
+    ...(spawnInput.domain ? { domain: spawnInput.domain } : {}),
     role: spawnInput.role,
     planStepId: spawnInput.planStepId,
     rationale: spawnInput.rationale,
@@ -2559,6 +2566,7 @@ async function spawnAgent(
       missionIteration: spawnInput.missionIteration,
       missionContinuation: spawnInput.missionContinuation,
       route: spawnInput.route,
+    ...(spawnInput.domain ? { domain: spawnInput.domain } : {}),
       role: spawnInput.role,
       planStepId: spawnInput.planStepId,
       rationale: spawnInput.rationale,
@@ -3508,6 +3516,7 @@ async function callDeskTool(name: string, args: Record<string, unknown>, from?: 
           args.route === "quick" || args.route === "balanced" || args.route === "deep" || args.route === "auto"
             ? args.route
             : undefined,
+        domain: typeof args.domain === "string" ? args.domain : undefined,
         planStepId: typeof args.planStepId === "string" ? args.planStepId : undefined,
         rationale: typeof args.rationale === "string" ? args.rationale : undefined,
         skills: Array.isArray(args.skills) ? args.skills.filter((item): item is string => typeof item === "string") : undefined,

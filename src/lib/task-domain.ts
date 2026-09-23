@@ -34,10 +34,22 @@ export function detectsImageGenerationIntent(prompt: string): boolean {
   );
 }
 
+/**
+ * The ask's deliverable is prose for people. A release note that names the
+ * function it announces is still a release note: without this, one mention of
+ * `src/stats.mjs` sent a writing slice to the coding ranking.
+ */
+export function asksForProse(text: string): boolean {
+  if (/```/.test(text)) return false;
+  if (/\b(implement|refactor|debug|fix the|fix a|unit tests?|test suite|compile|typecheck)\b/i.test(text)) return false;
+  return /\b(release notes?|changelog entry|blog post|announcement|newsletter|press release|marketing copy|tagline|friendly tone|plain language|under \d+ words)\b/i.test(text);
+}
+
 /** What the prompt is mostly about. Explicit request fields win over inference. */
 export function inferTaskDomain(prompt: string, attachments: ChatImage[] = []): TaskDomain {
   const text = prompt.trim();
   if (!text && attachments.length === 0) return "general";
+  if (asksForProse(text)) return "writing";
   if (looksCodey(text)) return "coding";
   const lower = text.toLowerCase();
   if (detectsImageGenerationIntent(text)) return "image-generation";

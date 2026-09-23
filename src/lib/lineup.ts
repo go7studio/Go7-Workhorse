@@ -130,6 +130,7 @@ function normalizeLineupRow(raw: unknown): DeskLineupRow | null {
     slice: typeof record.slice === "string" ? record.slice : "",
     folder: typeof record.folder === "string" ? record.folder : "",
     vendor: typeof record.vendor === "string" ? record.vendor : "",
+    ...(typeof record.model === "string" && record.model.trim() ? { model: record.model.trim().slice(0, 120) } : {}),
     status,
     startedAt: typeof record.startedAt === "number" ? record.startedAt : 0,
     ...(typeof record.finishedAt === "number" ? { finishedAt: record.finishedAt } : {}),
@@ -386,6 +387,9 @@ export function lineupJoinPrompt(
     lines.push(`### ${index + 1}. ${row.title}  child=${row.childId}  status=${row.status}${extra}`);
     // What the slice cost, so a parent can answer that without a second ledger.
     if (options?.usage) lines.push(formatSpendLine(sessionSpend(options.usage, row.childId)));
+    // Who ran the slice, from the desk's own record. A head writing "who did
+    // what" from memory credited a coding slice to a model that never ran it.
+    if (row.vendor || row.model) lines.push(`ran on: ${[row.vendor, row.model].filter(Boolean).join(" · ")}`);
     // A slice that stopped short says why here, so the join is written from
     // the reason rather than from a report that trails off mid-sentence.
     if (row.error?.trim()) lines.push(`why: ${row.error.trim()}`);
@@ -415,6 +419,7 @@ export function lineupJoinPrompt(
       "Answer the user in your own words as this chat’s bot. Write one combined review of what the crew found.",
       "This is a report join, not a new assignment. Do not spawn another worker or checker, even when a report says FAIL. Report unresolved findings and stop unless continuing an explicitly enabled Mission within its limits.",
       "Start with blockers, then the rest. Name which worker found each item.",
+      "When you say which bot or model did a slice, use its `ran on` line above. Do not name one from memory.",
       "Use the structured findings, then the prose reports for context.",
       "Do not paste worker notes, file checklists, “let me check” narration, or raw slice dumps into this chat.",
       "Cite which slice a fact came from. Failed or empty slices: one line on what is missing. Do not ask 1/2/3.",

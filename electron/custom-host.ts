@@ -152,8 +152,14 @@ export function dispatchSummary(
     .filter(spawnDispatchStarted)
     .map((result) => {
       try {
-        const parsed = JSON.parse(result.content ?? "") as { title?: unknown };
-        return typeof parsed.title === "string" ? parsed.title.trim() : "";
+        const parsed = JSON.parse(result.content ?? "") as { title?: unknown; worker?: unknown; bot?: unknown };
+        const title = typeof parsed.title === "string" ? parsed.title.trim() : "";
+        const worker = typeof parsed.worker === "string" ? parsed.worker.trim() : "";
+        const bot = typeof parsed.bot === "string" ? parsed.bot.trim() : "";
+        // This line is what the next turn remembers of the wave. It names who
+        // runs each slice so a later "who did what" is read, not recalled.
+        if (worker && bot) return title ? `${worker} on ${bot} (${title})` : `${worker} on ${bot}`;
+        return title;
       } catch {
         return "";
       }
@@ -864,7 +870,13 @@ export class CustomSessionHost {
         }
         messages = [
           ...messages,
-          { role: "assistant", text: result.text || "", toolUses, reasoning: result.thought },
+          {
+            role: "assistant",
+            text: result.text || "",
+            toolUses,
+            reasoning: result.thought,
+            ...(result.thinking?.length ? { thinking: result.thinking } : {}),
+          },
           { role: "user", text: "", toolResults: results },
         ];
         const roundFingerprint = customToolRoundFingerprint(toolUses, results);

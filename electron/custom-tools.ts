@@ -198,6 +198,10 @@ const DESK_TOOLS: { name: string; description: string; input_schema: Record<stri
         permission: { type: "string", description: "Ignored. This chat's Permission is the person's setting; the worker copies it. Do not pass permission." },
         sandbox: { type: "string", description: "Ignored. This chat's Sandbox is the person's setting; the worker copies it. Do not pass sandbox." },
         route: { type: "string", description: "auto, quick, balanced, or deep" },
+        domain: {
+          type: "string",
+          description: "Optional: coding, image-generation, writing, visual, data, or general. The kind of work this slice is; omit to read it from the prompt",
+        },
         planStepId: { type: "string", description: "Optional executable plan step id" },
         rationale: { type: "string", description: "Why this agent fits this step" },
         skills: { type: "array", items: { type: "string" }, description: "Exact installed skill names from workhorse_list_skills" },
@@ -246,7 +250,7 @@ const DESK_TOOLS: { name: string; description: string; input_schema: Record<stri
   {
     name: "workhorse_list_bots",
     description:
-      "List built-in vendors and custom desk slots with leftover/Watch status. leftoverPercent is that vendor’s plan remaining overall, not this prompt. Do not spawn or ask a row whose canCall is false.",
+      "List built-in vendors and custom desk slots with leftover/Watch status. leftoverPercent is that vendor’s plan remaining overall, not this prompt. Do not spawn or ask a row whose canCall is false. To choose who should take a task, call workhorse_find_bots.",
     input_schema: { type: "object", properties: {} },
   },
   {

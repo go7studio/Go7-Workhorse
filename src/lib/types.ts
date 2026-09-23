@@ -274,6 +274,8 @@ export type DeskLineupRow = {
   slice: string;
   folder: string;
   vendor: string;
+  /** The model that ran this worker, as the desk names it. The join says it so the head never has to guess. */
+  model?: string;
   status: DeskLineupRowStatus;
   startedAt: number;
   finishedAt?: number;

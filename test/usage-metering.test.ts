@@ -217,6 +217,27 @@ test("the ledger on disk: a summed-prompt event is capped at one prompt, tagged 
   assert.equal(tagged.inputTokens, 3_000_000, "a tagged bill is trusted as written");
 });
 
+test("a custom bot's turns survive a relaunch as separate rows", () => {
+  // Three real turns, ten minutes apart. The prompt grows with the history, as
+  // it does in every chat, and the stacked-request collapse read that growth as
+  // one turn's requests: it kept the 9k row and dropped the other two on every
+  // launch, then the desk saved the loss.
+  const minute = 60_000;
+  const turns = [
+    { id: "t3", at: 1_790_000_000_000 + 20 * minute, inputTokens: 9_000, outputTokens: 800 },
+    { id: "t2", at: 1_790_000_000_000 + 10 * minute, inputTokens: 6_000, outputTokens: 900 },
+    { id: "t1", at: 1_790_000_000_000, inputTokens: 3_000, outputTokens: 700 },
+  ].map((turn) => ({ ...KIMI, ...turn, customBotId: "bot_kimi", cacheReadTokens: 0, cacheWriteTokens: 0, source: "request" }));
+  const stored = normalizeUsage(turns);
+  assert.deepEqual(stored.map((event) => event.id), ["t3", "t2", "t1"]);
+  assert.equal(chatSpend(stored, KIMI.sessionId).totalTokens, 20_400);
+
+  // Rows written before usage carried a source are the stacked requests the
+  // collapse was written for, and it still keeps only the last of them.
+  const legacy = normalizeUsage(turns.map(({ source: _source, ...rest }) => rest));
+  assert.deepEqual(legacy.map((event) => event.id), ["t3"]);
+});
+
 test("what a row shows adds up to what a row totals", () => {
   const rows = byModel([
     { id: "a", at: 1, provider: "grok", model: "grok-4.6", inputTokens: 823_689, outputTokens: 128_907, cacheReadTokens: 23_680_384, cacheWriteTokens: 0 },

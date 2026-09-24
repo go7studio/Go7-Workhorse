@@ -2317,11 +2317,20 @@ function asCursorLane(value: unknown): CursorUsageLane | undefined {
   return undefined;
 }
 
+/**
+ * Before usage was tagged by source, the custom host stored its requests as
+ * separate rows, each carrying the whole prompt so far, and this keeps only the
+ * last of those. It cannot tell a request from a turn, so it runs on untagged
+ * rows only. It used to run on tagged rows too, and every chat's prompt grows
+ * turn by turn, so each launch folded a custom bot's whole chat into its last
+ * turn and saved it that way: three turns of 3k, 6k and 9k in became one row
+ * of 9k. A tagged row is one turn and stays.
+ */
 function collapseStackedCustomTurns(events: UsageEvent[]): UsageEvent[] {
   const drop = new Set<string>();
   const bySession = new Map<string, UsageEvent[]>();
   for (const event of events) {
-    if (event.provider !== "custom" || !event.sessionId) continue;
+    if (event.provider !== "custom" || !event.sessionId || event.source) continue;
     const list = bySession.get(event.sessionId) ?? [];
     list.push(event);
     bySession.set(event.sessionId, list);

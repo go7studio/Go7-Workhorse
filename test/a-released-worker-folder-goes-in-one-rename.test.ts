@@ -119,3 +119,24 @@ test("a file beside the worker folders is not a worker folder", () => {
   assert.ok(fs.existsSync(path.join(root, ".DS_Store")));
   fs.rmSync(root, { recursive: true, force: true });
 });
+
+test("the list of rescues resume trusts is flushed to disk before the folder goes", (t) => {
+  // Resume restores only a rescue on this list. Written without a flush, a
+  // power cut could leave it empty, and every interrupted worker's rescue would
+  // then read as another tool's ref that the desk will not rebuild from.
+  const { root, managed, wt } = repoWithWorktree("record-flush");
+  fs.writeFileSync(path.join(wt, "new.md"), "only here\n");
+  const flushed: number[] = [];
+  const realFsync = fs.fsyncSync;
+  t.mock.method(fs, "fsyncSync", (fd: number) => {
+    flushed.push(fd);
+    return realFsync(fd);
+  });
+
+  const pruned = pruneOrphanWorktrees(managed, [], durable(root));
+
+  t.mock.restoreAll();
+  assert.deepEqual(pruned.removed, ["sess_gone"]);
+  assert.ok(flushed.length > 0, "the rescue list was never flushed");
+  fs.rmSync(root, { recursive: true, force: true });
+});

@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { deskGitEnv } from "./desk-path";
+import { atomicWriteJson } from "./state-persistence";
 
 const execFileAsync = promisify(execFile);
 
@@ -921,9 +922,10 @@ function recordRescue(file: string, row: RescueRecord): boolean {
     }
     const kept = rows.filter((item) => !(item.session === row.session && item.commit === row.commit && item.repo === row.repo));
     kept.push(row);
-    const temp = `${file}.tmp-${process.pid}`;
-    fs.writeFileSync(temp, `${JSON.stringify({ version: 1, rescues: kept.slice(-RESCUE_RECORD_LIMIT) }, null, 1)}\n`);
-    fs.renameSync(temp, file);
+    // Flushed before the rename, as the desk state is. Resume trusts nothing
+    // but this list, and a rename that reached the disk ahead of its bytes
+    // left it empty after a power cut: every rescue then read as unlisted.
+    atomicWriteJson(file, { version: 1, rescues: kept.slice(-RESCUE_RECORD_LIMIT) });
     return true;
   } catch {
     return false;

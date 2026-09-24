@@ -22,6 +22,8 @@ export type FakeAcpVendor = {
   seen: FakeAcpMessage[];
   /** Write one message to the desk, as the vendor. */
   send: (message: object) => void;
+  /** Write to the vendor's stderr, as its logging does. */
+  log: (text: string) => void;
   /** The vendor process goes away, the way a crash looks from the desk. */
   exit: (code?: number) => void;
 };
@@ -46,6 +48,7 @@ export function fakeAcpVendor(script: FakeAcpScript = () => false, sessionId = "
     child,
     seen: [],
     send: (message) => stdout.write(`${JSON.stringify({ jsonrpc: "2.0", ...message })}\n`),
+    log: (text) => stderr.write(text),
     exit: (code = 1) => {
       (child as unknown as { exitCode: number }).exitCode = code;
       stdin.destroy();

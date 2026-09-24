@@ -434,6 +434,9 @@ type Pending = {
   reject: (error: Error) => void;
 };
 
+/** How much of a vendor's stderr the agent keeps to explain an exit. */
+export const STDERR_TAIL_CHARS = 4_000;
+
 function resolveGrokBinary(): string {
   if (process.env.GROK_BIN && process.env.GROK_BIN.trim()) return process.env.GROK_BIN.trim();
   const homeBin = path.join(os.homedir(), ".grok", "bin", process.platform === "win32" ? "grok.exe" : "grok");
@@ -1143,7 +1146,9 @@ export class GrokAgent {
     child.stderr.setEncoding("utf8");
     child.stdout.on("data", (chunk: string) => this.onStdout(chunk));
     child.stderr.on("data", (chunk: string) => {
-      this.stderr += chunk;
+      // The tail is what explains an exit. The whole of it grew for as long as
+      // the chat stayed open, and was pasted entire into the exit's error.
+      this.stderr = `${this.stderr}${chunk}`.slice(-STDERR_TAIL_CHARS);
     });
     child.on("error", (error) => {
       if (this.closed) return;
@@ -1467,18 +1472,11 @@ export class GrokAgent {
   cancel(): void {
     if (!this.sessionId) return;
     this.notify("session/cancel", { sessionId: this.sessionId });
-    for (const [id, waiter] of this.permissionWaiters) {
-      waiter("deny");
-      this.permissionWaiters.delete(id);
-    }
+    this.denyWaitingAsks();
   }
 
   dispose(): void {
     this.closed = true;
-    for (const [id, waiter] of this.permissionWaiters) {
-      waiter("deny");
-      this.permissionWaiters.delete(id);
-    }
     this.failAll(new Error(`${this.who} agent disposed`));
     // The group, never the pid. `child.kill()` stopped the CLI and left every
     // shell the CLI had started running — that is how 28 spinners outlived
@@ -1653,5 +1651,15 @@ export class GrokAgent {
   private failAll(error: Error): void {
     for (const pending of this.pending.values()) pending.reject(error);
     this.pending.clear();
+    // A vendor that died holding a permission ask left it waiting forever: the
+    // handler never finished and the ask stayed answerable, for no one.
+    this.denyWaitingAsks();
+  }
+
+  private denyWaitingAsks(): void {
+    for (const [id, waiter] of this.permissionWaiters) {
+      waiter("deny");
+      this.permissionWaiters.delete(id);
+    }
   }
 }

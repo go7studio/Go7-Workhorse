@@ -583,9 +583,23 @@ export function splitTableCells(line: string): string[] {
   return trimmed.split("|").map((cell) => cell.trim());
 }
 
+/**
+ * A rule row buried inside a mashed line: `| a | b ||---|---:|| c | d |`.
+ *
+ * The pattern used to be `(\|?\s*:?-{3,}:?\s*)+`, a repeat whose every part
+ * could be empty except the dashes, so one run of dashes split into any number
+ * of cells. With no closing pipe the engine tried every split: 51 dashes took
+ * 1.4 s, 60 took 44 s, and a table streams its rule row one delta at a time
+ * with no closing pipe until the cell is done. Every delta re-parsed and the
+ * desk froze. This matches the same rows, but consecutive runs must be parted
+ * by a colon, a space, or a pipe, so a run of dashes is read exactly one way.
+ */
+const MASHED_RULE =
+  /\|\s*(?:\|\s*)?:?-{3,}(?:(?::(?:\s*\|\s*|\s+)?:?|(?:\s*\|\s*|\s+):?)-{3,})*:?\s*\|/g;
+
 export function expandMashedRows(line: string): string[] {
   return line
-    .replace(/\|\s*(\|?\s*:?-{3,}:?\s*)+\|/g, "|\n$&\n|")
+    .replace(MASHED_RULE, "|\n$&\n|")
     .split("\n")
     .map((item) => item.trim())
     .filter(Boolean);

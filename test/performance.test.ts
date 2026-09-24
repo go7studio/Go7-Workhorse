@@ -18,7 +18,7 @@ import {
 } from "../src/lib/store-select";
 import { createPinScheduler } from "../src/lib/transcript-scroll";
 import { applyStreamQueues, createStreamCommitScheduler } from "../src/lib/stream-commit";
-import { mergeStreamedText } from "../src/lib/markdown";
+import { expandMashedRows, mergeStreamedText, parseChatMarkdown } from "../src/lib/markdown";
 import { searchChats } from "../src/lib/search";
 import { dropDrafts } from "../src/lib/chats";
 import { deskPersistBodyEqual } from "../src/lib/desk-persist";
@@ -1006,4 +1006,54 @@ test("ten thousand events in one fast session do not reopen the cross product", 
   // cross product. Same process, same machine, so no runner speed is in it.
   const small = collapseWork(syntheticUsage(100, 41, 1, 40)).steps;
   assert.ok(steps < small * 400, `100x the events took ${steps} steps against ${small}`);
+});
+
+test("a table rule row streaming in without its closing pipe parses in bounded time", () => {
+  // The mashed-row pattern once split a run of dashes every possible way when
+  // no closing pipe followed: 51 dashes took 1.4 s and 60 took 44 s, on the
+  // renderer thread, once per streamed delta. A wide rule cell streams exactly
+  // that shape until its pipe lands, and a table with no outer pipes keeps it.
+  // Together these cost the old pattern about 3 s; the new one takes about 1 ms,
+  // so the bound leaves a slow runner plenty of room. Nothing here is long
+  // enough to hang the suite if the old pattern ever came back.
+  const inputs: string[] = [];
+  for (let dashes = 3; dashes <= 51; dashes += 3) {
+    inputs.push(`Here is the summary:\n\n| Name | Description |\n|${"-".repeat(dashes)}`);
+  }
+  inputs.push(`Name | Value\n-----|${"-".repeat(48)}\nfoo | bar`);
+  inputs.push(`A | B | C\n---|---|${"-".repeat(48)}\n1 | 2 | 3`);
+  const started = performance.now();
+  for (const input of inputs) parseChatMarkdown(input);
+  const ms = performance.now() - started;
+  assert.ok(ms < 500, `parsing ${inputs.length} streamed rule rows took ${ms}ms`);
+});
+
+test("the mashed-row split reads every line the way the old pattern did", () => {
+  // The rewrite exists only to stop the backtracking. Any line the old pattern
+  // split, the new one splits at the same places. Short random lines over the
+  // characters a rule row is made of keep the old pattern cheap enough to be
+  // the reference.
+  const OLD = /\|\s*(\|?\s*:?-{3,}:?\s*)+\|/g;
+  const parts = ["|", "-", "-", "-", " ", ":", "a", "---", "|---", " | "];
+  let seed = 7;
+  const next = () => {
+    seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+    return seed / 0x7fffffff;
+  };
+  for (let round = 0; round < 50_000; round += 1) {
+    let line = "";
+    const length = 1 + Math.floor(next() * 12);
+    for (let index = 0; index < length; index += 1) line += parts[Math.floor(next() * parts.length)];
+    const expected = line
+      .replace(OLD, "|\n$&\n|")
+      .split("\n")
+      .map((item) => item.trim())
+      .filter(Boolean);
+    assert.deepEqual(expandMashedRows(line), expected, JSON.stringify(line));
+  }
+  assert.deepEqual(expandMashedRows("| SKU | Action | |---|---| | Darkest Dungeon PC | Keep |"), [
+    "| SKU | Action |",
+    "| |---|---|",
+    "| | Darkest Dungeon PC | Keep |",
+  ]);
 });

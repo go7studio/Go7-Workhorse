@@ -156,7 +156,8 @@ jobs:
       - name: Secret scan
         run: |
           set -euo pipefail
-          patterns='sk-ant-[A-Za-z0-9_-]{20,}|ghp_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{50,}|AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY-----|xox[baprs]-[A-Za-z0-9-]{10,}'
+          # xAI and OpenAI project keys too: this desk holds both kinds.
+          patterns='sk-ant-[A-Za-z0-9_-]{20,}|ghp_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{50,}|AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY-----|xox[baprs]-[A-Za-z0-9-]{10,}|xai-[A-Za-z0-9]{40,}|sk-proj-[A-Za-z0-9_-]{40,}'
           if git grep -nIE "$patterns" -- . ':!package-lock.json' ':!*.test.ts'; then
             echo "::error::A credential-shaped string is committed. Remove it and rotate the key."
             exit 1

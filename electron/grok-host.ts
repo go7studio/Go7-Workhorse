@@ -109,6 +109,20 @@ export function launchKey(input: Pick<GrokSessionOpenInput, "model" | "effort" |
   return `${spec.argv.join("\0")}\0${spec.cwd}\0${JSON.stringify(spec.sessionParams.mcpServers)}`;
 }
 
+/**
+ * The turn Stop reached before it began. The vendor session is open and kept;
+ * the prompt is never sent, and the desk hears the same ending a vendor gives
+ * a cancelled turn.
+ */
+export function stoppedBeforePrompt(
+  sessionId: string,
+  agent: Pick<GrokAgent, "sessionId" | "opened">,
+  emit: GrokEventSink,
+): GrokPromptResult {
+  emit({ type: "done", sessionId, stopReason: "cancelled" });
+  return { text: "", stopReason: "cancelled", vendorSessionId: agent.sessionId, opened: agent.opened };
+}
+
 export function isWorkerRuntime(input: { parentId?: string; hidden?: boolean; role?: string }): boolean {
   return Boolean(input.parentId || input.hidden || input.role === "worker");
 }
@@ -170,6 +184,13 @@ export class GrokSessionHost {
     return [...this.slots.keys()];
   }
   private tails = new Map<string, Promise<unknown>>();
+  /**
+   * Sessions whose vendor is still starting, and the ones Stop reached then.
+   * Until `session/new` answers there is no vendor session to cancel, so a
+   * Stop pressed during a slow start went nowhere and the prompt ran anyway.
+   */
+  private starting = new Set<string>();
+  private stoppedWhileStarting = new Set<string>();
 
   constructor(private readonly spawn: GrokSpawnFn = spawnGrokProcess) {}
 
@@ -190,6 +211,8 @@ export class GrokSessionHost {
   }
 
   private async promptUnlocked(input: GrokPromptInput, emit: GrokEventSink): Promise<GrokPromptResult> {
+    // A Stop left over from an earlier start belongs to that start, not this prompt.
+    this.stoppedWhileStarting.delete(input.sessionId);
     await this.ensureAgent(input, emit);
     const slot = this.slots.get(input.sessionId);
     if (!slot) throw new Error("grok agent is not running");
@@ -202,6 +225,7 @@ export class GrokSessionHost {
     }, input.visibleText);
 
     try {
+      if (this.stoppedWhileStarting.delete(input.sessionId)) return stoppedBeforePrompt(input.sessionId, slot.agent, emit);
       const result = await slot.agent.prompt(text, this.handlersFor(input, emit), input.images ?? []);
       this.emitDiscoveredTitle(input, emit, result.vendorSessionId ?? slot.agent.sessionId);
       emit({ type: "done", sessionId: input.sessionId, stopReason: result.stopReason });
@@ -345,6 +369,7 @@ export class GrokSessionHost {
       mcpServers: input.mcpServers,
     });
     const agent = new GrokAgent(spec, this.spawn);
+    this.starting.add(input.sessionId);
     try {
       const started = await agent.start({
         vendorSessionId: action === "load" ? input.vendorSessionId : undefined,
@@ -363,6 +388,8 @@ export class GrokSessionHost {
       const message = error instanceof Error ? error.message : String(error);
       emit({ type: "error", sessionId: input.sessionId, message });
       throw error;
+    } finally {
+      this.starting.delete(input.sessionId);
     }
     this.slots.set(input.sessionId, { key, agent });
   }
@@ -419,6 +446,7 @@ export class GrokSessionHost {
   }
 
   cancel(sessionId: string): void {
+    if (this.starting.has(sessionId)) this.stoppedWhileStarting.add(sessionId);
     this.slots.get(sessionId)?.agent.cancel();
   }
 

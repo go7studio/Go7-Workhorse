@@ -8,6 +8,7 @@ import { GrokAgent, type GrokPromptResult, type GrokToolEvent } from "./grok-age
 import {
   isWorkerRuntime,
   shouldLoadVendorSession,
+  stoppedBeforePrompt,
   type GrokCompactInput,
   type GrokEventSink,
   type GrokPromptInput,
@@ -86,6 +87,9 @@ export class ClaudeSessionHost {
     return [...this.slots.keys()];
   }
   private tails = new Map<string, Promise<unknown>>();
+  /** Sessions still starting, and the ones Stop reached then. See GrokSessionHost. */
+  private starting = new Set<string>();
+  private stoppedWhileStarting = new Set<string>();
 
   constructor(
     private readonly spawn: ClaudeSpawnFn = spawnClaudeProcess,
@@ -109,6 +113,8 @@ export class ClaudeSessionHost {
   }
 
   private async promptUnlocked(input: ClaudePromptInput, emit: ClaudeEventSink): Promise<GrokPromptResult> {
+    // A Stop left over from an earlier start belongs to that start, not this prompt.
+    this.stoppedWhileStarting.delete(input.sessionId);
     let previousRefusal: { fingerprint: string; error: unknown } | undefined;
     // Retry once, and only before output or actions could have reached the user.
     for (let attempt = 0; attempt < 2; attempt++) {
@@ -131,6 +137,7 @@ export class ClaudeSessionHost {
         await this.ensureAgent(input, forward, spec);
         const slot = this.slots.get(input.sessionId);
         if (!slot) throw new Error("Claude agent is not running");
+        if (this.stoppedWhileStarting.delete(input.sessionId)) return stoppedBeforePrompt(input.sessionId, slot.agent, emit);
         const text = composeVendorPrompt(input.text, input.preface, slot.agent.opened, {
           mode: input.mode,
           sandbox: input.sandbox,
@@ -222,6 +229,7 @@ export class ClaudeSessionHost {
     if (action === "reuse" && slot) return;
     slot?.agent.dispose();
     const agent = new GrokAgent(spec, (launchSpec) => this.spawn(launchSpec as typeof spec));
+    this.starting.add(input.sessionId);
     try {
       const started = await agent.start({
         vendorSessionId: action === "load" ? input.vendorSessionId : undefined,
@@ -240,6 +248,8 @@ export class ClaudeSessionHost {
     } catch (error) {
       agent.dispose();
       throw error;
+    } finally {
+      this.starting.delete(input.sessionId);
     }
     this.slots.set(input.sessionId, { key, agent });
   }
@@ -252,6 +262,7 @@ export class ClaudeSessionHost {
   }
 
   cancel(sessionId: string): void {
+    if (this.starting.has(sessionId)) this.stoppedWhileStarting.add(sessionId);
     this.slots.get(sessionId)?.agent.cancel();
   }
 

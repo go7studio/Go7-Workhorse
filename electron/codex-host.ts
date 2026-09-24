@@ -6,7 +6,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { GrokAgent, usageHasBilledTokens, type GrokPromptResult, type GrokToolEvent } from "./grok-agent";
 import { harvestCodexSessionBills } from "./codex-usage";
-import { isWorkerRuntime, shouldLoadVendorSession, type GrokCompactInput, type GrokEventSink, type GrokPromptInput, type GrokSessionOpenInput } from "./grok-host";
+import { isWorkerRuntime, shouldLoadVendorSession, stoppedBeforePrompt, type GrokCompactInput, type GrokEventSink, type GrokPromptInput, type GrokSessionOpenInput } from "./grok-host";
 import { CODEX_ACP_NOT_INSTALLED } from "./codex-login";
 import { buildCodexLaunchSpec, codexSpawnArgs } from "./codex-launch";
 import { composeVendorPrompt } from "../src/lib/context-preface";
@@ -128,6 +128,9 @@ export class CodexSessionHost {
     return [...this.slots.keys()];
   }
   private tails = new Map<string, Promise<unknown>>();
+  /** Sessions still starting, and the ones Stop reached then. See GrokSessionHost. */
+  private starting = new Set<string>();
+  private stoppedWhileStarting = new Set<string>();
 
   constructor(private readonly spawn: CodexSpawnFn = spawnCodexProcess) {}
 
@@ -148,6 +151,8 @@ export class CodexSessionHost {
   }
 
   private async promptUnlocked(input: CodexPromptInput, emit: CodexEventSink): Promise<GrokPromptResult> {
+    // A Stop left over from an earlier start belongs to that start, not this prompt.
+    this.stoppedWhileStarting.delete(input.sessionId);
     await this.ensureAgent(input, emit);
     const slot = this.slots.get(input.sessionId);
     if (!slot) throw new Error("Codex agent is not running");
@@ -160,6 +165,7 @@ export class CodexSessionHost {
     }, input.visibleText);
 
     try {
+      if (this.stoppedWhileStarting.delete(input.sessionId)) return stoppedBeforePrompt(input.sessionId, slot.agent, emit);
       const handlers = this.handlersFor(input, emit);
       const chunks = createCodexChunkFilter(handlers.onChunk);
       const startedAt = Date.now() - 2_000;
@@ -270,6 +276,7 @@ export class CodexSessionHost {
       mcpServers: input.mcpServers,
     });
     const agent = new GrokAgent(spec, (launchSpec) => this.spawn(launchSpec as typeof spec));
+    this.starting.add(input.sessionId);
     try {
       const started = await agent.start({
         vendorSessionId: action === "load" ? input.vendorSessionId : undefined,
@@ -288,6 +295,8 @@ export class CodexSessionHost {
       const message = error instanceof Error ? error.message : String(error);
       emit({ type: "error", sessionId: input.sessionId, message });
       throw error;
+    } finally {
+      this.starting.delete(input.sessionId);
     }
     this.slots.set(input.sessionId, { key, agent });
   }
@@ -300,6 +309,7 @@ export class CodexSessionHost {
   }
 
   cancel(sessionId: string): void {
+    if (this.starting.has(sessionId)) this.stoppedWhileStarting.add(sessionId);
     this.slots.get(sessionId)?.agent.cancel();
   }
 

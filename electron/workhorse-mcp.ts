@@ -553,7 +553,7 @@ const TOOLS = [
   {
     name: "workhorse_spawn_agent",
     description:
-      "Dispatch a bounded Workhorse worker. For an unassigned slice, leave provider, model, effort, chat, and worker unset so the desk auto-selects from task fit and current capacity. Explicit user assignments win. Use workhorse_delegate for an ordinary single task. If workhorse_list_bots said an explicitly assigned vendor is not callable, do not call it.",
+      "Dispatch a bounded Workhorse worker. For an unassigned slice, leave provider, model, effort, chat, and worker unset so the desk auto-selects from task fit and current capacity. Explicit user assignments win. A squad row from workhorse_find_bots may be passed as provider and model; the desk keeps that pick while it clears the domain bar. Use workhorse_delegate for an ordinary single task. If workhorse_list_bots said an explicitly assigned vendor is not callable, do not call it.",
     inputSchema: {
       type: "object",
       properties: {
@@ -564,11 +564,21 @@ const TOOLS = [
           description:
             "Name of a worker already on this chat (Wren, Wanda). Pass it to continue the same topic with what that worker learned. Leave empty to mint a new name for a new topic — a new worker starts with a clear head. Do not name an idle worker just to save a start. A busy worker still gets a colleague.",
         },
-        provider: { type: "string", description: "Explicit user override only: grok, codex, claude, cursor, or custom" },
-        model: { type: "string", description: "Explicit user override only, such as gpt-5.6-terra" },
+        provider: {
+          type: "string",
+          description: "grok, codex, claude, cursor, or custom. Only for a user's assignment or a workhorse_find_bots pick; otherwise unset",
+        },
+        model: {
+          type: "string",
+          description: "Such as gpt-5.6-terra. Only for a user's assignment or a workhorse_find_bots pick; otherwise unset",
+        },
         permission: { type: "string", description: "Ignored. This chat's Permission is the person's setting; the worker copies it. Do not pass permission." },
         sandbox: { type: "string", description: "Ignored. This chat's Sandbox is the person's setting; the worker copies it. Do not pass sandbox." },
         route: { type: "string", description: "auto, quick, balanced, or deep" },
+        domain: {
+          type: "string",
+          description: "Optional: coding, image-generation, writing, visual, data, or general. The kind of work this slice is; omit to read it from the prompt",
+        },
         chat: { type: "string", description: "Optional existing chat or vendor name to copy (Codex, Terra, Test)" },
         planStepId: { type: "string", description: "Optional executable plan step id" },
         rationale: { type: "string", description: "Why this agent fits this step" },
@@ -578,6 +588,12 @@ const TOOLS = [
         constraints: { type: "array", items: { type: "string" }, description: "Assignment boundaries" },
         paths: { type: "array", items: { type: "string" }, description: "Expected repo-relative paths used for scope checks and changed-file reporting. Separate from attached files." },
         exclude: { type: "array", items: { type: "string" }, description: "Provider, model, or bot terms this worker and its descendants must avoid" },
+        after: {
+          type: "array",
+          items: { type: "string" },
+          description:
+            "Names of this chat's workers that must finish first, such as a release note after the code it describes. The desk queues this one, starts it when they are done, and hands it their reports. If one of them does not finish, this one does not start.",
+        },
         files: { type: "array", items: { type: "string" }, description: "Files to attach to the worker" },
         effort: { type: "string", description: "Explicit user override only. Omit to keep a reused worker's thinking level; otherwise the desk derives it from task depth" },
         timeoutSeconds: { type: "number", description: "Ignored. The desk does not stop a worker on a runtime limit. The worker runs until it finishes or is cancelled." },
@@ -677,7 +693,7 @@ const TOOLS = [
   {
     name: "workhorse_list_bots",
     description:
-      "Inspect attached desk capacity. This is not required before workhorse_delegate and is not an instruction to choose a model. leftoverPercent is that vendor’s plan remaining overall, not this prompt. For ordinary delegated work, leave routing fields unset and let Workhorse select; explicit user assignments win.",
+      "Inspect attached desk capacity. This is not required before workhorse_delegate and is not an instruction to choose a model. leftoverPercent is that vendor’s plan remaining overall, not this prompt. For ordinary delegated work, leave routing fields unset and let Workhorse select; explicit user assignments win. To choose who should take a task, call workhorse_find_bots.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
   },
   {
@@ -689,6 +705,33 @@ const TOOLS = [
       properties: {
         provider: { type: "string", description: "Optional vendor or custom account id" },
         callableOnly: { type: "boolean", description: "If true, return only rows you can call now" },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "workhorse_find_bots",
+    description:
+      "Search this desk for who should take a task. Returns the bots the desk would pick, in order: each with its score for the task's domain and where that score came from (a public leaderboard, or the desk's own table), its plan terms (leftover, time to reset, pace, 5h window, workers already on it), and a squad spread over pools. Call it before staffing workers, then pass each squad row's provider and model on workhorse_spawn_agent. Nothing is spawned or reserved.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        task: { type: "string", description: "The work, as a sentence or the slice prompt. Domain and depth are read from it." },
+        squad: { type: "number", description: "How many workers you mean to start, 1-8. Default 1." },
+        domain: { type: "string", description: "Optional: coding, image-generation, writing, visual, data, or general. Wins over the task text." },
+        tier: { type: "string", description: "Optional: quick, balanced, or deep. Wins over the task text." },
+        needs: {
+          type: "object",
+          description: "Inputs every pick must accept.",
+          properties: {
+            images: { type: "boolean" },
+            documents: { type: "boolean" },
+            audio: { type: "boolean" },
+            video: { type: "boolean" },
+          },
+          additionalProperties: false,
+        },
+        exclude: { type: "array", items: { type: "string" }, description: "Provider, model, or bot terms to leave out" },
       },
       additionalProperties: false,
     },
@@ -1689,6 +1732,45 @@ async function listBots(from?: string): Promise<string> {
   return formatDeskRoster(deskRoster());
 }
 
+/**
+ * The desk ranks from its live plans and running workers, so the search needs
+ * the desk. There is no saved-file fallback: yesterday's leftover would rank a
+ * squad wrong.
+ */
+async function findBotsOnDesk(args: Record<string, unknown>, from?: string): Promise<string> {
+  const task = typeof args.task === "string" ? args.task.trim().slice(0, 4000) : "";
+  const tier = args.tier === "quick" || args.tier === "balanced" || args.tier === "deep" ? args.tier : undefined;
+  const squad = typeof args.squad === "number" && Number.isFinite(args.squad) ? Math.round(args.squad) : undefined;
+  const exclude = Array.isArray(args.exclude)
+    ? args.exclude.filter((item): item is string => typeof item === "string" && Boolean(item.trim()))
+    : undefined;
+  const rawNeeds = args.needs && typeof args.needs === "object" ? (args.needs as Record<string, unknown>) : undefined;
+  const needs = rawNeeds
+    ? {
+        ...(rawNeeds.images === true ? { images: true } : {}),
+        ...(rawNeeds.documents === true ? { documents: true } : {}),
+        ...(rawNeeds.audio === true ? { audio: true } : {}),
+        ...(rawNeeds.video === true ? { video: true } : {}),
+      }
+    : undefined;
+  return postBridge(
+    "/bots",
+    botsAsk(
+      {
+        action: "find-bots",
+        message: task || "find-bots",
+        ...(typeof args.domain === "string" ? { domain: args.domain } : {}),
+        ...(tier ? { route: tier } : {}),
+        ...(squad ? { limit: squad } : {}),
+        ...(exclude?.length ? { exclude } : {}),
+        ...(needs && Object.keys(needs).length ? { needs } : {}),
+      },
+      from,
+    ),
+    { timeoutMs: 8_000, inbox: false },
+  );
+}
+
 function setupInput(args: Record<string, unknown>): BotSetupInput {
   const importFrom =
     args.importFrom === "auto" || args.importFrom === "openclaw" || args.importFrom === "env" || args.importFrom === "none"
@@ -2279,6 +2361,8 @@ async function spawnAgent(
     missionContinuation?: { previousWorkerIds: string[]; completedWorkerIds: string[]; previousPass: number };
     loop?: unknown;
     route?: "auto" | "quick" | "balanced" | "deep";
+    /** The kind of work this slice is. Omit to read it from the prompt. */
+    domain?: string;
     role?: "auditor";
     planStepId?: string;
     rationale?: string;
@@ -2288,6 +2372,8 @@ async function spawnAgent(
     constraints?: string[];
     paths?: string[];
     exclude?: string[];
+    /** This chat's workers that must finish before this one starts. */
+    after?: string[];
     files?: string[];
     traceId?: string;
   },
@@ -2446,6 +2532,7 @@ async function spawnAgent(
     missionIteration: spawnInput.missionIteration,
     missionContinuation: spawnInput.missionContinuation,
     route: spawnInput.route,
+    ...(spawnInput.domain ? { domain: spawnInput.domain } : {}),
     role: spawnInput.role,
     planStepId: spawnInput.planStepId,
     rationale: spawnInput.rationale,
@@ -2456,6 +2543,7 @@ async function spawnAgent(
     constraints: spawnInput.constraints,
     paths: spawnInput.paths,
     exclude: spawnInput.exclude,
+    ...(spawnInput.after?.length ? { after: spawnInput.after } : {}),
     files: spawnInput.files,
     attachments,
     ...(spawnInput.traceId?.trim() ? { traceId: spawnInput.traceId.trim() } : {}),
@@ -2487,6 +2575,7 @@ async function spawnAgent(
       missionIteration: spawnInput.missionIteration,
       missionContinuation: spawnInput.missionContinuation,
       route: spawnInput.route,
+    ...(spawnInput.domain ? { domain: spawnInput.domain } : {}),
       role: spawnInput.role,
       planStepId: spawnInput.planStepId,
       rationale: spawnInput.rationale,
@@ -2497,6 +2586,7 @@ async function spawnAgent(
       constraints: spawnInput.constraints,
       paths: spawnInput.paths,
       exclude: spawnInput.exclude,
+      ...(spawnInput.after?.length ? { after: spawnInput.after } : {}),
       files: spawnInput.files,
       attachments,
       ...(spawnInput.traceId?.trim() ? { traceId: spawnInput.traceId.trim() } : {}),
@@ -3436,6 +3526,7 @@ async function callDeskTool(name: string, args: Record<string, unknown>, from?: 
           args.route === "quick" || args.route === "balanced" || args.route === "deep" || args.route === "auto"
             ? args.route
             : undefined,
+        domain: typeof args.domain === "string" ? args.domain : undefined,
         planStepId: typeof args.planStepId === "string" ? args.planStepId : undefined,
         rationale: typeof args.rationale === "string" ? args.rationale : undefined,
         skills: Array.isArray(args.skills) ? args.skills.filter((item): item is string => typeof item === "string") : undefined,
@@ -3444,6 +3535,11 @@ async function callDeskTool(name: string, args: Record<string, unknown>, from?: 
         constraints: Array.isArray(args.constraints) ? args.constraints.filter((item): item is string => typeof item === "string") : undefined,
         paths: Array.isArray(args.paths) ? args.paths.filter((item): item is string => typeof item === "string") : undefined,
         exclude: Array.isArray(args.exclude) ? args.exclude.filter((item): item is string => typeof item === "string") : undefined,
+        after: Array.isArray(args.after)
+          ? args.after.filter((item): item is string => typeof item === "string")
+          : typeof args.after === "string"
+            ? [args.after]
+            : undefined,
         files: Array.isArray(args.files) ? args.files.filter((item): item is string => typeof item === "string") : undefined,
         traceId: typeof args.traceId === "string" ? args.traceId : undefined,
         loop: args.loop,
@@ -3467,6 +3563,9 @@ async function callDeskTool(name: string, args: Record<string, unknown>, from?: 
   }
   if (name === "workhorse_query_capacity") {
     return queryCapacity(args);
+  }
+  if (name === "workhorse_find_bots") {
+    return findBotsOnDesk(args, from);
   }
   if (name === "workhorse_list_agents") {
     return listBots(from);

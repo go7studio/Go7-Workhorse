@@ -12,6 +12,7 @@ import type {
   WatchSettings,
 } from "./types";
 import { customBotAttached, customBotEnabled, customBotModels } from "./custom-bots";
+import { domainScoresForDeskRow } from "./domain-benchmark";
 import { defaultModel, modelsFor } from "./models";
 import {
   cursorLaneEvents,
@@ -19,7 +20,10 @@ import {
   deskUsageCards,
   eventTotal,
   formatPlanReset,
+  burstWindowBlocksCall,
+  isShortPlanWindow,
   leftoverForCard,
+  planTimeWindows,
   planRingView,
   planAllowance,
   isLocalEndpoint,
@@ -733,6 +737,7 @@ function deskCallRow(input: {
   /** Treat no-leftover as un-callable even when the daily bank is not holding. */
   blockSpent: boolean;
   spentPercent: number;
+  burstBlock?: ReturnType<typeof burstWindowBlocksCall>;
 }): DeskCallRow {
   let code: DeskCallStatus = "ok";
   let reason: string | undefined;
@@ -764,6 +769,11 @@ function deskCallRow(input: {
     code = "spent";
     canCall = false;
     reason = watchHoldMessage({ label: input.name, reason: "spent" });
+  } else if (input.burstBlock?.blocked) {
+    code = "spent";
+    canCall = false;
+    const reset = input.burstBlock.resetsAt ? ` ${formatPlanReset(input.burstBlock.resetsAt)}.` : "";
+    reason = `${input.name} ${input.burstBlock.windowLabel} window is used up.${reset} Switch to another model.`;
   } else if (input.holding) {
     code = "day_bank";
     canCall = false;
@@ -812,6 +822,7 @@ export function deskCallCatalog(input: {
     ? (catalogWatch.spentPercent as number)
     : DEFAULT_SPENT_PERCENT;
   const byKey = new Map(statuses.map((status) => [status.key, status]));
+  const planForKey = (key: string) => leftoverForCard(deskRowForKey(key, input.settings), input.plans);
   const rows: DeskCallRow[] = [];
   for (const id of DESK_STOCK) {
     const link = input.settings.llms[id];
@@ -844,6 +855,7 @@ export function deskCallCatalog(input: {
           holding: Boolean(composer?.holding),
           blockSpent,
           spentPercent,
+          burstBlock: burstWindowBlocksCall(planForKey("cursor:cursor-models"), spentPercent),
         }),
       );
       rows.push(
@@ -867,6 +879,7 @@ export function deskCallCatalog(input: {
           holding: Boolean(api?.holding),
           blockSpent,
           spentPercent,
+          burstBlock: burstWindowBlocksCall(planForKey("cursor:other-models"), spentPercent),
         }),
       );
       continue;
@@ -893,6 +906,7 @@ export function deskCallCatalog(input: {
         holding: Boolean(status?.holding),
         blockSpent,
         spentPercent,
+        burstBlock: burstWindowBlocksCall(planForKey(id), spentPercent),
       }),
     );
   }
@@ -922,10 +936,40 @@ export function deskCallCatalog(input: {
         holding: Boolean(status?.holding),
         blockSpent,
         spentPercent,
+        burstBlock: burstWindowBlocksCall(planForKey(`bot:${bot.id}`), spentPercent),
       }),
     );
   }
   return rows;
+}
+
+/** Map a catalog model to its vendor pool row — never another login's pool with the same model id. */
+export function deskCallRowForCatalogModel(
+  rows: DeskCallRow[],
+  query: { provider: ProviderId; model: string; customBotId?: string },
+): DeskCallRow | undefined {
+  if (query.customBotId) {
+    return rows.find((row) => row.id === `bot:${query.customBotId}`);
+  }
+  if (query.provider === "custom") {
+    return rows.find((row) => row.kind === "custom" && row.model === query.model);
+  }
+  if (query.provider === "cursor") {
+    const lane = cursorWatchLane(query.model);
+    return rows.find((row) => row.id === lane);
+  }
+  return rows.find((row) => row.id === query.provider);
+}
+
+export function botKnowledgeCallableCaption(row: Pick<DeskCallRow, "canCall" | "reason" | "status">): string {
+  if (row.canCall) return "Callable";
+  const reason = row.reason ?? "";
+  if (/window is used up/i.test(reason)) return "Not callable · 5-hour window";
+  if (row.status === "spent" || /no leftover left this week/i.test(reason)) return "Not callable · weekly pool empty";
+  if (row.status === "day_bank") return "Not callable · daily bank";
+  if (row.status === "cannot_start") return "Not callable · cannot start";
+  if (row.status === "disabled" || row.status === "not_connected") return "Not callable";
+  return "Not callable";
 }
 
 export function vendorCallBlocked(
@@ -1037,22 +1081,49 @@ export function formatPlanLine(row: Pick<DeskCallRow, "leftoverPercent" | "usedP
   return `${left}% leftover of this ${period}'s plan overall (${used}% used this ${period} so far — the whole ${period} pool, not this prompt)`;
 }
 
+/** Short plan caption for Bot knowledge and other UI (screen readers keep formatPlanLine). */
+export function formatPlanLineVisible(
+  row: Pick<DeskCallRow, "leftoverPercent" | "usedPercent" | "period">,
+  plan?: GrokPlanUsage,
+  spentPercent = DEFAULT_SPENT_PERCENT,
+): string {
+  if (plan) {
+    const burst = burstWindowBlocksCall(plan, spentPercent);
+    if (burst.blocked) {
+      const pool = planTimeWindows(plan).length > 0 ? planTimeWindows(plan) : (plan.products ?? []);
+      const burstProduct = pool.find((item) => isShortPlanWindow(item.product) && !item.unlimited);
+      const used = burstProduct
+        ? Math.round(Math.min(100, Math.max(0, burstProduct.usagePercent)))
+        : 100;
+      return `${used}% used · 5h`;
+    }
+  }
+  const period = row.period === "monthly" ? "month" : row.period === "weekly" ? "week" : "plan";
+  if (row.leftoverPercent == null) return `${period} not loaded`;
+  const used =
+    row.usedPercent != null && Number.isFinite(row.usedPercent)
+      ? Math.round(row.usedPercent)
+      : Math.max(0, 100 - Math.round(row.leftoverPercent));
+  return `${used}% used · ${period}`;
+}
+
 export function callableDeskRows(rows: DeskCallRow[]): DeskCallRow[] {
   return rows.filter((row) => row.canCall);
 }
 
 function routingStrengths(row: DeskCallRow): string[] {
-  const text = `${row.name} ${row.model ?? ""} ${(row.models ?? []).map((model) => `${model.id} ${model.name}`).join(" ")}`.toLowerCase();
-  if (/kimi|moonshot/.test(text)) return ["visual audit", "images", "UI/UX"];
-  if (/minimax-m3/.test(text)) return ["orchestration", "tools", "low cost"];
-  if (/fable|mythos/.test(text)) return ["visual", "creative", "complex"];
-  if (/5\.6-sol|opus|grok-4\.6/.test(text)) return ["coding", "agent work", "cheaper frontier"];
-  if (/5\.6-terra|sonnet|grok-4\.5/.test(text)) return ["implementation", "review", "balanced cost"];
-  if (/5\.6-luna|haiku|mini/.test(text)) return ["quick tasks", "verification", "low cost"];
-  return ["general work"];
+  const provider = row.provider ?? "custom";
+  const primary = row.model ?? row.models?.[0]?.id ?? "";
+  if (!primary) return ["general work"];
+  const line = domainScoresForDeskRow(provider, primary);
+  return [line];
 }
 
-export function formatDeskRoster(rows: DeskCallRow[]): string {
+/**
+ * What workhorse_list_bots answers. `ranked` is who the desk would pick for
+ * each kind of work (see findBotsDigest), given to a chat that staffs workers.
+ */
+export function formatDeskRoster(rows: DeskCallRow[], extra: { ranked?: string[] } = {}): string {
   const attached = rows.filter((row) => row.status !== "not_connected" && row.status !== "disabled");
   const held = attached.filter((row) => !row.canCall);
   const callable = callableDeskRows(attached);
@@ -1084,6 +1155,7 @@ export function formatDeskRoster(rows: DeskCallRow[]): string {
     lines.push(
       `Callable now: ${callable.map((row) => row.name).join(", ")}. For ordinary work, leave provider, model, and effort unset so the desk routes by task fit and capacity. Grok 4.6 on Grok and Cursor is one family — leave the vendor unset and the desk picks by leftover. Use a named row only for an explicit user assignment or requested full lineup.`,
     );
+    if (extra.ranked?.length) lines.push(...extra.ranked);
   } else {
     lines.push("Nothing is callable right now.");
   }
@@ -1095,6 +1167,7 @@ export function formatDeskRoster(rows: DeskCallRow[]): string {
       leftoverMeans: "Plan remaining for that vendor across all chats, not this spawn or prompt.",
       summary: lines.join("\n"),
       bots: attached.map((row) => ({ ...row, strengths: routingStrengths(row) })),
+      ...(callable.length > 0 && extra.ranked?.length ? { ranked: extra.ranked } : {}),
       routingRule:
         "Workhorse chooses from callable bots by task fit and capacity. A pool inside 24 hours of its reset is spent first, because leftover that expires is free. Explicit user assignments win.",
     },

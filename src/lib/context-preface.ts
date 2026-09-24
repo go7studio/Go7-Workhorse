@@ -1,4 +1,5 @@
 import type { CrewMode, LinkedReference, PermissionMode, SandboxProfile, SessionEnvironment } from "./types";
+import { collapsePreviewLabel } from "./session-bridge";
 import { sessionEnvironmentKind } from "./session-environment";
 import {
   AUDITOR_SESSION_RULES,
@@ -154,7 +155,7 @@ export function buildPolicyContext(
 
 export function buildDeskContext(desk: DeskContext): string {
   const title = desk.title.trim() || "New chat";
-  const preview = desk.preview.trim() || "(empty)";
+  const preview = collapsePreviewLabel(desk.preview) || "(empty)";
   const lines = ["This Workhorse chat:"];
   lines.push(`- Title: ${title}`);
   if (desk.projectName?.trim()) lines.push(`- Project: ${desk.projectName.trim()}`);

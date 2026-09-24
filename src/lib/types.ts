@@ -274,6 +274,8 @@ export type DeskLineupRow = {
   slice: string;
   folder: string;
   vendor: string;
+  /** The model that ran this worker, as the desk names it. The join says it so the head never has to guess. */
+  model?: string;
   status: DeskLineupRowStatus;
   startedAt: number;
   finishedAt?: number;
@@ -683,6 +685,11 @@ export type Session = {
   missionCaps?: MissionCaps;
   /** This-chat Orchestrate bot list. Empty means all bots. */
   spawnAllowlist?: string[];
+  /**
+   * Workshop add-ons turned on in this chat. Settings only installs and
+   * removes them. Missing means none are on here.
+   */
+  workshopPacks?: string[];
 };
 
 export type PermissionRequest = {
@@ -724,7 +731,16 @@ export type Sheet = "project" | "reference" | null;
 
 export type Panel = "settings" | "add-bot" | null;
 
-export type SettingsSection = "profile" | "llms" | "skills" | "workshop" | "routing" | "learning" | "usage" | "watch";
+export type SettingsSection =
+  | "profile"
+  | "llms"
+  | "skills"
+  | "workshop"
+  | "bot-knowledge"
+  | "routing"
+  | "learning"
+  | "usage"
+  | "watch";
 
 export type SkillOrigin = "grok" | "codex" | "claude" | "cursor" | "workhorse";
 
@@ -876,7 +892,7 @@ export type ModelInputCapabilities = {
 };
 
 /** What a prompt is mostly about. Routing tie-breaks toward models strong there. */
-export type TaskDomain = "coding" | "writing" | "visual" | "data" | "general";
+export type TaskDomain = "coding" | "image-generation" | "writing" | "visual" | "data" | "general";
 
 export type ModelRoutingProfile = {
   /** 1 is lightweight; 5 is frontier reasoning. */
@@ -964,6 +980,10 @@ export type RoutingDecision = {
   customBotId?: string;
   score: number;
   reason: string;
+  /** Task domain the slice was ranked for (coding, image-generation, …). */
+  taskDomain?: TaskDomain;
+  /** That domain's fit score out of 100 for the picked model. */
+  domainScore?: number;
   usedPercent?: number;
   expectedUsedPercent?: number;
 };
@@ -1017,6 +1037,8 @@ export type Settings = {
   usageBudgets: Partial<Record<ProviderId, number>>;
   watch: WatchSettings;
   routing: RoutingSettings;
+  /** Manual Bot knowledge rubrics per model. Catalog scores stay the default. */
+  botKnowledge?: import("./bot-knowledge-rubric").BotKnowledgeSettings;
   skills: SkillDiscoverySettings;
   learning: import("./learning-types").LearningSettings;
   agentSystems?: AgentSystemsSettings;

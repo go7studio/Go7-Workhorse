@@ -11,8 +11,9 @@ import type { CatalogViewState } from "../lib/workshop-catalog";
 import { useStore } from "../lib/store";
 
 /**
- * Workshop install/grant/catalog block. Settings → Workshop (surface=settings) or the rail
- * Manage sheet (surface=sheet). Install a pack, then Turn on (Host / Sources / Confirm).
+ * Workshop install/uninstall block. Settings → Workshop and the rail Manage sheet download
+ * and remove packs. surface="chat" is the only place a pack is turned on: that grants the
+ * host and sources, then enables the add-on for that chat.
  * Live watch is the desk rail; this block never paints it.
  * Nothing here starts, stops, routes, or leases anything.
  */
@@ -194,11 +195,17 @@ export function WorkshopBlock({
   surface = "settings",
   focusAvailable = false,
   catalogRefreshNonce = 0,
+  sessionId,
+  enabledIds = [],
 }: {
-  surface?: "settings" | "sheet";
+  surface?: "settings" | "sheet" | "chat";
   focusAvailable?: boolean;
   /** Bump from Manage sheet head Refresh to re-fetch catalog (never between rows). */
   catalogRefreshNonce?: number;
+  /** Chat whose Workshop is enabling packs. Settings and the rail sheet omit it. */
+  sessionId?: string;
+  /** Pack ids already on in that chat. Hidden here so the pane can paint their interface. */
+  enabledIds?: string[];
 } = {}) {
   const store = useStore();
   const configuredHosts = store.settings.localCompute.hosts;
@@ -226,6 +233,7 @@ export function WorkshopBlock({
   const activeRef = useRef<HTMLHeadingElement>(null);
   const peerUrlRef = useRef<HTMLInputElement>(null);
   const inSheet = surface === "sheet";
+  const enableHere = surface === "chat";
 
   const reload = useCallback(() => {
     const run = window.workhorse?.workshopList;
@@ -258,6 +266,7 @@ export function WorkshopBlock({
       if (view.yankedForceOffIds?.length) {
         const listing = await window.workhorse?.workshopList?.();
         if (listing) {
+          for (const id of view.yankedForceOffIds) store.dropWorkshopPackFromChats(id);
           await store.updateWorkshop({ packs: nextPacksOff(listing, view.yankedForceOffIds) });
           setPacks(listing.map((pack) =>
             view.yankedForceOffIds!.includes(pack.id)
@@ -374,6 +383,7 @@ export function WorkshopBlock({
       setGrantRefuseId(null);
       setConfirmId(null);
       setExpandedId(null);
+      if (sessionId) store.setSessionWorkshopPacks(sessionId, [...new Set([...enabledIds, pack.id])]);
       reload();
     });
 
@@ -382,6 +392,13 @@ export function WorkshopBlock({
   /** Collapsed Turn on: grant now when a host is ready. Name a missing host — never a silent no-op. */
   const beginTurnOn = (pack: PackListing) => {
     if (pack.refused) return;
+    if (pack.on && sessionId) {
+      store.setSessionWorkshopPacks(sessionId, [...new Set([...enabledIds, pack.id])]);
+      setGrantRefuseId(null);
+      setConfirmId(null);
+      setExpandedId(null);
+      return;
+    }
     const chosenHost = hosts.some((host) => host.id === pack.hostId) ? (pack.hostId as string) : hosts[0]?.id ?? "";
     const chosenSources = pack.sources.map((source) => source.id);
     if (!chosenHost || hosts.length === 0) {
@@ -402,6 +419,7 @@ export function WorkshopBlock({
 
   const turnOff = (id: string) =>
     run(async () => {
+      store.dropWorkshopPackFromChats(id);
       const next = nextPacks(packs, { id, on: false });
       await store.updateWorkshop({ packs: next });
       if (!next.some((row) => row.on)) await window.workhorse?.workshopCloseBreakout?.();
@@ -416,6 +434,7 @@ export function WorkshopBlock({
         ? result.versionChangedIds
         : [];
     if (!ids.length) return;
+    for (const id of ids) store.dropWorkshopPackFromChats(id);
     await store.updateWorkshop({ packs: nextPacksOff(packs, ids) });
   };
 
@@ -426,7 +445,7 @@ export function WorkshopBlock({
       setAvailableNote("");
       const result = await install({ id });
       // Fixed chrome only — never concatenate catalog summary into refuse copy.
-      const words = result.ok ? "Installed · Off — Turn on when ready." : result.reason;
+      const words = result.ok ? "Installed. Turn it on from a chat's Workshop." : result.reason;
       if (result.ok && (result.reconfirm || result.versionChangedIds?.length)) {
         await applyReconfirm(
           result.reconfirm
@@ -448,7 +467,7 @@ export function WorkshopBlock({
       let words = installWords(result);
       if (result.ok && result.reconfirm) {
         await applyReconfirm(result);
-        words = "Sources changed. Turn on to review.";
+        words = "Sources changed. Turn it on from a chat.";
       }
       setInstallNote(words);
       if (result.ok) {
@@ -465,7 +484,7 @@ export function WorkshopBlock({
       let words = installWords(result);
       if (result.ok && result.reconfirm) {
         await applyReconfirm(result);
-        words = "Sources changed. Turn on to review.";
+        words = "Sources changed. Turn it on from a chat.";
       }
       setInstallNote(words);
       if (result.ok) reload();
@@ -479,6 +498,7 @@ export function WorkshopBlock({
         return;
       }
       const next = packSettings(packs.filter((pack) => pack.id !== id));
+      store.dropWorkshopPackFromChats(id);
       await store.updateWorkshop({ packs: next });
       if (!next.some((row) => row.on)) await window.workhorse?.workshopCloseBreakout?.();
       if (confirmId === id) setConfirmId(null);
@@ -521,8 +541,9 @@ export function WorkshopBlock({
 
   const hostLabel = (id: string | undefined) => store.settings.localCompute.hosts.find((host) => host.id === id)?.label ?? id ?? "";
   const catalogState = catalog;
-  const onPacks = packs.filter((pack) => pack.on);
-  const offPacks = packs.filter((pack) => !pack.on);
+  const enabledHere = new Set(enableHere ? enabledIds : []);
+  const onPacks = packs.filter((pack) => pack.on && !enableHere);
+  const offPacks = packs.filter((pack) => (enableHere ? !enabledHere.has(pack.id) : !pack.on));
   const pendingCatalog =
     catalogState && catalogState.ok && !catalogState.unreachable && !catalogState.pinFailed && !catalogState.expired
       ? catalogState.packs.filter((entry) => {
@@ -539,7 +560,14 @@ export function WorkshopBlock({
       {hosts.length === 0 ? (
         <div className="workshop-grant-refuse">
           <p className="row-meta">{missingHostCopy ?? WORKSHOP_MISSING_HOST}</p>
-          <button className="tiny" type="button" onClick={() => store.setSettingsSection("llms")}>
+          <button
+            className="tiny"
+            type="button"
+            onClick={() => {
+              store.setSettingsSection("llms");
+              store.openSettings("llms");
+            }}
+          >
             Open LLMs
           </button>
         </div>
@@ -586,10 +614,15 @@ export function WorkshopBlock({
     </div>
   );
 
-  const sheetIntro =
-    packs.length === 0 ? "Install a pack, then Turn on." : "Installed packs";
-  const settingsIntro = "Add-ons for this desk. Catalog is shared; installs stay local. Live rail for box health, job meters, and more.";
-  const emptyInstalledCopy = "None installed. Install a pack from Available, then Turn on to watch it from the desk rail.";
+  const sheetIntro = enableHere
+    ? "Turn an add-on on for this chat."
+    : packs.length === 0
+      ? "Install a pack from Available."
+      : "Installed packs";
+  const settingsIntro = "Add-ons for this desk. Catalog is shared; installs stay local. Turn one on from a chat's Workshop.";
+  const emptyInstalledCopy = enableHere
+    ? "None installed. Install from Settings → Workshop."
+    : "None installed. Install a pack from Available.";
   const visibleCatalog = pendingCatalog.filter((entry) =>
     availableSearchMatch(catalogQuery, [catalogDisplayName(entry.id), entry.id, entry.summary].filter(Boolean).join(" ")),
   );
@@ -604,7 +637,9 @@ export function WorkshopBlock({
 
   return (
     <section className="workshop-settings" aria-label={inSheet ? "Manage packs" : "Workshop"}>
-      {inSheet ? (
+      {enableHere ? (
+        <p className="row-meta workshop-blurb workshop-sheet-intro">{sheetIntro}</p>
+      ) : inSheet ? (
         <p className="row-meta workshop-blurb workshop-sheet-intro">{sheetIntro}</p>
       ) : (
         <div className="link-head workshop-invite-head">
@@ -622,7 +657,7 @@ export function WorkshopBlock({
       )}
 
       {/* Settings: Refresh under intro. Sheet: Refresh lives in Manage sheet head (never between rows). */}
-      {!inSheet && showCatalogRefresh ? (
+      {!inSheet && !enableHere && showCatalogRefresh ? (
         <div className="workshop-manage-toolbar">
           {catalogState?.stale ? <p className="row-meta">Catalog stale — Install disabled until refresh.</p> : null}
           <button className="tiny" type="button" disabled={busy} onClick={() => reloadCatalog()} title="Refresh catalog">
@@ -664,7 +699,7 @@ export function WorkshopBlock({
                   </span>
                   <span className="workshop-row-copy">
                     <strong className="workshop-row-title">{pack.name}</strong>
-                    <span className="row-meta workshop-pack-status">On</span>
+                    <span className="row-meta workshop-pack-status">Installed</span>
                     {one ? (
                       <span className="row-meta workshop-row-one-liner" title={one.full}>
                         {one.line}
@@ -687,11 +722,11 @@ export function WorkshopBlock({
                     <span className="pack-row-side workshop-row-actions">
                       {pack.refused ? (
                         <span className="row-meta">Refused</span>
-                      ) : (
+                      ) : enableHere ? (
                         <button className="tiny" type="button" disabled={busy} onClick={() => void turnOff(pack.id)}>
                           Turn off
                         </button>
-                      )}
+                      ) : null}
                       {isRepo ? (
                         latest ? (
                           <button className="tiny" type="button" disabled={busy} onClick={() => void applyUpdate(pack.id)}>
@@ -771,7 +806,7 @@ export function WorkshopBlock({
                     </span>
                     <span className="workshop-row-copy">
                       <strong className="workshop-row-title">{pack.name}</strong>
-                      <span className="row-meta workshop-pack-status">Off</span>
+                      <span className="row-meta workshop-pack-status">{enableHere ? "Off" : "Installed"}</span>
                       {one ? (
                         <span className="row-meta workshop-row-one-liner" title={one.full}>
                           {one.full}
@@ -780,17 +815,24 @@ export function WorkshopBlock({
                     </span>
                   </button>
                   <span className="workshop-row-action-slot">
-                    {!expanded && !pack.refused && grantRefuseId !== pack.id ? (
+                    {enableHere && !expanded && !pack.refused && grantRefuseId !== pack.id ? (
                       <button className="tiny primary" type="button" disabled={busy} onClick={() => beginTurnOn(pack)}>
                         Turn on
                       </button>
                     ) : null}
                   </span>
                 </div>
-                {grantRefuseId === pack.id && missingHostCopy ? (
+                {enableHere && grantRefuseId === pack.id && missingHostCopy ? (
                   <div className="workshop-grant-refuse">
                     <p className="row-meta">{missingHostCopy}</p>
-                    <button className="tiny" type="button" onClick={() => store.setSettingsSection("llms")}>
+                    <button
+                      className="tiny"
+                      type="button"
+                      onClick={() => {
+                        store.setSettingsSection("llms");
+                        store.openSettings("llms");
+                      }}
+                    >
                       Open LLMs
                     </button>
                   </div>
@@ -803,11 +845,11 @@ export function WorkshopBlock({
                     {update && !update.reason && !update.note && !latest ? (
                       <span className="row-meta">Up to date · {vLabel(update.current)}</span>
                     ) : null}
-                    {confirming ? confirmPanel(pack) : null}
+                    {enableHere && confirming ? confirmPanel(pack) : null}
                     <span className="pack-row-side workshop-row-actions">
                       {pack.refused ? (
                         <span className="row-meta">Refused</span>
-                      ) : confirming ? (
+                      ) : enableHere && confirming ? (
                         <>
                           {hosts.length > 0 ? (
                             <button
@@ -823,9 +865,9 @@ export function WorkshopBlock({
                             Cancel
                           </button>
                         </>
-                      ) : grantRefuseId === pack.id ? null : hosts.length === 0 ? (
+                      ) : !enableHere || grantRefuseId === pack.id ? null : hosts.length === 0 ? (
                         missingHostCopy ? (
-                          <button className="tiny" type="button" onClick={() => store.setSettingsSection("llms")}>
+                          <button className="tiny" type="button" onClick={() => store.openSettings("llms")}>
                             Open LLMs
                           </button>
                         ) : null
@@ -834,7 +876,7 @@ export function WorkshopBlock({
                           Turn on
                         </button>
                       )}
-                      {isRepo ? (
+                      {!enableHere && isRepo ? (
                         latest ? (
                           <button className="tiny" type="button" disabled={busy} onClick={() => void applyUpdate(pack.id)}>
                             {vLabel(update?.current ?? "")} → {vLabel(latest)} · Update
@@ -845,7 +887,7 @@ export function WorkshopBlock({
                           </button>
                         )
                       ) : null}
-                      {removeConfirmId === pack.id ? (
+                      {!enableHere && removeConfirmId === pack.id ? (
                         <>
                           <button className="tiny primary" type="button" disabled={busy} onClick={() => void remove(pack.id)}>
                             Confirm remove
@@ -854,7 +896,7 @@ export function WorkshopBlock({
                             Cancel
                           </button>
                         </>
-                      ) : (
+                      ) : !enableHere ? (
                         <button
                           className="tiny"
                           type="button"
@@ -866,9 +908,9 @@ export function WorkshopBlock({
                         >
                           Remove
                         </button>
-                      )}
+                      ) : null}
                     </span>
-                    {pack.collector ? (
+                    {!enableHere && pack.collector ? (
                       <details className="workshop-row-more">
                         <summary className="row-meta">More</summary>
                         <span className="row-meta workshop-collector">
@@ -892,7 +934,12 @@ export function WorkshopBlock({
         ) : null}
         </>
       )}
+      {enableHere && packs.length > 0 && onPacks.length === 0 && offPacks.length === 0 ? (
+        <p className="row-meta">On in this chat.</p>
+      ) : null}
 
+      {!enableHere ? (
+      <>
       <h3 ref={pendingRef} id="workshop-available" className="workshop-section-title section-label" tabIndex={-1}>
         Available
       </h3>
@@ -1071,6 +1118,8 @@ export function WorkshopBlock({
       ) : null}
 
       {installNote && !advancedOpen ? <p className="row-meta">{installNote}</p> : null}
+      </>
+      ) : null}
       {note ? <p className="row-meta">{note}</p> : null}
     </section>
   );

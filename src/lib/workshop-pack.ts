@@ -239,6 +239,22 @@ export type WorkshopPackSetting = {
 export type WorkshopSettings = { packs: WorkshopPackSetting[] };
 export const DEFAULT_WORKSHOP_SETTINGS: WorkshopSettings = { packs: [] };
 
+/** Pack ids a chat has turned on. Drops blanks, duplicates, and anything that is not a pack id. */
+export function normalizeWorkshopPackIds(raw: unknown): string[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const ids: string[] = [];
+  const seen = new Set<string>();
+  for (const item of raw) {
+    if (typeof item !== "string") continue;
+    const id = item.trim();
+    if (!PACK_ID.test(id) || id.length > 48 || seen.has(id)) continue;
+    seen.add(id);
+    ids.push(id);
+    if (ids.length >= 24) break;
+  }
+  return ids.length > 0 ? ids : undefined;
+}
+
 /** Canonical grant binding for one source. Compared on every poll plan. */
 export function sourceFingerprint(packId: string, source: PackSource): string {
   if (source.kind === "json") {

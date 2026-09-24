@@ -62,7 +62,7 @@ import {
   shiftQueuedPrompt,
   sidebarKeepsChat,
 } from "./chats";
-import { settledWorkers, workerJustSettled } from "./worker-settled";
+import { isTerminalRunStatus, settledWorkers, workerJustSettled } from "./worker-settled";
 import { foldersToCount, leftInFolderNote, workerLabel } from "./worker-folders";
 import { deskPersistBodyEqual, persistDelayMs } from "./desk-persist";
 import { restoredPanel } from "./restored-panel";
@@ -120,6 +120,7 @@ import {
   contextWindowFor,
   defaultModel,
   findChoice,
+  modelName,
   normalizeModelId,
   parseEffort,
   parseEffortFromText,
@@ -189,11 +190,16 @@ import {
   reconcileTaskStoreOnRestart,
 } from "./external-task";
 import {
+  activeRouteLoad,
+  candidatesNamedBy,
   chooseRoutingDecision,
   describeRoutingMiss,
   inferRoutingTier,
+  inferTaskDomain,
   outcomesFromLearningEvents,
+  RECENT_ROUTE_MS,
   routingCandidatesForDesk,
+  routingPoolKey,
   routingDecisionEvidence,
   routingDecisionLogDetail,
   routingIdentityExcluded,
@@ -201,7 +207,16 @@ import {
   shouldRouteSessionTurn,
   shouldShadowRouteSessionTurn,
   spawnEffortFor,
+  withRunDraws,
 } from "./routing";
+import { mergeBotKnowledgeRubric, normalizeBotKnowledge } from "./bot-knowledge-rubric";
+import { botKnowledgeSnapshot, orchestrationKnowledgeBrief, ORCHESTRATION_TASK_DOMAINS } from "./domain-benchmark";
+import type { TaskDomain } from "./types";
+import { applyBotScoresFeed, normalizeBotScoresFeed, type BotScoresView } from "./bot-scores";
+import { applyModelPrices, normalizeModelPricesFeed } from "./model-prices";
+import { findBots, findBotsDigest } from "./bot-search";
+import type { RoutingCandidate } from "./routing";
+import { orchestrationEnabled } from "./workhorse-rules";
 import type {
   AgentRun,
   AgentSystemsSettings,
@@ -311,11 +326,13 @@ import {
   resolveSpawnSpec,
   missionForDeskSpawn,
   findReusableWorker,
+  findRunningWorkerOnSlice,
   formatParentCrewLine,
   fileContentsFingerprint,
   leasePathForWrite,
   refreshSharedFileFingerprint,
   resolveNamedWorker,
+  spawnSliceLabel,
   resolveWorkerIsolation,
   parseWorkerHandoff,
   workerStartMessages,
@@ -328,9 +345,14 @@ import {
   type WorkerNameReservation,
   type WorkerRecord,
   shouldAutoRouteSpawn,
+  parseProviderId,
+  userLockedSpawnModel,
   routingDecisionMatchesSpawn,
   constrainRouteCandidatesForSpawn,
   spawnContinuationHowToUse,
+  afterBlockedReason,
+  afterBriefFor,
+  resolveSpawnAfter,
   spawnExclusions,
   spawnTurnOf,
   spawnWaitsForReply,
@@ -371,6 +393,7 @@ import {
   backfillCursorUsage,
   estimateFromSessionTurn,
   joinCursorLedgerEvents,
+  measureRunDraws,
   normalizeUsage,
   occupancyFromUsage,
   rangeStart,
@@ -437,7 +460,7 @@ import {
 import { applyWorkhorseToggle, isConcreteTheme, isTheme, nextTheme } from "./theme";
 import { effectiveLearningMode, learningCaptures, normalizeLearning } from "./learning-policy";
 import { normalizeLocalComputeSettings } from "./local-compute";
-import { normalizeWorkshopSettings, type WorkshopSettings } from "./workshop-pack";
+import { normalizeWorkshopPackIds, normalizeWorkshopSettings, type WorkshopSettings } from "./workshop-pack";
 import { agentTurnEvidence, learningEvidenceId } from "./learning-agent-evidence";
 import { settleSessionGoals } from "./learning-goal";
 import { BACKFILL_SUMMARY_CHARS, backfillEventId } from "./learning-backfill";
@@ -616,12 +639,21 @@ export type Store = AppState & {
   setRetentionDays: (days: number) => void;
   updateWatch: (patch: Partial<WatchSettings>) => void;
   updateRouting: (patch: Partial<RoutingSettings>) => void;
+  saveBotKnowledgeRubric: (key: string, rubric: import("./bot-knowledge-rubric").BotKnowledgeRubricOverride | null) => void;
   updateSkillDiscovery: (patch: Partial<SkillDiscoverySettings>) => void;
   updateAgentSystems: (patch: Partial<AgentSystemsSettings>) => void;
   updateJudge: (patch: Partial<JudgeSettings>) => void;
   updateLocalCompute: (settings: import("./types").LocalComputeSettings) => void;
   updateWorkshop: (settings: WorkshopSettings) => Promise<void>;
+  /** Which installed add-ons this chat has turned on. Empty clears the field. */
+  setSessionWorkshopPacks: (sessionId: string, packIds: string[]) => void;
+  /** Uninstall, yank, or a forced off: the add-on leaves every chat immediately. */
+  dropWorkshopPackFromChats: (packId: string) => void;
   grantPlanExternalAgents: (sessionId: string, allow: boolean) => void;
+  /** Public leaderboard scores the desk holds (LMArena), and the last check. Null outside the desktop app. */
+  botScores: BotScoresView | null;
+  /** Check the leaderboard now; download it if it moved. */
+  refreshBotScores: () => Promise<void>;
   agentRuntimes: import("./external-catalog").AgentRuntimeStatus[];
   agentCatalog: import("./external-catalog").ExternalAgent[];
   refreshAgentRuntimes: () => Promise<void>;
@@ -1229,6 +1261,10 @@ function snapshotWriteInstance(
 /** Stable identity for "nothing is missing", so a redraw needs a real change. */
 const NO_MISSING_FOLDERS: ReadonlySet<string> = new Set<string>();
 
+/** How often a queued slice looks at the workers it comes after, and how long it waits for them. */
+const AFTER_POLL_MS = 2_000;
+const AFTER_WAIT_MS = 6 * 60 * 60_000;
+
 /**
  * Folders the operating system empties on its own. `/private/tmp` is swept on a
  * schedule and `/var/folders` is per-boot scratch, so a project linked to either
@@ -1277,6 +1313,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const draftPersistTimer = useRef<number | null>(null);
   const composerDraftsRef = useRef<Record<string, ComposerDraftSnap>>({});
   const plansRef = useRef<import("./watch").WatchPlans>({});
+  /** Orchestration routes handed out in the last few seconds, per pool. */
+  const recentRoutesRef = useRef<Array<{ key: string; at: number }>>([]);
   // Read by the refresh loop, which is declared with no deps so it can be
   // called from the routing paths. Mirrors customMeterHealth, like plansRef.
   const meterHealthRef = useRef<Record<string, CustomMeterHealth | undefined>>({});
@@ -2555,6 +2593,35 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const catalog = policy.suggestFromWording === false ? [] : skillsForAutoLoad(deskSkillsRef.current, policy);
       vendorText = withSkillDiscoveryHint(vendorText, originalText, catalog);
     }
+    if (
+      liveSession &&
+      !liveSession.parentId &&
+      orchestrationEnabled(liveSession.crewModes) &&
+      deskRoleOf(liveSession) === "orchestrator"
+    ) {
+      const statuses = watchVendorStatuses({
+        settings: stateRef.current.settings,
+        usage: stateRef.current.usage,
+        plans: plansRef.current,
+        permits: stateRef.current.watchPermits,
+        dayMarks: stateRef.current.watchDayMarks,
+      });
+      const domain = inferTaskDomain(originalText, images);
+      const brief = orchestrationKnowledgeBrief(
+        botKnowledgeSnapshot({
+          settings: stateRef.current.settings,
+          routing: stateRef.current.settings.routing,
+          statuses,
+          plans: plansRef.current,
+          domain,
+          tier: inferRoutingTier(originalText, images, { role: "orchestrator" }),
+          prompt: originalText,
+          activeLoad: activeRouteLoad(stateRef.current.sessions, recentRoutesRef.current),
+          draws: measureRunDraws(stateRef.current.usage, stateRef.current.sessions),
+        }),
+      );
+      vendorText = `${brief}\n\n${vendorText}`;
+    }
     const haltPlan = options?.afterGoalHalt
       ? "send-now"
       : planHaltForward({
@@ -3015,12 +3082,18 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         // this on purpose: a worker starts a fresh session.
         contextNeed: session.contextUsed || undefined,
       };
-      const decision = chooseRoutingDecision(routeCandidates, routeRequest, current.settings.routing);
+      const decision = chooseRoutingDecision(
+        routeCandidates,
+        routeRequest,
+        current.settings.routing,
+        current.settings.botKnowledge,
+      );
       recordRoutingDecision({
         source: "chat",
         candidates: routeCandidates,
         request: routeRequest,
         settings: current.settings.routing,
+        botKnowledge: current.settings.botKnowledge,
         ...(decision ? { selected: decision } : {}),
       });
       if (decision) {
@@ -3039,6 +3112,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           candidates: routeCandidates,
           request: routeRequest,
           settings: current.settings.routing,
+          botKnowledge: current.settings.botKnowledge,
           selected: decision,
           mode: "live-auto",
           source: "chat",
@@ -3094,6 +3168,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         candidates: routeCandidates,
         request: routeRequest,
         settings: current.settings.routing,
+        botKnowledge: current.settings.botKnowledge,
         selected: session,
         mode: "shadow",
         source: "chat",
@@ -4361,7 +4436,60 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               });
               const fromId = payload.fromSessionId?.trim() || "";
               const allowlist = fromId ? spawnAllowlistForCaller(latest.sessions, fromId) : undefined;
-              await replyAsk({ text: formatDeskRoster(filterCatalogBySpawnAllowlist(catalog, allowlist)) });
+              // A chat that staffs workers gets who the desk would pick, with
+              // scores and prices, in the list it actually reads.
+              const listing = latest.sessions.find((item) => item.id === fromId);
+              const plans = latest.deskPlans ?? plansRef.current;
+              const ranked = listing && orchestrationEnabled(listing.crewModes)
+                ? findBotsDigest({
+                    settings: latest.settings,
+                    statuses: watchVendorStatuses({
+                      settings: latest.settings,
+                      usage: latest.usage,
+                      plans,
+                      permits: latest.watchPermits,
+                      dayMarks: latest.watchDayMarks,
+                    }),
+                    plans,
+                    sessions: latest.sessions,
+                    recent: recentRoutesRef.current,
+                    draws: measureRunDraws(latest.usage, latest.sessions),
+                    ...(allowlist ? { narrow: (rows: RoutingCandidate[]) => filterCandidatesBySpawnAllowlist(rows, allowlist) } : {}),
+                  })
+                : [];
+              await replyAsk({ text: formatDeskRoster(filterCatalogBySpawnAllowlist(catalog, allowlist), { ranked }) });
+              return;
+            }
+            if (action === "find-bots") {
+              const fromId = payload.fromSessionId?.trim() || "";
+              const allowlist = fromId ? spawnAllowlistForCaller(latest.sessions, fromId) : undefined;
+              const plans = latest.deskPlans ?? plansRef.current;
+              const result = findBots(
+                {
+                  task: payload.message === "find-bots" ? "" : payload.message,
+                  domain: payload.domain,
+                  tier: payload.route,
+                  squad: payload.limit,
+                  exclude: payload.exclude,
+                  needs: payload.needs,
+                },
+                {
+                  settings: latest.settings,
+                  statuses: watchVendorStatuses({
+                    settings: latest.settings,
+                    usage: latest.usage,
+                    plans,
+                    permits: latest.watchPermits,
+                    dayMarks: latest.watchDayMarks,
+                  }),
+                  plans,
+                  sessions: latest.sessions,
+                  recent: recentRoutesRef.current,
+                  draws: measureRunDraws(latest.usage, latest.sessions),
+                  ...(allowlist ? { narrow: (rows: RoutingCandidate[]) => filterCandidatesBySpawnAllowlist(rows, allowlist) } : {}),
+                },
+              );
+              await replyAsk({ text: JSON.stringify(result, null, 2) });
               return;
             }
             if (action === "plan") {
@@ -5900,11 +6028,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               ? payload.route
               : undefined;
             const effectiveExclusions = spawnExclusions(caller, payload.exclude, isNested);
+            const orchestrationBench = orchestrationEnabled(caller.crewModes);
+            const userLockedModel = userLockedSpawnModel(caller.messages);
+            const coordinatorModel = typeof payload.model === "string" && Boolean(payload.model.trim());
             const routeSpawn = shouldAutoRouteSpawn({
               routingEnabled: latest.settings.routing.enabled,
               provider: payload.provider,
               model: payload.model,
               chat: payload.chat,
+              coordinatorModel: orchestrationBench && coordinatorModel,
+              userLockedModel,
             });
             if (routeSpawn) refreshPlansForRouting(latest.deskPlans ?? plansRef.current);
             const routeStatuses = routeSpawn
@@ -5938,6 +6071,38 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             const spawnRole = nestedPolicy.role ??
               (payload.role === "auditor" ? "auditor" as const : routeSpawn ? "worker" as const : undefined);
             const routingRole = spawnRole === "helper" ? "worker" as const : spawnRole;
+            const rankCoordinatorPick = orchestrationBench && coordinatorModel && !userLockedModel;
+            const spawnAllowlist = spawnAllowlistForCaller(latest.sessions, caller.id);
+            const runDraws = orchestrationBench ? measureRunDraws(latest.usage, latest.sessions) : undefined;
+            const routeCandidates = routeSpawn
+              ? filterCandidatesBySpawnAllowlist(
+                  constrainRouteCandidatesForSpawn(
+                    withRunDraws(
+                      routingCandidatesForDesk(latest.settings, routeStatuses, latest.deskPlans ?? plansRef.current),
+                      runDraws,
+                    ),
+                    {
+                      provider: payload.provider,
+                      ...(rankCoordinatorPick ? {} : { model: payload.model }),
+                    },
+                  ),
+                  spawnAllowlist,
+                )
+              : [];
+            // A coordinator that read the desk (workhorse_find_bots) and named a
+            // row keeps it when that row clears the domain bar; otherwise the
+            // desk ranks as if nothing was named.
+            const coordinatorRows = rankCoordinatorPick
+              ? candidatesNamedBy(routeCandidates, {
+                  provider: parseProviderId(typeof payload.provider === "string" ? payload.provider : undefined) ?? undefined,
+                  model: String(payload.model),
+                })
+              : [];
+            const runningOnSlice = findRunningWorkerOnSlice(
+              latest.sessions as Array<WorkerRecord & { title?: string }>,
+              { parentId: caller.id, projectId: spawnProjectId },
+              spawnSliceLabel(String(payload.message ?? "")),
+            );
             const routeRequest = {
               prompt: payload.message,
               attachments: payload.attachments,
@@ -5945,26 +6110,57 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               role: routingRole,
               outcomes: outcomesFromLearningEvents(learningOutcomeEvents),
               exclude: effectiveExclusions,
+              useOrchestrationBenchmark: orchestrationBench,
+              ...(runningOnSlice
+                ? {
+                    current: {
+                      provider: runningOnSlice.provider,
+                      model: runningOnSlice.model,
+                      customBotId: runningOnSlice.customBotId,
+                    },
+                  }
+                : {}),
+              // Rank and record the slice on the domain the head named, or the
+              // task text implies — never default silently to general when the
+              // head passed a find_bots row without repeating domain on spawn.
+              ...(routeSpawn
+                ? {
+                    taskDomain: (ORCHESTRATION_TASK_DOMAINS as readonly string[]).includes(String(payload.domain))
+                      ? (payload.domain as TaskDomain)
+                      : inferTaskDomain(String(payload.message ?? ""), payload.attachments ?? []),
+                  }
+                : {}),
+              effortHint: parseEffort(String(payload.effort ?? "")) ?? null,
+              ...(orchestrationBench ? { activeLoad: activeRouteLoad(latest.sessions, recentRoutesRef.current) } : {}),
+              ...(runDraws?.typical ? { typicalRun: runDraws.typical } : {}),
+              ...(coordinatorRows.length > 0
+                ? { preferred: coordinatorRows.map(({ provider, model, customBotId }) => ({ provider, model, customBotId })) }
+                : {}),
             };
-            const spawnAllowlist = spawnAllowlistForCaller(latest.sessions, caller.id);
-            const routeCandidates = routeSpawn
-              ? filterCandidatesBySpawnAllowlist(
-                  constrainRouteCandidatesForSpawn(
-                    routingCandidatesForDesk(latest.settings, routeStatuses, latest.deskPlans ?? plansRef.current),
-                    { provider: payload.provider, model: payload.model },
-                  ),
-                  spawnAllowlist,
-                )
-              : [];
             const routeDecision = routeSpawn
-              ? chooseRoutingDecision(routeCandidates, routeRequest, latest.settings.routing)
+              ? chooseRoutingDecision(
+                  routeCandidates,
+                  routeRequest,
+                  latest.settings.routing,
+                  latest.settings.botKnowledge,
+                )
               : null;
+            if (routeDecision && orchestrationBench) {
+              // Counted as load until its worker shows up as running, so the
+              // next spawn in the same wave sees this pool as taken.
+              const at = Date.now();
+              recentRoutesRef.current = [
+                ...recentRoutesRef.current.filter((item) => at - item.at <= RECENT_ROUTE_MS),
+                { key: routingPoolKey(routeDecision), at },
+              ];
+            }
             if (routeSpawn) {
               recordRoutingDecision({
                 source: "spawn",
                 candidates: routeCandidates,
                 request: routeRequest,
                 settings: latest.settings.routing,
+                botKnowledge: latest.settings.botKnowledge,
                 ...(routeDecision ? { selected: routeDecision } : {}),
               });
             }
@@ -6019,6 +6215,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             }
             if (!parent) {
               await replyAsk({ error: "no parent chat to attach this subagent to" });
+              return;
+            }
+            // Named before anything is started or leased, so a wrong name
+            // costs the head one error and the desk nothing.
+            const spawnAfter = resolveSpawnAfter(payload.after, parent.id, latest.sessions);
+            if (!spawnAfter.ok) {
+              await replyAsk({ error: spawnAfter.error });
               return;
             }
             const resolvedSpec = resolveSpawnSpec(
@@ -6112,6 +6315,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               }),
             };
             const routedWorkerIsRouted = routingDecisionMatchesSpawn(routeDecision, spec);
+            // The model this worker runs on, in the desk's words: it rides on the
+            // lineup row into the join, so the head reports who did what from the
+            // record rather than from memory.
+            const spawnModelLabel =
+              spec.provider === "custom"
+                ? [latest.settings.customBots.find((bot) => bot.id === spec.customBotId)?.name, modelName("custom", spec.model)]
+                    .filter(Boolean)
+                    .join(" · ")
+                : modelName(spec.provider, spec.model);
             if (routingIdentityExcluded({
               provider: spec.provider,
               model: spec.model,
@@ -6185,6 +6397,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             const childId = reusedWorker?.id || payload.childSessionId?.trim() || uid("sess");
             const assistantId = uid("msg");
             const startedAt = Date.now();
+            // A slice that comes after others is queued on the lineup until they end.
+            const waitingOn = spawnAfter.waitFor.filter((item) => item.id !== childId);
+            const waitingAtStart = waitingOn.some((item) => {
+              const earlier = latest.sessions.find((session) => session.id === item.id);
+              return Boolean(earlier) && !isTerminalRunStatus(earlier?.agentRun?.status);
+            });
             // The caller learns its child's seat from the spawn result, not
             // from a card the person has to answer. `log` is the main-log line
             // the Link helper records — identifiers and seats, no brief.
@@ -6364,6 +6582,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 candidates: routeCandidates,
                 request: routeRequest,
                 settings: latest.settings.routing,
+                botKnowledge: latest.settings.botKnowledge,
                 selected: spec,
                 mode: "live-auto",
                 source: "spawn",
@@ -6523,7 +6742,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                                 slice: payload.description?.trim() || spec.title,
                                 folder: childCwd,
                                 vendor: vendorDisplayName(spec.provider),
-                                status: "running",
+                                ...(spawnModelLabel ? { model: spawnModelLabel } : {}),
+                                status: waitingAtStart ? "queued" : "running",
                                 startedAt,
                                 correlationId: childCorrelationId,
                                 // The caller is known here and was being dropped, so a
@@ -6598,6 +6818,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 return { ...current, sessions: admitted.sessions, leases };
               });
             };
+            // Filled in when a queued slice's turn comes: who finished first and what they said.
+            let afterNote = "";
+            let notStarted: string | undefined;
             const runChild = async () => {
               const spawnHead = window.workhorse?.gitHead && childCwd
                 ? await window.workhorse.gitHead(childCwd)
@@ -6613,7 +6836,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                     seed: spawnSeed,
                     handoff: spawnHandoff,
                     fromTitle: parent.title?.trim() || "another agent",
-                    text: payload.message,
+                    text: afterNote ? `${payload.message}\n\n${afterNote}` : payload.message,
                     folder: childCwd,
                     project: project?.name,
                     slice: payload.description,
@@ -6733,6 +6956,56 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               });
               return finalReport;
             };
+            /*
+             * A slice that comes after others starts when they have all ended.
+             * If one of them did not finish its work, this one never starts:
+             * its ground was never laid, and a run on it is spent for nothing.
+             * The head reads why in the join. A worker the person or the head
+             * stopped while it waited stays stopped.
+             */
+            const startWhenReady = async (): Promise<string> => {
+              if (waitingOn.length > 0) {
+                const deadline = Date.now() + AFTER_WAIT_MS;
+                const stillOpen = () =>
+                  waitingOn.filter((item) => {
+                    const earlier = stateRef.current.sessions.find((session) => session.id === item.id);
+                    return Boolean(earlier) && !isTerminalRunStatus(earlier?.agentRun?.status);
+                  });
+                while (stillOpen().length > 0 && Date.now() < deadline) {
+                  await new Promise((resolve) => setTimeout(resolve, AFTER_POLL_MS));
+                }
+                const sessionsNow = stateRef.current.sessions;
+                const rows = sessionsNow.find((session) => session.id === parent.id)?.lineup?.rows ?? [];
+                const finished = waitingOn.map((item) => {
+                  const earlier = sessionsNow.find((session) => session.id === item.id);
+                  return {
+                    name: item.name,
+                    status: earlier?.agentRun?.status ?? "completed",
+                    report: rows.find((row) => row.childId === item.id)?.report ?? childReportText(earlier) ?? "",
+                    ...(earlier?.agentRun?.changedFiles?.length ? { changedFiles: earlier.agentRun.changedFiles } : {}),
+                  };
+                });
+                const open = stillOpen();
+                notStarted = open.length > 0
+                  ? `Did not start: ${open.map((item) => item.name).join(", ")} had not finished after ${Math.round(AFTER_WAIT_MS / 3_600_000)} hours.`
+                  : afterBlockedReason(finished);
+                if (notStarted) {
+                  markChildFailure(new Error(notStarted));
+                  return "";
+                }
+                if (stateRef.current.sessions.find((session) => session.id === childId)?.agentRun?.status !== "running") return "";
+                afterNote = afterBriefFor(finished);
+                setState((current) => ({
+                  ...current,
+                  sessions: current.sessions.map((session) =>
+                    session.id === parent.id && session.lineup
+                      ? { ...session, lineup: setLineupRowStatus(session.lineup, childId, "running") }
+                      : session,
+                  ),
+                }));
+              }
+              return runChild();
+            };
             if (!waitForReply) {
               const startedBoard = boundLinkReply({
                 crew: spawnCrew,
@@ -6743,7 +7016,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                     slice: payload.description?.trim() || spec.title,
                     folder: admitted.cwd,
                     vendor: vendorDisplayName(spec.provider),
-                    status: "running",
+                    ...(spawnModelLabel ? { model: spawnModelLabel } : {}),
+                    status: waitingAtStart ? "queued" : "running",
                     startedAt,
                     ...(planStepId ? { planStepId } : {}),
                     ...(rationale ? { rationale } : {}),
@@ -6763,27 +7037,38 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                     folder: admitted.cwd,
                     lineup: startedBoard.lineup,
                     worker: workerName,
+                    // Which bot took the slice, so the caller never has to infer it.
+                    bot: [vendorDisplayName(spec.provider), spawnModelLabel].filter(Boolean).join(" · "),
                     reused: Boolean(priorWorker),
                     crew: startedBoard.crew,
                     crewCount: startedBoard.crewCount,
                     access: accessReceipt,
                     routingMode: routedWorkerIsRouted ? "auto" : "manual",
                     ...(routedWorkerIsRouted && routeDecision ? { routingDecision: routeDecision } : {}),
-                    howToUse: spawnContinuationHowToUse(workerName, Boolean(priorWorker)),
+                    ...(waitingAtStart ? { waitingFor: waitingOn.map((item) => item.name) } : {}),
+                    howToUse: spawnContinuationHowToUse(
+                      workerName,
+                      Boolean(priorWorker),
+                      waitingAtStart ? waitingOn.map((item) => item.name) : [],
+                    ),
                   },
                   null,
                   2,
                 ),
               });
-              void runChild().catch(markChildFailure);
+              void startWhenReady().catch(markChildFailure);
               return;
             }
             let fallback = "";
             try {
-              fallback = await runChild();
+              fallback = await startWhenReady();
             } catch (error) {
               markChildFailure(error);
               throw error;
+            }
+            if (notStarted) {
+              await replyAsk({ error: notStarted });
+              return;
             }
             if (terminalFailure) {
               const failed = stateRef.current.sessions.find((item) => item.id === childId);
@@ -8962,6 +9247,20 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }));
   }, []);
 
+  const saveBotKnowledgeRubric = useCallback(
+    (key: string, rubric: import("./bot-knowledge-rubric").BotKnowledgeRubricOverride | null) => {
+      setState((current) => {
+        const merged = mergeBotKnowledgeRubric(current.settings.botKnowledge, key, rubric);
+        const botKnowledge = normalizeBotKnowledge(merged);
+        const nextSettings = { ...current.settings };
+        if (botKnowledge.byModel && Object.keys(botKnowledge.byModel).length > 0) nextSettings.botKnowledge = botKnowledge;
+        else delete nextSettings.botKnowledge;
+        return { ...current, settings: nextSettings };
+      });
+    },
+    [],
+  );
+
   const updateSkillDiscovery = useCallback((patch: Partial<SkillDiscoverySettings>) => {
     setState((current) => ({
       ...current,
@@ -9037,6 +9336,42 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  const setSessionWorkshopPacks = useCallback((sessionId: string, packIds: string[]) => {
+    const ids = normalizeWorkshopPackIds(packIds) ?? [];
+    const current = stateRef.current;
+    let changed = false;
+    const sessions = current.sessions.map((session) => {
+      if (session.id !== sessionId) return session;
+      const prev = session.workshopPacks ?? [];
+      if (prev.length === ids.length && prev.every((id, index) => id === ids[index])) return session;
+      changed = true;
+      return { ...session, workshopPacks: ids.length > 0 ? ids : undefined };
+    });
+    if (!changed) return;
+    // Written onto the ref first so a following updateWorkshop snapshot keeps this chat's list.
+    const next = { ...current, sessions };
+    stateRef.current = next;
+    setState(next);
+  }, []);
+
+  const dropWorkshopPackFromChats = useCallback((packId: string) => {
+    const id = packId.trim();
+    if (!id) return;
+    const current = stateRef.current;
+    let changed = false;
+    const sessions = current.sessions.map((session) => {
+      const ids = session.workshopPacks;
+      if (!ids?.includes(id)) return session;
+      changed = true;
+      const nextIds = ids.filter((item) => item !== id);
+      return { ...session, workshopPacks: nextIds.length > 0 ? nextIds : undefined };
+    });
+    if (!changed) return;
+    const next = { ...current, sessions };
+    stateRef.current = next;
+    setState(next);
+  }, []);
+
   const grantPlanExternalAgents = useCallback((sessionId: string, allow: boolean) => {
     setState((current) => ({
       ...current,
@@ -9049,6 +9384,33 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       }),
     }));
   }, []);
+
+  // Public leaderboard scores. Main downloads and caches them; this applies the
+  // table routing reads and keeps the status the Bot knowledge pane shows.
+  const [botScores, setBotScores] = useState<BotScoresView | null>(null);
+  const applyBotScoresView = useCallback((raw: unknown) => {
+    if (!raw || typeof raw !== "object") return;
+    const view = raw as Partial<BotScoresView>;
+    const feed = normalizeBotScoresFeed(view.feed);
+    const prices = normalizeModelPricesFeed(view.prices);
+    applyBotScoresFeed(feed);
+    applyModelPrices(prices);
+    setBotScores({ feed, prices, status: { refreshing: false, ...(view.status ?? {}) } });
+  }, []);
+  useEffect(() => {
+    if (!ready) return;
+    void window.workhorse?.scoresRead?.().then(applyBotScoresView).catch(() => undefined);
+    return window.workhorse?.onScoresUpdated?.(applyBotScoresView);
+  }, [ready, applyBotScoresView]);
+  const refreshBotScores = useCallback(async () => {
+    if (!window.workhorse?.scoresRefresh) return;
+    setBotScores((current) => (current ? { ...current, status: { ...current.status, refreshing: true } } : current));
+    try {
+      applyBotScoresView(await window.workhorse.scoresRefresh());
+    } catch {
+      setBotScores((current) => (current ? { ...current, status: { ...current.status, refreshing: false } } : current));
+    }
+  }, [applyBotScoresView]);
 
   const [agentRuntimes, setAgentRuntimes] = useState<import("./external-catalog").AgentRuntimeStatus[]>([]);
   const [agentCatalog, setAgentCatalog] = useState<import("./external-catalog").ExternalAgent[]>([]);
@@ -9399,12 +9761,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       setRetentionDays,
       updateWatch,
       updateRouting,
+      saveBotKnowledgeRubric,
       updateSkillDiscovery,
       updateAgentSystems,
       updateJudge,
       updateLocalCompute,
       updateWorkshop,
+      setSessionWorkshopPacks,
+      dropWorkshopPackFromChats,
       grantPlanExternalAgents,
+      botScores,
+      refreshBotScores,
       agentRuntimes,
       agentCatalog,
       refreshAgentRuntimes,
@@ -9542,12 +9909,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       setRetentionDays,
       updateWatch,
       updateRouting,
+      saveBotKnowledgeRubric,
       updateSkillDiscovery,
       updateAgentSystems,
       updateJudge,
       updateLocalCompute,
       updateWorkshop,
+      setSessionWorkshopPacks,
+      dropWorkshopPackFromChats,
       grantPlanExternalAgents,
+      botScores,
+      refreshBotScores,
       agentRuntimes,
       agentCatalog,
       refreshAgentRuntimes,

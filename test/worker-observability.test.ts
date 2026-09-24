@@ -441,6 +441,45 @@ test("a join deferred because the parent was busy still names each worker's spen
   assert.match(queued!.text, /child=kid_run\s+status=completed\nspend: 15k tokens · \$1\.87/);
 });
 
+test("the join lists what each worker changed and asks the head to check before it reports", () => {
+  // Three live MiniMax heads out of four relayed "3/3 green" without running
+  // anything. The join now carries the desk's own diff and asks for the check.
+  const child = worker({
+    id: "kid_run",
+    title: "S4 slice",
+    status: "idle",
+    messages: [{ id: "a", role: "assistant", text: "Done.", createdAt: 1 }],
+    agentRun: { status: "running", startedAt: 1, isolation: "shared", changedFiles: ["src/stats.mjs", "test/stats.test.mjs"] },
+  });
+  const parent: Session = {
+    ...worker({ id: "orch", parentId: undefined, title: "Parent", status: "idle", agentRun: undefined, messages: [] }),
+    lineup: addLineupRow(emptyLineup("/repo", 1), {
+      childId: child.id,
+      title: child.title,
+      slice: "S4 slice",
+      folder: "/repo",
+      vendor: "Codex",
+      status: "running",
+      startedAt: 1,
+    }),
+  };
+  const settled = applyChildIdleSync([parent, child], child.id, "completed", { now: 3, report: "Done, tests untouched." });
+  const joined = maybeEnqueueLineupJoin(settled, "orch", 5);
+  const queued = joined.find((session) => session.id === "orch")!.queue?.find((item) => item.joinAttempt === 1);
+  assert.ok(queued, "the join is queued");
+  assert.match(queued!.text, /child=kid_run\s+status=completed\nran on: Codex\nchanged: src\/stats\.mjs, test\/stats\.test\.mjs\n/);
+  assert.match(queued!.text, /run the project's own check \(its tests, or its build when it has no tests\) in the folder above/);
+  assert.match(queued!.text, /Say which results you checked yourself and which are only a worker's word\./);
+  assert.match(queued!.text, /Those are all 1 worker this wave started\. A slice you meant to start that is not listed was never spawned: say you did not start it, never that the desk dropped it\./);
+
+  const settledLineup = settled.find((session) => session.id === "orch")!.lineup;
+  const many = lineupJoinPrompt(settledLineup, { changed: { kid_run: Array.from({ length: 15 }, (_, index) => `f${index}.ts`) } });
+  assert.match(many, /changed: f0\.ts, f1\.ts, .*, f11\.ts, and 3 more\n/, "a long diff is cut short");
+  assert.doesNotMatch(lineupJoinPrompt(settledLineup), /\nchanged:/, "no diff, no line");
+  assert.doesNotMatch(lineupJoinPrompt(settledLineup, { continuePlan: true }), /project's own check/, "a plan's auditor owns its gate");
+  assert.match(formatAwaitAgentsSnapshot({ lineup: settledLineup, wait: true }), /run the project's own check/);
+});
+
 test("a wave that was mid-flight when the desk closed joins on restart with its spend", () => {
   const restart = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
   // The restart join runs inside reconcilePersistedLineups, so the ledger has

@@ -14,7 +14,7 @@ import type {
   StoredRoutingProfile,
   TaskDomain,
 } from "./types";
-import { isLocalEndpoint } from "./usage";
+import { isLocalEndpoint, runDrawKey, type RunDraws } from "./usage";
 import {
   customBotAttached,
   customBotEnabled,
@@ -28,6 +28,26 @@ import { cursorWatchLane } from "./cursor-lane";
 import { outcomeVerification } from "./learning-policy";
 import { isAssignedEffort, modelsFor, normalizeModelId, withEffort, contextWindowFor } from "./models";
 import type { WatchPlans, WatchVendorStatus } from "./watch";
+import { compareVersions, deskModelKey, nameGeneration } from "./bot-scores";
+import {
+  botKnowledgeRubricForModel,
+  MANUAL_RUBRIC_SOURCE,
+  type BotKnowledgeSettings,
+} from "./bot-knowledge-rubric";
+import {
+  DEFAULT_TYPICAL_RUN,
+  priceLabel,
+  resolveModelPrice,
+  runCostLabel,
+  typicalRunCost,
+  type ResolvedModelPrice,
+  type TypicalRun,
+} from "./model-prices";
+import { domainIntelligenceBar } from "./domain-benchmark-catalog";
+import { publishedAgenticScore, resolveDomainScore, type ResolvedDomainScore } from "./domain-score";
+import { detectsImageGenerationIntent, inferTaskDomain, looksCodey } from "./task-domain";
+
+export { detectsImageGenerationIntent, inferTaskDomain, looksCodey } from "./task-domain";
 
 export type RoutingCapacity = {
   usedPercent?: number;
@@ -63,7 +83,59 @@ export type RoutingCandidate = VendorLaunchState & {
   paceUnmetered?: boolean;
   /** Tokens this model can hold. A candidate that cannot hold the conversation is skipped. */
   contextWindow?: number;
+  /**
+   * The short rate window beside the weekly or monthly pool (a 5h session).
+   * A pool with days of leftover still stalls a worker when this one is full.
+   */
+  shortWindow?: RoutingCapacity;
+  /**
+   * What this model's finished worker runs took on this desk, against the
+   * desk's median run. Set only once the ledger holds enough runs to say.
+   */
+  draw?: CandidateRunDraw;
 };
+
+export type CandidateRunDraw = {
+  /** Median tokens a finished worker run on this model took. */
+  medianTokens: number;
+  runs: number;
+  /** That median over the desk's median run, whatever model ran it. */
+  ratio: number;
+  /** Median output tokens a second over this model's finished runs, and that over the desk's. */
+  outputPerSecond?: number;
+  speedRatio?: number;
+};
+
+/** Runs a model needs on the ledger before its draw counts, and runs the desk needs for a median worth comparing with. */
+const DRAW_MIN_MODEL_RUNS = 3;
+const DRAW_MIN_DESK_RUNS = 6;
+
+/** Each row with the draw its model has shown on this desk's own finished runs, when there are enough of them. */
+export function withRunDraws(candidates: RoutingCandidate[], draws: RunDraws | undefined): RoutingCandidate[] {
+  if (!draws || draws.deskRuns < DRAW_MIN_DESK_RUNS || draws.deskMedianTokens <= 0) return candidates;
+  return candidates.map((candidate) => {
+    const measured = draws.byModel[runDrawKey(candidate.provider, candidate.model, candidate.customBotId)];
+    if (!measured || measured.runs < DRAW_MIN_MODEL_RUNS) return candidate;
+    const speedRatio =
+      measured.outputPerSecond !== undefined && draws.deskOutputPerSecond
+        ? measured.outputPerSecond / draws.deskOutputPerSecond
+        : undefined;
+    return {
+      ...candidate,
+      draw: { ...measured, ratio: measured.medianTokens / draws.deskMedianTokens, ...(speedRatio !== undefined ? { speedRatio } : {}) },
+    };
+  });
+}
+
+/** `newer` is a later version of the same model line as `older`: Opus 5.5 over Opus 4.7, Grok 4.7 over Grok 4.6. */
+export function isNewerGeneration(
+  newer: Pick<RoutingCandidate, "provider" | "model">,
+  older: Pick<RoutingCandidate, "provider" | "model">,
+): boolean {
+  const a = nameGeneration(deskModelKey(newer.provider, newer.model).base);
+  const b = nameGeneration(deskModelKey(older.provider, older.model).base);
+  return Boolean(a && b && a.line === b.line && compareVersions(a.version, b.version) > 0);
+}
 
 export type RoutingJobRole = "orchestrator" | "worker" | "auditor" | "builder";
 
@@ -94,6 +166,19 @@ export type RoutingRequest = {
   contextNeed?: number;
   /** What the work is about. Omit to infer from the prompt. */
   taskDomain?: TaskDomain;
+  /** Orchestrate or Mission: rank spawns by domain score and the plan terms of each pool. */
+  useOrchestrationBenchmark?: boolean;
+  /**
+   * The rows a coordinator named on the spawn. Orchestration keeps its pick
+   * when one of them clears the domain bar, and ranks as usual when none does.
+   */
+  preferred?: Array<Pick<RoutingCandidate, "provider" | "model" | "customBotId">>;
+  /** Workers already running (or just assigned) per `routingPoolKey`. Each one costs that pool a little. */
+  activeLoad?: Record<string, number>;
+  /** Thinking level the caller asked for. Scores are read for the run at that level. */
+  effortHint?: EffortLevel | null;
+  /** What a typical finished run takes on this desk, part by part. Costs are priced on it. */
+  typicalRun?: TypicalRun;
 };
 
 export type RankedRoutingCandidate = RoutingCandidate & {
@@ -101,6 +186,8 @@ export type RankedRoutingCandidate = RoutingCandidate & {
   expectedUsedPercent?: number;
   capacityDelta?: number;
   usedPercent?: number;
+  /** Why an Orchestrate or Mission spawn ranked this row where it did. */
+  orchestration?: OrchestrationTerms;
 };
 
 export const ROUTING_EVIDENCE_VERSION = 1;
@@ -234,6 +321,7 @@ export function routingCandidatesForDesk(
       const product = namedProduct ?? sharedProduct ?? plan?.products.find((item) => `${item.product} ${item.label}`.toLowerCase().includes(slug));
       const laneCapacity =
         provider === "cursor" ? status.get(cursorWatchLane(model.id)) : capacity;
+      const shortWindow = shortWindowOf(plan);
       candidates.push({
         provider,
         model: model.id,
@@ -251,6 +339,7 @@ export function routingCandidatesForDesk(
           period: plan?.period ?? laneCapacity?.period ?? capacity?.period,
           ...(plan?.observedAt ? { observedAt: plan.observedAt } : {}),
         },
+        ...(shortWindow ? { shortWindow } : {}),
       });
     }
   }
@@ -290,6 +379,7 @@ export function routingCandidatesForDesk(
       const localByUrl = isLocalEndpoint(bot.baseUrl);
       const routed = routingProfileForModel("custom", model, customModelRoutingOverride(bot, model));
       const profile = localByUrl && !routed.local ? { ...routed, local: true } : routed;
+      const shortWindow = profile.local ? undefined : shortWindowOf(plan);
       candidates.push({
         provider: "custom",
         model,
@@ -309,10 +399,31 @@ export function routingCandidatesForDesk(
         // get, and a 0%-used local bot already outscored a metered model that
         // fit better. No gauge means no gauge.
         capacity: paceUnmetered || profile.local ? {} : customBotCapacity(product, plan, capacity),
+        ...(shortWindow ? { shortWindow } : {}),
       });
     }
   }
   return candidates;
+}
+
+/**
+ * The 5h session window a plan reports beside its main pool, if it reports
+ * one. Claude and Codex name it `session` / `five_hour`; hosts that only
+ * label products say "5h".
+ */
+function shortWindowOf(plan: GrokPlanUsage | undefined): RoutingCapacity | undefined {
+  const product = plan?.products.find(
+    (item) =>
+      item.product === "session" ||
+      item.product === "five_hour" ||
+      /(^|[^a-z0-9])5\s?h([^a-z0-9]|$)|5-hour|five hour/i.test(`${item.product} ${item.label ?? ""}`),
+  );
+  if (!product || product.unlimited || !Number.isFinite(product.usagePercent)) return undefined;
+  return {
+    usedPercent: product.usagePercent,
+    ...(product.resetsAt ? { resetsAt: product.resetsAt } : {}),
+    ...(plan?.observedAt ? { observedAt: plan.observedAt } : {}),
+  };
 }
 
 /**
@@ -411,7 +522,8 @@ export function routingProfileForModel(
   } else if (/(?:^|[^a-z0-9])gpt-6(?:$|[-.])/.test(slug)) {
     // GPT-6 Astra: Codex's newest flagship, rated with Sol until someone rates it.
     // A host path such as "openai/gpt-6-astra" counts; "mygpt-6" does not.
-    base = profile(10, 2, 5, { strengths: CODE });
+    // GPT-6 Luna is the light one of the family, fast and cheap like 5.6 Luna.
+    base = slug.includes("luna") ? profile(5, 5, 1) : profile(10, 2, 5, { strengths: CODE });
   } else if (slug.includes("5.6-sol")) {
     base = profile(10, 2, 5, { strengths: CODE });
   } else if (slug.includes("5.6-terra")) {
@@ -449,14 +561,17 @@ export function routingProfileForModel(
   } else if (slug.includes("haiku")) {
     base = profile(5, 5, 1);
   } else if (slug.includes("minimax-m3")) {
-    // Balanced band. Rated 7 it sat one point under the bar of 8, so no amount
-    // of spare capacity could put ordinary coding on it and every balanced pick
-    // went to a paid seat. The bar stays at 8; the rating is what was wrong.
-    base = profile(8, 4, 2, { strengths: CODE });
+    // Mid-field, not the balanced band, and not a coding specialist. The public
+    // boards put it around 40th in Code Arena, 80th in the text arena, and
+    // 34th of 43 in Agent Arena: behind Luna on code and agent work. It was
+    // lifted to 8 once so ordinary coding could reach a cheap plan; quick work
+    // still can, and orchestration reads its board scores directly.
+    base = profile(6, 4, 2);
   } else if (slug.includes("local") || slug.includes("ollama") || slug.includes("lmstudio")) {
     base = profile(4, 4, 1, { local: true });
   } else if (slug.includes("minimax")) {
-    base = profile(6, 4, 2);
+    // Last generation, well behind M3 on every board.
+    base = profile(5, 4, 2);
   } else if (slug.includes("composer")) {
     base = profile(8, 4, 2, { strengths: CODE });
   } else if (slug === "auto" || slug === "auto-smart" || slug.startsWith("auto-")) {
@@ -607,27 +722,6 @@ export function mergeInputRequirements(
   return required;
 }
 
-/**
- * Ask to *produce* an image from text. Conservative: needs a generation verb
- * plus an image noun, and skips analyze/describe-this-image phrasing.
- */
-export function detectsImageGenerationIntent(prompt: string): boolean {
-  const text = prompt.trim().toLowerCase();
-  if (!text) return false;
-  if (
-    /\b(analy[sz]e|describe|explain|inspect|review|ocr|transcribe|caption|what(?:'s| is)|tell me about)\b/.test(text) &&
-    /\b(image|picture|photo|screenshot|illustration|drawing)\b/.test(text)
-  ) {
-    return false;
-  }
-  const imageNoun = /\b(image|picture|illustration|photo|drawing|artwork)\b/.test(text);
-  if (!imageNoun) return false;
-  return (
-    /\b(generate|create|draw|imagine|paint|render|sketch)\b/.test(text) ||
-    /\bmake\b[\s\S]{0,40}\b(image|picture|illustration|photo|drawing|artwork)\b/.test(text)
-  );
-}
-
 /** Stock image generators only. Never infer from profile.inputs.images. */
 function candidateCanGenerateImages(candidate: RoutingCandidate): boolean {
   return candidate.provider === "grok";
@@ -679,41 +773,27 @@ export function describeRoutingMiss(
   return `no capable route${skipped}`;
 }
 
-/**
- * Does this prompt look like it is about code? One definition serves two
- * rules: the quick tier must not swallow a short-but-codey ask, and the
- * domain tie-break should send code work to models strong at it. Sol's
- * killer example was 76 characters with "list" in it and a lock-free queue
- * to reason about.
- */
-export function looksCodey(text: string): boolean {
-  return (
-    /```/.test(text) ||
-    /\b[\w./-]+\.(ts|tsx|js|jsx|mjs|py|go|rs|rb|java|cs|cpp|cc|h|swift|kt|gd|sql|sh|bash|yml|yaml|toml|json)\b/i.test(text) ||
-    /\b(function|class|import|const|async|await|struct|enum|interface|typedef|regex|compile|typecheck|stack trace|traceback|segfault|null pointer|exception|unit test|test suite|lint|refactor|implement|component|api|endpoint|mutex|thread|queue|algorithm)\b/i.test(text) ||
-    /=>|::|\(\)|\{\}|\[\]/.test(text)
-  );
-}
+/** How far into a worker's brief its slice is stated. The rest is the head's background. */
+const WORKER_SLICE_HEAD = 600;
 
-/** What the prompt is mostly about. Explicit request fields win over inference. */
-export function inferTaskDomain(prompt: string, attachments: ChatImage[] = []): TaskDomain {
-  const text = prompt.trim();
-  if (!text && attachments.length === 0) return "general";
-  if (looksCodey(text)) return "coding";
-  const lower = text.toLowerCase();
-  if (/\b(csv|sql|spreadsheet|dataset|dashboard|pivot|rows|columns|chart|plot|histogram|median|regression|analy[sz]e the (data|numbers))\b/.test(lower)) {
-    return "data";
+/** The slice prose a spawn tier should read, not the head's surrounding brief. */
+export function routingTierSliceText(prompt: string, role?: RoutingJobRole): string {
+  const trimmed = prompt.trim();
+  const workerBrief = role === "builder" || role === "worker" || role === "auditor";
+  if (!workerBrief) return trimmed;
+  for (const line of trimmed.split(/\r?\n/)) {
+    const tagged = line.match(/^\s*(?:SLICE|TASK)\s*:\s*(.+)/i);
+    if (tagged?.[1]?.trim()) return tagged[1].trim().slice(0, WORKER_SLICE_HEAD);
   }
-  if (
-    attachments.some((item) => item.kind === "image") ||
-    /\b(screenshots?|mockups?|illustration|figma|visual|pixel|artwork|storyboard)\b/.test(lower)
-  ) {
-    return "visual";
+  const onlyTask = /(?:^|\n)\s*(?:your only task|task)\s*:\s*/i.exec(trimmed);
+  if (onlyTask) {
+    const start = onlyTask.index! + onlyTask[0].length;
+    let rest = trimmed.slice(start);
+    const stop = rest.search(/\.\s*(?:background:|no bugs)/i);
+    if (stop >= 0) rest = rest.slice(0, stop + 1);
+    return rest.trim().slice(0, WORKER_SLICE_HEAD);
   }
-  if (/\b(write|draft|rewrite|blog|article|essay|email|newsletter|copy|caption|tagline|announcement|readme|docs?|documentation|prose|tone|headline|post)\b/.test(lower)) {
-    return "writing";
-  }
-  return "general";
+  return trimmed.slice(0, WORKER_SLICE_HEAD);
 }
 
 export function inferRoutingTier(
@@ -731,18 +811,30 @@ export function inferRoutingTier(
   if (extras?.role === "auditor") return "deep";
   const text = prompt.trim();
   const lower = text.toLowerCase();
+  const workerBrief = extras?.role === "builder" || extras?.role === "worker";
+  // A worker's depth is the slice it was given, not the background a careful
+  // head wrote around it. A MiniMax head's detailed brief for a 120-word
+  // release note routed Deep on its length alone and put Fable 5.1 on it, and
+  // a "no bugs" deep in the background reads as bug work.
+  const sliceText = routingTierSliceText(text, extras?.role);
+  const marked = workerBrief ? sliceText.toLowerCase() : lower;
   // Hard-work markers route deep even in a short prompt. All three reviews
   // agreed the safe error is expensive (frontier on trivia), not harmful (a
   // light model on "list every concurrency bug and prove linearizability").
-  const deep = /\b(architect|migration|security|threat|root cause|debug|refactor|review|investigate|research|strategy|production|end[- ]to[- ]end|multi[- ]agent|bug|prove|concurrenc\w*|deadlock|race|lineariz\w*|crash|leak)\b/.test(lower);
-  const creative = /\b(creative|story|narrative|poem|fiction|worldbuild|invent a|brainstorm)\b/.test(lower);
+  const deep = /\b(architect|migration|security|threat|root cause|debug|refactor|review|investigate|research|strategy|production|end[- ]to[- ]end|multi[- ]agent|bug|prove|concurrenc\w*|deadlock|race|lineariz\w*|crash|leak)\b/.test(marked);
+  const creative = /\b(creative|story|narrative|poem|fiction|worldbuild|invent a|brainstorm)\b/.test(marked);
   // A short prompt with a quick keyword still is not quick when it reads like
   // code: "classify this function" deserves the balanced band, not Luna.
-  const quick = text.length < 180 && !looksCodey(text) && /\b(reply|rename|format|translate|summari[sz]e|list|extract|classify|one[- ]line|quick)\b/.test(lower);
+  const quickSource = workerBrief ? sliceText : text;
+  const quick =
+    quickSource.length < 180 &&
+    !looksCodey(quickSource) &&
+    /\b(reply|rename|format|translate|summari[sz]e|list|extract|classify|one[- ]line|quick)\b/.test(marked);
   const media = attachments.some((item) => item.kind === "audio" || item.kind === "video" || item.kind === "document");
   const long = text.length > 1200;
-  if (extras?.role === "builder" || extras?.role === "worker") {
-    if (deep || creative || long || (media && text.length > 240)) return "deep";
+  if (workerBrief) {
+    if (deep || creative || (media && sliceText.length > 240)) return "deep";
+    if (quick && !media) return "quick";
     return "balanced";
   }
   if (deep || creative || long || (media && text.length > 240)) return "deep";
@@ -1016,7 +1108,7 @@ function extraPoolAssignment(
     profile.cost >= 5 &&
     (profile.strengths?.includes("visual") === true || profile.strengths?.includes("writing") === true);
   if (!extraPool) return 0;
-  if (domain === "visual" || domain === "writing") return 4;
+  if (domain === "visual" || domain === "writing" || domain === "image-generation") return 4;
   return tier === "deep" ? -2 : -6;
 }
 
@@ -1116,11 +1208,12 @@ export function routingDecisionEvidence(input: {
   candidates: RoutingCandidate[];
   request: RoutingRequest;
   settings: RoutingSettings;
+  botKnowledge?: BotKnowledgeSettings;
   selected: Pick<RoutingCandidate, "provider" | "model" | "customBotId">;
   mode: RoutingEvidenceMode;
   source: RoutingEvidenceSource;
 }): RoutingDecisionEvidenceV1 | null {
-  const ranked = rankRoutingCandidates(input.candidates, input.request, input.settings);
+  const ranked = rankRoutingCandidates(input.candidates, input.request, input.settings, input.botKnowledge);
   const recommendation = ranked[0];
   if (!recommendation) return null;
   const runnerUp = ranked[1];
@@ -1214,10 +1307,523 @@ export function routingSkipReason(
   return undefined;
 }
 
+/**
+ * The most quality counts for on each tier, out of 100. Quick work stops
+ * paying for quality at 40, about a board's twelfth place: a quick reply does
+ * not need a leader, so cost and speed decide it. Balanced and deep work count
+ * every point, so the frontier is never ranked level with a model half as
+ * good; GPT-6 Astra once sat below GPT-5.6 Sol on balanced coding because
+ * quality stopped counting at 7 of 10.
+ */
+const ORCHESTRATION_QUALITY_CAP: Record<RoutingTaskTier, number> = { quick: 40, balanced: 100, deep: 100 };
+/**
+ * Domain points given up for each doubling of what a typical run costs over the
+ * cheapest row that clears the bar and can take work now: list price per input
+ * and output token times the desk's typical run, scaled by what the model's own
+ * runs take. Uncapped, so two dear models keep their order.
+ */
+const ORCHESTRATION_COST_WEIGHT: Record<RoutingTaskTier, number> = { quick: 9, balanced: 3.5, deep: 1.5 };
+/** A run priced below this reads as this, so a free row cannot make every other one infinitely dear. */
+const MIN_RUN_COST_USD = 0.001;
+/** How much a pool's plan terms count against quality on each tier. */
+const ORCHESTRATION_PLAN_WEIGHT: Record<RoutingTaskTier, number> = { quick: 1.5, balanced: 1, deep: 0.5 };
+/**
+ * Domain points gained for each doubling of speed over the desk's median (or
+ * lost for each halving): what a quick job is for, a tiebreaker on balanced
+ * work, and nothing on deep work, where the best answer is worth the wait.
+ */
+const ORCHESTRATION_SPEED_WEIGHT: Record<RoutingTaskTier, number> = { quick: 6, balanced: 2.5, deep: 0 };
+/** How far measured speed can move a row, in doublings either way. */
+const MAX_SPEED_DOUBLINGS = 2;
+
+/** What each tier weighs, for anyone reading a ranking: the bar, the quality cap, and what cost, speed and plan terms are worth. */
+export type OrchestrationTierWeights = {
+  tier: RoutingTaskTier;
+  bar: number;
+  qualityCap: number;
+  costPerDoubling: number;
+  speedPerDoubling: number;
+  planWeight: number;
+};
+
+export function orchestrationTierWeights(tier: RoutingTaskTier): OrchestrationTierWeights {
+  const bar = domainIntelligenceBar(tier);
+  return {
+    tier,
+    bar,
+    qualityCap: ORCHESTRATION_QUALITY_CAP[tier],
+    costPerDoubling: ORCHESTRATION_COST_WEIGHT[tier],
+    speedPerDoubling: ORCHESTRATION_SPEED_WEIGHT[tier],
+    planWeight: ORCHESTRATION_PLAN_WEIGHT[tier],
+  };
+}
+
+/** One sentence per tier: "Quick: any bot; quality counts up to 40; …". */
+export function orchestrationTierNote(tier: RoutingTaskTier): string {
+  const weights = orchestrationTierWeights(tier);
+  const name = tier === "quick" ? "Quick" : tier === "deep" ? "Deep" : "Balanced";
+  const bar = weights.bar <= 1 ? "any bot" : `${weights.bar}/100 to qualify`;
+  const quality = weights.qualityCap >= 100 ? "every point of quality counts" : `quality counts up to ${weights.qualityCap}`;
+  const speed = weights.speedPerDoubling > 0 ? `each doubling of speed +${weights.speedPerDoubling}` : "speed does not count";
+  return `${name}: ${bar}; ${quality}; each doubling of run cost −${weights.costPerDoubling}; ${speed}; plan terms ×${weights.planWeight}.`;
+}
+
+/**
+ * How far a model's measured draw moves what its typical run costs: its median
+ * run over the desk's, capped both ways so a few odd runs cannot swing a pick.
+ */
+const DRAW_RATIO_CEILING = 4;
+const DRAW_RATIO_FLOOR = 0.5;
+/** Points a pool gives up for each worker already running on it, so a squad spreads over the desk. */
+const ORCHESTRATION_BUSY_POINTS = 6;
+/**
+ * Points a 5h window takes off as it fills past the tight mark, at 100%. A
+ * worker that stalls mid-task for hours costs more than a wide gap in
+ * quality, so a window about to stall one outweighs Opus 5's lead over
+ * GPT-5.6 Sol on coding.
+ */
+const SHORT_WINDOW_POINTS = 60;
+/** What a pool's plan terms are worth, out of 100: leftover about to expire, pace, the reserve, no meter. */
+const EXPIRING_POINTS_MAX = 15;
+const EXCESS_PACE_POINTS = 7.5;
+const BEHIND_PACE_POINTS = 5;
+const RESERVE_POINTS = 20;
+const UNMETERED_POINTS = 2.5;
+/** A 5h window at or past this is close to stalling a worker mid-task... */
+const SHORT_WINDOW_TIGHT_PERCENT = 90;
+/** ...unless it resets this soon. */
+const SHORT_WINDOW_GRACE_MS = 20 * 60 * 1000;
+
+/** Which allowance a candidate draws on. Two workers on one pool share its leftover and its rate window. */
+export function routingPoolKey(candidate: Pick<RoutingCandidate, "provider" | "model" | "customBotId">): string {
+  if (candidate.provider === "custom") return `bot:${candidate.customBotId ?? candidate.model.toLowerCase()}`;
+  if (candidate.provider === "cursor") return cursorWatchLane(candidate.model);
+  return candidate.provider;
+}
+
+/** How long a fresh route counts as load before its worker shows up as running. */
+export const RECENT_ROUTE_MS = 45_000;
+
+/**
+ * Workers on each pool right now: running desk workers, plus routes handed out
+ * in the last few seconds whose workers have not started yet. A wave of
+ * parallel spawns then spreads over the desk instead of piling onto one pool.
+ */
+export function activeRouteLoad(
+  sessions: ReadonlyArray<{
+    provider: ProviderId;
+    model: string;
+    customBotId?: string;
+    agentRun?: { status?: string } | null;
+  }>,
+  recent: ReadonlyArray<{ key: string; at: number }> = [],
+  now = Date.now(),
+): Record<string, number> {
+  const load: Record<string, number> = {};
+  for (const session of sessions) {
+    if (session.agentRun?.status !== "running") continue;
+    const key = routingPoolKey(session);
+    load[key] = (load[key] ?? 0) + 1;
+  }
+  for (const item of recent) {
+    if (now - item.at > RECENT_ROUTE_MS) continue;
+    load[item.key] = (load[item.key] ?? 0) + 1;
+  }
+  return load;
+}
+
+/**
+ * The rows a coordinator's model name refers to: the exact id, the desk's
+ * display name, or a model family named without a vendor.
+ */
+export function candidatesNamedBy(
+  candidates: RoutingCandidate[],
+  input: { provider?: ProviderId; model?: string },
+): RoutingCandidate[] {
+  const raw = input.model?.trim().toLowerCase() ?? "";
+  if (!raw) return [];
+  const family = spawnModelFamilyKey(raw);
+  return candidates.filter((row) => {
+    if (input.provider && row.provider !== input.provider) return false;
+    const id = normalizeModelId(row.provider, row.model).toLowerCase();
+    if (id === raw || row.model.toLowerCase() === raw || row.label.toLowerCase() === raw) return true;
+    if (normalizeModelId(row.provider, raw).toLowerCase() === id) return true;
+    return family !== null && routingModelFamily(row) === family;
+  });
+}
+
+export type OrchestrationPace = "spare" | "on pace" | "behind";
+
+/** The terms one pool is judged on for one Orchestrate or Mission spawn. */
+export type OrchestrationTerms = {
+  domain: TaskDomain;
+  tier: RoutingTaskTier;
+  /** Thinking level this route would run at. Scores are read for that run. */
+  effort: EffortLevel | null;
+  /** Domain score (1–10) and where it came from. The bar is read against this. */
+  fit: ResolvedDomainScore;
+  /** Agent Arena score, when that arena rates this model. */
+  agentic?: { score: number; source: string };
+  /** Fit with the agentic share mixed in for a spawn. What ranking weighs. */
+  quality: number;
+  /** This model's measured draw per run, and the capped ratio that scales its run cost. */
+  draw?: CandidateRunDraw & { applied: number };
+  /** List price, and what a typical run on this desk costs at it. */
+  cost: ResolvedModelPrice & { perRun: number };
+  /**
+   * Speed in doublings over the desk's median: measured from this model's own
+   * finished runs when there are enough, otherwise its family's speed rating
+   * (5 of 5 is one doubling up, 1 of 5 one down).
+   */
+  speed: { doublings: number; measured: boolean; outputPerSecond?: number; rating: number; label: string };
+  /** Older rows of this model's line on the same plan that this row stands in for. */
+  supersedes?: Array<Pick<RoutingCandidate, "provider" | "model" | "customBotId" | "label">>;
+  /** The bar this spawn had to clear. */
+  bar: number;
+  plan: {
+    usedPercent?: number;
+    expectedUsedPercent?: number;
+    resetsInMs?: number;
+    period?: RoutingCapacity["period"];
+    pace?: OrchestrationPace;
+    /** Leftover that disappears at a reset inside the next day. */
+    expiring: boolean;
+    /** Inside the reserve the owner set aside, with days still to run. */
+    reserve: boolean;
+    /** No meter: a local box, or a plan whose gauge never moves. */
+    unmetered: boolean;
+    shortWindowUsedPercent?: number;
+    shortWindowResetsInMs?: number;
+    /** Workers already running on this pool. */
+    busy: number;
+  };
+  /** Domain points: quality after the tier's headroom, the cost premium, and the plan terms after the tier's weight. */
+  points: { quality: number; cost: number; speed: number; plan: number };
+  /** The number rows are ordered by. */
+  considerate: number;
+  /** A coordinator named this row and it cleared the bar. */
+  coordinatorPick: boolean;
+  why: string[];
+};
+
+function paceOf(delta: number | undefined): OrchestrationPace | undefined {
+  if (delta === undefined || !Number.isFinite(delta)) return undefined;
+  if (delta >= 10) return "spare";
+  if (delta <= -10) return "behind";
+  return "on pace";
+}
+
+function oneDecimal(value: number): number {
+  return Math.round(value * 10) / 10;
+}
+
+/** "84k", "1.2M". */
+function tokenCount(tokens: number): string {
+  if (tokens >= 1_000_000) return `${oneDecimal(tokens / 1_000_000)}M`;
+  if (tokens >= 1_000) return `${Math.round(tokens / 1_000)}k`;
+  return String(Math.round(tokens));
+}
+
+type OrchestrationFit = {
+  terms: Omit<OrchestrationTerms, "bar" | "points" | "considerate" | "coordinatorPick">;
+  /** Raw plan points. The ranker weights them by tier. */
+  planPoints: number;
+};
+
+/** Fit and plan terms for one candidate, before the ranker knows the bar or the cheapest row. */
+function orchestrationFit(
+  candidate: RoutingCandidate,
+  input: {
+    tier: RoutingTaskTier;
+    domain: TaskDomain;
+    role?: RoutingJobRole;
+    settings: RoutingSettings;
+    now: number;
+    busy: number;
+    effortHint?: EffortLevel | null;
+    typicalRun?: TypicalRun;
+    botKnowledge?: BotKnowledgeSettings;
+  },
+): OrchestrationFit {
+  const effort = effortForRoutingTier(candidate.provider, candidate.model, input.tier, input.effortHint ?? null);
+  const manual = botKnowledgeRubricForModel(
+    input.botKnowledge,
+    candidate.provider,
+    candidate.model,
+    candidate.customBotId,
+  )?.domainScores?.[input.domain];
+  const fit: ResolvedDomainScore =
+    manual !== undefined
+      ? { score: manual, source: MANUAL_RUBRIC_SOURCE, origin: "desk-table" }
+      : resolveDomainScore(candidate.provider, candidate.model, input.domain, candidate.profile.intelligence, effort);
+  const agentic = publishedAgenticScore(candidate.provider, candidate.model, effort) ?? undefined;
+  // The domain score already carries the Agent Arena (see resolveDomainScore),
+  // and a score set on the rubric is the owner's word for the whole thing.
+  const quality = fit.score;
+  const why: string[] = [`${input.domain} ${fit.score}/100 (${fit.source})`];
+  const runDraw = candidate.draw
+    ? { ...candidate.draw, applied: clamp(candidate.draw.ratio, DRAW_RATIO_FLOOR, DRAW_RATIO_CEILING) }
+    : undefined;
+  const price = resolveModelPrice(candidate.provider, candidate.model, candidate.profile.cost);
+  const perRun = typicalRunCost(price, input.typicalRun ?? DEFAULT_TYPICAL_RUN) * (runDraw?.applied ?? 1);
+  why.push(
+    `about ${runCostLabel(perRun)} a typical run (${price.published ? priceLabel(price) : price.source})`,
+  );
+  if (runDraw) {
+    why.push(`about ${tokenCount(runDraw.medianTokens)} tokens a finished run over ${runDraw.runs} runs, ${oneDecimal(runDraw.ratio)}× the desk's median`);
+  }
+  const measuredSpeed = runDraw?.speedRatio !== undefined && runDraw.outputPerSecond !== undefined;
+  const speed = measuredSpeed
+    ? {
+        doublings: oneDecimal(clamp(Math.log2(runDraw!.speedRatio!), -MAX_SPEED_DOUBLINGS, MAX_SPEED_DOUBLINGS)),
+        measured: true,
+        outputPerSecond: runDraw!.outputPerSecond!,
+        rating: candidate.profile.speed,
+        label: `${Math.round(runDraw!.outputPerSecond!)} tok/s here`,
+      }
+    : {
+        doublings: (candidate.profile.speed - 3) / 2,
+        measured: false,
+        rating: candidate.profile.speed,
+        label: `speed ${candidate.profile.speed}/5 (family)`,
+      };
+  why.push(
+    speed.measured
+      ? `${speed.label}, ${oneDecimal(runDraw!.speedRatio!)}× the desk's median`
+      : `${speed.label}, until three runs here time it`,
+  );
+  const unmetered = Boolean(candidate.paceUnmetered || candidate.profile.local);
+  const draw = weeklyDrawState(candidate.capacity, input.now);
+  const resetMs = routingResetMs(candidate.capacity, input.now);
+  let planPoints = 0;
+  let expiring = false;
+  let reserve = false;
+  if (unmetered) {
+    planPoints += UNMETERED_POINTS;
+    why.push("no meter to spend down");
+  } else if (input.settings.capacityAware && draw.usedPercent !== undefined) {
+    const expiry = candidateExpiryCredit(candidate.capacity, input.now);
+    if (expiry > 0) {
+      expiring = true;
+      planPoints += Math.min(EXPIRING_POINTS_MAX, (expiry / 32) * 10);
+      why.push(`${Math.round(100 - draw.usedPercent)}% left expires in ${expiryHoursLabel(resetMs)}`);
+    } else if (draw.delta !== undefined) {
+      const delta = clamp(draw.delta, -50, 50);
+      if (input.settings.preferExcess) planPoints += (delta / 50) * EXCESS_PACE_POINTS;
+      else if (delta < 0) planPoints += (delta / 50) * BEHIND_PACE_POINTS;
+    }
+    if (draw.usedPercent >= 100 - input.settings.reservePercent) {
+      const weight = reservePenaltyWeight(draw.resetMs);
+      if (weight > 0) {
+        reserve = true;
+        planPoints -= RESERVE_POINTS * weight;
+        why.push(`inside the ${input.settings.reservePercent}% reserve`);
+      }
+    }
+  }
+  const short = candidate.shortWindow;
+  const shortResetMs = routingResetMs(short, input.now);
+  if (
+    short?.usedPercent !== undefined &&
+    short.usedPercent >= SHORT_WINDOW_TIGHT_PERCENT &&
+    !(Number.isFinite(shortResetMs) && shortResetMs <= SHORT_WINDOW_GRACE_MS)
+  ) {
+    planPoints -= SHORT_WINDOW_POINTS * clamp((short.usedPercent - SHORT_WINDOW_TIGHT_PERCENT) / (100 - SHORT_WINDOW_TIGHT_PERCENT), 0, 1);
+    why.push(`5h window ${Math.round(short.usedPercent)}% used`);
+  }
+  if (input.busy > 0) {
+    planPoints -= ORCHESTRATION_BUSY_POINTS * input.busy;
+    why.push(`${input.busy} worker${input.busy === 1 ? "" : "s"} already on this pool`);
+  }
+  const pace = unmetered ? undefined : paceOf(draw.delta);
+  if (pace && !expiring) {
+    why.push(pace === "spare" ? "spare leftover for the time left" : pace === "behind" ? "spending faster than its pace" : "on pace");
+  }
+  return {
+    terms: {
+      domain: input.domain,
+      tier: input.tier,
+      effort,
+      fit,
+      ...(agentic ? { agentic } : {}),
+      quality,
+      ...(runDraw ? { draw: runDraw } : {}),
+      cost: { ...price, perRun },
+      speed,
+      plan: {
+        ...(draw.usedPercent !== undefined ? { usedPercent: draw.usedPercent } : {}),
+        ...(draw.expectedUsedPercent !== undefined ? { expectedUsedPercent: oneDecimal(draw.expectedUsedPercent) } : {}),
+        ...(Number.isFinite(resetMs) ? { resetsInMs: resetMs } : {}),
+        ...(candidate.capacity?.period ? { period: candidate.capacity.period } : {}),
+        ...(pace ? { pace } : {}),
+        expiring,
+        reserve,
+        unmetered,
+        ...(short?.usedPercent !== undefined ? { shortWindowUsedPercent: short.usedPercent } : {}),
+        ...(Number.isFinite(shortResetMs) ? { shortWindowResetsInMs: shortResetMs } : {}),
+        busy: input.busy,
+      },
+      why,
+    },
+    planPoints,
+  };
+}
+
+function sameCandidateIdentity(
+  a: Pick<RoutingCandidate, "provider" | "model" | "customBotId">,
+  b: Pick<RoutingCandidate, "provider" | "model" | "customBotId">,
+): boolean {
+  return a.provider === b.provider && a.model === b.model && (a.customBotId ?? "") === (b.customBotId ?? "");
+}
+
+/**
+ * Orchestrate and Mission spawns. Every row that can take the work is scored
+ * for this domain at the thinking level it would run at; rows under the tier's
+ * bar drop out, and the bar never sits above the best row, so a domain nobody
+ * on the desk is great at still routes to the best there is. The rest are
+ * ordered by quality (capped on quick work, so a quick job does not
+ * burn a frontier pool), less the cost premium, plus the plan terms weighted
+ * by tier: leftover about to expire, pace against the days left, the reserve,
+ * a 5h window close to full, and workers already running on the pool.
+ */
+function rankOrchestrationCandidates(
+  scorable: RoutingCandidate[],
+  request: RoutingRequest,
+  settings: RoutingSettings,
+  context: { tier: RoutingTaskTier; domain: TaskDomain; wantsImageGen: boolean; botKnowledge?: BotKnowledgeSettings },
+): RankedRoutingCandidate[] {
+  const now = request.now ?? Date.now();
+  let pool = scorable;
+  if (context.domain === "image-generation" || context.wantsImageGen) {
+    const makers = pool.filter((candidate) => candidateCanGenerateImages(candidate));
+    if (makers.length > 0) pool = makers;
+  }
+  if (pool.length === 0) return [];
+  const fits = pool.map((candidate) => ({
+    candidate,
+    ...orchestrationFit(candidate, {
+      tier: context.tier,
+      domain: context.domain,
+      role: request.role,
+      settings,
+      now,
+      busy: request.activeLoad?.[routingPoolKey(candidate)] ?? 0,
+      effortHint: request.effortHint,
+      ...(request.typicalRun ? { typicalRun: request.typicalRun } : {}),
+      botKnowledge: context.botKnowledge,
+    }),
+  }));
+  const best = Math.max(...fits.map((row) => row.terms.fit.score));
+  const bar = Math.min(domainIntelligenceBar(context.tier), best);
+  const clearing = fits.filter((row) => row.terms.fit.score >= bar);
+  // An older generation of a model on the same plan gives way to a newer one
+  // that can take the work and scores at least as well here: the same
+  // allowance buys the better, and usually leaner, model.
+  type Fit = (typeof fits)[number];
+  const successorOf = new Map<Fit, Fit>();
+  for (const older of clearing) {
+    const successors = clearing.filter(
+      (newer) =>
+        newer !== older &&
+        routingPoolKey(newer.candidate) === routingPoolKey(older.candidate) &&
+        isNewerGeneration(newer.candidate, older.candidate) &&
+        newer.terms.quality >= older.terms.quality &&
+        routingRowLive({ usedPercent: newer.terms.plan.usedPercent, capacity: newer.candidate.capacity }, now),
+    );
+    if (successors.length > 0) {
+      successorOf.set(older, successors.reduce((a, b) => (isNewerGeneration(b.candidate, a.candidate) ? b : a)));
+    }
+  }
+  const passing = clearing.filter((row) => !successorOf.has(row));
+  // What a typical run costs at each row's list price, in doublings over the cheapest.
+  // A spent pool's price does not set the baseline for pools that can take the work.
+  const takingWork = passing.filter((row) =>
+    routingRowLive({ usedPercent: row.terms.plan.usedPercent, capacity: row.candidate.capacity }, now),
+  );
+  const runCost = (row: Fit) => Math.max(MIN_RUN_COST_USD, row.terms.cost.perRun);
+  const cheapest = Math.min(...(takingWork.length ? takingWork : passing).map(runCost));
+  const doublings = (row: Fit) => Math.max(0, Math.log2(runCost(row) / cheapest));
+  const ceiling = ORCHESTRATION_QUALITY_CAP[context.tier];
+  const preferred = request.preferred ?? [];
+  const ranked: RankedRoutingCandidate[] = passing.map((row) => {
+    const { candidate, terms, planPoints } = row;
+    const displaced = [...successorOf].filter(([, successor]) => successor === row).map(([older]) => older.candidate);
+    const qualityPoints = Math.min(terms.quality, ceiling);
+    const costPoints = ORCHESTRATION_COST_WEIGHT[context.tier] * doublings(row);
+    const speedWeight = ORCHESTRATION_SPEED_WEIGHT[context.tier];
+    const speedPoints = speedWeight > 0 ? speedWeight * terms.speed.doublings : 0;
+    const planWeighted = ORCHESTRATION_PLAN_WEIGHT[context.tier] * planPoints;
+    const considerate = oneDecimal(qualityPoints - costPoints + speedPoints + planWeighted);
+    const coordinatorPick = preferred.some((item) => sameCandidateIdentity(item, candidate));
+    const draw = weeklyDrawState(candidate.capacity, now);
+    return {
+      ...candidate,
+      score: considerate,
+      expectedUsedPercent: draw.expectedUsedPercent,
+      capacityDelta: draw.delta,
+      usedPercent: draw.usedPercent,
+      orchestration: {
+        ...terms,
+        ...(displaced.length
+          ? {
+              supersedes: displaced.map((older) => ({
+                provider: older.provider,
+                model: older.model,
+                ...(older.customBotId ? { customBotId: older.customBotId } : {}),
+                label: older.label,
+              })),
+            }
+          : {}),
+        bar,
+        points: {
+          quality: oneDecimal(qualityPoints),
+          cost: oneDecimal(costPoints),
+          speed: oneDecimal(speedPoints),
+          plan: oneDecimal(planWeighted),
+        },
+        considerate,
+        coordinatorPick,
+        why: [
+          ...(coordinatorPick ? ["the coordinator's pick, and it clears the bar"] : []),
+          ...terms.why,
+          ...(displaced.length ? [`stands in for ${displaced.map((older) => older.label).join(", ")}: older, same plan`] : []),
+        ],
+      },
+    };
+  });
+  // A coordinator that read the desk and named a row keeps it, as long as the
+  // row clears the bar and its pool can still take work.
+  const picked = (row: RankedRoutingCandidate) => row.orchestration?.coordinatorPick === true && routingRowLive(row, now);
+  const incumbent = (row: RankedRoutingCandidate) =>
+    Boolean(request.current && sameRoutingIdentity(request.current, row) && routingRowLive(row, now));
+  return ranked.sort((a, b) => {
+    const aPick = picked(a);
+    const bPick = picked(b);
+    if (aPick !== bPick) return aPick ? -1 : 1;
+    const aInc = incumbent(a);
+    const bInc = incumbent(b);
+    if (aInc !== bInc) return aInc ? -1 : 1;
+    const aLive = routingRowLive(a, now);
+    const bLive = routingRowLive(b, now);
+    if (aLive !== bLive) return aLive ? -1 : 1;
+    const matchScore = (row: RankedRoutingCandidate) => row.orchestration?.fit?.score ?? 0;
+    const aMatch = matchScore(a);
+    const bMatch = matchScore(b);
+    if (aMatch !== bMatch) return bMatch - aMatch;
+    // Cost, speed, and plan terms live in considerate; they break ties only.
+    if (a.score !== b.score) return b.score - a.score;
+    return (
+      (a.orchestration?.cost.perRun ?? 0) - (b.orchestration?.cost.perRun ?? 0) ||
+      a.label.localeCompare(b.label)
+    );
+  });
+}
+
 export function rankRoutingCandidates(
   candidates: RoutingCandidate[],
   request: RoutingRequest,
   settings: RoutingSettings,
+  botKnowledge?: BotKnowledgeSettings,
 ): RankedRoutingCandidate[] {
   const tier =
     request.tier ??
@@ -1242,6 +1848,9 @@ export function rankRoutingCandidates(
     ? Math.min(...eligible.map((candidate) => candidate.profile.cost))
     : 0;
   const scorable = candidates.filter((candidate) => !routingSkipReason(candidate, request, settings, required));
+  if (request.useOrchestrationBenchmark) {
+    return rankOrchestrationCandidates(scorable, request, settings, { tier, domain, wantsImageGen, botKnowledge });
+  }
   const ranked: RankedRoutingCandidate[] = [];
   for (const candidate of candidates) {
     if (routingSkipReason(candidate, request, settings, required)) continue;
@@ -1401,6 +2010,7 @@ export function routingDecisionLogDetail(input: {
   candidates: RoutingCandidate[];
   request: RoutingRequest;
   settings: RoutingSettings;
+  botKnowledge?: BotKnowledgeSettings;
   selected?: Pick<RoutingCandidate, "provider" | "model" | "customBotId">;
 }): string {
   const { candidates, request, settings } = input;
@@ -1410,7 +2020,7 @@ export function routingDecisionLogDetail(input: {
   const domain = request.taskDomain ?? inferTaskDomain(request.prompt, request.attachments);
   const required = mergeInputRequirements(request.attachments, request.requirements);
   const minimum = requiredIntelligence(tier);
-  const ranked = rankRoutingCandidates(candidates, { ...request, tier, taskDomain: domain }, settings);
+  const ranked = rankRoutingCandidates(candidates, { ...request, tier, taskDomain: domain }, settings, input.botKnowledge);
   const skipped: string[] = [];
   for (const candidate of candidates) {
     const reason = routingSkipReason(candidate, request, settings, required);
@@ -1454,15 +2064,43 @@ export function routingDecisionLogDetail(input: {
   ].join(" ");
 }
 
+function routingDecisionDomainFit(
+  winner: RankedRoutingCandidate,
+  request: RoutingRequest,
+  taskTier: RoutingTaskTier,
+  botKnowledge?: BotKnowledgeSettings,
+): { domain: TaskDomain; score: number } {
+  const domain = request.taskDomain ?? winner.orchestration?.domain ?? inferTaskDomain(request.prompt, request.attachments ?? []);
+  if (winner.orchestration?.domain === domain) {
+    return { domain, score: winner.orchestration.fit.score };
+  }
+  const effort = effortForRoutingTier(winner.provider, winner.model, taskTier, request.effortHint ?? null);
+  const manual = botKnowledgeRubricForModel(botKnowledge, winner.provider, winner.model, winner.customBotId)?.domainScores?.[
+    domain
+  ];
+  const fit =
+    manual !== undefined
+      ? { score: manual, source: MANUAL_RUBRIC_SOURCE, origin: "desk-table" as const }
+      : resolveDomainScore(winner.provider, winner.model, domain, winner.profile.intelligence, effort);
+  return { domain, score: fit.score };
+}
+
 export function chooseRoutingDecision(
   candidates: RoutingCandidate[],
   request: RoutingRequest,
   settings: RoutingSettings,
+  botKnowledge?: BotKnowledgeSettings,
 ): RoutingDecision | null {
   const taskTier =
     request.tier ??
     inferRoutingTier(request.prompt, request.attachments, { role: request.role, parentTier: request.parentTier });
-  const winner = rankRoutingCandidates(candidates, { ...request, tier: taskTier }, settings)[0];
+  const taskDomain = request.taskDomain ?? inferTaskDomain(request.prompt, request.attachments ?? []);
+  const winner = rankRoutingCandidates(
+    candidates,
+    { ...request, tier: taskTier, taskDomain },
+    settings,
+    botKnowledge,
+  )[0];
   if (!winner) return null;
   const draw = weeklyDrawState(winner.capacity, request.now);
   const expiry = candidateExpiryCredit(winner.capacity, request.now ?? Date.now());
@@ -1478,6 +2116,10 @@ export function chooseRoutingDecision(
             : " · on pace";
   const imageGenReason =
     detectsImageGenerationIntent(request.prompt) && candidateCanGenerateImages(winner) ? " · image generation" : "";
+  const domainFit = winner.orchestration ? routingDecisionDomainFit(winner, { ...request, taskDomain }, taskTier, botKnowledge) : null;
+  const fitReason = domainFit
+    ? ` · ${domainFit.domain} ${domainFit.score}/100${winner.orchestration?.coordinatorPick ? " · coordinator's pick" : ""}`
+    : "";
   return {
     at: request.now ?? Date.now(),
     taskTier,
@@ -1486,7 +2128,8 @@ export function chooseRoutingDecision(
     effort: effortForRoutingTier(winner.provider, winner.model, taskTier),
     customBotId: winner.customBotId,
     score: winner.score,
-    reason: `${taskTier === "deep" ? "Deep" : taskTier === "quick" ? "Quick" : "Balanced"} · ${effortForRoutingTier(winner.provider, winner.model, taskTier) ?? "fixed"} effort${capacityReason}${imageGenReason}`,
+    reason: `${taskTier === "deep" ? "Deep" : taskTier === "quick" ? "Quick" : "Balanced"} · ${effortForRoutingTier(winner.provider, winner.model, taskTier) ?? "fixed"} effort${capacityReason}${imageGenReason}${fitReason}`,
+    ...(domainFit ? { taskDomain: domainFit.domain, domainScore: domainFit.score } : {}),
     usedPercent: draw.usedPercent,
     expectedUsedPercent: draw.expectedUsedPercent,
   };
@@ -1524,5 +2167,14 @@ export function normalizeRoutingDecision(raw: unknown): RoutingDecision | undefi
     ...(typeof record.expectedUsedPercent === "number" && Number.isFinite(record.expectedUsedPercent)
       ? { expectedUsedPercent: record.expectedUsedPercent }
       : {}),
+    ...(record.taskDomain === "coding" ||
+    record.taskDomain === "image-generation" ||
+    record.taskDomain === "writing" ||
+    record.taskDomain === "visual" ||
+    record.taskDomain === "data" ||
+    record.taskDomain === "general"
+      ? { taskDomain: record.taskDomain }
+      : {}),
+    ...(typeof record.domainScore === "number" && Number.isFinite(record.domainScore) ? { domainScore: record.domainScore } : {}),
   };
 }

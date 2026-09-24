@@ -13,6 +13,7 @@ import {
 } from "./cursor-lane";
 import { isGrokBotUrl } from "./custom-http-identity";
 import { estimateMessageTokens } from "./context-stats";
+import type { TypicalRun } from "./model-prices";
 import type { CustomBot, GrokPlanProduct, GrokPlanUsage, LlmLink, ProviderId, Session, Settings, UsageDraft, UsageEvent, UsagePlanWindow, UsageRange, UsageSource } from "./types";
 
 export type { UsagePlanWindow };
@@ -514,6 +515,111 @@ function add(base: UsageTotals, event: UsageEvent): UsageTotals {
 
 export function rollup(events: UsageEvent[]): UsageTotals {
   return events.reduce(add, { ...EMPTY });
+}
+
+/** One model's measured draw per finished worker run, from this desk's own ledger. */
+export type ModelRunDraw = {
+  /** Median tokens a finished run took: fresh input, output and cache writes, as Usage totals them. */
+  medianTokens: number;
+  runs: number;
+  /** Median output tokens a second over a whole run, tool time included. Absent until a run long enough to time. */
+  outputPerSecond?: number;
+};
+
+/** Every measured model, and the desk's median run across all of them. */
+export type RunDraws = {
+  byModel: Record<string, ModelRunDraw>;
+  deskMedianTokens: number;
+  deskRuns: number;
+  /** The desk's median run, part by part: what a typical run costs is priced on this. */
+  typical?: TypicalRun;
+  /** The desk's median output tokens a second, whatever model ran. */
+  deskOutputPerSecond?: number;
+};
+
+/** How a run's model is keyed: vendor, model id as the desk writes it, and the bot for a custom row. */
+export function runDrawKey(provider: ProviderId, model: string, customBotId?: string): string {
+  return `${provider}|${normalizeModelId(provider, model).toLowerCase()}|${customBotId ?? ""}`;
+}
+
+/** Events a minute past a run's finish still belong to it: a vendor reports usage after its last word. */
+const RUN_USAGE_GRACE_MS = 60_000;
+/** A run shorter than this is too short to time. */
+const RUN_TIMING_MIN_MS = 10_000;
+
+function median(values: number[]): number {
+  const sorted = [...values].sort((a, b) => a - b);
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[middle]! : (sorted[middle - 1]! + sorted[middle]!) / 2;
+}
+
+/**
+ * What each model's finished worker runs took, read from the desk's ledger. A
+ * run is a worker chat whose last run completed; its draw is every billed
+ * event on that chat from the run's start to a minute after it finished, and
+ * its speed is the output tokens over the run's wall time. Rows the desk only
+ * estimated from text length (Cursor's, before its own ledger lands) are left
+ * out, as are runs that recorded nothing billed, and every other kind of chat.
+ */
+export function measureRunDraws(usage: readonly UsageEvent[], sessions: readonly Session[]): RunDraws {
+  const runs = new Map<string, { key: string; start: number; end: number; ms: number; tokens: number; parts: TypicalRun }>();
+  for (const session of sessions) {
+    const run = session.agentRun;
+    if (!session.parentId || run?.status !== "completed" || !run.finishedAt) continue;
+    runs.set(session.id, {
+      key: runDrawKey(session.provider, session.model, session.customBotId),
+      start: run.startedAt,
+      end: run.finishedAt + RUN_USAGE_GRACE_MS,
+      ms: run.finishedAt - run.startedAt,
+      tokens: 0,
+      parts: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    });
+  }
+  for (const event of usage) {
+    if (event.source === "estimate" || event.source === "gauge") continue;
+    const run = event.sessionId ? runs.get(event.sessionId) : undefined;
+    if (!run || event.at < run.start || event.at > run.end) continue;
+    run.tokens += eventTotal(event);
+    run.parts.input += event.inputTokens;
+    run.parts.output += event.outputTokens;
+    run.parts.cacheRead += event.cacheReadTokens;
+    run.parts.cacheWrite += event.cacheWriteTokens;
+  }
+  const perModel = new Map<string, { tokens: number[]; speeds: number[] }>();
+  const all: number[] = [];
+  const speeds: number[] = [];
+  const measured: TypicalRun[] = [];
+  for (const run of runs.values()) {
+    if (run.tokens <= 0) continue;
+    const model = perModel.get(run.key) ?? { tokens: [], speeds: [] };
+    model.tokens.push(run.tokens);
+    if (run.ms >= RUN_TIMING_MIN_MS && run.parts.output > 0) {
+      const speed = run.parts.output / (run.ms / 1000);
+      model.speeds.push(speed);
+      speeds.push(speed);
+    }
+    perModel.set(run.key, model);
+    all.push(run.tokens);
+    measured.push(run.parts);
+  }
+  const byModel: Record<string, ModelRunDraw> = {};
+  for (const [key, model] of perModel) {
+    byModel[key] = {
+      medianTokens: median(model.tokens),
+      runs: model.tokens.length,
+      ...(model.speeds.length ? { outputPerSecond: median(model.speeds) } : {}),
+    };
+  }
+  const part = (name: keyof TypicalRun) => median(measured.map((run) => run[name]));
+  return {
+    byModel,
+    deskMedianTokens: all.length ? median(all) : 0,
+    deskRuns: all.length,
+    ...(measured.length
+      ? { typical: { input: part("input"), output: part("output"), cacheRead: part("cacheRead"), cacheWrite: part("cacheWrite") } }
+      : {}),
+    ...(speeds.length ? { deskOutputPerSecond: median(speeds) } : {}),
+  };
 }
 
 /** Billed spend for one chat. Total is in + out, same as Settings → Usage. */
@@ -1026,6 +1132,24 @@ export function weeklyPlanLeftover(plan: GrokPlanUsage | undefined): number | un
 
 export function isShortPlanWindow(product: string): boolean {
   return SHORT_WINDOW.test(product);
+}
+
+/** When the short-rate window (5h / session / primary) is empty, spawns must stop even if weekly leftover remains. */
+export function burstWindowBlocksCall(
+  plan: GrokPlanUsage | undefined,
+  spentPercent = 0.5,
+): { blocked: true; windowLabel: string; resetsAt?: string } | { blocked: false } {
+  if (!plan) return { blocked: false };
+  const pool = planTimeWindows(plan).length > 0 ? planTimeWindows(plan) : (plan.products ?? []);
+  const burst = pool.find((item) => isShortPlanWindow(item.product) && !item.unlimited);
+  if (!burst) return { blocked: false };
+  const left = clampLeftover(100 - burst.usagePercent);
+  if (left > spentPercent) return { blocked: false };
+  const windowLabel =
+    burst.product === "five_hour" || burst.product === "primary" || burst.label === "5h"
+      ? "5-hour"
+      : burst.label?.trim() || "Short-rate";
+  return { blocked: true, windowLabel, ...(burst.resetsAt ? { resetsAt: burst.resetsAt } : {}) };
 }
 
 export function planWindowPreference(product: string): UsagePlanWindow {

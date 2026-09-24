@@ -1,7 +1,7 @@
 {
   "name": "go7-workhorse",
   "productName": "Go7 Workhorse",
-  "version": "0.6.93",
+  "version": "0.7.0",
   "private": true,
   "description": "One desk for every AI subscription you already pay for: Grok, Claude, Codex, Cursor and your own API keys, each under its own login, on Windows and macOS.",
   "keywords": [
@@ -50,6 +50,7 @@
     "eval:godot-suite": "node scripts/workhorse-eval-godot-suite.mjs",
     "eval:real-plan-smoke": "tsx test/real-world-plan-smoke.ts",
     "eval:harness-smoke": "tsx test/external-harness-live-smoke.ts",
+    "eval:orchestration-smoke": "tsx test/orchestration-live-smoke.ts",
     "eval:link-iteration": "tsx test/link-iteration-live-smoke.ts",
     "eval:fixture": "node scripts/workhorse-eval-fixture.mjs",
     "eval:fixture-check": "node scripts/workhorse-eval-fixture.mjs --self-test",
@@ -73,6 +74,7 @@
   "dependencies": {
     "@agentclientprotocol/claude-agent-acp": "^0.66.0",
     "@agentclientprotocol/codex-acp": "^1.2.0",
+    "hyparquet": "^1.31.1",
     "react": "^19.1.1",
     "react-dom": "^19.1.1"
   },

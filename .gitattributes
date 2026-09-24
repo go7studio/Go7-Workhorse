@@ -1,1 +1,2 @@
 workshop/catalog-seed.json text eol=lf
+*.parquet binary

@@ -1115,8 +1115,9 @@
   background: var(--bg-sidebar);
 }
 .session-workshop .workshop-panel {
-  width: 100%;
-  min-width: 0;
+  width: var(--workshop-pane, 420px);
+  min-width: var(--workshop-pane, 420px);
+  margin-left: auto;
 }
 .workshop-panel-head {
   display: flex;

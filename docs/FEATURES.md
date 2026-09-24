@@ -215,8 +215,71 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
 - **Composer + menu** Orchestrate, Mission, and Debug pin on the chat in any
   combination. Each pin is a chip next to +; multiple pins collapse to a count
   you can expand.
-- Orchestrate makes this chat the orchestrator, and it must spawn desk workers.
-  Auto ranks, fan-out only when asked.
+- Orchestrate makes this chat the orchestrator, and it must spawn desk workers,
+  fan-out only when asked. On its spawns Auto scores every bot for the task's
+  domain at the thinking level it would run at, drops bots under the tier's bar
+  (Balanced 30, Deep 70 out of 100 on the scale below, never above the best bot
+  the desk can call; Quick takes any bot and stops paying for quality at 40),
+  and orders the rest by quality, cost, speed and plan terms: leftover about to
+  expire, pace against the days left before the pool resets, the reserve, a 5h
+  window close to full, and workers already running on the pool. A wave of
+  spawns spreads over pools instead of piling onto one.
+- Each tier weighs those differently, and Bot knowledge, `workhorse_find_bots`
+  and the head's brief say how. Quick is fast and cheap first: any bot, quality
+  counts up to 40, each doubling of run cost costs 9 points and each doubling
+  of speed earns 6, plan terms count 1.5 times. Balanced needs 30, counts every
+  point of quality, and weighs cost 3.5, speed 2.5 and plan terms once, so a
+  frontier bot is never ranked level with one half as good. Deep needs 70,
+  counts every point, weighs cost 1.5, ignores speed, and plan terms count half.
+- Speed is measured here: output tokens a second over each model's finished
+  worker runs, from billed ledger rows only, against the desk's median. Until
+  a model has three runs on the desk it reads its family's speed rating (5 of 5
+  is one doubling up, 1 of 5 one down).
+- An older model on the same plan gives way to a newer one of its line that
+  can take the work and scores at least as well at it: on Cursor, Opus 5.5
+  takes what Opus 4.7 or 4.6 would have, even when a coordinator named the
+  older one. A model on another plan, or one the boards rate better at the
+  task, keeps its place.
+- What a task costs is weighed. Each model's input, output and cache-read list
+  prices come from OpenRouter's public model list (no key, read once a day with
+  the scores; a model it does not list reads its family's price tier). A
+  typical finished run on this desk (the median fresh input, output and cache
+  reads in its Usage ledger) is priced at them, and scaled by what the model's
+  own runs take once it has three runs and the desk six. Each doubling of that
+  cost over the cheapest bot that clears the bar and can take work now gives up
+  quality: 9 points on Quick, 3.5 on Balanced, 1.5 on Deep, with no cap, so two
+  dear bots keep their order. Bot knowledge, `workhorse_find_bots` and the
+  head's brief show each bot's run cost.
+- `workhorse_find_bots` is the orchestrator's search: give it the task and a
+  squad size, and it returns the bots the desk would pick with each one's score,
+  where the score came from, its plan terms, a squad spread over pools, and why
+  the rest were not picked. It spawns and reserves nothing. Custom bots such as
+  MiniMax M3 get it too, so any chat's head can staff a squad.
+- A model name locks only when the user named it in their ask. A model the
+  coordinator writes on the spawn is kept when it clears the domain bar (a
+  `workhorse_find_bots` pick, say) and ranked away when it does not.
+- A spawn may say what kind of work its slice is (`domain`: coding, image
+  generation, writing, visual, data, general); otherwise the desk reads it from
+  the prompt, and an ask for prose (a release note, a post, "under 120 words")
+  is writing even when it names the code it is about.
+- Each spawn reply names the bot that took the slice, and the reports that come
+  back say which bot ran each one (`ran on`), so the head's "who did what" is
+  read from the desk's record rather than remembered.
+- The reports also list what each worker changed, from the desk's own diff, and
+  the head is asked to run the project's check and open those files before it
+  writes the review, saying which results it checked and which it only relayed.
+- A spawn can come after other workers of the same chat (`after`, by name): a
+  release note after the code it describes. It is queued on the lineup, starts
+  when they finish, and gets their reports and changed files under its brief.
+  If one of them did not finish, it does not start, and the report says why.
+- A worker's tier is read from the slice its brief states up front. A long,
+  careful brief is not Deep work on its length alone.
+- On an Orchestrate or Mission chat, `workhorse_list_bots` also says who the
+  desk would pick for coding, writing, data, general and visual work, with each
+  pick's score and typical run cost.
+- A custom bot on an Anthropic-style endpoint, MiniMax's among them, gets its
+  own thinking blocks back unchanged on every tool round, as those hosts
+  require, so it keeps its plan from one round to the next.
 - Either pin also hands the chat the spawn rules. An unpinned chat gets them
   the moment it is asked for workers, and opens lighter for not carrying them.
 - If the ask is phrased in a way the desk does not read as a request for
@@ -592,8 +655,47 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
 
 ## Settings
 
-- Eight sections: Profile, LLMs, Skills, Workshop, Routing, Learning, Usage,
-  Watch.
+- Nine sections: Profile, LLMs, Skills, Workshop, Bot knowledge, Routing,
+  Learning, Usage, Watch.
+- **Bot knowledge** shows what orchestration reads on an Orchestrate or Mission
+  chat: task domain (coding, image generation, writing, visual, data, general),
+  the bar for that domain and tier, every connected catalog and custom model in
+  the order a spawn would pick it, with its score, where the score came from,
+  its Agent Arena score when it has one, and its plan terms (leftover, time to
+  reset, pace, 5h window, workers running there). Rows under the bar or out of
+  reach say why. No API keys, credential ids, or base URLs. Cursor Auto is
+  omitted; Grok 4.7 on Grok Build and on Cursor stay one family for leftover.
+- Each row's rubric (the cog) sets your own score for that model, per domain,
+  out of 100, and a sort weight. Orchestration, `workhorse_find_bots` and the
+  list all read it, and the sheet shows what the boards say without it.
+- Scores come from the public LMArena leaderboard dataset (CC BY 4.0), no key
+  needed. Coding reads Code Arena, where models build working apps with tools
+  (the text arena's coding category only for a model Code Arena has not rated);
+  writing reads creative writing, data reads math, visual reads the vision
+  arena, image generation reads text-to-image for Grok's image product, and
+  general reads the text arena. Each score is matched to the run at the
+  thinking level the desk would use. The desk checks the dataset's commit once a
+  day and downloads it (about 0.7 MB) only when it changed, so a newly ranked
+  model is scored the day LMArena publishes it; **Check now** asks at once.
+- Scores are out of 100, and steep. Only a board's leader scores 100. A row's
+  distance from the leader is measured against the gap to the board's
+  25th-best model (each model counted once), and the score falls off that
+  distance on an S-curve: the models at the top stay in the 90s, the middle of
+  the board drops hard, the 25th-best lands near 10, and anything far down sits
+  at the floor of 1. Agent Arena grades the same way.
+- Every worker is an agent in a folder, so a domain score mixes its own board
+  with the Agent Arena: half each for coding, where Code Arena already grades
+  agents building software, and two thirds Agent Arena for the other domains,
+  whose boards grade one-shot chat answers. Where no board rates a model for a
+  domain, its Agent Arena score stands in, never a sibling's row. Image
+  generation reads its own board alone.
+- A new generation a board has not rated yet reads the latest earlier one of
+  its line that it has (Opus 5.5 reads Opus 5, Grok 4.7's chat scores read Grok
+  4.6), and its source says so. A bot with no public rating at all uses the
+  desk's own table, which is on the same scale, rounded down, never above 90,
+  and says which board or sibling each number was read from. An unknown custom
+  bot keeps its family prior on that scale: a frontier family is 72, the
+  balanced band 10, an unrated model 1.
 - The profile shows the Workhorse mark as tiny moving blobs of the bots you have
   called. Spend sets how many of each colour, and blobs merge without mixing.
 - Hover it for Your Workhorse and what it is made of. With no spend yet it keeps

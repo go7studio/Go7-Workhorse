@@ -145,8 +145,8 @@ function ManageButton({
 // The rail
 
 /**
- * Desk-attached Workshop rail: live watch when any pack is On. Hidden when none are —
- * Install / Turn on live in Settings → Workshop only, never a dead rail CTA.
+ * Desk-attached Workshop rail: live watch when any pack is On. Hidden when none are.
+ * Settings → Workshop installs and uninstalls. A chat's Workshop turns a pack on.
  * Manage opens a sheet hosting WorkshopBlock (same install/grant/catalog). Breakout
  * remains an optional Detach on the live rail. Collapsed: each pack's
  * strip (GPU% · watts · writer · models one-liner for Box monitor) with the feed age under the

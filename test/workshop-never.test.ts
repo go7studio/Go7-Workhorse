@@ -40,7 +40,8 @@ test("Workshop manage: Settings tab secondary, rail Manage primary; not a dock, 
   assert.match(settings, /id: "workshop", label: "Workshop"/);
   assert.match(settings, /section === "workshop" && <WorkshopBlock/);
   const types = read("src/lib/types.ts");
-  assert.match(types, /export type SettingsSection = "profile" \| "llms" \| "skills" \| "workshop" \| "routing" \| "learning" \| "usage" \| "watch"/);
+  assert.match(types, /"bot-knowledge"/);
+  assert.match(types, /export type SettingsSection[\s\S]*"watch"/);
   assert.match(types, /export type Panel = "settings" \| "add-bot" \| null/);
   const skills = read("src/ui/SkillsPane.tsx");
   assert.doesNotMatch(skills, /WorkshopBlock/);
@@ -175,11 +176,11 @@ test("Workshop manage/rail copy uses packs/modules only — no user-visible skil
   assert.match(block, /pack-list/);
   assert.match(block, /pack-row/);
   assert.doesNotMatch(block, /skills-list|skill-row/);
-  assert.match(block, /Install a pack, then Turn on\./);
+  assert.match(block, /Install a pack from Available\./);
   assert.match(block, /Add-ons for this desk\. Catalog is shared; installs stay local\./);
   assert.match(block, /None installed/);
-  assert.match(block, /Installed · Off — Turn on when ready\./);
-  assert.match(block, /workshop-pack-status">Off</);
+  assert.match(block, /Installed\. Turn it on from a chat's Workshop\./);
+  assert.match(block, /workshop-pack-status">\{enableHere \? "Off" : "Installed"\}/);
   assert.match(block, /aria-label="Search catalog"/);
   assert.match(block, /pack-card-grid/);
   assert.match(block, /Updated · Off\./);

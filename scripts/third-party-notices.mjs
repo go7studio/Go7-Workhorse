@@ -129,10 +129,13 @@ export function renderNotices(rows, now) {
 }
 
 function main() {
+  // npm is npm.cmd on Windows, and Node will not spawn a .cmd without a shell.
+  // The arguments are fixed, so the shell sees nothing a caller wrote.
   const raw = execFileSync("npm", ["ls", "--omit=dev", "--all", "--json"], {
     cwd: ROOT,
     encoding: "utf8",
     maxBuffer: 64 * 1024 * 1024,
+    shell: process.platform === "win32",
   });
   const buildFiles = JSON.parse(readFileSync(path.join(ROOT, "package.json"), "utf8")).build?.files ?? [];
   // npm ls names an optional peer nobody installed with no version at all

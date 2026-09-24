@@ -62,6 +62,11 @@ test("the 1-10 table orders the mid-field the 1-5 scale collapsed", () => {
   assert.equal(intelligence("claude", "claude-opus-5"), 10);
   assert.equal(intelligence("codex", "gpt-5.6-sol"), 10);
   assert.equal(intelligence("codex", "gpt-6-astra"), 10, "GPT-6 Astra sits with Sol, ahead of the 5.6 rows it would otherwise miss");
+  assert.deepEqual(
+    [intelligence("codex", "gpt-6-luna"), routingProfileForModel("codex", "gpt-6-luna").speed, routingProfileForModel("codex", "gpt-6-luna").cost],
+    [5, 5, 1],
+    "GPT-6 Luna is the family's light model, not Astra",
+  );
   assert.equal(intelligence("custom", "openai/gpt-6-astra"), 10, "a host path to the same model is the same tier");
   assert.notEqual(intelligence("custom", "mygpt-6"), 10, "the tier starts at a token boundary");
   assert.notEqual(intelligence("codex", "gpt-60"), 10);
@@ -76,8 +81,9 @@ test("the 1-10 table orders the mid-field the 1-5 scale collapsed", () => {
   assert.equal(intelligence("cursor", "composer-2.5"), 8);
   assert.equal(intelligence("codex", "gpt-5.5"), 8);
   // The flagship open models sit in the balanced band, so ordinary coding can
-  // reach them. The bar for balanced is still 8.
-  assert.equal(intelligence("custom", "MiniMax-M3"), 8);
+  // reach them. The bar for balanced is still 8. MiniMax M3 is not one of them:
+  // the public boards put it behind Luna on code and agent work.
+  assert.equal(intelligence("custom", "MiniMax-M3"), 6);
   assert.equal(intelligence("custom", "hf:moonshotai/Kimi-K3"), 8);
   assert.equal(intelligence("custom", "hf:zai-org/GLM-5.2"), 8);
   // The rest of Synthetic's catalog, below the flagships and above nothing.
@@ -104,8 +110,8 @@ test("slug order: the specific name wins before the generic one", () => {
   const intelligence = (model: string) => routingProfileForModel("custom", model).intelligence;
   assert.equal(intelligence("claude-sonnet-4-6"), 8, "sonnet-4-6 before sonnet");
   assert.equal(intelligence("claude-sonnet-5"), 9);
-  assert.equal(intelligence("MiniMax-M3"), 8, "minimax-m3 before minimax");
-  assert.equal(intelligence("MiniMax-M2.7"), 6, "generic minimax is last gen");
+  assert.equal(intelligence("MiniMax-M3"), 6, "minimax-m3 before minimax");
+  assert.equal(intelligence("MiniMax-M2.7"), 5, "generic minimax is last gen");
   assert.equal(intelligence("hf:moonshotai/Kimi-K3"), 8, "kimi-k3 before kimi");
   assert.equal(intelligence("kimi-k2"), 7, "an older Kimi is not the flagship");
   assert.equal(intelligence("hf:zai-org/GLM-5.2"), 8, "glm-5.2 before glm-5");
@@ -259,6 +265,7 @@ test("a short codey ask is not quick, and the domain is coding", () => {
   assert.equal(inferTaskDomain("write the launch blog post for the new referral system"), "writing");
   assert.equal(inferTaskDomain("analyze the csv and plot a histogram of rows per day"), "data");
   assert.equal(inferTaskDomain("compare these screenshots of the settings panel"), "visual");
+  assert.equal(inferTaskDomain("generate a detailed image of a chicken wing"), "image-generation");
   assert.equal(inferTaskDomain("what should we do next"), "general");
   assert.equal(inferTaskDomain("write a function that parses the manifest.json"), "coding", "code words beat write words");
 });

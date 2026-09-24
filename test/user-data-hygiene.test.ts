@@ -642,9 +642,19 @@ test("pruneOrphanWorktrees keeps a .godot holding anything Godot did not write",
   }
 });
 
-test("pruneOrphanWorktrees keeps a .godot holding a link", () => {
+test("pruneOrphanWorktrees keeps a .godot holding a link", (t) => {
   const { root, managed, cache } = godotTree("godot-link");
-  fs.symlinkSync("/etc/hosts", path.join(cache, "imported", `link.png-${HASH}.ctex`));
+  try {
+    fs.symlinkSync("/etc/hosts", path.join(cache, "imported", `link.png-${HASH}.ctex`));
+  } catch (err) {
+    fs.rmSync(root, { recursive: true, force: true });
+    const code = err && typeof err === "object" && "code" in err ? String((err as NodeJS.ErrnoException).code) : "";
+    if (code === "EPERM" || code === "EACCES") {
+      t.skip("Windows without symlink privilege");
+      return;
+    }
+    throw err;
+  }
   assert.deepEqual(pruneOrphanWorktrees(managed, []).removed, []);
   fs.rmSync(root, { recursive: true, force: true });
 });
@@ -695,7 +705,7 @@ test("pruneOrphanWorktrees leaves a worktree made in the last hour alone", () =>
   fs.rmSync(root, { recursive: true, force: true });
 });
 
-test("folderLeftBehind counts what a worker left in its own folder, and nothing ignored", async () => {
+test("folderLeftBehind counts what a worker left in its own folder, and nothing ignored", async (t) => {
   const { root, repo, managed, wt } = repoWithWorktree("left", { ".gitignore": "*.log\n", "old.txt": "old\n" });
   fs.writeFileSync(path.join(wt, "tracked.txt"), "edited, never committed\n");
   execFileSync("git", ["mv", "old.txt", "renamed.txt"], { cwd: wt });
@@ -707,9 +717,19 @@ test("folderLeftBehind counts what a worker left in its own folder, and nothing 
   assert.deepEqual(await folderLeftBehind("sess_gone", managed), { ok: true, changed: 2, untracked: 2 });
 
   // Only the desk's own folders are read: not a link out of them, not a missing one.
-  fs.symlinkSync(repo, path.join(managed, "sess_link"));
-  assert.deepEqual(await folderLeftBehind("sess_link", managed), { ok: false });
   assert.deepEqual(await folderLeftBehind("sess_missing", managed), { ok: false });
   assert.deepEqual(await folderLeftBehind("", managed), { ok: false });
+  try {
+    fs.symlinkSync(repo, path.join(managed, "sess_link"));
+  } catch (err) {
+    fs.rmSync(root, { recursive: true, force: true });
+    const code = err && typeof err === "object" && "code" in err ? String((err as NodeJS.ErrnoException).code) : "";
+    if (code === "EPERM" || code === "EACCES") {
+      t.skip("Windows without symlink privilege");
+      return;
+    }
+    throw err;
+  }
+  assert.deepEqual(await folderLeftBehind("sess_link", managed), { ok: false });
   fs.rmSync(root, { recursive: true, force: true });
 });

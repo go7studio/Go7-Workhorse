@@ -380,6 +380,11 @@ type WorkhorseBridge = {
     fields?: Record<string, string | number | boolean>;
   }) => Promise<{ ok: true; jobId?: string; message: string } | { ok: false; reason: string }>;
   onWorkshopChanged?: (handler: () => void) => () => void;
+  /** Public leaderboard scores the desk cached (LMArena, CC BY 4.0), and when it last checked. */
+  scoresRead?: () => Promise<import("./lib/bot-scores").BotScoresView>;
+  /** Check the leaderboard now and download it if it moved. */
+  scoresRefresh?: () => Promise<import("./lib/bot-scores").BotScoresView>;
+  onScoresUpdated?: (handler: (view: unknown) => void) => () => void;
 };
 
 interface Window {

@@ -1,0 +1,1239 @@
+{
+ "note": "LMArena leaderboard dataset (huggingface.co/datasets/lmarena-ai/leaderboard-dataset), CC BY 4.0. Code Arena and Agent Arena rows as published in September 2026, reduced to what routing reads.",
+ "sha": "fb1d453984c478cdec61bb1a89db664b3f635933",
+ "published": {
+  "webdev:overall": "2026-09-22",
+  "agent:overall": "2026-09-15"
+ },
+ "tables": {
+  "webdev:overall": [
+   {
+    "name": "gpt-6-astra-max",
+    "org": "openai",
+    "value": 1793.1844725539565,
+    "rank": 1,
+    "votes": 4230
+   },
+   {
+    "name": "claude-fable-5.1-max",
+    "org": "anthropic",
+    "value": 1754.9324636144534,
+    "rank": 2,
+    "votes": 4887
+   },
+   {
+    "name": "claude-opus-5-max",
+    "org": "anthropic",
+    "value": 1691.146632138032,
+    "rank": 3,
+    "votes": 14251
+   },
+   {
+    "name": "qwen3.8-max",
+    "org": "alibaba",
+    "value": 1670.8867795635479,
+    "rank": 4,
+    "votes": 3221
+   },
+   {
+    "name": "qwen3.8-max-0902",
+    "org": "alibaba",
+    "value": 1662.1823403580745,
+    "rank": 5,
+    "votes": 5350
+   },
+   {
+    "name": "claude-opus-5-high",
+    "org": "anthropic",
+    "value": 1661.32341374304,
+    "rank": 6,
+    "votes": 16887
+   },
+   {
+    "name": "kimi-k3-max",
+    "org": "moonshot",
+    "value": 1657.911644160895,
+    "rank": 7,
+    "votes": 13140
+   },
+   {
+    "name": "muse-spark-1.3-max",
+    "org": "meta",
+    "value": 1656.7091020317873,
+    "rank": 8,
+    "votes": 5239
+   },
+   {
+    "name": "qwen3.8-flash-next",
+    "org": "alibaba",
+    "value": 1635.62892501158,
+    "rank": 9,
+    "votes": 4313
+   },
+   {
+    "name": "grok-4.7-xhigh",
+    "org": "xai",
+    "value": 1632.484104446712,
+    "rank": 10,
+    "votes": 1425
+   },
+   {
+    "name": "hy4-preview",
+    "org": "tencent",
+    "value": 1627.39286197407,
+    "rank": 11,
+    "votes": 4326
+   },
+   {
+    "name": "claude-fable-5-high",
+    "org": "anthropic",
+    "value": 1626.8498350045247,
+    "rank": 12,
+    "votes": 11824
+   },
+   {
+    "name": "muse-spark-1.3 (xHigh)",
+    "org": "meta",
+    "value": 1623.7171942538303,
+    "rank": 13,
+    "votes": 4285
+   },
+   {
+    "name": "glm-5.3-max",
+    "org": "zai",
+    "value": 1619.700650701583,
+    "rank": 14,
+    "votes": 5763
+   },
+   {
+    "name": "gpt-5.6-sol-xhigh (codex-harness)",
+    "org": "openai",
+    "value": 1617.312441204197,
+    "rank": 15,
+    "votes": 14266
+   },
+   {
+    "name": "grok-4.6-high",
+    "org": "xai",
+    "value": 1616.1634842109202,
+    "rank": 16,
+    "votes": 6447
+   },
+   {
+    "name": "deepseek-v4.1-flash-max",
+    "org": "deepseek",
+    "value": 1616.0804100287492,
+    "rank": 17,
+    "votes": 3125
+   },
+   {
+    "name": "glm-5.3-flash",
+    "org": "zai",
+    "value": 1612.226103894643,
+    "rank": 18,
+    "votes": 5818
+   },
+   {
+    "name": "glm-5.2-max",
+    "org": "zai",
+    "value": 1598.158239860263,
+    "rank": 19,
+    "votes": 12373
+   },
+   {
+    "name": "gemini-3.7-flash-high",
+    "org": "google",
+    "value": 1594.971587127716,
+    "rank": 20,
+    "votes": 7061
+   },
+   {
+    "name": "qwen3.8-27b",
+    "org": "alibaba",
+    "value": 1591.187841134246,
+    "rank": 21,
+    "votes": 9092
+   },
+   {
+    "name": "gemini-3.8-flash-high",
+    "org": "google",
+    "value": 1583.3771726162252,
+    "rank": 22,
+    "votes": 6558
+   },
+   {
+    "name": "deepseek-v4-pro-high-20260813",
+    "org": "deepseek",
+    "value": 1580.1949502647171,
+    "rank": 23,
+    "votes": 4636
+   },
+   {
+    "name": "deepseek-v4-flash-high",
+    "org": "deepseek",
+    "value": 1579.8951757439377,
+    "rank": 24,
+    "votes": 4739
+   },
+   {
+    "name": "claude-opus-4-7",
+    "org": "anthropic",
+    "value": 1557.4686122999371,
+    "rank": 25,
+    "votes": 15912
+   },
+   {
+    "name": "claude-opus-4-8-high",
+    "org": "anthropic",
+    "value": 1556.1185882930145,
+    "rank": 26,
+    "votes": 16020
+   },
+   {
+    "name": "claude-opus-4-7-high",
+    "org": "anthropic",
+    "value": 1555.6117291895077,
+    "rank": 27,
+    "votes": 16391
+   },
+   {
+    "name": "grok-4.5",
+    "org": "xai",
+    "value": 1552.3726626131822,
+    "rank": 28,
+    "votes": 10137
+   },
+   {
+    "name": "claude-opus-4-6-high",
+    "org": "anthropic",
+    "value": 1546.5790804679932,
+    "rank": 29,
+    "votes": 18328
+   },
+   {
+    "name": "muse-spark-1.1",
+    "org": "meta",
+    "value": 1541.8820460282063,
+    "rank": 30,
+    "votes": 7544
+   },
+   {
+    "name": "claude-sonnet-5-high",
+    "org": "anthropic",
+    "value": 1537.8106423310169,
+    "rank": 31,
+    "votes": 11511
+   },
+   {
+    "name": "claude-opus-4-8",
+    "org": "anthropic",
+    "value": 1537.2065228458189,
+    "rank": 32,
+    "votes": 14981
+   },
+   {
+    "name": "claude-opus-4-6",
+    "org": "anthropic",
+    "value": 1537.0791790043197,
+    "rank": 33,
+    "votes": 19536
+   },
+   {
+    "name": "gemini-3.6-flash-high",
+    "org": "google",
+    "value": 1536.8328991260353,
+    "rank": 34,
+    "votes": 8263
+   },
+   {
+    "name": "muse-spark-1.2 (xHigh)",
+    "org": "meta",
+    "value": 1534.3819283762869,
+    "rank": 35,
+    "votes": 2066
+   },
+   {
+    "name": "claude-sonnet-4-6",
+    "org": "anthropic",
+    "value": 1520.5362984968376,
+    "rank": 36,
+    "votes": 21659
+   },
+   {
+    "name": "gpt-5.6-luna-xhigh (codex-harness)",
+    "org": "openai",
+    "value": 1519.8299928798988,
+    "rank": 37,
+    "votes": 10128
+   },
+   {
+    "name": "seed-2.1-pro-preview",
+    "org": "bytedance",
+    "value": 1519.1909205830264,
+    "rank": 38,
+    "votes": 11263
+   },
+   {
+    "name": "gpt-5.6-terra-xhigh (codex-harness)",
+    "org": "openai",
+    "value": 1518.08172263709,
+    "rank": 39,
+    "votes": 9984
+   },
+   {
+    "name": "qwen3.7-max-20260517",
+    "org": "alibaba",
+    "value": 1517.0621500108598,
+    "rank": 40,
+    "votes": 8375
+   },
+   {
+    "name": "gpt-5.5-xhigh (codex-harness)",
+    "org": "openai",
+    "value": 1510.1958714282569,
+    "rank": 41,
+    "votes": 14952
+   },
+   {
+    "name": "hy3",
+    "org": "tencent",
+    "value": 1508.663439191662,
+    "rank": 42,
+    "votes": 4879
+   },
+   {
+    "name": "kimi-k2.6",
+    "org": "moonshot",
+    "value": 1508.5613612359132,
+    "rank": 43,
+    "votes": 9585
+   },
+   {
+    "name": "glm-5.1",
+    "org": "zai",
+    "value": 1508.0948678107936,
+    "rank": 44,
+    "votes": 10215
+   },
+   {
+    "name": "gemini-3.5-flash-high",
+    "org": "google",
+    "value": 1499.9742892796207,
+    "rank": 45,
+    "votes": 8933
+   },
+   {
+    "name": "claude-opus-4-5-20251101-high-32k",
+    "org": "anthropic",
+    "value": 1494.8999455607602,
+    "rank": 46,
+    "votes": 10597
+   },
+   {
+    "name": "gemini-3.5-flash-medium",
+    "org": "google",
+    "value": 1491.026170183334,
+    "rank": 47,
+    "votes": 11405
+   },
+   {
+    "name": "gpt-5.5-high (codex-harness)",
+    "org": "openai",
+    "value": 1486.5816085289077,
+    "rank": 48,
+    "votes": 17013
+   },
+   {
+    "name": "minimax-m3",
+    "org": "minimax",
+    "value": 1484.996902236342,
+    "rank": 49,
+    "votes": 14820
+   },
+   {
+    "name": "qwen3.6-max-preview",
+    "org": "alibaba",
+    "value": 1478.7961361750479,
+    "rank": 50,
+    "votes": 2598
+   },
+   {
+    "name": "mimo-v2.5-pro",
+    "org": "xiaomi",
+    "value": 1476.759306104293,
+    "rank": 51,
+    "votes": 17933
+   },
+   {
+    "name": "kimi-k2.7-code",
+    "org": "moonshot",
+    "value": 1472.2950889888896,
+    "rank": 52,
+    "votes": 4682
+   },
+   {
+    "name": "claude-opus-4-5-20251101",
+    "org": "anthropic",
+    "value": 1468.258659684453,
+    "rank": 53,
+    "votes": 12907
+   },
+   {
+    "name": "deepseek-v4-pro-high-preview",
+    "org": "deepseek",
+    "value": 1463.5056497010223,
+    "rank": 54,
+    "votes": 12396
+   },
+   {
+    "name": "gpt-5.4-high (codex-harness)",
+    "org": "openai",
+    "value": 1462.4723827762098,
+    "rank": 55,
+    "votes": 1275
+   },
+   {
+    "name": "qwen3.6-plus",
+    "org": "alibaba",
+    "value": 1460.538492980678,
+    "rank": 56,
+    "votes": 17572
+   },
+   {
+    "name": "gpt-5.5 (codex-harness)",
+    "org": "openai",
+    "value": 1457.7255190744115,
+    "rank": 57,
+    "votes": 15013
+   },
+   {
+    "name": "gemini-3.5-flash-lite",
+    "org": "google",
+    "value": 1446.9090314968757,
+    "rank": 58,
+    "votes": 228
+   },
+   {
+    "name": "gemini-3.1-pro-preview",
+    "org": "google",
+    "value": 1446.7410246842633,
+    "rank": 59,
+    "votes": 22902
+   },
+   {
+    "name": "deepseek-v4-pro",
+    "org": "deepseek",
+    "value": 1445.5654765598447,
+    "rank": 60,
+    "votes": 13179
+   },
+   {
+    "name": "gpt-5.4-medium (codex-harness)",
+    "org": "openai",
+    "value": 1442.660921600311,
+    "rank": 61,
+    "votes": 1317
+   },
+   {
+    "name": "gemini-3-pro",
+    "org": "google",
+    "value": 1438.8978547710296,
+    "rank": 62,
+    "votes": 13574
+   },
+   {
+    "name": "gemini-3-flash",
+    "org": "google",
+    "value": 1438.2307540022782,
+    "rank": 63,
+    "votes": 10461
+   },
+   {
+    "name": "mimo-v2.5",
+    "org": "xiaomi",
+    "value": 1437.4028388224995,
+    "rank": 64,
+    "votes": 14110
+   },
+   {
+    "name": "kimi-k2.5-thinking",
+    "org": "moonshot",
+    "value": 1436.3156159968757,
+    "rank": 65,
+    "votes": 19057
+   },
+   {
+    "name": "glm-5",
+    "org": "zai",
+    "value": 1435.7695008067244,
+    "rank": 66,
+    "votes": 7056
+   },
+   {
+    "name": "glm-4.7",
+    "org": "zai",
+    "value": 1434.8553625018396,
+    "rank": 67,
+    "votes": 3811
+   },
+   {
+    "name": "mimo-v2-pro",
+    "org": "xiaomi",
+    "value": 1433.6909721147001,
+    "rank": 68,
+    "votes": 6982
+   },
+   {
+    "name": "deepseek-v4-flash-high-preview",
+    "org": "deepseek",
+    "value": 1430.7318123670377,
+    "rank": 69,
+    "votes": 9495
+   },
+   {
+    "name": "gpt-5-medium",
+    "org": "openai",
+    "value": 1419.670615442576,
+    "rank": 70,
+    "votes": 3032
+   },
+   {
+    "name": "gpt-5.2",
+    "org": "openai",
+    "value": 1416.7738830941773,
+    "rank": 71,
+    "votes": 1055
+   },
+   {
+    "name": "inkling",
+    "org": "thinky",
+    "value": 1411.142199772964,
+    "rank": 72,
+    "votes": 11166
+   },
+   {
+    "name": "gpt-5.3-codex (codex-harness)",
+    "org": "openai",
+    "value": 1408.9976378685944,
+    "rank": 73,
+    "votes": 2513
+   },
+   {
+    "name": "Inkling Small",
+    "org": "thinky",
+    "value": 1406.7116129984493,
+    "rank": 74,
+    "votes": 5057
+   },
+   {
+    "name": "kimi-k2.5-instant",
+    "org": "moonshot",
+    "value": 1406.0398079524873,
+    "rank": 75,
+    "votes": 3094
+   },
+   {
+    "name": "glm-5v-turbo",
+    "org": "zai",
+    "value": 1400.5579087301578,
+    "rank": 76,
+    "votes": 2189
+   },
+   {
+    "name": "qwen3.5-397b-a17b",
+    "org": "alibaba",
+    "value": 1398.7500761960475,
+    "rank": 77,
+    "votes": 19946
+   },
+   {
+    "name": "minimax-m2.7",
+    "org": "minimax",
+    "value": 1397.5065050713067,
+    "rank": 78,
+    "votes": 15195
+   },
+   {
+    "name": "gpt-5.4-mini-high",
+    "org": "openai",
+    "value": 1397.2200298913363,
+    "rank": 79,
+    "votes": 11285
+   },
+   {
+    "name": "claude-sonnet-4-5-20250929-high-32k",
+    "org": "anthropic",
+    "value": 1392.8032516858377,
+    "rank": 80,
+    "votes": 12766
+   },
+   {
+    "name": "gpt-5.1-medium",
+    "org": "openai",
+    "value": 1392.0840943135447,
+    "rank": 81,
+    "votes": 4753
+   },
+   {
+    "name": "gpt-5.4",
+    "org": "openai",
+    "value": 1391.8034547122352,
+    "rank": 82,
+    "votes": 3195
+   },
+   {
+    "name": "claude-opus-4-1-20250805",
+    "org": "anthropic",
+    "value": 1389.2904707888715,
+    "rank": 83,
+    "votes": 6771
+   },
+   {
+    "name": "minimax-m2.1-preview",
+    "org": "minimax",
+    "value": 1387.3948091303962,
+    "rank": 84,
+    "votes": 7283
+   },
+   {
+    "name": "claude-sonnet-4-5-20250929",
+    "org": "anthropic",
+    "value": 1385.3798419006805,
+    "rank": 85,
+    "votes": 15171
+   },
+   {
+    "name": "minimax-m2.5",
+    "org": "minimax",
+    "value": 1384.0460493337675,
+    "rank": 86,
+    "votes": 7204
+   },
+   {
+    "name": "gemini-3-flash (thinking-minimal)",
+    "org": "google",
+    "value": 1383.0545325996732,
+    "rank": 87,
+    "votes": 20928
+   },
+   {
+    "name": "grok-4.20-beta-0309-reasoning",
+    "org": "xai",
+    "value": 1373.4039958763087,
+    "rank": 88,
+    "votes": 14585
+   },
+   {
+    "name": "gpt-5.3-codex (codex-harness)",
+    "org": "openai",
+    "value": 1369.332640638914,
+    "rank": 89,
+    "votes": 3502
+   },
+   {
+    "name": "solar-pro4",
+    "org": "upstage",
+    "value": 1364.6782490290477,
+    "rank": 90,
+    "votes": 4690
+   },
+   {
+    "name": "gemma-4-31b",
+    "org": "google",
+    "value": 1364.1889278399517,
+    "rank": 91,
+    "votes": 11584
+   },
+   {
+    "name": "gemma-4-26b-a4b",
+    "org": "google",
+    "value": 1361.9026912217173,
+    "rank": 92,
+    "votes": 1441
+   },
+   {
+    "name": "deepseek-v3.2-thinking",
+    "org": "deepseek",
+    "value": 1360.8357530233045,
+    "rank": 93,
+    "votes": 6646
+   },
+   {
+    "name": "muse-glimmer",
+    "org": "meta",
+    "value": 1359.7678815948796,
+    "rank": 94,
+    "votes": 1515
+   },
+   {
+    "name": "qwen3.5-122b-a10b",
+    "org": "alibaba",
+    "value": 1358.2091073654879,
+    "rank": 95,
+    "votes": 7854
+   },
+   {
+    "name": "qwen3.5-27b",
+    "org": "alibaba",
+    "value": 1357.813426661123,
+    "rank": 96,
+    "votes": 7438
+   },
+   {
+    "name": "hunyuan-hy3-preview",
+    "org": "tencent",
+    "value": 1356.9938652993435,
+    "rank": 97,
+    "votes": 1398
+   },
+   {
+    "name": "grok-4.3",
+    "org": "xai",
+    "value": 1356.9786897013935,
+    "rank": 98,
+    "votes": 14191
+   },
+   {
+    "name": "laguna-m.1",
+    "org": "poolside",
+    "value": 1347.2471775430488,
+    "rank": 99,
+    "votes": 5059
+   },
+   {
+    "name": "gpt-5.1",
+    "org": "openai",
+    "value": 1340.9864133448007,
+    "rank": 100,
+    "votes": 10327
+   },
+   {
+    "name": "glm-4.6",
+    "org": "zai",
+    "value": 1340.7964728594256,
+    "rank": 101,
+    "votes": 6600
+   },
+   {
+    "name": "gpt-5.2-codex",
+    "org": "openai",
+    "value": 1338.6844730287128,
+    "rank": 102,
+    "votes": 6404
+   },
+   {
+    "name": "gpt-5.1-codex",
+    "org": "openai",
+    "value": 1336.1971890329119,
+    "rank": 103,
+    "votes": 4865
+   },
+   {
+    "name": "mimo-v2-flash (non-thinking)",
+    "org": "xiaomi",
+    "value": 1330.6524493163759,
+    "rank": 104,
+    "votes": 5400
+   },
+   {
+    "name": "claude-haiku-4-5-20251001",
+    "org": "anthropic",
+    "value": 1329.5174727314068,
+    "rank": 105,
+    "votes": 27806
+   },
+   {
+    "name": "deepseek-v3.2",
+    "org": "deepseek",
+    "value": 1325.3369418798202,
+    "rank": 106,
+    "votes": 8976
+   },
+   {
+    "name": "kimi-k2-thinking-turbo",
+    "org": "moonshot",
+    "value": 1322.9719311564118,
+    "rank": 107,
+    "votes": 12651
+   },
+   {
+    "name": "laguna-xs.2",
+    "org": "poolside",
+    "value": 1302.2691151953716,
+    "rank": 108,
+    "votes": 3936
+   },
+   {
+    "name": "minimax-m2",
+    "org": "minimax",
+    "value": 1297.9564394216222,
+    "rank": 109,
+    "votes": 6543
+   },
+   {
+    "name": "mimo-v2-flash (thinking)",
+    "org": "xiaomi",
+    "value": 1293.2511926785835,
+    "rank": 110,
+    "votes": 1657
+   },
+   {
+    "name": "qwen3-coder-480b-a35b-instruct",
+    "org": "alibaba",
+    "value": 1273.938439922615,
+    "rank": 111,
+    "votes": 12269
+   },
+   {
+    "name": "deepseek-v3.2-exp",
+    "org": "deepseek",
+    "value": 1271.839693049875,
+    "rank": 112,
+    "votes": 3866
+   },
+   {
+    "name": "mistral-medium-3.5",
+    "org": "mistral",
+    "value": 1264.5590702522995,
+    "rank": 113,
+    "votes": 2148
+   },
+   {
+    "name": "KAT-Coder-Pro-V1",
+    "org": "",
+    "value": 1255.199387322868,
+    "rank": 114,
+    "votes": 1458
+   },
+   {
+    "name": "gemini-3.1-flash-lite-preview",
+    "org": "google",
+    "value": 1254.4620654348846,
+    "rank": 115,
+    "votes": 13655
+   },
+   {
+    "name": "qwen3.5-35b-a3b",
+    "org": "alibaba",
+    "value": 1250.318630231919,
+    "rank": 116,
+    "votes": 1535
+   },
+   {
+    "name": "gpt-5.1-codex-mini",
+    "org": "openai",
+    "value": 1244.0691879311812,
+    "rank": 117,
+    "votes": 1133
+   },
+   {
+    "name": "grok-4-1-fast-reasoning",
+    "org": "xai",
+    "value": 1240.6939077177974,
+    "rank": 118,
+    "votes": 5314
+   },
+   {
+    "name": "qwen3.5-flash",
+    "org": "alibaba",
+    "value": 1238.9527602959963,
+    "rank": 119,
+    "votes": 1272
+   },
+   {
+    "name": "trinity-large-thinking",
+    "org": "",
+    "value": 1236.7545733324998,
+    "rank": 120,
+    "votes": 1303
+   },
+   {
+    "name": "mistral-large-3",
+    "org": "mistral",
+    "value": 1228.7889527282387,
+    "rank": 121,
+    "votes": 811
+   },
+   {
+    "name": "gemini-2.5-pro",
+    "org": "google",
+    "value": 1225.9769776461194,
+    "rank": 122,
+    "votes": 2666
+   },
+   {
+    "name": "grok-4.1-thinking",
+    "org": "xai",
+    "value": 1211.1736996650293,
+    "rank": 123,
+    "votes": 939
+   },
+   {
+    "name": "devstral-2",
+    "org": "mistral",
+    "value": 1194.2330890021658,
+    "rank": 124,
+    "votes": 1146
+   },
+   {
+    "name": "granite-4.1-8b",
+    "org": "ibm",
+    "value": 1191.5918339899242,
+    "rank": 125,
+    "votes": 1704
+   },
+   {
+    "name": "mercury-2",
+    "org": "inception-ai",
+    "value": 1166.96730986347,
+    "rank": 126,
+    "votes": 905
+   },
+   {
+    "name": "grok-code-fast-1",
+    "org": "xai",
+    "value": 1165.2726570918169,
+    "rank": 127,
+    "votes": 783
+   },
+   {
+    "name": "grok-4-fast-reasoning",
+    "org": "xai",
+    "value": 1161.887083769317,
+    "rank": 128,
+    "votes": 732
+   },
+   {
+    "name": "devstral-medium-2507",
+    "org": "mistral",
+    "value": 1081.3853268707478,
+    "rank": 129,
+    "votes": 831
+   }
+  ],
+  "agent:overall": [
+   {
+    "name": "Claude Fable 5.1 (Max)",
+    "org": "anthropic",
+    "value": 0.13705292686095527,
+    "rank": 1,
+    "votes": 1453463
+   },
+   {
+    "name": "GPT 6 Astra (Max)",
+    "org": "openai",
+    "value": 0.11536629274970146,
+    "rank": 2,
+    "votes": 782334
+   },
+   {
+    "name": "Claude Opus 5 (High)",
+    "org": "anthropic",
+    "value": 0.10248156798096714,
+    "rank": 3,
+    "votes": 3006741
+   },
+   {
+    "name": "Claude Opus 5 (Max)",
+    "org": "anthropic",
+    "value": 0.10162856287836407,
+    "rank": 4,
+    "votes": 2534849
+   },
+   {
+    "name": "Claude Fable 5 (High)",
+    "org": "anthropic",
+    "value": 0.08813778182391603,
+    "rank": 5,
+    "votes": 2061291
+   },
+   {
+    "name": "Claude Opus 4.8 (High)",
+    "org": "anthropic",
+    "value": 0.08188506500733964,
+    "rank": 6,
+    "votes": 2097389
+   },
+   {
+    "name": "GPT 5.6 Sol (xHigh)",
+    "org": "openai",
+    "value": 0.07104568746580574,
+    "rank": 7,
+    "votes": 3553721
+   },
+   {
+    "name": "Kimi K3 (Max)",
+    "org": "moonshot",
+    "value": 0.06218584341198621,
+    "rank": 8,
+    "votes": 9086177
+   },
+   {
+    "name": "Claude Sonnet 5 (High)",
+    "org": "anthropic",
+    "value": 0.059695752187351785,
+    "rank": 9,
+    "votes": 3176952
+   },
+   {
+    "name": "GPT 5.5 (xHigh)",
+    "org": "openai",
+    "value": 0.050298846104034116,
+    "rank": 10,
+    "votes": 2527480
+   },
+   {
+    "name": "Hy4 preview",
+    "org": "tencent",
+    "value": 0.05007600814637329,
+    "rank": 11,
+    "votes": 2777850
+   },
+   {
+    "name": "Deepseek V4.1 Flash (Max)",
+    "org": "deepseek",
+    "value": 0.04879810306288962,
+    "rank": 12,
+    "votes": 2295632
+   },
+   {
+    "name": "Gemini 3.8 Flash (High)",
+    "org": "google",
+    "value": 0.047089018416937446,
+    "rank": 13,
+    "votes": 712246
+   },
+   {
+    "name": "GLM 5.2 (Max)",
+    "org": "zai",
+    "value": 0.04367958424129895,
+    "rank": 14,
+    "votes": 4943866
+   },
+   {
+    "name": "Muse Spark 1.3 (Max)",
+    "org": "meta",
+    "value": 0.04200682551762978,
+    "rank": 15,
+    "votes": 2525117
+   },
+   {
+    "name": "DeepSeek V4 Pro (High) (0813)",
+    "org": "deepseek",
+    "value": 0.04141365019821214,
+    "rank": 16,
+    "votes": 4132769
+   },
+   {
+    "name": "Qwen3.8 Max",
+    "org": "alibaba",
+    "value": 0.0330392621731733,
+    "rank": 17,
+    "votes": 2502655
+   },
+   {
+    "name": "GLM 5.3 (Max)",
+    "org": "zai",
+    "value": 0.0305126664186006,
+    "rank": 18,
+    "votes": 6652488
+   },
+   {
+    "name": "Grok 4.5",
+    "org": "xai",
+    "value": 0.029206810162472386,
+    "rank": 19,
+    "votes": 1942877
+   },
+   {
+    "name": "GPT 5.5",
+    "org": "openai",
+    "value": 0.026690863035375666,
+    "rank": 20,
+    "votes": 2107641
+   },
+   {
+    "name": "Grok 4.6 (xHigh)",
+    "org": "xai",
+    "value": 0.02007119985515724,
+    "rank": 21,
+    "votes": 2390552
+   },
+   {
+    "name": "Deepseek V4 Flash (High) (20260731)",
+    "org": "deepseek",
+    "value": 0.017972403089713686,
+    "rank": 22,
+    "votes": 6405377
+   },
+   {
+    "name": "GPT 5.6 Terra (xHigh)",
+    "org": "openai",
+    "value": 0.01439987572780558,
+    "rank": 23,
+    "votes": 1231027
+   },
+   {
+    "name": "GPT 5.4 (High)",
+    "org": "openai",
+    "value": 0.012647023968307126,
+    "rank": 24,
+    "votes": 3735057
+   },
+   {
+    "name": "GLM 5.3 Flash",
+    "org": "zai",
+    "value": 0.01147769290939039,
+    "rank": 25,
+    "votes": 4433017
+   },
+   {
+    "name": "Qwen3.8 Flash Next",
+    "org": "alibaba",
+    "value": -0.0007482967042862503,
+    "rank": 26,
+    "votes": 7278343
+   },
+   {
+    "name": "GPT 5.6 Luna (xHigh)",
+    "org": "openai",
+    "value": -0.00437957903954871,
+    "rank": 27,
+    "votes": 2307801
+   },
+   {
+    "name": "Gemini 3.7 Flash (High)",
+    "org": "google",
+    "value": -0.006047318148538505,
+    "rank": 28,
+    "votes": 3925675
+   },
+   {
+    "name": "Qwen 3.8 27B",
+    "org": "alibaba",
+    "value": -0.006433826068463658,
+    "rank": 29,
+    "votes": 4349219
+   },
+   {
+    "name": "DeepSeek V4 Pro",
+    "org": "deepseek",
+    "value": -0.007147489724484314,
+    "rank": 30,
+    "votes": 1910125
+   },
+   {
+    "name": "Claude Sonnet 4.6",
+    "org": "anthropic",
+    "value": -0.01517376664192388,
+    "rank": 31,
+    "votes": 1444102
+   },
+   {
+    "name": "Muse Spark 1.2 (xHigh)",
+    "org": "meta",
+    "value": -0.017708699918045308,
+    "rank": 32,
+    "votes": 1437075
+   },
+   {
+    "name": "Muse Spark 1.1",
+    "org": "meta",
+    "value": -0.029815204202187497,
+    "rank": 33,
+    "votes": 4434474
+   },
+   {
+    "name": "Qwen3.7 Max",
+    "org": "alibaba",
+    "value": -0.03625303395826887,
+    "rank": 34,
+    "votes": 1816729
+   },
+   {
+    "name": "Hy3",
+    "org": "tencent",
+    "value": -0.05233047468497381,
+    "rank": 35,
+    "votes": 992576
+   },
+   {
+    "name": "Mimo V2.5 Pro",
+    "org": "xiaomi",
+    "value": -0.05730993440019725,
+    "rank": 36,
+    "votes": 1864383
+   },
+   {
+    "name": "Minimax M3",
+    "org": "minimax",
+    "value": -0.05763862870071043,
+    "rank": 37,
+    "votes": 2879059
+   },
+   {
+    "name": "Gemini 3.1 Pro Preview",
+    "org": "google",
+    "value": -0.05805697353101433,
+    "rank": 38,
+    "votes": 2915267
+   },
+   {
+    "name": "Gemini 3.6 Flash (High)",
+    "org": "google",
+    "value": -0.05937658888757943,
+    "rank": 39,
+    "votes": 1181765
+   },
+   {
+    "name": "Qwen3.7 Plus",
+    "org": "alibaba",
+    "value": -0.0608270388836486,
+    "rank": 40,
+    "votes": 993739
+   },
+   {
+    "name": "Inkling Small",
+    "org": "thinky",
+    "value": -0.0916258314318859,
+    "rank": 41,
+    "votes": 432357
+   },
+   {
+    "name": "Inkling",
+    "org": "thinky",
+    "value": -0.10020886483857573,
+    "rank": 42,
+    "votes": 1624204
+   },
+   {
+    "name": "Mistral Medium 3.5",
+    "org": "mistral",
+    "value": -0.10876985300415064,
+    "rank": 43,
+    "votes": 358935
+   },
+   {
+    "name": "Minimax M2.7",
+    "org": "minimax",
+    "value": -0.14021933072278817,
+    "rank": 44,
+    "votes": 858163
+   },
+   {
+    "name": "Gemini 3.5 Flash Lite",
+    "org": "google",
+    "value": -0.15348839747574022,
+    "rank": 45,
+    "votes": 670178
+   },
+   {
+    "name": "Solar Pro 4",
+    "org": "upstage",
+    "value": -0.1552336520902226,
+    "rank": 46,
+    "votes": 354024
+   }
+  ]
+ }
+}

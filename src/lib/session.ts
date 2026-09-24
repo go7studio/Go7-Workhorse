@@ -17,6 +17,7 @@ import { normalizeRoutingDecision } from "./routing";
 import { normalizeCrewModes } from "./workhorse-rules";
 import { normalizeSpawnAllowlist } from "./spawn-allowlist";
 import { folderFromPath } from "./project";
+import { normalizeWorkshopPackIds } from "./workshop-pack";
 import type { ChatMessage, CustomBot, EffortLevel, LinkedFolder, MissionCaps, PermissionMode, ProviderId, SandboxProfile, Session } from "./types";
 
 export type BrainStamp = {
@@ -370,6 +371,7 @@ export function normalizeSession(raw: unknown, liveRunIds?: ReadonlySet<string>)
     })(),
     spawnAllowlist: normalizeSpawnAllowlist((record as { spawnAllowlist?: unknown }).spawnAllowlist),
     missionCaps: normalizeMissionCaps((record as { missionCaps?: unknown }).missionCaps),
+    workshopPacks: normalizeWorkshopPackIds((record as { workshopPacks?: unknown }).workshopPacks),
   };
 }
 

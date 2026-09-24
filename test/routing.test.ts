@@ -11,6 +11,7 @@ import {
   detectsImageGenerationIntent,
   effortForRoutingTier,
   inferRoutingTier,
+  routingTierSliceText,
   mergeInputRequirements,
   outcomesFromLearningEvents,
   rankRoutingCandidates,
@@ -40,6 +41,7 @@ import { applyVendorCatalog, modelsFor, parseEffortFromText, resetVendorCatalog 
 import { normalizeSettings } from "../src/lib/settings";
 import type { RoutingSettings } from "../src/lib/types";
 import { constrainRouteCandidatesForSpawn, listedChatFollowThrough, resolveSpawnSpec, shouldAutoRouteSpawn } from "../src/lib/subagents";
+import { domainBenchmarkScoreFromCatalog, FAMILY_ROUTING_PRIOR_SOURCE } from "../src/lib/domain-benchmark-catalog";
 import { customBotModels } from "../src/lib/custom-bots";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -704,7 +706,11 @@ test("Settings draws one bar on every tab and no second title", () => {
   // Usage used to draw its own "Usage" heading and tab row, so choosing it
   // shifted the page; the window title already says Settings.
   const settingsUi = readFileSync(path.join(ROOT, "src", "ui", "Settings.tsx"), "utf8");
+  const botKnowledge = readFileSync(path.join(ROOT, "src", "ui", "BotKnowledgePane.tsx"), "utf8");
   const usage = readFileSync(path.join(ROOT, "src", "ui", "UsagePane.tsx"), "utf8");
+  assert.match(settingsUi, /id: "bot-knowledge", label: "Bot knowledge"/);
+  assert.match(settingsUi, /BotKnowledgePane/);
+  assert.match(botKnowledge, /botKnowledgeSnapshot/);
   assert.match(settingsUi, /className="settings-bar"/);
   assert.match(usage, /className="settings-bar"/);
   assert.doesNotMatch(settingsUi, /<h2>Settings<\/h2>/);
@@ -809,8 +815,8 @@ test("spawn route= beats keyword inference; auditor, builder, size, attachments,
   assert.equal(inferRoutingTier("Quick: list these names", [], { parentTier: "deep" }), "deep");
   assert.equal(inferRoutingTier("Architect a production migration", [], { parentTier: "quick" }), "quick");
   assert.equal(inferRoutingTier("Quick: list these names", [], { role: "auditor" }), "deep");
-  assert.equal(inferRoutingTier("Quick: list these names", [], { role: "builder" }), "balanced");
-  assert.equal(inferRoutingTier("Quick: list these names", [], { role: "worker" }), "balanced");
+  assert.equal(inferRoutingTier("Quick: list these names", [], { role: "builder" }), "quick");
+  assert.equal(inferRoutingTier("Quick: list these names", [], { role: "worker" }), "quick");
   assert.equal(inferRoutingTier("x".repeat(1300)), "deep");
   assert.equal(
     inferRoutingTier("Please handle this file", [
@@ -849,16 +855,35 @@ test("spawn route= beats keyword inference; auditor, builder, size, attachments,
   };
   assert.equal(
     inferRoutingTier(workerSpawn.prompt, [], { role: workerSpawn.role, parentTier: workerSpawn.parentTier }),
-    "balanced",
+    "quick",
   );
   assert.equal(
     inferRoutingTier(auditorSpawn.prompt, [], { role: auditorSpawn.role, parentTier: auditorSpawn.parentTier }),
     "deep",
   );
+  // A long brief is a careful head, not hard work: length alone keeps a worker balanced.
   assert.equal(
     inferRoutingTier(longWorker.prompt, [], { role: longWorker.role, parentTier: longWorker.parentTier }),
-    "deep",
+    "balanced",
   );
+  const background = " Background: the stub throws, the tests are fixed, keep the folder tidy.".repeat(30);
+  assert.equal(
+    inferRoutingTier(`Your only task: write a short, friendly release note (under 120 words) in docs/RELEASE.md.${background} No bugs in the note, please.`, [], { role: "worker" }),
+    "balanced",
+    "a marker buried in the background is not the slice",
+  );
+  assert.equal(
+    inferRoutingTier(`Your only task: find the root cause of the crash in src/queue.ts and fix it.${background}`, [], { role: "worker" }),
+    "deep",
+    "a hard slice stated up front still routes deep",
+  );
+  assert.equal(inferRoutingTier("x".repeat(1300)), "deep", "a long ask from a person still reads as a big one");
+  assert.equal(
+    inferRoutingTier(`SLICE: Quick: list the files in src\n\n${"Background context. ".repeat(200)}`, [], { role: "worker" }),
+    "quick",
+    "tier reads the SLICE line, not the head's background",
+  );
+  assert.equal(routingTierSliceText(`TASK: rename the helper\n${"x".repeat(800)}`, "worker"), "rename the helper");
 
   const rows = [candidate("gpt-5.6-sol"), candidate("gpt-5.6-luna")];
   const workerPick = chooseRoutingDecision(rows, {
@@ -866,8 +891,8 @@ test("spawn route= beats keyword inference; auditor, builder, size, attachments,
     role: workerSpawn.role,
     parentTier: workerSpawn.parentTier,
   }, settings);
-  assert.equal(workerPick?.taskTier, "balanced");
-  assert.equal(workerPick?.effort, "medium");
+  assert.equal(workerPick?.taskTier, "quick");
+  assert.equal(workerPick?.effort, "low");
   const auditorPick = chooseRoutingDecision(rows, {
     prompt: auditorSpawn.prompt,
     role: auditorSpawn.role,
@@ -1208,4 +1233,88 @@ test("non-image prompts keep the same ranking winners as before image-gen prefer
   );
   assert.equal(quick?.model, "gpt-5.6-luna");
   assert.equal(deep?.model, "gpt-5.6-sol");
+});
+
+test("the desk table says which board, sibling, or estimate each number was read from", () => {
+  const sol = domainBenchmarkScoreFromCatalog("codex", "gpt-5.6-sol", "coding", 10);
+  assert.equal(sol.source, "LMArena, Sept 2026, out of 100 with the Agent Arena mixed in, rounded down");
+  const grokText = domainBenchmarkScoreFromCatalog("grok", "grok-4.7", "general", 10);
+  assert.match(grokText.source, /read from Grok 4\.6, the nearest rated sibling/);
+  const composer = domainBenchmarkScoreFromCatalog("cursor", "composer-2.5", "coding", 8);
+  assert.match(composer.source, /^No LMArena board rates it/);
+  const unknown = domainBenchmarkScoreFromCatalog("custom", "my-unrated-bot", "coding", 6);
+  assert.equal(unknown.source, FAMILY_ROUTING_PRIOR_SOURCE);
+});
+
+test("orchestration benchmark picks different winners for coding and image-generation slices", () => {
+  const now = Date.parse("2026-08-13T00:00:00Z");
+  const rows = [
+    candidate("gpt-5.6-sol", 10, {
+      provider: "codex",
+      label: "GPT-5.6 Sol",
+      profile: { ...routingProfileForModel("codex", "gpt-5.6-sol"), cost: 5 },
+    }),
+    candidate("grok-4.6", 10, {
+      provider: "grok",
+      label: "Grok 4.6",
+      profile: { ...routingProfileForModel("grok", "grok-4.6"), cost: 5 },
+    }),
+  ];
+  const coding = chooseRoutingDecision(
+    rows,
+    {
+      prompt: "Implement the lock-free queue in Rust with unit tests",
+      tier: "balanced",
+      useOrchestrationBenchmark: true,
+      now,
+    },
+    settings,
+  );
+  const image = chooseRoutingDecision(
+    rows,
+    {
+      prompt: "generate a detailed image of a chicken wing",
+      tier: "balanced",
+      useOrchestrationBenchmark: true,
+      now,
+    },
+    settings,
+  );
+  assert.equal(coding?.provider, "codex");
+  assert.equal(coding?.model, "gpt-5.6-sol");
+  assert.equal(image?.provider, "grok");
+  assert.equal(image?.model, "grok-4.6");
+  assert.notEqual(coding?.model, image?.model);
+});
+
+test("a coordinator-named model on the spawn still goes through orchestration ranking", () => {
+  assert.equal(
+    shouldAutoRouteSpawn({ routingEnabled: true, model: "MiniMax-M3", coordinatorModel: true }),
+    true,
+  );
+  assert.equal(
+    shouldAutoRouteSpawn({
+      routingEnabled: true,
+      model: "MiniMax-M3",
+      coordinatorModel: true,
+      userLockedModel: "MiniMax-M3",
+    }),
+    false,
+  );
+  const now = Date.parse("2026-08-13T00:00:00Z");
+  const rows = [
+    candidate("gpt-5.6-sol", 10, { provider: "codex", label: "GPT-5.6 Sol" }),
+    candidate("grok-4.6", 10, { provider: "grok", label: "Grok 4.6" }),
+  ];
+  const ranked = chooseRoutingDecision(
+    rows,
+    {
+      prompt: "generate a detailed image of a lighthouse",
+      tier: "balanced",
+      useOrchestrationBenchmark: true,
+      now,
+    },
+    settings,
+  );
+  assert.equal(ranked?.model, "grok-4.6");
 });

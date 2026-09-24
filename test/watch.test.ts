@@ -22,6 +22,7 @@ import {
   evaluateWatchHold,
   formatDeskRoster,
   formatPlanLine,
+  formatPlanLineVisible,
   projectCapacitySnapshot,
   type DeskCallRow,
   vendorCallBlocked,
@@ -89,6 +90,7 @@ test("watch is one daily limit, off until you turn it on", () => {
   assert.equal(settings.watch.desktopNotify, true);
   assert.equal(settings.watch.dailyLimitPercent, 100 / 7);
   assert.equal(isSettingsSection("watch"), true);
+  assert.equal(isSettingsSection("bot-knowledge"), true);
   assert.equal(normalizeWatch({ desktopNotify: true }).desktopNotify, true);
   assert.equal(normalizeWatch({ desktopNotify: false }).desktopNotify, false);
   assert.equal(isDesktopWatchNotice({ kind: "daily" }), true);
@@ -629,6 +631,11 @@ test("deskCallCatalog marks spent and Watch-held vendors as not callable", () =>
     /43% leftover of this week's plan overall \(57% used this week so far/,
   );
   assert.match(formatPlanLine({ leftoverPercent: 43, usedPercent: 57, period: "weekly" }), /not this prompt/);
+  assert.equal(formatPlanLineVisible({ leftoverPercent: 43, usedPercent: 57, period: "weekly" }), "57% used · week");
+  assert.equal(
+    formatPlanLineVisible({ leftoverPercent: 51, usedPercent: 49, period: "monthly" }),
+    "49% used · month",
+  );
   assert.match(
     formatPlanLine({ leftoverPercent: 51, usedPercent: 49, period: "monthly" }),
     /51% leftover of this month's plan overall \(49% used this month so far/,

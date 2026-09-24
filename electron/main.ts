@@ -114,6 +114,7 @@ import { createWorkshopHost, listInstalledPacks } from "./workshop-host";
 import { invokeMediaCreate } from "./local-media-create";
 import { checkPackUpdate, installCatalogEntry, installFromFolder, installFromRepo, removePack, updatePack } from "./workshop-install";
 import { createCatalogService } from "./workshop-catalog";
+import { createBotScoresHost } from "./bot-scores-host";
 import { catalogYankMatches } from "../src/lib/workshop-catalog";
 import { createWorkshopBreakoutWindow } from "./workshop-window";
 import { disablePacksForReconfirm, normalizeWorkshopSettings } from "../src/lib/workshop-pack";
@@ -1169,6 +1170,17 @@ app.whenReady().then(async () => {
     },
   });
   void workshopCatalog.refresh();
+  // Public leaderboard scores for orchestration (LMArena, CC BY 4.0, no key).
+  // A daily commit check; a download only when the leaderboard moved.
+  const botScores = createBotScoresHost({
+    dir: () => path.join(app.getPath("userData"), "bot-scores"),
+    onUpdate: (view) => {
+      for (const window of BrowserWindow.getAllWindows()) {
+        if (!window.webContents.isDestroyed()) window.webContents.send("scores:updated", view);
+      }
+    },
+  });
+  botScores.start();
   const workshopHost = createWorkshopHost({
     packsRoot: workshopPacksRoot,
     getSettings: () => normalizeWorkshopSettings(liveSettings.workshop),
@@ -1847,6 +1859,8 @@ app.whenReady().then(async () => {
   };
   const workshopId = (input: unknown): string =>
     input && typeof input === "object" && typeof (input as { id?: unknown }).id === "string" ? (input as { id: string }).id : "";
+  ipcMain.handle("scores:read", () => botScores.view());
+  ipcMain.handle("scores:refresh", () => botScores.refresh({ force: true }));
   ipcMain.handle("workshop:list", () => workshopHost.list());
   ipcMain.handle("workshop:view", () => workshopHost.view());
   ipcMain.handle("workshop:catalog", async () => {

@@ -38,6 +38,7 @@ import {
   usageTimestamp,
   visibleUsageEvents,
   usageFocusFacts,
+  vendorTidePercent,
 } from "../src/lib/usage";
 import type { UsageDraft } from "../src/lib/types";
 
@@ -834,6 +835,45 @@ test("a Cursor pool's drill-in lists only that pool's models", () => {
   const pane = readFileSync(path.join(ROOT, "src", "ui", "UsagePane.tsx"), "utf8");
   assert.match(pane, /modelsForProvider\(focusedEvents, focused\.provider\)/);
   assert.doesNotMatch(pane, /modelsForProvider\(events, focused\.provider\)/);
+});
+
+test("a Cursor chat's setup tide reads its own pool's plan and spend", () => {
+  // The setup sheet passed no Cursor plan and named the row plain "cursor".
+  // A Composer chat with 10% of its pool used showed 100% left with no
+  // budget, or a budget share of both pools with one. Handed the plan, the
+  // row "cursor" mapped to the API pool instead.
+  const event = (id: string, model: string, lane: "cursor-models" | "other-models", inputTokens: number) => ({
+    id,
+    at: 1,
+    provider: "cursor" as const,
+    model,
+    lane,
+    inputTokens,
+    outputTokens: 0,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+  });
+  const events = [event("a", "composer-2.5", "cursor-models", 1_000), event("b", "claude-sonnet-4.6", "other-models", 50_000)];
+  const cursor = {
+    usedPercent: 10,
+    leftPercent: 90,
+    period: "monthly" as const,
+    prepaidBalance: 0,
+    products: [
+      { product: "cursor-models", label: "Composer", usagePercent: 10 },
+      { product: "other-models", label: "API", usagePercent: 95 },
+    ],
+  };
+  const composer = { focus: "cursor:cursor-models" as const, provider: "cursor" as const, key: "cursor:cursor-models" };
+  const api = { focus: "cursor:other-models" as const, provider: "cursor" as const, key: "cursor:other-models" };
+  assert.equal(vendorTidePercent(composer, { cursor }, events, 60_000), 90);
+  assert.equal(vendorTidePercent(api, { cursor }, events, 60_000), 5);
+  // With no plan yet, the budget share counts this pool's spend only.
+  assert.equal(Math.round(vendorTidePercent(composer, {}, events, 10_000)), 90);
+
+  const setup = readFileSync(path.join(ROOT, "src", "ui", "SessionSetup.tsx"), "utf8");
+  assert.match(setup, /cursorWatchLane\(session\.model\)/);
+  assert.match(setup, /cursor: cursorPlan/);
 });
 
 test("disabled LLMs stay out of the usage view until they are turned back on", () => {

@@ -779,6 +779,7 @@ export function vendorUsedPercent(
     grok?: GrokPlanUsage;
     codex?: GrokPlanUsage;
     claude?: GrokPlanUsage;
+    cursor?: GrokPlanUsage;
     custom?: Record<string, GrokPlanUsage | undefined>;
   },
   events: UsageEvent[] = [],
@@ -789,10 +790,14 @@ export function vendorUsedPercent(
   if (plan && Number.isFinite(plan.usedPercent)) {
     return Math.min(100, Math.max(0, plan.usedPercent));
   }
+  // A Cursor pool spends against its own allowance, so only its own events
+  // count toward the budget.
   const slice =
     row.provider === "custom" && bot
       ? customBotUsageEvents(events, bot)
-      : events.filter((event) => event.provider === row.provider);
+      : isCursorWatchKey(String(row.focus))
+        ? cursorLaneEvents(events, row.focus as CursorWatchKey)
+        : events.filter((event) => event.provider === row.provider);
   const used = rollup(slice).totalTokens;
   if (budget && budget > 0 && used > 0) return Math.min(100, (used / budget) * 100);
   return 0;
@@ -828,6 +833,7 @@ export function vendorTidePercent(
     grok?: GrokPlanUsage;
     codex?: GrokPlanUsage;
     claude?: GrokPlanUsage;
+    cursor?: GrokPlanUsage;
     custom?: Record<string, GrokPlanUsage | undefined>;
   },
   events: UsageEvent[] = [],

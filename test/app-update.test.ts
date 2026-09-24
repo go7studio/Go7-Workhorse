@@ -12,6 +12,7 @@ import {
   macInstallerArch,
   macRefreshRegistrationScript,
   macReplaceScript,
+  npmInstallCommand,
   windowsGrokBotShimPids,
   offerFromRelease,
   winInstallerArgs,
@@ -441,4 +442,20 @@ test("a development desk never installs a release over itself", () => {
     main,
     /applyAppUpdate\(typeof version === "string" \? version : "", runtimeIdentity\.userDataDirectory === WORKHORSE_DEV_USER_DATA_DIR\)/,
   );
+});
+
+test("the source-checkout update starts npm on Windows through cmd.exe", () => {
+  // npm.cmd is a batch file. Node refuses to start one without a shell, so the
+  // update failed with EINVAL every time on Windows, after git had moved.
+  assert.deepEqual(npmInstallCommand("win32", "C:\\Windows\\system32\\cmd.exe"), {
+    command: "C:\\Windows\\system32\\cmd.exe",
+    args: ["/d", "/s", "/c", "npm.cmd install"],
+  });
+  assert.equal(npmInstallCommand("win32").command, "C:\\Windows\\System32\\cmd.exe");
+  assert.deepEqual(npmInstallCommand("darwin"), { command: "npm", args: ["install"] });
+  assert.deepEqual(npmInstallCommand("linux"), { command: "npm", args: ["install"] });
+  const updater = readFileSync(path.join(ROOT, "electron", "app-update.ts"), "utf8");
+  assert.doesNotMatch(updater, /run\(npm, \["install"\]/);
+  assert.doesNotMatch(updater, /"npm\.cmd" : "npm"/);
+  assert.match(updater, /npmInstallCommand\(process\.platform, sourceEnv\.ComSpec\)/);
 });

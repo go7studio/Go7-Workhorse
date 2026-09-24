@@ -156,6 +156,20 @@ export function updateInstallKind(input: {
   return "none";
 }
 
+/**
+ * How the source-checkout update runs `npm install`.
+ *
+ * npm on Windows is npm.cmd, a batch file, and Node refuses to start a batch
+ * file without a shell (EINVAL since the CVE-2024-27980 fix). The update ran it
+ * directly, so on Windows it failed every time — after git had already moved
+ * the checkout to the new tag. It goes through cmd.exe the way the Claude and
+ * Codex logins start their .cmd shims.
+ */
+export function npmInstallCommand(platform: string, comspec?: string): { command: string; args: string[] } {
+  if (platform !== "win32") return { command: "npm", args: ["install"] };
+  return { command: comspec?.trim() || "C:\\Windows\\System32\\cmd.exe", args: ["/d", "/s", "/c", "npm.cmd install"] };
+}
+
 export function packagedUpdateMissingMessage(platform: string): string {
   if (platform === "linux") return "This Linux build cannot install in place.";
   return "This Workhorse build cannot install in place.";

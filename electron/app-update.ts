@@ -12,6 +12,7 @@ import {
   macBundleFromExecPath,
   macInstallerArch,
   macReplaceScript,
+  npmInstallCommand,
   offerFromRelease,
   packagedUpdateMissingMessage,
   parseHdiutilAttach,
@@ -318,8 +319,8 @@ export async function applyAppUpdate(version: string, development = false): Prom
     } catch {
       await run("git", ["checkout", tag], root, 120_000, sourceEnv);
     }
-    const npm = process.platform === "win32" ? "npm.cmd" : "npm";
-    await run(npm, ["install"], root, 300_000, sourceEnv);
+    const npm = npmInstallCommand(process.platform, sourceEnv.ComSpec);
+    await run(npm.command, npm.args, root, 300_000, sourceEnv);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Install failed.";
     return { ok: false, message: message.slice(0, 280) };

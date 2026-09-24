@@ -90,6 +90,8 @@ import { offloadStateTranscripts, readTranscriptSidecar, repairRetiredSidecars, 
 import { applyComposerDrafts, type ComposerDraftSnap } from "../src/lib/chats";
 import { createSaveQueue, dueByInterval, readComposerDraftFile, readStringMapFile, readVersionedState, sameJsonValue, STATE_BACKUP_INTERVAL_MS, STATE_FSYNC_INTERVAL_MS, syncFileInPlace, worktreeKeepSet,
   worktreeResumableSet, worktreePruneDecision, writeComposerDraftFile, writeStringMapFile, writeVersionedState, writeVersionedStateAsync } from "./state-persistence";
+import { createDebouncedWrite } from "./state-persistence";
+import { boundInstances } from "../src/lib/file-instances";
 import { workhorseUserDataOverride, workhorseVolatileCredentials } from "../src/lib/user-data";
 import {
   bookmarksFromProjects,
@@ -420,6 +422,9 @@ function statePath() {
 function fileInstancesPath() {
   return path.join(app.getPath("userData"), "file-instances.json");
 }
+
+/** The review's baselines, written once for a burst of agent writes and once more at quit. */
+const fileInstanceWrites = createDebouncedWrite(() => writeStringMapFile(fileInstancesPath(), fileInstances), 2_000);
 
 let credentials: CredentialStore | null = null;
 let jobEngine: DurableJobEngine | null = null;
@@ -980,6 +985,7 @@ function disposeAtQuit(name: string, close: () => void): void {
 disposeAtQuit("grok", () => grokHost.disposeAll());
 disposeAtQuit("codex", () => codexHost.disposeAll());
 disposeAtQuit("terminal", () => terminalHost.disposeAll());
+disposeAtQuit("file-instances", () => fileInstanceWrites.flush());
 const peerWaiters = new Map<string, (result: PeerAskResult) => void>();
 
 process.on("uncaughtException", (error) => {
@@ -1007,7 +1013,7 @@ app.whenReady().then(async () => {
   startMemoryLog(mainLog);
   protocol.handle("workhorse-media", handleMediaProtocol);
   claimLinkedFolders();
-  fileInstances = readStringMapFile(fileInstancesPath());
+  fileInstances = boundInstances(readStringMapFile(fileInstancesPath()));
   void archiveWorkhorseWorkerThreads()
     .then((result) => {
       if (result.archived > 0) console.info(`Archived ${result.archived} Workhorse Codex worker logs.`);
@@ -1589,7 +1595,7 @@ app.whenReady().then(async () => {
       Array.isArray(roots) ? roots.filter((item) => typeof item === "string") : [],
       { instances: fileInstances },
     );
-    if (recorded) writeStringMapFile(fileInstancesPath(), fileInstances);
+    if (recorded) fileInstanceWrites.schedule();
     return recorded;
   });
 

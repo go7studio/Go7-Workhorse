@@ -19,6 +19,7 @@ export function projectGitEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.Pro
 import { sameEditPath, stripPathSizeSuffix } from "../src/lib/project-edits";
 import {
   countCreatedReview,
+  INSTANCE_MAX_CHARS,
   instancePathKey,
   rememberInstance,
   reviewCreatedDiff,
@@ -485,6 +486,8 @@ export function recordFileInstance(filePath: string, roots: string[] = [], input
   if (!abs) return "";
   let text = "";
   try {
+    // A file the review would not keep is not read whole to find that out.
+    if (!input.readFile && fs.statSync(abs).size > INSTANCE_MAX_CHARS * 4) return "";
     text = existsSync(abs) ? readFile(abs) : "";
   } catch {
     text = "";

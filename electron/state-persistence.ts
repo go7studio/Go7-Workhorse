@@ -452,6 +452,41 @@ export function writeStringMapFile(file: string, values: ReadonlyMap<string, str
   atomicWriteJson(file, Object.fromEntries(values));
 }
 
+export type DebouncedWrite = { schedule: () => void; flush: () => void };
+
+/**
+ * One write for a burst of changes, and one at quit for whatever is waiting.
+ *
+ * The review's baselines were written whole, with a flush, on every file an
+ * agent wrote: a turn that touched forty files rewrote the store forty times
+ * on the main loop. A write that fails is left for the next change to retry.
+ */
+export function createDebouncedWrite(
+  write: () => void,
+  delayMs: number,
+  timers: { setTimeout: typeof setTimeout; clearTimeout: typeof clearTimeout } = { setTimeout, clearTimeout },
+): DebouncedWrite {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const flush = () => {
+    if (timer === null) return;
+    timers.clearTimeout(timer);
+    timer = null;
+    try {
+      write();
+    } catch {
+      /* the next change schedules it again */
+    }
+  };
+  return {
+    schedule: () => {
+      if (timer !== null) return;
+      timer = timers.setTimeout(flush, delayMs);
+      (timer as { unref?: () => void }).unref?.();
+    },
+    flush,
+  };
+}
+
 export function writeVersionedState(
   file: string,
   state: PersistableState,

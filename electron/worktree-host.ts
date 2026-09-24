@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { deskGitEnv } from "./desk-path";
+import { atomicWriteJson } from "./state-persistence";
 
 const execFileAsync = promisify(execFile);
 
@@ -85,7 +86,35 @@ function sameFilesystemPath(left: string, right: string): boolean {
   return process.platform === "win32" ? a.toLowerCase() === b.toLowerCase() : a === b;
 }
 
+/**
+ * Asks for a folder still in progress, by folder.
+ *
+ * Resume and a mission reusing the same worker both ask for its folder, and
+ * nothing kept the two apart. The second found the folder the first was still
+ * rebuilding and handed it back half made, or failed to add it and removed the
+ * first one's folder on its way out. Now each ask waits for the one before it.
+ */
+const folderAsks = new Map<string, Promise<EnsureWorktreeResult>>();
+
 export async function ensureManagedWorktree(
+  input: EnsureWorktreeInput,
+  managedRoot: string,
+): Promise<EnsureWorktreeResult> {
+  const folder = path.join(path.resolve(managedRoot), safeSegment(input.sessionId));
+  const key = process.platform === "win32" ? folder.toLowerCase() : folder;
+  // Waits on the ask before it however that one ended: a throw there must not
+  // fail this ask without it ever running.
+  const before = folderAsks.get(key)?.catch(() => null) ?? Promise.resolve(null);
+  const ask = before.then(() => ensureManagedWorktreeNow(input, managedRoot));
+  folderAsks.set(key, ask);
+  try {
+    return await ask;
+  } finally {
+    if (folderAsks.get(key) === ask) folderAsks.delete(key);
+  }
+}
+
+async function ensureManagedWorktreeNow(
   input: EnsureWorktreeInput,
   managedRoot: string,
 ): Promise<EnsureWorktreeResult> {
@@ -107,6 +136,21 @@ export async function ensureManagedWorktree(
       const existingRoot = path.resolve(await git(["-C", target, "rev-parse", "--show-toplevel"]));
       if (!sameFilesystemPath(existingRoot, target)) {
         return { ok: false, message: "The managed worktree path is occupied by another checkout." };
+      }
+      // A chat moved to another project keeps its id, so its folder can be a
+      // checkout of the repository it left. Handing that back ran the worker in
+      // the old repository while the desk named the new one.
+      const [ours, theirs] = await Promise.all(
+        [gitRoot, target].map(async (dir) => {
+          const common = await git(["-C", dir, "rev-parse", "--git-common-dir"]);
+          return path.resolve(dir, common);
+        }),
+      );
+      if (!sameFilesystemPath(ours, theirs)) {
+        return {
+          ok: false,
+          message: `This chat's worktree at ${target} belongs to another repository. Move anything you need out of it and remove it, and the desk will cut a fresh one from this project.`,
+        };
       }
       const head = await git(["-C", target, "rev-parse", "HEAD"]);
       return { ok: true, path: target, gitRoot, head, reused: true };
@@ -352,41 +396,17 @@ function headContentIsOnDefaultBranch(target: string): boolean {
   return !drifted.out.split("\0").some((row) => row.length > 0 && paths.has(row));
 }
 
-/** The repository a managed worktree belongs to, or null when Git disowns the directory. */
+/**
+ * The repository a managed worktree belongs to, as its common git directory,
+ * or null when Git disowns the directory. Not the folder above it: for a bare
+ * repository that folder is no repository at all, and every git call aimed
+ * there failed, so its trees were never let go.
+ */
 function owningRepo(target: string): string | null {
   const common = gitSync(["-C", target, "rev-parse", "--git-common-dir"]);
   if (!common.ok || !common.out) return null;
-  const absolute = path.isAbsolute(common.out) ? common.out : path.resolve(target, common.out);
-  return path.resolve(absolute, "..");
+  return path.isAbsolute(common.out) ? common.out : path.resolve(target, common.out);
 }
-
-/**
- * Caches a project rebuilds from itself. `__pycache__` is bytecode for the `.py`
- * beside it; the rest are tool caches keyed on files already in the tree. None
- * of them can be the only copy of anything.
- */
-const REBUILDABLE_CACHES = new Set([
-  "__pycache__",
-  ".pytest_cache",
-  ".mypy_cache",
-  ".ruff_cache",
-  ".gradle",
-  ".turbo",
-  ".parcel-cache",
-]);
-
-/**
- * Installed dependencies — restorable, but only when the manifest that restores
- * them is still in the tree. A `node_modules` next to no `package.json` is not a
- * dependency tree any more; it is just a folder full of somebody's files.
- */
-const PYTHON_MANIFESTS = ["pyproject.toml", "requirements.txt", "Pipfile"];
-const REBUILDABLE_FROM_MANIFEST: Array<{ segment: string; manifests: string[] }> = [
-  { segment: "node_modules", manifests: ["package.json"] },
-  { segment: ".venv", manifests: PYTHON_MANIFESTS },
-  { segment: "venv", manifests: PYTHON_MANIFESTS },
-  { segment: "Pods", manifests: ["Podfile"] },
-];
 
 /**
  * What Godot writes into its `.godot` folder, by name and shape. The editor
@@ -509,17 +529,6 @@ function tsBuildInfoRebuilds(target: string, listed: string): boolean {
   }
 }
 
-function rebuildable(target: string, listed: string): boolean {
-  const segments = listed.split("/").filter(Boolean);
-  if (segments.some((segment) => REBUILDABLE_CACHES.has(segment))) return true;
-  if (godotRebuilds(target, listed) || tsBuildInfoRebuilds(target, listed)) return true;
-  return REBUILDABLE_FROM_MANIFEST.some(
-    (rule) =>
-      segments.includes(rule.segment) &&
-      rule.manifests.some((manifest) => fs.existsSync(path.join(target, manifest))),
-  );
-}
-
 /**
  * Ignored files `git worktree remove` would delete without saying so.
  *
@@ -531,24 +540,22 @@ function rebuildable(target: string, listed: string): boolean {
  *
  * There is no exact rule for "the project would regenerate this". A `dist/` can
  * hold the only build of something; a Blender autosave can be the only surviving
- * version of an afternoon. So the rule is narrow and stated: dependency
- * directories restorable from a manifest still present in the tree, and caches
- * derived from files in the tree, are ignorable. Everything else stops the
- * removal, `dist/` and `build/` included. That keeps more trees than a perfect
- * rule would, and disk is cheaper than a lost afternoon.
+ * version of an afternoon. A folder's name shows nothing either: a file dropped
+ * into `node_modules` or `__pycache__` is as much the only copy as any other,
+ * and a clean, pushed tree used to lose it to a name rule. So only what
+ * `provenRebuildable` shows to be a cache by its contents is ignorable, in every
+ * folder, saved or not. Everything else stops the removal, installed packages,
+ * `dist/` and `build/` included. That keeps more trees than a perfect rule
+ * would, and disk is cheaper than a lost afternoon.
  *
  * `--directory` collapses a wholly-ignored folder to one entry, so a
  * `node_modules` costs one line and not a hundred thousand.
  */
-function ignoredWorkAtRisk(target: string): { paths: string[]; loose: string[]; unknown: boolean } {
+function ignoredWorkAtRisk(target: string): { paths: string[]; unknown: boolean } {
   const listed = gitSync(["-C", target, "ls-files", "--others", "--ignored", "--exclude-standard", "--directory"]);
-  if (!listed.ok) return { paths: [], loose: [], unknown: true };
+  if (!listed.ok) return { paths: [], unknown: true };
   const rows = listed.out.split("\n").map((row) => row.trim()).filter(Boolean);
-  return {
-    paths: rows.filter((row) => !rebuildable(target, row)),
-    loose: rows.filter((row) => !provenRebuildable(target, row)),
-    unknown: false,
-  };
+  return { paths: rows.filter((row) => !provenRebuildable(target, row)), unknown: false };
 }
 
 /** `<module>.<interpreter tag>[.opt-N].pyc`: the only names Python writes into `__pycache__`. */
@@ -612,9 +619,8 @@ function pycacheOnly(target: string, listed: string): boolean {
  * Ignored content shown to be rebuildable by what is in it, not by its name:
  * a link (deleting one deletes nothing it points at), Godot's editor cache and
  * TypeScript's build record read against the shapes those tools write, and a
- * `__pycache__` of bytecode only. The name rules above are the sweep's old
- * bar for folders that were saved anyway. A folder the rescue lets go of was
- * kept before, so it has to clear this one.
+ * `__pycache__` of bytecode only. Every folder the sweep lets go of clears
+ * this bar, whether its work was saved already or the rescue saved it.
  */
 function provenRebuildable(target: string, listed: string): boolean {
   const segments = listed.split("/").filter(Boolean);
@@ -917,9 +923,10 @@ function recordRescue(file: string, row: RescueRecord): boolean {
     }
     const kept = rows.filter((item) => !(item.session === row.session && item.commit === row.commit && item.repo === row.repo));
     kept.push(row);
-    const temp = `${file}.tmp-${process.pid}`;
-    fs.writeFileSync(temp, `${JSON.stringify({ version: 1, rescues: kept.slice(-RESCUE_RECORD_LIMIT) }, null, 1)}\n`);
-    fs.renameSync(temp, file);
+    // Flushed before the rename, as the desk state is. Resume trusts nothing
+    // but this list, and a rename that reached the disk ahead of its bytes
+    // left it empty after a power cut: every rescue then read as unlisted.
+    atomicWriteJson(file, { version: 1, rescues: kept.slice(-RESCUE_RECORD_LIMIT) });
     return true;
   } catch {
     return false;
@@ -1566,9 +1573,12 @@ async function restoreFromRescue(gitRoot: string, target: string, rescue: string
       if (!safeRescuePath(rel)) throw new Error(`the rescue names a path outside the folder (${rel})`);
     }
 
-    // Set before the add: a checkout that fails part way leaves a folder too.
-    made = true;
+    // Set once the add has made the folder, not before it: an add that fails
+    // cleans up after itself, and a folder that was already there is not this
+    // rebuild's to remove. Set before, a second ask's failed add took the
+    // folder the first ask had just rebuilt.
     await git(["-C", gitRoot, "worktree", "add", "--detach", target, base]);
+    made = true;
     // What a hook made and git ignores is not the rescue's to judge.
     const ignored = await gitOut(["-C", target, "ls-files", "--others", "--ignored", "--exclude-standard", "--directory", "-z"]);
     const skip = new Set(ignored.split("\0").filter(Boolean).map((row) => row.replace(/\/$/, "")));
@@ -1643,6 +1653,101 @@ async function restoreFromRescue(gitRoot: string, target: string, rescue: string
 }
 
 /**
+ * Where a released folder waits for its files to be deleted: beside the
+ * worker folders, so moving one there is a single rename. Beside the real
+ * path, so a managed root that links to another disk still gets a rename.
+ */
+export function worktreeTrashDir(managedRoot: string): string {
+  return `${canonicalPath(managedRoot)}.trash`;
+}
+
+/** The folder git keeps this worktree's registration in, when it is plainly one of the repository's own. */
+function registrationDir(target: string, home: string): string | null {
+  try {
+    const match = /^gitdir:\s*(.+)$/m.exec(fs.readFileSync(path.join(target, ".git"), "utf8"));
+    if (!match) return null;
+    const dir = path.resolve(target, match[1].trim());
+    return sameFilesystemPath(path.dirname(dir), path.join(home, "worktrees")) ? dir : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Let a folder go in one step nothing can cut short.
+ *
+ * `git worktree remove` deletes file by file, and the sweep ran it under a
+ * three-second timeout. A tree with a large `node_modules` was killed part
+ * way: its `.git` link and half its files gone, every later sweep holding the
+ * remains for ever as "no longer a Git worktree", and a rescued worker coming
+ * back to that half, or not coming back at all.
+ *
+ * So git moves the folder aside, which is one rename and refuses a locked tree
+ * or one holding submodules as removal did; this folder's registration goes;
+ * and the files are deleted afterwards, off the loop and with no clock on them
+ * (`emptyWorktreeTrash`). Without `force`, the question `git worktree remove`
+ * asks before it deletes anything is asked first, the same way. Only this
+ * folder's registration is dropped: a repository-wide prune would also forget a
+ * tree that sits on a disk that is not plugged in.
+ */
+function releaseWorktree(
+  repo: string,
+  target: string,
+  managedRoot: string,
+  force: boolean,
+): { ok: true } | { ok: false; reason: string } {
+  if (!force) {
+    const status = gitSync(["-C", target, "status", "--porcelain", "--ignore-submodules=none"]);
+    if (!status.ok) return { ok: false, reason: "git could not say what it holds, so nothing can vouch for its contents" };
+    if (status.out) return { ok: false, reason: "it holds modified or untracked files" };
+  }
+  const home = repoHome(target);
+  const registration = home ? registrationDir(target, home) : null;
+  const trash = worktreeTrashDir(managedRoot);
+  const aside = path.join(trash, `${path.basename(target)}-${Date.now().toString(36)}-${crypto.randomBytes(3).toString("hex")}`);
+  try {
+    fs.mkdirSync(trash, { recursive: true });
+  } catch {
+    return { ok: false, reason: "the desk could not make a place to set it aside" };
+  }
+  const moved = gitSync(["-C", repo, "worktree", "move", target, aside]);
+  if (fs.existsSync(target) || !fs.existsSync(aside)) {
+    return { ok: false, reason: moved.out.replace(/^fatal:\s*/i, "").split("\n")[0] || "git declined to move it" };
+  }
+  if (registration) {
+    try {
+      fs.rmSync(registration, { recursive: true });
+    } catch {
+      /* git lists it as prunable, and its own gc drops it */
+    }
+  }
+  return { ok: true };
+}
+
+/**
+ * Delete what the sweep set aside. Every folder here passed every refusal and
+ * went in one rename, so a delete cut short, by quitting say, loses nothing
+ * and the next sweep finishes it.
+ */
+export async function emptyWorktreeTrash(managedRoot: string): Promise<void> {
+  const trash = worktreeTrashDir(managedRoot);
+  let names: string[];
+  try {
+    if (!(await fs.promises.lstat(trash)).isDirectory()) return;
+    names = await fs.promises.readdir(trash);
+  } catch {
+    return;
+  }
+  for (const name of names) {
+    try {
+      await fs.promises.rm(path.join(trash, name), { recursive: true });
+    } catch {
+      /* the next sweep tries again */
+    }
+  }
+}
+
+/**
  * Drop one managed worktree, but only when Git agrees it holds nothing.
  *
  * `git worktree remove` without `--force` refuses a tree that still has modified
@@ -1683,8 +1788,9 @@ function dropManagedWorktree(
       return { dropped: false, reason: "git could not say what it holds, so nothing can vouch for its contents" };
     }
     // Ignored files first. Git would delete them with the folder and no commit
-    // can hold them, so a tree carrying work of that kind stays whatever else
-    // is true, and no rescue ref is written for a tree that is not going.
+    // can hold them, so a tree carrying anything not shown to be a cache stays
+    // whatever else is true, and no rescue ref is written for a tree that is
+    // not going.
     const ignored = ignoredWorkAtRisk(target);
     if (ignored.unknown) {
       return { dropped: false, reason: "git could not list what it ignores there, so nothing can vouch for its contents" };
@@ -1692,7 +1798,7 @@ function dropManagedWorktree(
     if (ignored.paths.length > 0) {
       return {
         dropped: false,
-        reason: `git would delete ignored files it holds (${namedSample(ignored.paths)}) — open it, move anything you need, then remove it yourself`,
+        reason: `git would delete ignored files it holds (${namedSample(ignored.paths)}), and nothing shows they are only a cache; open it, move anything you need, then remove it yourself`,
       };
     }
     // Saved elsewhere already: clean, and either a remote branch holds HEAD or
@@ -1710,16 +1816,6 @@ function dropManagedWorktree(
     // repository first, proven exact, or keep the folder.
     let rescued: string | undefined;
     if (!saved || options.resumable) {
-      // The rescue lets go of folders the sweep used to keep, so nothing may go
-      // with them that is not shown to be a cache. A folder's name shows
-      // nothing: a file dropped into `__pycache__` or `node_modules` is as
-      // much the only copy as any other.
-      if (ignored.loose.length > 0) {
-        return {
-          dropped: false,
-          reason: `git would delete ignored files it holds (${namedSample(ignored.loose)}), and nothing shows they are only a cache`,
-        };
-      }
       const rescue = rescueFolder(target, {
         sessionName: options.sessionName,
         managedRoot: options.managedRoot,
@@ -1736,7 +1832,7 @@ function dropManagedWorktree(
       // The walk does not enter what git ignores, so that is read again too:
       // a file dropped into a cache folder since the first look keeps the folder.
       const ignoredNow = ignoredWorkAtRisk(target);
-      if (ignoredNow.unknown || ignoredNow.paths.length > 0 || ignoredNow.loose.length > 0) {
+      if (ignoredNow.unknown || ignoredNow.paths.length > 0) {
         return { dropped: false, reason: "a file changed while it was being saved, so the folder stays" };
       }
       rescued = rescue.ref;
@@ -1744,13 +1840,9 @@ function dropManagedWorktree(
     // Git refuses a dirty folder without --force. Only a folder the rescue
     // just proved it holds byte for byte, and read again unchanged, is given
     // it, and only once nothing but rebuildable caches is left beside it.
-    const result =
-      rescued && status.held
-        ? rescueGit(["-C", repo, "worktree", "remove", "--force", target], options.deadline)
-        : gitSync(["-C", repo, "worktree", "remove", target]);
-    if (!fs.existsSync(target)) return { dropped: true, reason: "", ...(rescued ? { rescued } : {}) };
-    const reason = result.out.replace(/^fatal:\s*/i, "").split("\n")[0] || "git declined to remove it";
-    return { dropped: false, reason, ...(rescued ? { rescued } : {}) };
+    const released = releaseWorktree(repo, target, options.managedRoot, Boolean(rescued && status.held));
+    if (released.ok) return { dropped: true, reason: "", ...(rescued ? { rescued } : {}) };
+    return { dropped: false, reason: released.reason, ...(rescued ? { rescued } : {}) };
   }
   // Git could not answer. A directory that still carries a `.git` link was a worktree
   // whose repository has since been deleted, so nothing can vouch for what it holds and
@@ -1857,12 +1949,16 @@ export function pruneOrphanWorktrees(
     const target = path.join(managedRoot, name);
     if (!containedPath(managedRoot, target)) continue;
 
-    // `git worktree remove` resolves its argument through symlinks, so a link planted here
+    // `git worktree move` resolves its argument through symlinks, so a link planted here
     // would aim git at a checkout outside the managed root. Lexical containment cannot see
     // that; compare the real paths instead.
     let link = false;
     try {
-      link = fs.lstatSync(target).isSymbolicLink();
+      const stat = fs.lstatSync(target);
+      // A file here is no worker's folder: revealing this folder in Finder
+      // leaves a `.DS_Store`, and the sweep held it for ever as one.
+      if (stat.isFile()) continue;
+      link = stat.isSymbolicLink();
     } catch {
       continue;
     }
@@ -1893,5 +1989,7 @@ export function pruneOrphanWorktrees(
       if (outcome.rescued) rescued.push({ name, ref: outcome.rescued });
     } else kept.push({ name, reason: outcome.reason });
   }
+  // The files of every folder let go, and any a quit cut short last time.
+  void emptyWorktreeTrash(managedRoot);
   return { removed, kept, rescued };
 }

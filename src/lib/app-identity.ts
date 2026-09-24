@@ -53,6 +53,21 @@ export function workhorseRuntimeIdentity(
       };
 }
 
+/**
+ * Whether this desk may rewrite the machine-wide Grok Bot keepalive. The launch
+ * agent is keyed by home and one fixed label, so only the installed release
+ * desk owns it. A desk on an isolated profile is a test, and a development
+ * desk (`npm run dev`, or the Dev app `npm run try` installs) is a second desk
+ * on this machine: either one pointed the agent at its own binary and profile,
+ * and the installed desk's Grok Bot calls failed until it started again.
+ */
+export function ownsShimKeepalive(
+  identity: { userDataDirectory: string },
+  isolatedProfile: string | undefined,
+): boolean {
+  return !isolatedProfile && identity.userDataDirectory !== WORKHORSE_DEV_USER_DATA_DIR;
+}
+
 export type WorkhorseInstallTarget = {
   channel: WorkhorseBuildChannel;
   appName: string;

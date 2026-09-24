@@ -1,7 +1,7 @@
 import { deskCss } from "./desk-css";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -62,6 +62,36 @@ test("spawn-head changes are repo-relative and a commit cannot hide an out-of-al
     const changes = listGitChanges(repo, spawnHead);
     assert.deepEqual(changes.map((change) => change.path).sort(), ["src/outside.ts", "src/owned.ts"]);
     assert.equal(changes.every((change) => !path.isAbsolute(change.path)), true);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("a renamed file keeps its new name in the change list when a new file takes the old one", () => {
+  // `status -z` writes a rename as the new path, then the old one. Taking the
+  // old name whenever it existed on disk dropped the renamed file entirely.
+  const repo = makeRepo("wh-rename-");
+  try {
+    commitFile(repo, "old.txt", "moved\n");
+    git(repo, ["mv", "old.txt", "new.txt"]);
+    writeFileSync(path.join(repo, "old.txt"), "a new file under the old name\n");
+    const changes = listGitChanges(repo);
+    assert.deepEqual(changes.map((change) => [change.path, change.status]).sort(), [["new.txt", "R"], ["old.txt", "??"]]);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("a base ref that reads as an option is refused before git sees it", () => {
+  // The ref arrives over IPC and went to `git diff` ahead of `--`, where
+  // `--output=<file>` writes wherever it names.
+  const repo = makeRepo("wh-base-option-");
+  try {
+    commitFile(repo, "a.txt", "a\n");
+    const planted = path.join(repo, "planted.txt");
+    assert.deepEqual(listGitChanges(repo, `--output=${planted}`), []);
+    assert.equal(existsSync(planted), false, "git wrote a file the base ref named");
+    assert.deepEqual(listGitChanges(repo, readGitHead(repo)), [], "a real commit id still works");
   } finally {
     rmSync(repo, { recursive: true, force: true });
   }

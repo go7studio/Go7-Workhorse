@@ -69,15 +69,18 @@ export function chatExportFiles(
   projects: Project[],
   customBotId?: string,
 ): { relPath: string; body: string }[] {
-  const names = new Map<string, number>();
+  // Keyed by the file that is written, not the slug: two chats called "notes"
+  // and a third called "notes-2" used to share notes-2.md, and the host writes
+  // them in turn, so one chat vanished from the export.
+  const taken = new Set<string>();
   const files: { relPath: string; body: string }[] = [];
   for (const session of exportableSessions(provider, sessions, customBotId)) {
     const project = session.projectId ? projects.find((item) => item.id === session.projectId) : undefined;
     const folder = project ? slugTitle(project.name, "project") : "_chats";
     const base = slugTitle(session.title, session.id.slice(-8));
-    const used = names.get(`${folder}/${base}`) ?? 0;
-    names.set(`${folder}/${base}`, used + 1);
-    const file = used === 0 ? `${base}.md` : `${base}-${used + 1}.md`;
+    let file = `${base}.md`;
+    for (let copy = 2; taken.has(`${folder}/${file}`); copy += 1) file = `${base}-${copy}.md`;
+    taken.add(`${folder}/${file}`);
     files.push({
       relPath: `projects/${folder}/${file}`,
       body: sessionToMarkdown(session, project?.name),

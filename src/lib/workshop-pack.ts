@@ -9,6 +9,9 @@
  * (paint from a PackView). Neither side computes a domain formula; values are formatted only.
  */
 
+import { isTheme } from "./theme";
+import type { Theme } from "./types";
+
 export const WORKSHOP_CONTRACT = 1;
 export const WORKSHOP_UNKNOWN = "\u2014";
 
@@ -876,7 +879,18 @@ export function ratioPercent(num: unknown, den: unknown): number | null {
   return Math.max(0, Math.min(100, (100 * num) / den));
 }
 
-/** The detached window loads the desk with `?workshop`; App renders the breakout instead of the desk. */
+/**
+ * The detached window loads the desk with `?workshop`, and main.tsx renders the
+ * breakout alone — outside the store. Inside it, the breakout ran a second copy
+ * of the desk: it saved a stale snapshot over the live one and sent scheduled
+ * jobs the desk was already sending.
+ */
 export function isWorkshopSurface(search = typeof window === "undefined" ? "" : window.location.search): boolean {
   return new URLSearchParams(search).has("workshop");
+}
+
+/** The desk theme main handed the breakout in its URL, since the breakout reads no state. */
+export function workshopSurfaceTheme(search = typeof window === "undefined" ? "" : window.location.search): Theme {
+  const theme = new URLSearchParams(search).get("theme");
+  return isTheme(theme) ? theme : "system";
 }

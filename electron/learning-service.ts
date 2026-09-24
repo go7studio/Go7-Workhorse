@@ -82,6 +82,13 @@ export class LearningService {
   }
   private idleTimer: unknown = null;
   private sleeping = false;
+  /**
+   * Bumped by every forget and purge. A compile waits seconds on its model,
+   * and one that came back after a purge wrote a memory drawn from the very
+   * events the purge had just removed and reported gone. A compile that sees
+   * this move while it waited keeps nothing it was told.
+   */
+  private forgets = 0;
   readonly createdChats: string[] = [];
 
   constructor(private readonly options: LearningServiceOptions) {}
@@ -248,10 +255,12 @@ export class LearningService {
   }
 
   forget(target: ForgetTarget) {
+    this.forgets += 1;
     return { tombstoned: this.options.store.tombstone(target, this.now()) };
   }
 
   purge(target: ForgetTarget) {
+    this.forgets += 1;
     this.pause();
     try {
       return this.options.store.purge(target);
@@ -285,6 +294,23 @@ export class LearningService {
       },
       compileBackoffMs(this.consecutiveFailures, policy.quietMs, policy.maxBackoffMs),
     );
+  }
+
+  /** A compile's answer arrived after a forget or purge: its run is closed and nothing it proposed is kept. */
+  private forgottenMidCompile(
+    runId: string,
+    lane: CompilerRun["intelligenceLane"],
+    attempt: number,
+    inputHash: string,
+    route: Omit<CompileResult, "ran">,
+  ): CompileResult {
+    this.options.store.putCompilerRun({
+      ...(this.options.store.getCompilerRun(runId) ?? { id: runId, intelligenceLane: lane, status: "running", attempt, inputHash }),
+      status: "failed",
+      errorClass: "forgotten-mid-compile",
+      endedAt: this.now(),
+    });
+    return { ran: false, skipped: "forgotten-mid-compile", runId, ...route };
   }
 
   /**
@@ -453,6 +479,7 @@ export class LearningService {
     };
     const runId = resumed?.id ?? newRunId();
     const attempt = (resumed?.attempt ?? 0) + 1;
+    const forgets = this.forgets;
     this.compiling = true;
     this.options.store.putCompilerRun({
       id: runId,
@@ -497,6 +524,7 @@ export class LearningService {
             ? compilerPrompt(events, memories)
             : agentCompilerPrompt(events, memories),
         });
+        if (this.forgets !== forgets) return this.forgottenMidCompile(runId, lane, attempt, inputHash, route);
         if (result.createdWorkhorseChat !== false || result.leftoverVendorThread !== false) {
           throw new Error("auxiliary-pollution");
         }
@@ -720,6 +748,7 @@ export class LearningService {
     };
     const runId = resumed?.id ?? newRunId();
     const attempt = (resumed?.attempt ?? 0) + 1;
+    const forgets = this.forgets;
     this.compiling = true;
     this.options.store.putCompilerRun({
       id: runId,
@@ -748,6 +777,7 @@ export class LearningService {
           customBotId: selection.customBotId,
           prompt: mismatchCompilerPrompt(memories),
         });
+        if (this.forgets !== forgets) return this.forgottenMidCompile(runId, lane, attempt, inputHash, route);
         if (result.createdWorkhorseChat !== false || result.leftoverVendorThread !== false) {
           throw new Error("auxiliary-pollution");
         }

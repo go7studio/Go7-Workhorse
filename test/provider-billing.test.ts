@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
@@ -382,4 +383,27 @@ test("Grok Bot is a local Custom HTTP preset, not a stock vendor", () => {
   assert.match(agents, /Grok Bot preset on 127\.0\.0\.1/);
   assert.doesNotMatch(agents, /\bRemote\b/);
   assert.doesNotMatch(readFileSync(path.join(ROOT, "electron", "workhorse-bridge.ts"), "utf8"), /Grok Bot/);
+});
+
+/**
+ * customModelsUrl accepts http, but the transport was always https.get, which
+ * throws on an http URL. The catch turned that into "no models", so a box on
+ * this machine — the Grok Bot shim, Ollama, vLLM — never listed what it serves.
+ */
+test("a custom host on plain http lists its models", async () => {
+  const seen: string[] = [];
+  const server = http.createServer((request, response) => {
+    seen.push(`${request.url} ${request.headers.authorization ?? ""}`);
+    response.setHeader("content-type", "application/json");
+    response.end(JSON.stringify({ data: [{ id: "grok-bot" }, { id: "llama" }] }));
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
+  try {
+    const port = (server.address() as { port: number }).port;
+    const listed = await fetchCustomModels({ baseUrl: `http://127.0.0.1:${port}/v1`, apiKey: "local-key" });
+    assert.deepEqual(listed, ["grok-bot", "llama"]);
+    assert.deepEqual(seen, ["/v1/models Bearer local-key"]);
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
 });

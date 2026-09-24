@@ -11,9 +11,10 @@ import { cursorUsageLane } from "../src/lib/cursor-lane";
 import { cursorSlugForEffort } from "../src/lib/cursor-catalog";
 import { findChoice, findChoiceOnProvider, normalizeModelId } from "../src/lib/models";
 import {
-  detectCursorLogin,
   isCursorAppCommand,
   isGrokCommand,
+  resolveCursorBinary,
+  resolveCursorPrefixArgs,
   type CursorLoginDetectInput,
 } from "./cursor-login";
 import { withDeskToolEnv, withoutWorkhorsePrivateEnv } from "./desk-path";
@@ -73,13 +74,18 @@ export function resolveCursorPermissionMode(mode: PermissionMode): "ask" | "agen
 }
 
 export function buildCursorLaunchSpec(input: CursorLaunchInput): GrokLaunchSpec {
-  const detected = detectCursorLogin(input.detect);
-  let command = detected.binary ?? "";
+  // The binary, and nothing about the login. `detectCursorLogin` also runs
+  // `cursor-agent about` to ask whether the person is signed in, and this spec
+  // is built for every Cursor prompt — twice for a new runtime — so each one
+  // froze the desk's main process for as long as that command took, up to 8s.
+  const binary = resolveCursorBinary(input.detect);
+  let command = binary ?? "";
   if (command && (isCursorAppCommand(command) || isGrokCommand(command))) command = "";
+  const prefixArgs = command ? resolveCursorPrefixArgs(input.detect, command) : [];
   const effort = resolveCursorEffort(input.effort);
   const model = resolveCursorModel(input.model, effort);
   const permissionMode = resolveCursorPermissionMode(input.mode);
-  const argv = [...detected.prefixArgs, "--model", model, "acp"];
+  const argv = [...prefixArgs, "--model", model, "acp"];
   const builtIn = workhorseMcpServer(input.sessionId);
   const mcpServers = mergeMcpServers(input.mcpServers, builtIn);
   const env: Record<string, string> = {};

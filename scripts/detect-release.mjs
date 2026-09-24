@@ -12,7 +12,8 @@
 // The question is whether the version itself changed.
 
 import { execFileSync } from "node:child_process";
-import { appendFileSync } from "node:fs";
+import { appendFileSync, realpathSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 /**
  * Pure decision, so the table can be tested without git or a network.
@@ -109,4 +110,16 @@ function main() {
   }
 }
 
-if (process.argv[1] && import.meta.url === `file://${process.argv[1]}`) main();
+// Not a compare of the module URL with "file://" + argv[1]: false on Windows and
+// for any path with a space, and then the script decides nothing and says
+// nothing, so `cut` comes out empty. See assert-release-channel.mjs.
+function isMainModule() {
+  if (!process.argv[1]) return false;
+  try {
+    return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
+  } catch {
+    return false;
+  }
+}
+
+if (isMainModule()) main();

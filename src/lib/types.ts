@@ -692,12 +692,20 @@ export type PermissionRequest = {
   tool: string;
   detail: string;
   path?: string;
+  /** What the call carries, for the person to read. Never classified and never part of a grant. */
+  preview?: string;
   kind?: "tool" | "elevate" | "vendor";
   elevate?: { mode?: PermissionMode; sandbox?: SandboxProfile };
   vendor?: {
     provider: ProviderId;
     name: string;
     status: "day_bank" | "spent" | "disabled" | "ok";
+    /**
+     * The watch key Allow grants: `bot:<id>` for a custom bot, the lane for
+     * Cursor, the provider otherwise. It is the row that was asked for, not
+     * the chat that asked, so it rides on the card.
+     */
+    key?: string;
   };
 };
 

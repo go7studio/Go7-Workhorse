@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import {
   collectPackages,
+  excludedByBuild,
   licenseOf,
   needsReview,
   renderNotices,
@@ -77,4 +78,27 @@ test("the notices file exists and covers what the installer carries", () => {
     assert.ok(existsSync(manifestPathFor(name, ROOT)), `${name} is declared but not installed`);
   }
   assert.match(pkg.scripts.notices, /third-party-notices/);
+});
+
+/*
+ * build.files keeps the vendor CLIs' native binaries out of the installer,
+ * and they were also the only rows that changed with the machine that ran
+ * `npm run notices`. The file claimed the darwin-arm64 Claude binary shipped.
+ */
+test("the notices list nothing the installer leaves out, whoever generated them", () => {
+  const files = ["dist/**/*", "!node_modules/@anthropic-ai/claude-agent-sdk-*/**", "!node_modules/@openai/codex-*/**"];
+  assert.equal(excludedByBuild("@anthropic-ai/claude-agent-sdk-darwin-arm64", files), true);
+  assert.equal(excludedByBuild("@openai/codex-win32-x64", files), true);
+  assert.equal(excludedByBuild("@anthropic-ai/claude-agent-sdk", files), false, "the SDK itself ships");
+  assert.equal(excludedByBuild("@openai/codex", files), false);
+  assert.equal(excludedByBuild("left-pad", files), false);
+
+  const pkg = JSON.parse(readFileSync(path.join(ROOT, "package.json"), "utf8"));
+  const notices = readFileSync(path.join(ROOT, "THIRD_PARTY_NOTICES.md"), "utf8");
+  const listed = [...notices.matchAll(/^\| `([^`]+)` \|/gm)].map((match) => match[1]);
+  assert.ok(listed.length > 0);
+  for (const name of listed) {
+    assert.equal(excludedByBuild(name, pkg.build.files), false, `${name} is excluded by build.files but listed as shipping`);
+  }
+  assert.doesNotMatch(notices, new RegExp(NOT_INSTALLED), "a row that depends on the generating machine");
 });

@@ -30,6 +30,23 @@ export function collectPackages(tree) {
   return [...found.values()].sort((a, b) => a.name.localeCompare(b.name) || a.version.localeCompare(b.version));
 }
 
+/**
+ * electron-builder packs the production tree less build.files' own
+ * `!node_modules/<glob>/**` exclusions. Those packages (the vendor CLIs' native
+ * binaries) never reach the installer, so they are not listed. They were also
+ * the only rows that depended on the machine this ran on: the file claimed
+ * the darwin-arm64 Claude binary shipped because that is what was installed
+ * where it was last generated.
+ */
+export function excludedByBuild(name, files = []) {
+  return files.some((pattern) => {
+    const glob = /^!node_modules\/(.+)\/\*\*$/.exec(pattern)?.[1];
+    if (!glob) return false;
+    const source = glob.split("*").map((part) => part.replace(/[.+?^${}()|[\]\\]/g, "\\$&")).join("[^/]*");
+    return new RegExp(`^${source}$`).test(name);
+  });
+}
+
 /** The SPDX id a package declares, or a plain word when it declares none. */
 export function licenseOf(manifest) {
   const raw = manifest?.license ?? manifest?.licenses;
@@ -117,7 +134,11 @@ function main() {
     encoding: "utf8",
     maxBuffer: 64 * 1024 * 1024,
   });
-  const rows = collectPackages(JSON.parse(raw)).map((pkg) => {
+  const buildFiles = JSON.parse(readFileSync(path.join(ROOT, "package.json"), "utf8")).build?.files ?? [];
+  // npm ls names an optional peer nobody installed with no version at all
+  // (@cfworker/json-schema); it is not in the lockfile, so nothing ships.
+  const shipped = collectPackages(JSON.parse(raw)).filter((pkg) => pkg.version && !excludedByBuild(pkg.name, buildFiles));
+  const rows = shipped.map((pkg) => {
     const manifest = manifestFor(pkg);
     return {
       name: pkg.name,

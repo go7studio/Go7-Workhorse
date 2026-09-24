@@ -189,6 +189,11 @@ test("a typed id the list does not know is a choice when it names a vendor", () 
   assert.equal(unlistedChoice("composer-3")?.provider, "cursor");
   assert.equal(unlistedChoice("mystery-9"), null, "no family, no vendor, no choice");
   assert.equal(unlistedChoice("claude fable"), null);
+  // The Grok Bot preset is a custom HTTP slot. Its model id starts like a Grok
+  // one and must never launch the Grok CLI.
+  assert.equal(unlistedChoice("grok-bot"), null);
+  assert.equal(findChoice("grok-bot"), null);
+  assert.equal(findChoice("Grok-Bot"), null);
   assert.equal(findChoice("claude-fable-5-2")?.unlisted, true, "/model falls through to the vendor's word");
   assert.equal(findChoice("claude-fable-5-1")?.unlisted, undefined, "Fable 5.1 is a seed row now");
   assert.equal(findChoice("Fable 5")?.unlisted, undefined, "a listed name still resolves to its row");

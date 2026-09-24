@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { buildAnthropicBody, buildOpenAiBody } from "../electron/custom-http";
-import { CustomSessionHost } from "../electron/custom-host";
-import { McpToolBridge, mcpExposedToolName, mcpNeedsWindowsShell, mcpSpawnEnvironment, mcpToolDefinition, probeMcpServer } from "../electron/mcp-tool-bridge";
+import { CustomSessionHost, MCP_ARGUMENTS_PREVIEW_CHARS, mcpArgumentsPreview } from "../electron/custom-host";
+import { MCP_TOOL_NAME_MAX, McpToolBridge, mcpExposedToolName, mcpNeedsWindowsShell, mcpSpawnEnvironment, mcpToolDefinition, probeMcpServer } from "../electron/mcp-tool-bridge";
 import { mergeMcpServers } from "../electron/grok-launch";
 import { mcpServersForSession, mcpToolAllowed } from "../src/lib/mcp-servers";
 import { normalizeMcpServers } from "../src/lib/settings";
@@ -206,4 +206,107 @@ test("custom model host completes an allowlisted MCP tool round end to end", asy
   assert.equal(round, 2);
   assert.equal(result.text, "MCP_HOST_OK");
   assert.ok(events.some((event) => event.title === "mcp__memory__search_graph" && event.status === "completed"));
+});
+
+test("custom model host refuses an MCP tool a helper was never offered", async () => {
+  let round = 0;
+  let refusal: { content?: string; isError?: boolean } | undefined;
+  const host = new CustomSessionHost(async (_config, input) => {
+    round += 1;
+    if (round === 1) {
+      // The request this helper sends does not offer the tool; the name is guessed.
+      const offered = buildOpenAiBody({ model: "local-qwen", messages: input.messages, tools: input.tools, role: input.role }).tools as { function: { name: string } }[];
+      assert.equal(offered.some((tool) => tool.function.name === "mcp__memory__search_graph"), false);
+      return { text: "", toolUses: [{ id: "mcp-guess", name: "mcp__memory__search_graph", input: {} }] };
+    }
+    refusal = input.messages.at(-1)?.toolResults?.[0];
+    return { text: "done", stopReason: "end_turn" };
+  });
+  await host.prompt({
+    sessionId: "mcp-helper-refused",
+    parentId: "orch",
+    hidden: true,
+    role: "helper",
+    text: "Use the graph tool.",
+    model: "local-qwen",
+    effort: "high",
+    cwd: process.cwd(),
+    mode: "always-approve",
+    sandbox: "workspace",
+    mcpServers: [{ name: "memory", command: process.execPath, args: ["-e", FAKE_MCP], includeTools: ["search_graph"] }],
+    config: { baseUrl: "http://127.0.0.1:1/v1", apiKey: "unused", model: "local-qwen", api: "openai-completions" },
+  }, () => undefined);
+  assert.equal(round, 2);
+  assert.equal(refusal?.isError, true);
+  assert.notEqual(refusal?.content, "ok", "the MCP server ran a tool the helper was never offered");
+  assert.match(refusal?.content ?? "", /helper was not offered/);
+});
+
+/**
+ * An MCP call's card detail is its name, so the person approved
+ * `mcp__shell__execute_command` without seeing the command. The arguments now
+ * ride beside the detail as a clipped preview. The detail itself is unchanged,
+ * because the classifiers judge it and a session grant is keyed on it.
+ */
+test("an MCP permission card shows the call's arguments beside an unchanged detail", async () => {
+  let round = 0;
+  const cards: Array<{ detail: string; preview?: string }> = [];
+  const host = new CustomSessionHost(async () => {
+    round += 1;
+    if (round === 1) {
+      return { text: "", toolUses: [{ id: "mcp-ask", name: "mcp__memory__search_graph", input: { query: "rm -rf ~", depth: 2 } }] };
+    }
+    return { text: "done", stopReason: "end_turn" };
+  });
+  await host.prompt({
+    sessionId: "mcp-card-preview",
+    text: "Use the graph tool.",
+    model: "local-qwen",
+    effort: "high",
+    cwd: process.cwd(),
+    mode: "ask",
+    sandbox: "workspace",
+    mcpServers: [{ name: "memory", command: process.execPath, args: ["-e", FAKE_MCP], includeTools: ["search_graph"] }],
+    config: { baseUrl: "http://127.0.0.1:1/v1", apiKey: "unused", model: "local-qwen", api: "openai-completions" },
+  }, (event) => {
+    if (event.type !== "permission") return;
+    cards.push({ detail: event.detail, preview: event.preview });
+    // The card is registered just after it is announced.
+    setImmediate(() => host.answerPermission(event.requestId, "once"));
+  });
+  assert.deepEqual(cards, [{ detail: "mcp__memory__search_graph", preview: '{"query":"rm -rf ~","depth":2}' }]);
+
+  assert.equal(mcpArgumentsPreview({}), undefined);
+  const long = mcpArgumentsPreview({ text: "x".repeat(2_000) }) ?? "";
+  assert.equal(long.length, MCP_ARGUMENTS_PREVIEW_CHARS);
+  assert.ok(long.endsWith("…"));
+});
+
+/**
+ * Exposed names ran to 120 characters. OpenAI-compatible hosts refuse a
+ * function name over 64, and one long name failed every request in the chat.
+ */
+test("an exposed MCP tool name fits 64 characters and is the same on every request", async () => {
+  const valid = /^[a-zA-Z0-9_-]{1,64}$/;
+  assert.equal(MCP_TOOL_NAME_MAX, 64);
+  assert.equal(mcpExposedToolName("github", "create_issue"), "mcp__github__create_issue");
+  const server = "company-internal-knowledge-base-and-wiki";
+  const long = mcpExposedToolName(server, "search_documents_by_modified_date_range");
+  assert.match(long, valid);
+  assert.equal(long, mcpExposedToolName(server, "search_documents_by_modified_date_range"));
+  assert.notEqual(long, mcpExposedToolName(server, "search_documents_by_modified_date_range_v2"));
+
+  // Two servers that share a long name still get distinct names within the cap.
+  const bridge = new McpToolBridge([
+    { name: "a".repeat(60), command: process.execPath, args: ["-e", FAKE_MCP] },
+    { name: "a".repeat(60), command: process.execPath, args: ["-e", FAKE_MCP] },
+  ]);
+  try {
+    const names = (await bridge.tools()).map((tool) => tool.name);
+    assert.equal(names.length, 4);
+    assert.equal(new Set(names).size, 4);
+    for (const name of names) assert.match(name, valid);
+  } finally {
+    bridge.dispose();
+  }
 });

@@ -1,3 +1,6 @@
+import { useEffect } from "react";
+import { resolvedTheme } from "../lib/theme";
+import { workshopSurfaceTheme } from "../lib/workshop-pack";
 import { Chip, PaintCard } from "./workshop-paint";
 import { MediaCreatePanel, packOffersCreate } from "./MediaCreatePanel";
 import { feedAge, feedTone, primaryStatus, useWorkshopLive } from "./workshop-live";
@@ -8,6 +11,18 @@ import { feedAge, feedTone, primaryStatus, useWorkshopLive } from "./workshop-li
  */
 export function WorkshopBreakout() {
   const { packs } = useWorkshopLive();
+
+  // No store here, so the theme the desk had when it opened this window.
+  useEffect(() => {
+    const theme = workshopSurfaceTheme();
+    const media = window.matchMedia("(prefers-color-scheme: dark)");
+    const apply = () => {
+      document.documentElement.dataset.theme = resolvedTheme(theme, media.matches);
+    };
+    apply();
+    media.addEventListener("change", apply);
+    return () => media.removeEventListener("change", apply);
+  }, []);
   const on = packs.filter((pack) => pack.on);
   const now = Date.now();
   const status = on[0] ? primaryStatus(on[0]) : undefined;

@@ -8,6 +8,7 @@ import { GrokAgent, type GrokPromptResult, type GrokToolEvent } from "./grok-age
 import {
   isWorkerRuntime,
   shouldLoadVendorSession,
+  stoppedBeforePrompt,
   type GrokEventSink,
   type GrokPromptInput,
   type GrokSessionOpenInput,
@@ -97,6 +98,9 @@ export class CursorSessionHost {
     return [...this.slots.keys()];
   }
   private tails = new Map<string, Promise<unknown>>();
+  /** Sessions still starting, and the ones Stop reached then. See GrokSessionHost. */
+  private starting = new Set<string>();
+  private stoppedWhileStarting = new Set<string>();
 
   constructor(private readonly spawn: CursorSpawnFn = spawnCursorProcess) {}
 
@@ -117,6 +121,8 @@ export class CursorSessionHost {
   }
 
   private async promptUnlocked(input: CursorPromptInput, emit: CursorEventSink): Promise<GrokPromptResult> {
+    // A Stop left over from an earlier start belongs to that start, not this prompt.
+    this.stoppedWhileStarting.delete(input.sessionId);
     await this.ensureAgent(input, emit);
     const slot = this.slots.get(input.sessionId);
     if (!slot) throw new Error("Cursor agent is not running");
@@ -128,6 +134,7 @@ export class CursorSessionHost {
       spawnNames: input.spawnNames,
     }, input.visibleText);
     try {
+      if (this.stoppedWhileStarting.delete(input.sessionId)) return stoppedBeforePrompt(input.sessionId, slot.agent, emit);
       const result = await slot.agent.prompt(text, this.handlersFor(input, emit), input.images ?? []);
       emit({ type: "done", sessionId: input.sessionId, stopReason: result.stopReason });
       return result;
@@ -208,6 +215,7 @@ export class CursorSessionHost {
       mcpServers: input.mcpServers,
     });
     const agent = new GrokAgent({ ...spec, agentLabel: "Cursor" }, (launchSpec) => this.spawn(launchSpec as typeof spec));
+    this.starting.add(input.sessionId);
     try {
       const started = await agent.start({
         vendorSessionId: action === "load" ? input.vendorSessionId : undefined,
@@ -226,6 +234,8 @@ export class CursorSessionHost {
       const message = error instanceof Error ? error.message : String(error);
       emit({ type: "error", sessionId: input.sessionId, message });
       throw error;
+    } finally {
+      this.starting.delete(input.sessionId);
     }
     this.slots.set(input.sessionId, { key, agent });
   }
@@ -238,6 +248,7 @@ export class CursorSessionHost {
   }
 
   cancel(sessionId: string): void {
+    if (this.starting.has(sessionId)) this.stoppedWhileStarting.add(sessionId);
     this.slots.get(sessionId)?.agent.cancel();
   }
 

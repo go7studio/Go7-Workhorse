@@ -34,6 +34,8 @@ import {
   archiveChat,
   autoRenameChat,
   deleteChat,
+  deletedLiveSessions,
+  vendorTurnIsLive,
   dropDrafts,
   appendUserMessage,
   deleteWorkerChats,
@@ -62,7 +64,7 @@ import {
 } from "./chats";
 import { settledWorkers, workerJustSettled } from "./worker-settled";
 import { foldersToCount, leftInFolderNote, workerLabel } from "./worker-folders";
-import { deskPersistBodyEqual } from "./desk-persist";
+import { deskPersistBodyEqual, persistDelayMs } from "./desk-persist";
 import { restoredPanel } from "./restored-panel";
 import { mergeTranscriptRows, normalizeRetentionDays, transcriptFetchPlan, transcriptStillOnDisk } from "./transcript-sidecar";
 import { autoTitleForSend, firstUserText, suggestedTitleForSession, titleAcceptsVendor, titleFromIntent } from "./titles";
@@ -378,8 +380,8 @@ import {
   usageHomeForReport,
 } from "./usage";
 import {
-  applyWorkerBudgetUsage,
   beginAssignmentBudget,
+  bookWorkerUsage,
   missionUsedTokens,
 } from "./worker-budget";
 import { clampPaneWidth, SIDEBAR_PANE, THREAD_PANE } from "./pane";
@@ -407,6 +409,7 @@ import {
   evaluateWatchHold,
   vendorCallBlocked,
   vendorDeclinedForBot,
+  vendorCardPermitKey,
   vendorGrantedForChat,
   vendorOverrideNeeded,
   spawnIsNoGo,
@@ -1115,18 +1118,7 @@ function cancelVendorSession(session: Pick<Session, "id" | "provider" | "agentRu
 }
 
 function stopDeletedWorkerSessions(before: Session[], after: Session[]) {
-  const kept = new Set(after.map((session) => session.id));
-  for (const session of before) {
-    if (kept.has(session.id) || !session.parentId) continue;
-    if (
-      session.agentRun?.status === "running" ||
-      session.agentRun?.status === "interrupted" ||
-      session.status === "running" ||
-      session.status === "needs-input"
-    ) {
-      cancelVendorSession(session);
-    }
-  }
+  for (const session of deletedLiveSessions(before, after)) cancelVendorSession(session);
 }
 
 function occupancyForSession(
@@ -1278,6 +1270,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const settledPending = useRef(false);
   const lateAckPending = useRef<Map<string, string>>(new Map());
   const persistBody = useRef<AppState | null>(null);
+  /** When the oldest change not yet written was made; null once a save goes out. */
+  const persistDirtySince = useRef<number | null>(null);
   /** Chats whose sidecar this desk has already asked for. One ask per chat per launch, hit or miss. */
   const transcriptAsked = useRef<Set<string>>(new Set());
   const draftPersistTimer = useRef<number | null>(null);
@@ -1596,8 +1590,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     // age, so the latch staying up for a state change or two costs nothing.
     if (settledPending.current) refreshPlansForRouting(plansRef.current);
     if (settledPending.current) noteFoldersLeft(foldersToCount(settledWorkers(previous?.sessions, state.sessions), state.sessions));
+    const now = Date.now();
+    const dirtySince = persistDirtySince.current ?? now;
+    persistDirtySince.current = dirtySince;
     persistTimer.current = window.setTimeout(() => {
       settledPending.current = false;
+      persistDirtySince.current = null;
       const saved = listedChats(applyComposerDrafts(state.sessions, composerDraftsRef.current));
       void window.workhorse
         ?.saveState({
@@ -1629,7 +1627,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           }
         })
         .catch(() => undefined);
-    }, settledPending.current ? 0 : busy ? 2_000 : 400);
+    }, persistDelayMs({ settled: settledPending.current, busy, dirtySince, now }));
   }, [ready, state]);
 
   /*
@@ -1941,10 +1939,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       session.model !== model ||
       session.effort !== effort;
     if (switched) {
-      if (session.provider === "codex") void window.workhorse?.codexCancel?.(session.id);
-      else if (session.provider === "claude") void window.workhorse?.claudeCancel?.(session.id);
-      else if (session.provider === "custom") void window.workhorse?.customCancel?.(session.id);
-      else void window.workhorse?.grokCancel?.(session.id);
+      // One router for every vendor: this and the mode, sandbox and network
+      // switches below had copies with no Cursor branch, so a Cursor run kept
+      // going on the model or the access the person had just taken from it.
+      cancelVendorSession(session);
     }
     setState((latest) => {
       const live = latest.sessions.find((item) => item.id === latest.activeSessionId);
@@ -2115,23 +2113,25 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       stopDeletedWorkerSessions(current.sessions, sessions);
       const leases = releaseDeletedSessionLeases(current.leases ?? [], current.sessions, sessions);
       pathLeasesRef.current = leases;
+      // The chat's workers and helpers went with it, and so do their cards.
+      const kept = new Set(sessions.map((session) => session.id));
       return {
         ...current,
         sessions,
         leases,
-        pending: current.pending.filter((item) => item.sessionId !== id),
-        activeSessionId: current.activeSessionId === id ? null : current.activeSessionId,
+        pending: current.pending.filter((item) => kept.has(item.sessionId)),
+        activeSessionId: current.activeSessionId && kept.has(current.activeSessionId) ? current.activeSessionId : null,
       };
     });
   }, []);
 
   const deleteWorkers = useCallback((parentId: string) => {
     setState((current) => {
-      const kids = current.sessions.filter((session) => session.parentId === parentId);
       const sessions = deleteWorkerChats(current.sessions, parentId);
       if (!sessions) return current;
       stopDeletedWorkerSessions(current.sessions, sessions);
-      const gone = new Set(kids.map((kid) => kid.id));
+      const kept = new Set(sessions.map((session) => session.id));
+      const gone = new Set(current.sessions.filter((session) => !kept.has(session.id)).map((session) => session.id));
       const leases = releaseDeletedSessionLeases(current.leases ?? [], current.sessions, sessions);
       pathLeasesRef.current = leases;
       return {
@@ -2174,10 +2174,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const setMode = useCallback((mode: PermissionMode) => {
     const session = stateRef.current.sessions.find((item) => item.id === stateRef.current.activeSessionId);
     if (session && session.mode !== mode) {
-      if (session.provider === "codex") void window.workhorse?.codexCancel?.(session.id);
-      else if (session.provider === "claude") void window.workhorse?.claudeCancel?.(session.id);
-      else if (session.provider === "custom") void window.workhorse?.customCancel?.(session.id);
-      else void window.workhorse?.grokCancel?.(session.id);
+      cancelVendorSession(session);
     }
     setState((current) => {
       const live = current.sessions.find((item) => item.id === current.activeSessionId);
@@ -2203,10 +2200,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const setSandbox = useCallback((sandbox: SandboxProfile) => {
     const session = stateRef.current.sessions.find((item) => item.id === stateRef.current.activeSessionId);
     if (session && session.sandbox !== sandbox) {
-      if (session.provider === "codex") void window.workhorse?.codexCancel?.(session.id);
-      else if (session.provider === "claude") void window.workhorse?.claudeCancel?.(session.id);
-      else if (session.provider === "custom") void window.workhorse?.customCancel?.(session.id);
-      else void window.workhorse?.grokCancel?.(session.id);
+      cancelVendorSession(session);
     }
     setState((current) => {
       const live = current.sessions.find((item) => item.id === current.activeSessionId);
@@ -2226,10 +2220,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const current = session.securityPolicy ?? { network: "allowed", root: "allowed" };
     const securityPolicy: SessionSecurityPolicy = { ...current, ...patch };
     if (securityPolicy.network === current.network && securityPolicy.root === current.root) return;
-    if (session.provider === "codex") void window.workhorse?.codexCancel?.(session.id);
-    else if (session.provider === "claude") void window.workhorse?.claudeCancel?.(session.id);
-    else if (session.provider === "custom") void window.workhorse?.customCancel?.(session.id);
-    else void window.workhorse?.grokCancel?.(session.id);
+    cancelVendorSession(session);
     setState((state) => ({
       ...state,
       sessions: state.sessions.map((item) =>
@@ -2418,7 +2409,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const peer = elevatePeerReply.current.get(id);
     elevatePeerReply.current.delete(id);
     const allowVendor = Boolean(vendorAsk && answer !== "deny" && session);
-    const vendorKey = vendorAsk ? (vendorAsk.provider === "custom" ? `bot:${session?.customBotId ?? ""}` : vendorAsk.provider) : "";
+    const vendorKey = vendorCardPermitKey(vendorAsk);
     if (allowVendor && vendorAsk?.status !== "disabled" && vendorKey && session) {
       const today = dayKey();
       const nextPermits = {
@@ -2938,11 +2929,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           stopDeletedWorkerSessions(current.sessions, sessions);
           const leases = releaseDeletedSessionLeases(current.leases ?? [], current.sessions, sessions);
           pathLeasesRef.current = leases;
+          const kept = new Set(sessions.map((session) => session.id));
           return {
             ...current,
             sessions,
             leases,
-            pending: current.pending.filter((item) => item.sessionId !== current.activeSessionId),
+            pending: current.pending.filter((item) => kept.has(item.sessionId)),
             activeSessionId: null,
           };
         });
@@ -5043,7 +5035,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 await replyAsk({ error: `${row?.reason || "That vendor is not attached."} Do not wait.` });
                 return;
               }
-              const vendorKey = row.id.startsWith("bot:") ? row.id : row.provider;
+              // The row id is the watch key the hold reads: a bot's own id, and a
+              // Cursor lane rather than "cursor".
+              const vendorKey = row.id;
               const sameVendor =
                 from.provider === row.provider &&
                 (row.provider !== "custom" || row.id === `bot:${from.customBotId ?? ""}`);
@@ -5079,7 +5073,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                       ? `${row.name} will run inside this conversation.`
                       : row.reason || `${row.name} is not callable right now.`,
                   kind: "vendor",
-                  vendor: { provider: row.provider, name: row.name, status: vendorStatus },
+                  vendor: { provider: row.provider, name: row.name, status: vendorStatus, key: vendorKey },
                 }),
                 sessions: current.sessions.map((item) =>
                   item.id === from.id ? { ...item, status: "needs-input" } : item,
@@ -6143,7 +6137,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               customBotId: spec.customBotId,
               name: spec.title,
             });
-            const vendorKey = spec.customBotId ? `bot:${spec.customBotId}` : spec.provider;
+            const vendorKey = watchKeyForSession(spec);
             const sameVendor =
               spec.provider === parent.provider && spec.customBotId === parent.customBotId;
             const granted = vendorGrantedForChat(latest.watchPermits, vendorKey, parent.id);
@@ -6875,7 +6869,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                   tool: "workhorse_request_vendor",
                   detail: row.reason || `${row.name} will answer from another sidebar chat.`,
                   kind: "vendor",
-                  vendor: { provider: row.provider, name: row.name, status: "day_bank" },
+                  vendor: { provider: row.provider, name: row.name, status: "day_bank", key: row.id },
                 }),
                 sessions: current.sessions.map((item) =>
                   item.id === from.id ? { ...item, status: "needs-input" } : item,
@@ -7116,7 +7110,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   /** Caller cancel still shares this path. The desk does not fire it for a runtime limit. */
   const stopWorker = useCallback((childSessionId: string, reason: "timed-out" | "cancelled") => {
     const child = stateRef.current.sessions.find((session) => session.id === childSessionId);
-    if (child?.status === "running") cancelVendorSession(child);
+    // A worker waiting on a card is mid-turn too. Stopped only when running,
+    // it was marked cancelled while its vendor sat on the request and its card
+    // stayed in the inbox for a worker nobody could resume.
+    if (child && vendorTurnIsLive(child)) cancelVendorSession(child);
     setState((current) => {
       const rowStatus = reason === "timed-out" ? "timed-out" as const : "cancelled" as const;
       // The stop names the run it was aimed at. If the worker has been reused
@@ -7135,7 +7132,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       queueMicrotask(() => {
         if (admitted.auditor) sendRef.current(admitted.auditor.brief, { sessionId: admitted.auditor.id, hideUser: true });
       });
-      return { ...current, sessions: admitted.sessions };
+      return {
+        ...current,
+        sessions: admitted.sessions,
+        pending: current.pending.filter((item) => item.sessionId !== childSessionId),
+      };
     });
   }, []);
 
@@ -7605,7 +7606,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             (eventVendor.provider === "codex" || eventVendor.provider === "claude" || eventVendor.provider === "custom"
               ? eventVendor.provider
               : "grok");
-          const vendorKey = row?.id.startsWith("bot:") ? row.id : vendorProvider;
+          const vendorKey = row?.id ?? vendorProvider;
           if (vendorGrantedForChat(stateRef.current.watchPermits, vendorKey, owner.id) || !vendorOverrideNeeded(row)) {
             if (provider === "custom") void window.workhorse?.customAnswerPermission?.(event.requestId, "once");
             return;
@@ -7622,7 +7623,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                   ? `${vendorName} will run inside this conversation.`
                   : row?.reason || `${vendorName} is not callable right now.`,
               kind: "vendor",
-              vendor: { provider: vendorProvider, name: vendorName, status: vendorStatus },
+              vendor: { provider: vendorProvider, name: vendorName, status: vendorStatus, key: vendorKey },
             }),
             sessions: current.sessions.map((session) =>
               session.id === event.sessionId ? { ...session, status: "needs-input" } : session,
@@ -7727,6 +7728,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               tool: event.tool,
               detail: event.detail,
               path: event.path,
+              ...(event.preview ? { preview: event.preview } : {}),
               kind: "elevate",
               elevate: need,
             }),
@@ -7848,6 +7850,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             tool: event.tool,
             detail: event.detail,
             path: event.path,
+            ...(event.preview ? { preview: event.preview } : {}),
           }),
           sessions: current.sessions.map((session) =>
             session.id === event.sessionId ? { ...session, status: "needs-input" } : session,
@@ -7892,23 +7895,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         }
         const liveSession = stateRef.current.sessions.find((item) => item.id === event.sessionId);
         if (liveSession?.agentRun?.status === "running") {
-          const spend = applyWorkerBudgetUsage(liveSession.agentRun, event);
-          setState((current) => ({
-            ...current,
-            sessions: current.sessions.map((session) => {
-              if (session.id !== event.sessionId || !session.agentRun) return session;
-              return {
-                ...session,
-                agentRun: {
-                  ...session.agentRun,
-                  usedTokens: spend.usedTokens,
-                  budgetBaseline: spend.budgetBaseline,
-                  outputTokensTotal: spend.outputTokensTotal,
-                  cacheTokensTotal: spend.cacheTokensTotal,
-                },
-              };
-            }),
-          }));
+          // Summed from the committed run, not the snapshot this event read.
+          setState((current) => ({ ...current, sessions: bookWorkerUsage(current.sessions, event.sessionId, event) }));
         }
         const occupancy = occupancyFromUsage(
           incoming,

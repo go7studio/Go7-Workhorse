@@ -6,11 +6,13 @@ import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import {
   compareVersions,
+  DEVELOPMENT_DESK_UPDATE_MESSAGE,
   isNewerVersion,
   macBundleFromExecPath,
   macInstallerArch,
   macRefreshRegistrationScript,
   macReplaceScript,
+  npmInstallCommand,
   windowsGrokBotShimPids,
   offerFromRelease,
   winInstallerArgs,
@@ -151,7 +153,8 @@ test("a packaged Mac desk installs the arch-matched dmg, not a git checkout", ()
     tmp,
   });
   assert.match(script, /kill -0 "\$pid"/);
-  assert.match(script, /cp -R "\$src" "\$dest"/);
+  assert.match(script, /swap_app "\$src" "\$dest"/);
+  assert.doesNotMatch(script, /rm -rf "\$dest"/, "the live app is never deleted before the new one is whole");
   assert.match(script, /hdiutil detach "\$device"/);
   assert.match(script, /open "\$dest"/);
   assert.match(script, /4242/);
@@ -162,7 +165,7 @@ test("a packaged Mac desk installs the arch-matched dmg, not a git checkout", ()
   assert.match(script, /WORKHORSE_MAC_GROK_BOT_SHIM_STOP/);
   assert.match(script, /launchctl bootout/);
   assert.ok(script.includes("grok-bot-shim-host.js$"));
-  assert.ok(script.indexOf("WORKHORSE_MAC_GROK_BOT_SHIM_STOP") < script.indexOf('rm -rf "$dest"'));
+  assert.ok(script.indexOf("WORKHORSE_MAC_GROK_BOT_SHIM_STOP") < script.indexOf('swap_app "$src" "$dest"'));
 
 });
 
@@ -407,4 +410,52 @@ test("update check is wired through main, preload, and the sidebar action", () =
   assert.match(publish, /!cancelled\(\)/);
   assert.match(publish, /needs\.installers\.result == 'success'/);
   assert.match(publish, /needs\.detect-release\.outputs\.cut == 'true'/);
+});
+
+test("a development desk never installs a release over itself", () => {
+  // The Dev app is packaged, so it read as a Mac or Windows install: Update
+  // copied the production bundle over Go7 Workhorse Dev.app, which then ran as
+  // production on production's userData and Keychain, or ran the production
+  // installer from a try build. Unpackaged, it checked a tag out in the clone.
+  for (const platform of ["darwin", "win32", "linux"]) {
+    for (const packaged of [true, false]) {
+      for (const hasGitCheckout of [true, false]) {
+        assert.equal(
+          updateInstallKind({ platform, packaged, hasGitCheckout, development: true }),
+          "development",
+          `${platform} packaged=${packaged} checkout=${hasGitCheckout}`,
+        );
+      }
+    }
+  }
+  assert.equal(updateInstallKind({ platform: "darwin", packaged: true, hasGitCheckout: false, development: false }), "mac-dmg");
+  assert.match(DEVELOPMENT_DESK_UPDATE_MESSAGE, /development desk/);
+
+  const updater = readFileSync(path.join(ROOT, "electron", "app-update.ts"), "utf8");
+  const apply = updater.slice(updater.indexOf("export async function applyAppUpdate("));
+  const refuse = apply.indexOf('if (kind === "development") return { ok: false, message: DEVELOPMENT_DESK_UPDATE_MESSAGE };');
+  assert.ok(refuse > 0, "applyAppUpdate refuses a development desk");
+  assert.ok(refuse < apply.indexOf("await checkAppUpdate()"), "before it downloads anything");
+  assert.ok(refuse < apply.indexOf("installMacDmg("), "and before any install");
+  const main = readFileSync(path.join(ROOT, "electron", "main.ts"), "utf8");
+  assert.match(
+    main,
+    /applyAppUpdate\(typeof version === "string" \? version : "", runtimeIdentity\.userDataDirectory === WORKHORSE_DEV_USER_DATA_DIR\)/,
+  );
+});
+
+test("the source-checkout update starts npm on Windows through cmd.exe", () => {
+  // npm.cmd is a batch file. Node refuses to start one without a shell, so the
+  // update failed with EINVAL every time on Windows, after git had moved.
+  assert.deepEqual(npmInstallCommand("win32", "C:\\Windows\\system32\\cmd.exe"), {
+    command: "C:\\Windows\\system32\\cmd.exe",
+    args: ["/d", "/s", "/c", "npm.cmd install"],
+  });
+  assert.equal(npmInstallCommand("win32").command, "C:\\Windows\\System32\\cmd.exe");
+  assert.deepEqual(npmInstallCommand("darwin"), { command: "npm", args: ["install"] });
+  assert.deepEqual(npmInstallCommand("linux"), { command: "npm", args: ["install"] });
+  const updater = readFileSync(path.join(ROOT, "electron", "app-update.ts"), "utf8");
+  assert.doesNotMatch(updater, /run\(npm, \["install"\]/);
+  assert.doesNotMatch(updater, /"npm\.cmd" : "npm"/);
+  assert.match(updater, /npmInstallCommand\(process\.platform, sourceEnv\.ComSpec\)/);
 });

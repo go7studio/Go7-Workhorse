@@ -93,9 +93,51 @@ export function autoRenameChat(sessions: Session[], id: string, title: string): 
   return renameChat(sessions, id, title, false);
 }
 
+/**
+ * These chats and everything they spawned, at every depth. A worker can hold a
+ * nested helper of its own; deleting only direct children left that helper
+ * behind with a parent that no longer existed, hidden from the sidebar and
+ * never cancelled.
+ */
+function withDescendants(sessions: Array<Pick<Session, "id" | "parentId">>, ids: Iterable<string>): Set<string> {
+  const gone = new Set(ids);
+  let grew = gone.size > 0;
+  while (grew) {
+    grew = false;
+    for (const session of sessions) {
+      if (session.parentId && gone.has(session.parentId) && !gone.has(session.id)) {
+        gone.add(session.id);
+        grew = true;
+      }
+    }
+  }
+  return gone;
+}
+
 export function deleteChat(sessions: Session[], id: string): Session[] | null {
   if (!sessions.some((session) => session.id === id)) return null;
-  return sessions.filter((session) => session.id !== id && session.parentId !== id);
+  const gone = withDescendants(sessions, [id]);
+  return sessions.filter((session) => !gone.has(session.id));
+}
+
+/** A chat whose vendor turn is live: streaming, or holding a request on a card. */
+export function vendorTurnIsLive(session: Pick<Session, "status"> | undefined): boolean {
+  return session?.status === "running" || session?.status === "needs-input";
+}
+
+/**
+ * Chats a deletion removed that still have a vendor turn to stop. The chat the
+ * person deleted counts as much as its workers: skipping every chat without a
+ * parent left a deleted chat's turn running, still spending and still able to
+ * write, with nowhere left to report.
+ */
+export function deletedLiveSessions<T extends Pick<Session, "id" | "status" | "agentRun">>(before: T[], after: Array<Pick<Session, "id">>): T[] {
+  const kept = new Set(after.map((session) => session.id));
+  return before.filter(
+    (session) =>
+      !kept.has(session.id) &&
+      (session.agentRun?.status === "running" || session.agentRun?.status === "interrupted" || vendorTurnIsLive(session)),
+  );
 }
 
 export function deleteWorkerChats(sessions: Session[], parentId: string): Session[] | null {
@@ -105,8 +147,9 @@ export function deleteWorkerChats(sessions: Session[], parentId: string): Sessio
       .map((session) => session.id),
   );
   if (childIds.size === 0) return null;
+  const gone = withDescendants(sessions, childIds);
   return sessions
-    .filter((session) => !childIds.has(session.id))
+    .filter((session) => !gone.has(session.id))
     .map((session) => {
       if (session.id !== parentId) return session;
       return {
@@ -131,7 +174,13 @@ export function archiveChat(sessions: Session[], id: string, archived: boolean, 
 export function moveChat(sessions: Session[], id: string, projectId: string): Session[] | null {
   const session = sessions.find((item) => item.id === id);
   if (!session || !projectId || session.projectId === projectId) return null;
-  return sessions.map((item) => (item.id === id ? { ...item, projectId } : item));
+  // The chat's crew moves with it. Left behind, each worker lost its parent in
+  // the old project's list and showed there as a chat of its own. A worker
+  // bound to some other project by its folder stays bound there.
+  const crew = withDescendants(sessions, [id]);
+  return sessions.map((item) =>
+    item.id === id || (crew.has(item.id) && item.projectId === session.projectId) ? { ...item, projectId } : item,
+  );
 }
 
 export type ListedChatHit = { id: string; title: string; provider?: string };
@@ -356,8 +405,30 @@ export function withComposerDrafts(
   return dropDrafts(applyComposerDrafts(sessions, drafts), keepId);
 }
 
-export function isDraftChat(session: Pick<Session, "messages" | "archivedAt" | "composerDraft" | "composerImages">): boolean {
+type DraftFields =
+  | "messages"
+  | "archivedAt"
+  | "composerDraft"
+  | "composerImages"
+  | "parentId"
+  | "hidden"
+  | "agentRun"
+  | "transcriptSidecar"
+  | "transcriptOffloaded"
+  | "retainedReport";
+
+/**
+ * A chat New chat made that nobody has used yet. New chat reuses the first one
+ * and every draft rule drops the rest, so only a plain chat with nothing in it
+ * qualifies. A worker, a hidden chat, or a chat whose rows went to the
+ * transcript store can hold no user row in memory and still be somebody's
+ * work: in a profile an older build had saved, one click on New chat turned a
+ * retired worker into the new chat and dropped 102 others.
+ */
+export function isDraftChat(session: Pick<Session, DraftFields>): boolean {
   if (typeof session.archivedAt === "number") return false;
+  if (session.parentId || session.hidden || session.agentRun) return false;
+  if (session.transcriptSidecar || session.transcriptOffloaded || session.retainedReport) return false;
   if (hasComposerDraft(session)) return false;
   return !hasUserPrompt(session);
 }
@@ -372,7 +443,7 @@ export function isDraftChat(session: Pick<Session, "messages" | "archivedAt" | "
  * seven workers in the transcript and none in the sidebar.
  */
 export function sidebarKeepsChat(
-  session: Pick<Session, "projectId" | "parentId" | "hidden" | "archivedAt" | "messages" | "composerDraft" | "composerImages">,
+  session: Pick<Session, DraftFields | "projectId">,
   where: { projectId: string | null; archived: boolean },
 ): boolean {
   if ((session.projectId ?? null) !== where.projectId) return false;
@@ -396,12 +467,13 @@ export function dropDrafts(sessions: Session[], keepId?: string | null): Session
 }
 
 export function listedChats(sessions: Session[]): Session[] {
-  // A worker is a durable address, never a draft. listedChats gates what gets
-  // written to workhorse-state.json, and a freshly spawned worker has no user
-  // bubble yet — so without this a spawn can return a session id and cut a
-  // worktree while the session is never persisted at all. Restart in that
-  // window and the worker is gone, but its worktree is still on disk.
-  return sessions.filter((session) => Boolean(session.parentId) || !isDraftChat(session));
+  // A worker is a durable address, never a draft (`isDraftChat`). listedChats
+  // gates what gets written to workhorse-state.json, and a freshly spawned
+  // worker has no user bubble yet, so were it a draft, a spawn could return a
+  // session id and cut a worktree while the session is never persisted at all.
+  // Restart in that window and the worker is gone, but its worktree is still
+  // on disk.
+  return sessions.filter((session) => !isDraftChat(session));
 }
 
 /** Loose Chats first, then any other visible root chat. Settings inbound parent uses this when unset. */

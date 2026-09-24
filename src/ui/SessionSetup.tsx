@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { customBotEnabled, customBotModels } from "../lib/custom-bots";
 import { makerLabel, modelChipLabel, parseModelId } from "../lib/model-groups";
 import { cursorFamilyId } from "../lib/cursor-catalog";
+import { cursorWatchLane, type CursorWatchKey } from "../lib/cursor-lane";
 import { contextWindowFor, defaultModel, effortLabel, effortStopAt, effortStopPos, effortsFor, formatWindow, modelName, modelsForPicker, withEffort } from "../lib/models";
 import { hasAttachedLlm, vendorEnabled, vendorLabel, vendorTint } from "../lib/settings";
 import { sessionEnvironmentKind } from "../lib/session-environment";
@@ -57,10 +58,12 @@ export function SessionSetup({ onClose }: { onClose: () => void }) {
     grokPlan,
     codexPlan,
     claudePlan,
+    cursorPlan,
     customPlans,
     refreshGrokPlan,
     refreshCodexPlan,
     refreshClaudePlan,
+    refreshCursorPlan,
     refreshCustomPlans,
     folderExists,
   } = useStore();
@@ -73,8 +76,9 @@ export function SessionSetup({ onClose }: { onClose: () => void }) {
     refreshGrokPlan();
     refreshCodexPlan();
     refreshClaudePlan();
+    refreshCursorPlan();
     refreshCustomPlans();
-  }, [refreshGrokPlan, refreshCodexPlan, refreshClaudePlan, refreshCustomPlans]);
+  }, [refreshGrokPlan, refreshCodexPlan, refreshClaudePlan, refreshCursorPlan, refreshCustomPlans]);
 
   useEffect(() => {
     const onPointer = (event: MouseEvent) => {
@@ -112,10 +116,17 @@ export function SessionSetup({ onClose }: { onClose: () => void }) {
       setEnvironmentBusy(null);
     }
   };
-  const focus: ProviderId | `bot:${string}` = bot ? `bot:${bot.id}` : session.provider;
+  // A Cursor chat draws on the pool its model bills to. Read as plain
+  // "cursor", the tide had no Cursor plan to read and fell back to a budget
+  // over both pools, or mapped to the API pool.
+  const focus: ProviderId | `bot:${string}` | CursorWatchKey = bot
+    ? `bot:${bot.id}`
+    : session.provider === "cursor"
+      ? cursorWatchLane(session.model)
+      : session.provider;
   const used = vendorTidePercent(
-    { focus, provider: session.provider, key: bot?.id ?? session.provider },
-    { grok: grokPlan, codex: codexPlan, claude: claudePlan, custom: customPlans },
+    { focus, provider: session.provider, key: bot?.id ?? focus },
+    { grok: grokPlan, codex: codexPlan, claude: claudePlan, cursor: cursorPlan, custom: customPlans },
     usage ?? [],
     settings.usageBudgets[session.provider],
     bot,

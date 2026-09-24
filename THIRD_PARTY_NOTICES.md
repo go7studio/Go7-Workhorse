@@ -4,7 +4,7 @@ Go7 Workhorse is MIT (see [LICENSE](LICENSE)). The installer also carries the
 packages below. This file is generated from the production dependency tree by
 `npm run notices`, and a test fails when it drifts.
 
-77 packages ship.
+62 packages ship.
 
 ## Not open source
 
@@ -14,7 +14,6 @@ is a licensing question, not a formatting one.
 | Package | Version | Declared |
 | --- | --- | --- |
 | `@anthropic-ai/claude-agent-sdk` | 0.3.220 | SEE LICENSE IN README.md |
-| `@anthropic-ai/claude-agent-sdk-darwin-arm64` | 0.3.220 | SEE LICENSE IN LICENSE.md |
 
 ## All packages
 
@@ -24,26 +23,11 @@ is a licensing question, not a formatting one.
 | `@agentclientprotocol/codex-acp` | 1.2.0 | Apache-2.0 |
 | `@agentclientprotocol/sdk` | 1.3.0 | Apache-2.0 |
 | `@anthropic-ai/claude-agent-sdk` | 0.3.220 | SEE LICENSE IN README.md |
-| `@anthropic-ai/claude-agent-sdk-darwin-arm64` | 0.3.220 | SEE LICENSE IN LICENSE.md |
-| `@anthropic-ai/claude-agent-sdk-darwin-x64` | — | not installed on this platform |
-| `@anthropic-ai/claude-agent-sdk-linux-arm64` | — | not installed on this platform |
-| `@anthropic-ai/claude-agent-sdk-linux-arm64-musl` | — | not installed on this platform |
-| `@anthropic-ai/claude-agent-sdk-linux-x64` | — | not installed on this platform |
-| `@anthropic-ai/claude-agent-sdk-linux-x64-musl` | — | not installed on this platform |
-| `@anthropic-ai/claude-agent-sdk-win32-arm64` | — | not installed on this platform |
-| `@anthropic-ai/claude-agent-sdk-win32-x64` | — | not installed on this platform |
 | `@anthropic-ai/sdk` | 0.116.0 | MIT |
 | `@babel/runtime` | 7.29.7 | MIT |
-| `@cfworker/json-schema` | — | not installed on this platform |
 | `@hono/node-server` | 2.1.0 | MIT |
 | `@modelcontextprotocol/sdk` | 1.30.0 | MIT |
 | `@openai/codex` | 0.147.0 | Apache-2.0 |
-| `@openai/codex-darwin-arm64` | 0.147.0-darwin-arm64 | Apache-2.0 |
-| `@openai/codex-darwin-x64` | — | not installed on this platform |
-| `@openai/codex-linux-arm64` | — | not installed on this platform |
-| `@openai/codex-linux-x64` | — | not installed on this platform |
-| `@openai/codex-win32-arm64` | — | not installed on this platform |
-| `@openai/codex-win32-x64` | — | not installed on this platform |
 | `@stablelib/base64` | 1.0.1 | MIT |
 | `ajv` | 8.20.0 | MIT |
 | `ajv-formats` | 3.0.1 | MIT |
@@ -62,7 +46,7 @@ is a licensing question, not a formatting one.
 | `express` | 5.2.1 | MIT |
 | `express-rate-limit` | 8.6.2 | MIT |
 | `fast-sha256` | 1.3.0 | Unlicense |
-| `hono` | 4.13.2 | MIT |
+| `hono` | 4.13.7 | MIT |
 | `http-errors` | 2.0.1 | MIT |
 | `iconv-lite` | 0.7.3 | MIT |
 | `ip-address` | 10.5.0 | MIT |

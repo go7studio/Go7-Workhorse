@@ -779,6 +779,7 @@ export function vendorUsedPercent(
     grok?: GrokPlanUsage;
     codex?: GrokPlanUsage;
     claude?: GrokPlanUsage;
+    cursor?: GrokPlanUsage;
     custom?: Record<string, GrokPlanUsage | undefined>;
   },
   events: UsageEvent[] = [],
@@ -789,10 +790,14 @@ export function vendorUsedPercent(
   if (plan && Number.isFinite(plan.usedPercent)) {
     return Math.min(100, Math.max(0, plan.usedPercent));
   }
+  // A Cursor pool spends against its own allowance, so only its own events
+  // count toward the budget.
   const slice =
     row.provider === "custom" && bot
       ? customBotUsageEvents(events, bot)
-      : events.filter((event) => event.provider === row.provider);
+      : isCursorWatchKey(String(row.focus))
+        ? cursorLaneEvents(events, row.focus as CursorWatchKey)
+        : events.filter((event) => event.provider === row.provider);
   const used = rollup(slice).totalTokens;
   if (budget && budget > 0 && used > 0) return Math.min(100, (used / budget) * 100);
   return 0;
@@ -828,6 +833,7 @@ export function vendorTidePercent(
     grok?: GrokPlanUsage;
     codex?: GrokPlanUsage;
     claude?: GrokPlanUsage;
+    cursor?: GrokPlanUsage;
     custom?: Record<string, GrokPlanUsage | undefined>;
   },
   events: UsageEvent[] = [],
@@ -1153,8 +1159,11 @@ export function formatPlanReset(iso?: string, now = Date.now()): string {
   if (Number.isNaN(date.getTime())) return "";
   const delta = date.getTime() - now;
   if (delta > 0 && delta < 12 * 60 * 60 * 1000) {
-    const hours = Math.floor(delta / 3_600_000);
-    const minutes = Math.max(0, Math.round((delta % 3_600_000) / 60_000));
+    // Round the whole span to minutes before splitting it. Rounding only the
+    // remainder read 1 h 59 m 45 s as "1 hr 60 min".
+    const total = Math.round(delta / 60_000);
+    const hours = Math.floor(total / 60);
+    const minutes = total % 60;
     if (hours <= 0) return `Resets in ${minutes} min`;
     return `Resets in ${hours} hr${minutes ? ` ${minutes} min` : ""}`;
   }
@@ -1871,12 +1880,15 @@ export function deskPulseLines(input: {
 }
 
 export function formatTokens(value: number): string {
-  if (value < 1000) return String(Math.round(value));
-  if (value < 10_000) return `${(value / 1000).toFixed(1)}k`;
-  if (value < 1_000_000) return `${Math.round(value / 1000)}k`;
+  // Each unit is picked by the number it will print, not the raw value, so a
+  // count just under a boundary moves up a unit instead of printing "1000k"
+  // (999,600) or "1000.0M".
+  if (Math.round(value) < 1000) return String(Math.round(value));
+  if (value < 9_950) return `${(value / 1000).toFixed(1)}k`;
+  if (Math.round(value / 1000) < 1000) return `${Math.round(value / 1000)}k`;
   // A desk that has run for a year read 1657.5M, which is a number nobody can
   // hold. A billion gets its own letter.
-  if (value < 1_000_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
+  if (Number((value / 1_000_000).toFixed(1)) < 1000) return `${(value / 1_000_000).toFixed(1)}M`;
   return `${(value / 1_000_000_000).toFixed(2)}B`;
 }
 
@@ -2317,11 +2329,20 @@ function asCursorLane(value: unknown): CursorUsageLane | undefined {
   return undefined;
 }
 
+/**
+ * Before usage was tagged by source, the custom host stored its requests as
+ * separate rows, each carrying the whole prompt so far, and this keeps only the
+ * last of those. It cannot tell a request from a turn, so it runs on untagged
+ * rows only. It used to run on tagged rows too, and every chat's prompt grows
+ * turn by turn, so each launch folded a custom bot's whole chat into its last
+ * turn and saved it that way: three turns of 3k, 6k and 9k in became one row
+ * of 9k. A tagged row is one turn and stays.
+ */
 function collapseStackedCustomTurns(events: UsageEvent[]): UsageEvent[] {
   const drop = new Set<string>();
   const bySession = new Map<string, UsageEvent[]>();
   for (const event of events) {
-    if (event.provider !== "custom" || !event.sessionId) continue;
+    if (event.provider !== "custom" || !event.sessionId || event.source) continue;
     const list = bySession.get(event.sessionId) ?? [];
     list.push(event);
     bySession.set(event.sessionId, list);

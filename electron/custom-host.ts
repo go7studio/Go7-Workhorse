@@ -17,10 +17,14 @@ import type { GrokPromptResult } from "./grok-agent";
 import type { GrokEventSink } from "./grok-host";
 import { CUSTOM_NOT_CONFIGURED, streamCustomHttp, type CustomChatMessage, type CustomHttpConfig, type CustomHttpUsage } from "./custom-http";
 import {
+  customToolNotOffered,
+  customToolOffered,
   customToolPolicy,
   executeCustomTool,
   groupFanOutToolUses,
+  headWithoutSplit,
   limitCustomToolResult,
+  tailWithoutSplit,
   toolDetail,
   type CustomToolResult,
   type CustomToolUse,
@@ -226,15 +230,15 @@ function transcriptChars(messages: CustomChatMessage[]): number {
 function checkpointLine(message: CustomChatMessage): string {
   if (message.toolUses?.length) {
     return message.toolUses
-      .map((tool) => `Called ${tool.name} with ${JSON.stringify(ordered(tool.input)).slice(0, 600)}`)
+      .map((tool) => `Called ${tool.name} with ${headWithoutSplit(JSON.stringify(ordered(tool.input)), 600)}`)
       .join("\n");
   }
   if (message.toolResults?.length) {
     return message.toolResults
-      .map((result) => `${result.isError ? "Failed" : "Result from"} ${result.name}: ${result.content.slice(0, 900)}`)
+      .map((result) => `${result.isError ? "Failed" : "Result from"} ${result.name}: ${headWithoutSplit(result.content, 900)}`)
       .join("\n");
   }
-  return message.text.trim().slice(0, 900);
+  return headWithoutSplit(message.text.trim(), 900);
 }
 
 export function compactCustomTurnTranscript(
@@ -245,7 +249,7 @@ export function compactCustomTurnTranscript(
   if (transcriptChars(messages) <= maxChars || messages.length <= baseMessageCount + 8) return messages;
   const recentStart = Math.max(baseMessageCount, messages.length - 8);
   const older = messages.slice(baseMessageCount, recentStart);
-  const summary = older.map(checkpointLine).filter(Boolean).join("\n").slice(-24_000);
+  const summary = tailWithoutSplit(older.map(checkpointLine).filter(Boolean).join("\n"), 24_000);
   const checkpoint = `Workhorse continuation checkpoint. Older tool transcript was compacted to protect the model context. Preserve this progress and continue the original task:\n${summary}`;
   const base = messages.slice(0, baseMessageCount);
   const lastBase = base.at(-1);
@@ -270,6 +274,21 @@ function safetyPauseMessage(reason: SafetyPause): string {
   return "Workhorse paused after an unusually long continuous run. Progress is preserved in this chat; send Continue to resume.";
 }
 
+/** The longest argument preview a permission card carries. */
+export const MCP_ARGUMENTS_PREVIEW_CHARS = 400;
+
+/** An MCP call's arguments as the card shows them: compact JSON, clipped. */
+export function mcpArgumentsPreview(input: Record<string, unknown> | undefined): string | undefined {
+  let text: string;
+  try {
+    text = JSON.stringify(input ?? {});
+  } catch {
+    return undefined;
+  }
+  if (!text || text === "{}") return undefined;
+  return text.length > MCP_ARGUMENTS_PREVIEW_CHARS ? `${text.slice(0, MCP_ARGUMENTS_PREVIEW_CHARS - 1)}…` : text;
+}
+
 function positiveLimit(value: number | undefined, fallback: number): number {
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : fallback;
 }
@@ -278,7 +297,12 @@ function positiveLimit(value: number | undefined, fallback: number): number {
 export class CustomSessionHost {
   private tails = new Map<string, Promise<unknown>>();
   private aborts = new Map<string, AbortController>();
-  private waiting = new Map<string, (answer: PermissionAnswer) => void>();
+  /**
+   * Open permission cards, each with the chat it belongs to. One host serves
+   * every custom chat, and Stop on one of them used to answer every card on
+   * the desk with deny — another chat's write failed while its card stayed up.
+   */
+  private waiting = new Map<string, { sessionId: string; resolve: (answer: PermissionAnswer) => void }>();
 
   /**
    * The sessions this host is still driving. Custom HTTP keeps no agent slot,
@@ -316,7 +340,7 @@ export class CustomSessionHost {
     const wait = this.waiting.get(requestId);
     if (!wait) return false;
     this.waiting.delete(requestId);
-    wait(answer);
+    wait.resolve(answer);
     return true;
   }
 
@@ -546,6 +570,10 @@ export class CustomSessionHost {
           return executed;
         };
         for (const group of toolGroups) {
+          // Stop ends the batch, not only the call in flight. The loop used to
+          // check only between model calls, so after Stop killed a command the
+          // write queued behind it in the same reply still ran.
+          if (abort.signal.aborted) throw new Error("cancelled");
           if (group.length > 1 && group.every((use) => use.name === "workhorse_spawn_agent" || use.name.endsWith("spawn_agent"))) {
             results.push(...(await Promise.all(group.map((use) => executeSpawnUse(use)))));
             continue;
@@ -560,6 +588,21 @@ export class CustomSessionHost {
             status: "running",
             detail: detail.detail,
           });
+          // A role runs only what its catalog offered — MCP tools included, and
+          // before any card, so nobody is asked to approve a call that must
+          // not run for this seat.
+          if (!customToolOffered(use.name, role)) {
+            results.push({ id: use.id, name: use.name, content: customToolNotOffered(use.name, role), isError: true });
+            emit({
+              type: "tool",
+              sessionId: input.sessionId,
+              toolCallId: use.id,
+              title: use.name,
+              status: "failed",
+              detail: "not offered to this role",
+            });
+            continue;
+          }
           const spawnTarget =
             use.name === "workhorse_request_vendor"
               ? parseProviderId(String(use.input.vendor ?? use.input.provider ?? use.input.name ?? ""))
@@ -576,7 +619,7 @@ export class CustomSessionHost {
               vendor: { provider: spawnTarget, name: vendorName, status: "ok" },
             });
             const answer = await new Promise<PermissionAnswer>((resolve) => {
-              this.waiting.set(requestId, resolve);
+              this.waiting.set(requestId, { sessionId: input.sessionId, resolve });
             });
             if (answer === "deny") {
               results.push({
@@ -660,7 +703,7 @@ export class CustomSessionHost {
               elevate: need,
             });
             const answer = await new Promise<PermissionAnswer>((resolve) => {
-              this.waiting.set(requestId, resolve);
+              this.waiting.set(requestId, { sessionId: input.sessionId, resolve });
             });
             if (answer === "deny") {
               results.push({
@@ -733,6 +776,11 @@ export class CustomSessionHost {
             detail: detail.detail,
             path: detail.path,
           });
+          // An MCP call's detail is its name alone, so the card asked the person
+          // to approve `execute_command` without the command. The arguments ride
+          // beside it for reading only: the detail, which the classifiers judge
+          // and a session grant is keyed on, stays as it was.
+          const preview = mcp.has(use.name) ? mcpArgumentsPreview(use.input) : undefined;
           if (answer === "deny" && blocked) {
             const requestId = uid("perm");
             emit({
@@ -743,10 +791,11 @@ export class CustomSessionHost {
               rawTool: use.name,
               detail: detail.detail,
               path: detail.path,
+              ...(preview ? { preview } : {}),
               elevate: blocked,
             });
             answer = await new Promise<PermissionAnswer>((resolve) => {
-              this.waiting.set(requestId, resolve);
+              this.waiting.set(requestId, { sessionId: input.sessionId, resolve });
             });
             if (answer !== "deny") {
               if (blocked.mode) mode = blocked.mode;
@@ -763,9 +812,10 @@ export class CustomSessionHost {
               rawTool: use.name,
               detail: detail.detail,
               path: detail.path,
+              ...(preview ? { preview } : {}),
             });
             answer = await new Promise<PermissionAnswer>((resolve) => {
-              this.waiting.set(requestId, resolve);
+              this.waiting.set(requestId, { sessionId: input.sessionId, resolve });
             });
           }
           if (answer === "deny") {
@@ -787,6 +837,8 @@ export class CustomSessionHost {
             });
             continue;
           }
+          // An Allow that lands in the same moment as Stop does not run the call.
+          if (abort.signal.aborted) throw new Error("cancelled");
           const executed = limitCustomToolResult(mcp.has(use.name)
             ? await mcp.call(use)
             : await this.executeTool(use, {
@@ -877,8 +929,9 @@ export class CustomSessionHost {
   cancel(sessionId: string): void {
     this.aborts.get(sessionId)?.abort();
     for (const [id, wait] of this.waiting) {
-      wait("deny");
+      if (wait.sessionId !== sessionId) continue;
       this.waiting.delete(id);
+      wait.resolve("deny");
     }
   }
 }

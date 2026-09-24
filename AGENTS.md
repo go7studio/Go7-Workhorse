@@ -49,6 +49,9 @@ breaking it cost real time.
 - **One tree per agent.** Take a `git worktree` or a clone, and give it its own
   `npm ci`. Never symlink `node_modules` from another tree: `npm ci` follows the
   link and empties the tree it points at.
+- **Never `git stash` in a worktree.** Every worktree of a clone shares one
+  stash, so `git stash pop` takes whichever tree stashed last. Two agents
+  swapped half-finished work that way. Commit to your branch instead.
 - **Stage what you changed.** `git add -A` in a shared checkout sweeps up other
   people's work and stray files. It is how a `node_modules` symlink reached the
   repo.

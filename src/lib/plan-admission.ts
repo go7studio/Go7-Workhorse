@@ -7,6 +7,7 @@ import {
 } from "./plan";
 import { addLineupRow, finishedAssignmentSpawnError, lineupIsTerminal, maybeEnqueueLineupJoin } from "./lineup";
 import { formatAuditorPrompt, nextWorkerName, workerTaskTitle } from "./subagents";
+import { isGrokBotModel, isGrokBotName } from "./custom-http-identity";
 import type { PlanEvidence, PlanRun, ProviderId, Session, UsageEvent } from "./types";
 
 export type AuditorCatalogRow = {
@@ -14,6 +15,7 @@ export type AuditorCatalogRow = {
   canCall: boolean;
   id?: string;
   model?: string;
+  name?: string;
   kind?: "vendor" | "custom";
 };
 
@@ -33,6 +35,10 @@ export function pickAuditorVendor(
   );
   for (const row of catalog) {
     if (!row.canCall) continue;
+    // The Grok Bot slot may call, analyze and dispatch, but the desk never
+    // hands it a worker seat, and an auditor is one. On a desk with only Grok
+    // and Grok Bot connected, the first unused callable row was the bot.
+    if (row.provider === "custom" && (isGrokBotModel(row.model ?? "") || isGrokBotName(row.name ?? ""))) continue;
     const customBotId = row.kind === "custom" && row.id?.startsWith("bot:") ? row.id.slice(4) : undefined;
     const key = `${row.provider}:${customBotId ?? ""}`;
     if (used.has(key)) continue;
@@ -77,10 +83,24 @@ export function applyAuditorWaveAdmission(
   const parent = sessions.find((session) => session.id === parentId);
   const plan = parent?.planRun;
   if (!parent || !plan || plan.status !== "running") return sessions;
-  const auditors = sessions.filter(
-    (session) => session.parentId === parentId && session.agentRun?.role === "auditor" && session.agentRun.status !== "running",
-  );
+  // Newest first, so the latest receipt decides a step and an older one finds
+  // it already settled.
+  const auditors = sessions
+    .filter(
+      (session) => session.parentId === parentId && session.agentRun?.role === "auditor" && session.agentRun.status !== "running",
+    )
+    .sort((left, right) => (right.agentRun?.startedAt ?? 0) - (left.agentRun?.startedAt ?? 0));
   if (auditors.length === 0) return sessions;
+  // An auditor vouches only for work that existed when it started. Every past
+  // auditor on this parent used to be read again at each admission, so wave
+  // one's PASS completed a wave-two step whose own auditor had just failed it.
+  const workStartedAt = (step: PlanRun["steps"][number]) =>
+    Math.max(
+      step.startedAt ?? 0,
+      step.assignment?.assignedAt ?? 0,
+      step.reopenedAt ?? 0,
+      sessions.find((session) => session.id === step.assignedSessionId)?.agentRun?.startedAt ?? 0,
+    );
   let next = plan;
   for (const auditor of auditors) {
     const report = [...auditor.messages].reverse().find((message) => message.role === "assistant" && message.text.trim())?.text
@@ -92,8 +112,10 @@ export function applyAuditorWaveAdmission(
       gate: next.gate,
     });
     if (!evidence) continue;
+    const auditedFrom = auditor.agentRun?.startedAt ?? 0;
     const targets = next.steps.filter((step) =>
-      step.status === "running" || Boolean(step.assignedSessionId) && step.status !== "completed" && step.status !== "failed" && step.status !== "cancelled",
+      (step.status === "running" || Boolean(step.assignedSessionId) && step.status !== "completed" && step.status !== "failed" && step.status !== "cancelled") &&
+      auditedFrom >= workStartedAt(step),
     );
     for (const step of targets) {
       const recorded = recordPlanEvidence(next, step.id, { ...evidence, id: `${evidence.id}_${step.id}` }, now);
@@ -147,13 +169,20 @@ export function applyPlanAuditorSpawn(
     sessions.find((session) => session.id === id)?.agentRun?.role === "auditor";
   const builderRows = parent.lineup.rows.filter((row) => !isAuditor(row.childId));
   const auditorRows = parent.lineup.rows.filter((row) => isAuditor(row.childId));
-  if (auditorRows.length > 0 && builderRows.length === 0) {
+  // An auditor covers the builders that finished before it started. When the
+  // parent is still talking the join does not reset the lineup, so the
+  // auditor's row lands beside the builders it audited; reading those builders
+  // as unaudited spawned another auditor at every settle and never admitted
+  // the one that had reported.
+  const auditedUpTo = Math.max(-Infinity, ...auditorRows.map((row) => row.startedAt));
+  const unaudited = builderRows.filter((row) => row.startedAt >= auditedUpTo);
+  if (auditorRows.length > 0 && unaudited.length === 0) {
     return { sessions: applyAuditorWaveAdmission(sessions, parentId, now) };
   }
   if (sessions.some((session) => session.parentId === parentId && session.agentRun?.role === "auditor" && session.agentRun.status === "running")) {
     return { sessions };
   }
-  if (builderRows.length === 0) return { sessions };
+  if (unaudited.length === 0) return { sessions };
   const builders = builderRows.map((row) => {
     const child = sessions.find((session) => session.id === row.childId);
     return { provider: child?.provider ?? "grok", customBotId: child?.customBotId };

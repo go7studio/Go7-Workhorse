@@ -240,19 +240,20 @@ export function applyDeleteCustomBot(
   return { bots: bots.filter((item) => item.id !== removed.id), removed };
 }
 
+/**
+ * The bot this setup would create, if the desk already has it: the same
+ * endpoint and the same model. A name or a model alone used to count, so the
+ * same model at a second provider, or a new bot that shared a name, was
+ * answered "already on the desk" with the first one and never created.
+ */
 export function findListedBot(
   bots: PublicBotCard[],
-  draft: { baseUrl: string; model: string; name?: string },
+  draft: { baseUrl: string; model: string },
 ): PublicBotCard | undefined {
   const url = normalizeUrl(draft.baseUrl);
   const model = draft.model.trim().toLowerCase();
-  const name = (draft.name ?? "").trim().toLowerCase();
-  return bots.find(
-    (bot) =>
-      (url && normalizeUrl(bot.baseUrl) === url && bot.model.trim().toLowerCase() === model) ||
-      (name && bot.name.trim().toLowerCase() === name) ||
-      (model && bot.model.trim().toLowerCase() === model),
-  );
+  if (!url || !model) return undefined;
+  return bots.find((bot) => normalizeUrl(bot.baseUrl) === url && bot.model.trim().toLowerCase() === model);
 }
 
 export const DESK_BOT_HOWTO =

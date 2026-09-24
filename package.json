@@ -81,7 +81,7 @@
     "@types/react": "^19.1.12",
     "@types/react-dom": "^19.1.9",
     "@vitejs/plugin-react": "^5.0.2",
-    "electron": "^43.4.0",
+    "electron": "^43.7.5",
     "electron-builder": "^26.15.3",
     "playwright": "^1.62.1",
     "tsx": "^4.23.12",
@@ -119,6 +119,10 @@
       {
         "from": "workshop/workshop-catalog.schema.json",
         "to": "workshop/workshop-catalog.schema.json"
+      },
+      {
+        "from": "skills",
+        "to": "skills"
       }
     ],
     "win": {

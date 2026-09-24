@@ -84,6 +84,19 @@ async function checkedRunFile(runDir, reference) {
   return { resolved: fileReal, bytes: await readFile(fileReal) };
 }
 
+function fullGitHistory() {
+  try {
+    const shallow = execFileSync("git", ["rev-parse", "--is-shallow-repository"], {
+      cwd: root,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    return shallow.trim() === "false";
+  } catch {
+    return false;
+  }
+}
+
 async function validateRunEvidence(manifests, runDir, results, run) {
   const scenarioById = new Map(manifests.suite.areas.flatMap((area) => area.scenarios).map((scenario) => [scenario.id, scenario]));
   const rubricById = new Map(manifests.suite.areas.flatMap((area) => area.rubric).map((item) => [item.id, item]));
@@ -267,6 +280,12 @@ async function validate() {
   }
   if (!/^[a-f0-9]{40}$/.test(suite.baselineRef ?? "")) {
     problems.push("suite baselineRef must be a full lowercase Git commit");
+  } else if (!fullGitHistory()) {
+    // A shallow clone or a release's source archive cannot answer the
+    // question, and `npm run build` runs this: README's own build steps
+    // failed from a Source code zip. Say so, and leave the check to a tree
+    // that has the history (CI clones with fetch-depth 0).
+    console.warn("Workhorse eval kit: no full Git history here, so suite baselineRef was not checked.");
   } else {
     try {
       execFileSync("git", ["merge-base", "--is-ancestor", suite.baselineRef, "HEAD"], { cwd: root, stdio: "ignore" });

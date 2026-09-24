@@ -993,6 +993,19 @@ export function spawnAllowed(row: DeskCallRow | undefined): boolean {
   return spawnIsNoGo(row) === null && Boolean(row?.canCall);
 }
 
+/**
+ * The permit an Allow on a vendor card writes: the watch key of the row that
+ * was asked for, which the card carries. Built from the asking chat instead,
+ * a Claude chat allowing a custom bot wrote `bot:` with no id, and a Cursor
+ * card wrote "cursor" where the hold reads a lane, so the Allow held nothing
+ * and the next spawn was refused again.
+ */
+export function vendorCardPermitKey(vendor: { provider: string; key?: string } | undefined): string {
+  if (!vendor) return "";
+  if (vendor.key) return vendor.key;
+  return vendor.provider === "custom" ? "" : vendor.provider;
+}
+
 export function vendorGrantedForChat(
   permits: WatchPermits,
   key: string,

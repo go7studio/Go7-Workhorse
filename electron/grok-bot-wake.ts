@@ -7,9 +7,8 @@ import {
   type GrokBotWakeInput,
   type GrokBotWakeStatus,
 } from "../src/lib/grok-bot-wake";
+import { probeGrokBotShim, shimRowPort } from "./grok-bot-shim-host";
 import { atomicWriteJson } from "./state-persistence";
-
-const SHIM_HEALTH_URL = "http://127.0.0.1:8787/health";
 
 export type GrokBotWakeIo = {
   readFile(file: string): string;
@@ -21,20 +20,17 @@ export function grokBotWakePath(userData: string): string {
   return path.join(userData, "grok-bot-wake.json");
 }
 
-function defaultIo(): GrokBotWakeIo {
+/**
+ * The wake file sits beside the shim's own row, and the shim is found the way
+ * the desk finds it: on the row's port, answering as itself. This used to ask
+ * 8787 for any 2xx, so another server there read as the shim and a shim on its
+ * row's port read as down.
+ */
+function defaultIo(wakeFile: string): GrokBotWakeIo {
   return {
     readFile: (file) => fs.readFileSync(file, "utf8"),
     writeConfig: (file, value) => atomicWriteJson(file, value, 0o600),
-    health: async () => {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 1_500);
-      try {
-        const response = await fetch(SHIM_HEALTH_URL, { signal: controller.signal });
-        return { ok: response.ok };
-      } finally {
-        clearTimeout(timer);
-      }
-    },
+    health: async () => ({ ok: await probeGrokBotShim(1_500, shimRowPort(path.dirname(wakeFile))) }),
   };
 }
 
@@ -48,7 +44,7 @@ function readConfig(file: string, io: GrokBotWakeIo): GrokBotWakeConfig | null {
 
 export async function inspectGrokBotWake(
   file: string,
-  io: GrokBotWakeIo = defaultIo(),
+  io: GrokBotWakeIo = defaultIo(file),
 ): Promise<GrokBotWakeStatus> {
   if (!readConfig(file, io)) {
     return {
@@ -87,7 +83,7 @@ export async function inspectGrokBotWake(
 export async function saveGrokBotWake(
   file: string,
   input: GrokBotWakeInput,
-  io: GrokBotWakeIo = defaultIo(),
+  io: GrokBotWakeIo = defaultIo(file),
 ): Promise<GrokBotWakeStatus> {
   const config = grokBotWakeInput(input);
   if (!config) {

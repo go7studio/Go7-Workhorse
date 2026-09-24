@@ -10,7 +10,7 @@ import { resolveClaudeModel } from "./claude-launch";
 import { CursorSessionHost, type CursorPromptInput } from "./cursor-host";
 import { CustomSessionHost, type CustomPromptInput } from "./custom-host";
 import { probeMcpServer } from "./mcp-tool-bridge";
-import { guardIpcSender } from "./ipc-sender";
+import { guardIpcSender, guardNavigation, isDeskPage } from "./ipc-sender";
 import { detectGrokLogin } from "./grok-login";
 import { detectCodexLogin } from "./codex-login";
 import { archiveWorkhorseWorkerThreads, detectCodexRuntime, listCodexNativeThreads } from "./codex-app-server";
@@ -41,7 +41,7 @@ import { existingPeerReply } from "../src/lib/session-bridge";
 import { listDropFiles } from "./drop-files";
 import { attachDialogProperties, attachDialogTitle, windowsNeedsAttachChoice } from "./attach-pick";
 
-import { displaySrcForHref, resolveMediaProtocolFile } from "./media-src";
+import { displaySrcForHref, openableMediaPath, resolveMediaProtocolFile, safeLocalPath } from "./media-src";
 import { findSourceFile, listGitChanges, readEditStatsAsync, readFileDiff, readGitHead, readSourceText, recordFileInstance } from "./project-diff";
 import { TerminalHost, type TerminalEvent } from "./terminal-host";
 import {
@@ -90,6 +90,8 @@ import { offloadStateTranscripts, readTranscriptSidecar, repairRetiredSidecars, 
 import { applyComposerDrafts, type ComposerDraftSnap } from "../src/lib/chats";
 import { createSaveQueue, dueByInterval, readComposerDraftFile, readStringMapFile, readVersionedState, sameJsonValue, STATE_BACKUP_INTERVAL_MS, STATE_FSYNC_INTERVAL_MS, syncFileInPlace, worktreeKeepSet,
   worktreeResumableSet, worktreePruneDecision, writeComposerDraftFile, writeStringMapFile, writeVersionedState, writeVersionedStateAsync } from "./state-persistence";
+import { createDebouncedWrite, setAsideNewerState } from "./state-persistence";
+import { boundInstances } from "../src/lib/file-instances";
 import { workhorseUserDataOverride, workhorseVolatileCredentials } from "../src/lib/user-data";
 import {
   bookmarksFromProjects,
@@ -104,7 +106,7 @@ import { customBotEnabled, customBotModels } from "../src/lib/custom-bots";
 import { routingProfileForModel } from "../src/lib/routing";
 import type { AdaptiveCandidate } from "../src/lib/learning-policy";
 import { LearningService } from "./learning-service";
-import { SqliteMemoryStore } from "./learning-sqlite";
+import { openSqliteMemoryStore } from "./learning-sqlite";
 import { attachLearningIpc } from "./learning-ipc";
 import { runLearningSmoke } from "./learning-smoke";
 import { probeLocalComputeHosts } from "./local-compute-registry";
@@ -124,6 +126,7 @@ import {
   WORKHORSE_DEV_USER_DATA_DIR,
   WORKHORSE_USER_DATA_DIR,
   installedWorkhorseBuildChannel,
+  ownsShimKeepalive,
   parseWorkhorseBuildChannel,
   workhorseRuntimeIdentity,
 } from "../src/lib/app-identity";
@@ -337,7 +340,7 @@ if (!isPrimaryInstance) {
   app.quit();
 } else if (!isMcpHelper) {
   app.on("second-instance", () => {
-    const win = BrowserWindow.getAllWindows()[0];
+    const win = liveDeskWindow() ?? BrowserWindow.getAllWindows()[0];
     if (!win) return;
     if (win.isMinimized()) win.restore();
     win.show();
@@ -420,6 +423,9 @@ function statePath() {
 function fileInstancesPath() {
   return path.join(app.getPath("userData"), "file-instances.json");
 }
+
+/** The review's baselines, written once for a burst of agent writes and once more at quit. */
+const fileInstanceWrites = createDebouncedWrite(() => writeStringMapFile(fileInstancesPath(), fileInstances), 2_000);
 
 let credentials: CredentialStore | null = null;
 let jobEngine: DurableJobEngine | null = null;
@@ -555,6 +561,8 @@ function readStateWithSource(): StateLoad {
 
 function readStateInner(): StateLoad {
   const result = readVersionedState(statePath());
+  // Before anything below writes: a newer Workhorse's state is never written over.
+  for (const kept of setAsideNewerState(result)) mainLog.record("state:read", `kept newer state aside as ${path.basename(kept)}`);
   const { state } = result;
   const origin = { source: result.source, recovered: result.recovered, primary: result.source === statePath() };
   if (!origin.primary) {
@@ -888,10 +896,35 @@ function runHousekeeping(sessions: readonly unknown[]) {
   }
 }
 
+/** The desk's own page on disk. The only file: URL a desk window may show or be trusted from. */
+const DESK_INDEX_FILE = path.join(__dirname, "../dist/index.html");
+
 function isDeskAppUrl(url: string): boolean {
-  const dev = process.env.VITE_DEV_SERVER_URL?.replace(/\/$/, "");
-  if (dev && (url === dev || url.startsWith(`${dev}/`))) return true;
-  return url.startsWith("file:");
+  return isDeskPage(url, process.env.VITE_DEV_SERVER_URL, DESK_INDEX_FILE);
+}
+
+// Every window, the Workshop breakout included, and any added later.
+app.on("web-contents-created", (_event, contents) => {
+  guardNavigation(contents, isDeskAppUrl, (url) => void shell.openExternal(url));
+});
+
+/*
+ * The one window that holds the desk's state. The Workshop breakout loads the
+ * same page, and "the first window" or "every window" used to include it: it
+ * ran a second store of its own, saved a stale copy of the whole desk over the
+ * live one, and queued and sent the same scheduled job the desk did. Desk
+ * traffic goes to this window, and desk-state writes are taken only from it.
+ */
+let deskWindow: BrowserWindow | null = null;
+
+function liveDeskWindow(): BrowserWindow | null {
+  return deskWindow && !deskWindow.isDestroyed() && !deskWindow.webContents.isDestroyed() ? deskWindow : null;
+}
+
+/** True when a desk-state write came from the desk window, not the breakout or anything else. */
+function fromDesk(event: Electron.IpcMainInvokeEvent): boolean {
+  const desk = liveDeskWindow();
+  return Boolean(desk && event.sender === desk.webContents);
 }
 
 function createWindow() {
@@ -923,17 +956,6 @@ function createWindow() {
   });
 
   win.setMenu(null);
-  win.webContents.setWindowOpenHandler(({ url }) => {
-    const external = safeExternalUrl(url);
-    if (external) void shell.openExternal(external);
-    return { action: "deny" };
-  });
-  win.webContents.on("will-navigate", (event, url) => {
-    if (isDeskAppUrl(url)) return;
-    event.preventDefault();
-    const external = safeExternalUrl(url);
-    if (external) void shell.openExternal(external);
-  });
   win.once("ready-to-show", () => {
     win.show();
   });
@@ -948,14 +970,16 @@ function createWindow() {
     mainLog.record("render-process-gone", `reason=${details.reason} exit_code=${details.exitCode ?? "none"}`);
   });
   win.on("closed", () => {
+    if (deskWindow === win) deskWindow = null;
     mainLog.record("window", "destroyed");
   });
+  deskWindow = win;
   mainLog.record("window", `created id=${win.id}`);
 
   if (process.env.VITE_DEV_SERVER_URL) {
     win.loadURL(process.env.VITE_DEV_SERVER_URL);
   } else {
-    win.loadFile(path.join(__dirname, "../dist/index.html"));
+    win.loadFile(DESK_INDEX_FILE);
   }
   return win;
 }
@@ -980,6 +1004,7 @@ function disposeAtQuit(name: string, close: () => void): void {
 disposeAtQuit("grok", () => grokHost.disposeAll());
 disposeAtQuit("codex", () => codexHost.disposeAll());
 disposeAtQuit("terminal", () => terminalHost.disposeAll());
+disposeAtQuit("file-instances", () => fileInstanceWrites.flush());
 const peerWaiters = new Map<string, (result: PeerAskResult) => void>();
 
 process.on("uncaughtException", (error) => {
@@ -998,6 +1023,11 @@ app.whenReady().then(async () => {
   debugStartup(`ready primary=${isPrimaryInstance}`);
   mainLog.record("ready", `primary=${isPrimaryInstance} uptime_ms=${Math.round(process.uptime() * 1000)}`);
   if (!isPrimaryInstance) return;
+  // Before any channel is registered, so every one of them is covered — and so
+  // is a channel written next month. It sat below attachLearningIpc once, and
+  // the eleven learning channels, registered from their own module, answered
+  // any frame at all while the test that guards the order read only main.ts.
+  guardIpcSender(ipcMain, process.env.VITE_DEV_SERVER_URL, DESK_INDEX_FILE);
   app.on("child-process-gone", (_event, details) => {
     mainLog.record(
       "child-process-gone",
@@ -1007,7 +1037,7 @@ app.whenReady().then(async () => {
   startMemoryLog(mainLog);
   protocol.handle("workhorse-media", handleMediaProtocol);
   claimLinkedFolders();
-  fileInstances = readStringMapFile(fileInstancesPath());
+  fileInstances = boundInstances(readStringMapFile(fileInstancesPath()));
   void archiveWorkhorseWorkerThreads()
     .then((result) => {
       if (result.archived > 0) console.info(`Archived ${result.archived} Workhorse Codex worker logs.`);
@@ -1027,9 +1057,8 @@ app.whenReady().then(async () => {
 
   process.env.WORKHORSE_STATE_PATH = statePath();
   jobEngine = new DurableJobEngine(path.join(app.getPath("userData"), "workhorse-jobs.json"), (events) => {
-    for (const win of BrowserWindow.getAllWindows()) {
-      if (!win.webContents.isDestroyed()) win.webContents.send("jobs:due", events);
-    }
+    // The desk alone: every window that heard this queued the job and sent it.
+    liveDeskWindow()?.webContents.send("jobs:due", events);
   });
   jobEngine.start();
   debugStartup("job engine ready");
@@ -1060,7 +1089,9 @@ app.whenReady().then(async () => {
       fs.unlinkSync(dest);
     },
   };
-  const learningStore = new SqliteMemoryStore(app.getPath("userData"));
+  const learningStore = openSqliteMemoryStore(app.getPath("userData"), (error) =>
+    mainLog.record("learn:open", `failed ${faultDetail(error, 1)}; learning is in memory this session`),
+  );
   const learningService = new LearningService({
     store: learningStore,
     settings: () => liveSettings.learning,
@@ -1165,9 +1196,10 @@ app.whenReady().then(async () => {
       return createWorkshopBreakoutWindow({
         preload: path.join(__dirname, "preload.mjs"),
         deskUrl: process.env.VITE_DEV_SERVER_URL ?? null,
-        deskFile: path.join(__dirname, "../dist/index.html"),
+        deskFile: DESK_INDEX_FILE,
         icon: appIconPath(),
         dark,
+        theme: liveTheme,
       });
     },
   });
@@ -1188,7 +1220,7 @@ app.whenReady().then(async () => {
   debugStartup("learning ready");
   const peerBusy = new Set<string>();
   const handlePeerAsk = async (ask: PeerAsk) => {
-    const win = BrowserWindow.getAllWindows()[0];
+    const win = liveDeskWindow();
     if (!win || win.webContents.isDestroyed()) return { error: "Workhorse window is closed" };
     const bots = ask.mode === "bots";
     const spawn = !bots && ask.mode === "spawn";
@@ -1254,18 +1286,13 @@ app.whenReady().then(async () => {
     platform: process.platform,
     command: process.execPath,
     script: path.join(__dirname, "grok-bot-shim-host.js"),
-    // A desk pinned to an isolated profile is a test or a dev build. It can use
-    // whatever shim is already up, but it must not rewrite the launch agent the
-    // installed desk depends on.
-    manageKeepalive: !workhorseUserDataOverride(),
+    // A test or development desk can use whatever shim is already up, but it
+    // must not rewrite the launch agent the installed desk depends on.
+    manageKeepalive: ownsShimKeepalive(runtimeIdentity, workhorseUserDataOverride()),
   }).then((result) => {
     if (!result.ok) console.warn("Grok Bot shim failed to start. Desk POSTs to 127.0.0.1:8787 still fail closed.");
     else debugStartup(`Grok Bot shim ${result.mode}`);
   }).catch((error) => console.warn("Grok Bot shim", error));
-
-  // Before any channel is registered, so every one of them is covered — and so
-  // is a channel written next month.
-  guardIpcSender(ipcMain, process.env.VITE_DEV_SERVER_URL);
 
   // Grok Bot answers that outlive the shim's wait land here later. Deliver each
   // one into the chat that asked; the renderer confirms, then the files go.
@@ -1277,8 +1304,7 @@ app.whenReady().then(async () => {
   }
   watchGrokBotLateAnswers(grokBotInbox, (answers) => {
     // One window holds the state of record; a broadcast would append twice.
-    const win = BrowserWindow.getAllWindows().find((candidate) => !candidate.webContents.isDestroyed());
-    win?.webContents.send("grok-bot:late-answer", answers);
+    liveDeskWindow()?.webContents.send("grok-bot:late-answer", answers);
   });
   ipcMain.handle("grokBot:lateAnswers", () => listGrokBotLateAnswers(grokBotInbox));
   ipcMain.handle("grokBot:ackLateAnswer", (_event, reqId: unknown) => {
@@ -1589,7 +1615,7 @@ app.whenReady().then(async () => {
       Array.isArray(roots) ? roots.filter((item) => typeof item === "string") : [],
       { instances: fileInstances },
     );
-    if (recorded) writeStringMapFile(fileInstancesPath(), fileInstances);
+    if (recorded) fileInstanceWrites.schedule();
     return recorded;
   });
 
@@ -1750,7 +1776,11 @@ app.whenReady().then(async () => {
     }
   };
 
-  ipcMain.handle("state:save", (_event, state: Persistable) => {
+  ipcMain.handle("state:save", (event, state: Persistable) => {
+    if (!fromDesk(event)) {
+      mainLog.record("state:save", "refused a save from a window that is not the desk");
+      return { written: false };
+    }
     if (!state || typeof state !== "object") return { written: false };
     const saved = (state as { sessions?: unknown }).sessions;
     if ("settings" in state) {
@@ -1777,7 +1807,8 @@ app.whenReady().then(async () => {
       return result;
     });
   });
-  ipcMain.handle("state:save-drafts", (_event, drafts: unknown) => {
+  ipcMain.handle("state:save-drafts", (event, drafts: unknown) => {
+    if (!fromDesk(event)) return;
     if (!drafts || typeof drafts !== "object" || Array.isArray(drafts)) return;
     writeComposerDraftFile(statePath(), drafts);
   });
@@ -1956,21 +1987,17 @@ app.whenReady().then(async () => {
     return true;
   });
 
-  const safeLocalPath = (input: unknown): string | null => {
-    if (typeof input !== "string" || !input || input.length > 4096 || input.includes("\0")) return null;
-    if (!path.isAbsolute(input)) return null;
-    const resolved = path.resolve(input);
-    try {
-      const stat = fs.statSync(resolved);
-      if (!stat.isFile() && !stat.isDirectory()) return null;
-      return resolved;
-    } catch {
-      return null;
+  // safeLocalPath (media-src) refuses a path on another machine before any stat.
+  // Open hands a file to whatever the OS runs for it, and the path came from a
+  // pack's feed: only a picture or video of the row's kind is opened. Anything
+  // else local is shown in its folder instead.
+  ipcMain.handle("desk:open-local-path", async (_event, input: unknown, kind: unknown) => {
+    const target = openableMediaPath(input, kind);
+    if (!target) {
+      const local = safeLocalPath(input);
+      if (local) shell.showItemInFolder(local);
+      return false;
     }
-  };
-  ipcMain.handle("desk:open-local-path", async (_event, input: unknown) => {
-    const target = safeLocalPath(input);
-    if (!target) return false;
     const err = await shell.openPath(target);
     return !err;
   });
@@ -1991,12 +2018,13 @@ app.whenReady().then(async () => {
       input,
     );
   });
-  ipcMain.handle("jobs:sync", (_event, sessions: unknown) => jobEngine?.sync(sessions) ?? []);
+  ipcMain.handle("jobs:sync", (event, sessions: unknown) => (fromDesk(event) ? jobEngine?.sync(sessions) ?? [] : []));
 
   ipcMain.handle("app:quit", () => app.quit());
   ipcMain.handle("app:check-update", () => checkAppUpdate());
+  // A Dev desk may hear of a release; it never installs one over itself.
   ipcMain.handle("app:apply-update", (_event, version: unknown) =>
-    applyAppUpdate(typeof version === "string" ? version : ""),
+    applyAppUpdate(typeof version === "string" ? version : "", runtimeIdentity.userDataDirectory === WORKHORSE_DEV_USER_DATA_DIR),
   );
   ipcMain.handle("notify:desktop", (_event, payload: { title?: string; body?: string }) =>
     showDesktopNotice({
@@ -2530,9 +2558,29 @@ app.whenReady().then(async () => {
   setDockIcon();
 
   app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    // The breakout can outlive the desk on macOS; it is not a desk to come back to.
+    if (!liveDeskWindow()) createWindow();
     setDockIcon();
   });
+}).catch((error) => {
+  /*
+   * A throw above used to end here as an unhandled rejection, with no window
+   * made and the single-instance lock still held: the app sat running and
+   * every relaunch focused a window that did not exist. Say what failed and let
+   * go of the lock, so the next launch can try again.
+   */
+  mainLog.record("ready", `failed ${faultDetail(error)}`);
+  console.error("workhorse could not start", error);
+  if (liveDeskWindow()) return;
+  process.exitCode = 1;
+  // The packaged learning smoke has nobody to dismiss a dialog.
+  if (!process.argv.includes("--workhorse-learning-smoke")) {
+    dialog.showErrorBox(
+      "Workhorse could not start",
+      `${error instanceof Error ? error.message : String(error)}\n\nThe details are in the desk's main log.`,
+    );
+  }
+  app.quit();
 });
 
 /**

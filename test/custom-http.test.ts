@@ -17,6 +17,7 @@ import {
   parseCustomUsage,
   sanitizeCustomReply,
   streamCustomHttp,
+  type CustomChatMessage,
 } from "../electron/custom-http";
 
 test("OpenAI-compatible tool calls wait for all streamed argument fragments", async () => {
@@ -2568,4 +2569,318 @@ test("a custom chat whose folder has moved names the folder, not the tool", asyn
   // reached the model never reached the bridge either. A dead folder cannot be
   // handed to an MCP server that would then run in it.
   assert.equal(modelCalls, 0, "the folder is checked before anything is launched or asked");
+});
+
+/**
+ * A link whose target is missing fails to resolve exactly as a file that does
+ * not exist yet does. Treating the two alike measured the folder the link sits
+ * in, so `notes.txt -> ../outside/pwned.txt` passed as inside and the write
+ * followed the link and created the file out there.
+ */
+test("a link that points nowhere is not a new file inside the workspace", async (t) => {
+  const workspace = path.join(path.sep, "work", "repo");
+  const dangling = path.join(workspace, "notes.txt");
+  const missing = () => Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+  const fake = {
+    realpath: (value: string) => {
+      if (value === workspace) return value;
+      throw missing();
+    },
+    lstat: (value: string) => {
+      if (value === workspace || value === dangling) return {};
+      throw missing();
+    },
+  };
+  assert.equal(
+    resolveWorkspacePath("new.txt", workspace, [], "workspace", fake),
+    path.join(workspace, "new.txt"),
+    "a file that really does not exist yet is still a new file inside",
+  );
+  assert.throws(() => resolveWorkspacePath("notes.txt", workspace, [], "workspace", fake), /does not resolve/);
+  assert.throws(() => resolveWorkspacePath(path.join("notes.txt", "child.txt"), workspace, [], "workspace", fake), /does not resolve/);
+
+  const tmp = mkdtempSync(path.join(os.tmpdir(), "wh-dangling-"));
+  const inside = path.join(tmp, "workspace");
+  const outside = path.join(tmp, "outside");
+  mkdirSync(inside);
+  mkdirSync(outside);
+  writeFileSync(path.join(inside, "real.md"), "before");
+  try {
+    symlinkSync(path.join(outside, "pwned.txt"), path.join(inside, "notes.txt"));
+    symlinkSync(path.join(inside, "real.md"), path.join(inside, "alias.md"));
+  } catch (err) {
+    const code = err && typeof err === "object" && "code" in err ? String((err as NodeJS.ErrnoException).code) : "";
+    if (code === "EPERM" || code === "EACCES") {
+      t.skip("Windows without symlink privilege");
+      return;
+    }
+    throw err;
+  }
+  const escaped = await executeCustomTool(
+    { id: "w1", name: "write_file", input: { path: "notes.txt", content: "escaped" } },
+    { cwd: inside, sandbox: "workspace", mode: "accept-edits" },
+  );
+  assert.equal(escaped.isError, true, escaped.content);
+  assert.equal(existsSync(path.join(outside, "pwned.txt")), false, "the write followed a dangling link out of the sandbox");
+
+  // A link that stays inside was measured, and it still takes the write.
+  const aliased = await executeCustomTool(
+    { id: "w2", name: "write_file", input: { path: "alias.md", content: "after" } },
+    { cwd: inside, sandbox: "workspace", mode: "accept-edits" },
+  );
+  assert.equal(aliased.isError, undefined, aliased.content);
+  assert.equal(readFileSync(path.join(inside, "real.md"), "utf8"), "after");
+});
+
+function customTurn(sessionId: string, mode: "ask" | "accept-edits" | "always-approve") {
+  return {
+    sessionId,
+    text: "go",
+    model: "MiniMax-M3",
+    effort: "medium" as const,
+    cwd: ROOT,
+    mode,
+    sandbox: "workspace" as const,
+    history: [],
+    config: { baseUrl: "https://api.minimax.io/anthropic", apiKey: "sk", model: "MiniMax-M3" },
+  };
+}
+
+async function until(check: () => boolean, what: string): Promise<void> {
+  const deadline = Date.now() + 5_000;
+  while (!check()) {
+    if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+}
+
+/**
+ * Stop is checked between model calls, and one reply can carry several tool
+ * calls. Stop killed the command in flight and the write queued behind it in
+ * the same reply ran anyway — as did one queued behind an open card.
+ */
+test("Stop ends the rest of a custom tool batch, not only the call in flight", async () => {
+  for (const scene of ["running command", "open card"] as const) {
+    const ran: string[] = [];
+    const cards: string[] = [];
+    const host = new CustomSessionHost(
+      async (_config, request) => {
+        if (request.messages.some((message) => message.toolResults?.length)) return { text: "done" };
+        return {
+          text: "",
+          toolUses: [
+            { id: "cmd", name: "run_command", input: { command: "sleep 5" } },
+            { id: "write", name: "write_file", input: { path: "after-stop.txt", content: "x" } },
+          ],
+        };
+      },
+      {
+        executeTool: async (use, policy) => {
+          ran.push(use.name);
+          if (use.name === "run_command") {
+            await new Promise((resolve) => policy.signal?.addEventListener("abort", resolve, { once: true }));
+            return { id: use.id, name: use.name, content: "Command cancelled", isError: true };
+          }
+          return { id: use.id, name: use.name, content: "Wrote" };
+        },
+      },
+    );
+    // Always-approve runs the command at once; accept-edits cards the command
+    // and would auto-approve the write behind it.
+    const turn = host.prompt(customTurn(`s-stop-${scene}`, scene === "running command" ? "always-approve" : "accept-edits"), (event) => {
+      if (event.type === "permission") cards.push(event.requestId);
+    });
+    await until(() => (scene === "running command" ? ran.length > 0 : cards.length > 0), scene);
+    host.cancel(`s-stop-${scene}`);
+    assert.equal((await turn).stopReason, "cancelled");
+    assert.equal(ran.includes("write_file"), false, `the write ran after Stop (${scene})`);
+  }
+});
+
+/**
+ * One host serves every custom chat. Stop on one of them answered every open
+ * card on the desk with deny, so another chat's write failed while its card
+ * was still on screen, and answering that card later did nothing.
+ */
+test("Stop on one custom chat leaves another chat's permission card open", async () => {
+  const ran: string[] = [];
+  const cards: Array<{ sessionId: string; requestId: string }> = [];
+  const host = new CustomSessionHost(
+    async (_config, request) => {
+      if (request.messages.some((message) => message.toolResults?.length)) return { text: "done" };
+      return { text: "", toolUses: [{ id: "w", name: "write_file", input: { path: "x.txt", content: "hi" } }] };
+    },
+    {
+      executeTool: async (use, policy) => {
+        ran.push(policy.sessionId ?? "");
+        return { id: use.id, name: use.name, content: "Wrote" };
+      },
+    },
+  );
+  const emit = (event: { type: string; sessionId: string; requestId?: string }) => {
+    if (event.type === "permission" && event.requestId) cards.push({ sessionId: event.sessionId, requestId: event.requestId });
+  };
+  const a = host.prompt(customTurn("chat-a", "ask"), emit);
+  const b = host.prompt(customTurn("chat-b", "ask"), emit);
+  await until(() => cards.length === 2, "both cards");
+  host.cancel("chat-a");
+  assert.equal((await a).stopReason, "cancelled");
+  const bCard = cards.find((card) => card.sessionId === "chat-b");
+  assert.ok(bCard);
+  assert.equal(host.answerPermission(bCard.requestId, "once"), true, "stopping chat A answered chat B's card");
+  assert.equal((await b).stopReason, "end_turn");
+  assert.deepEqual(ran, ["chat-b"]);
+});
+
+/**
+ * The auditor and helper catalogs carry desk reads only, but the executor
+ * checked only a worker's omissions. An auditor that guessed `write_file` had
+ * the write run. Which tools a role is offered is unchanged here; a name from
+ * outside the offer is refused.
+ */
+test("a custom tool the role was not offered is refused, not run", async () => {
+  const tmp = mkdtempSync(path.join(os.tmpdir(), "wh-role-offer-"));
+  for (const role of ["auditor", "helper"] as const) {
+    const refused = await executeCustomTool(
+      { id: `w-${role}`, name: "write_file", input: { path: `${role}.txt`, content: "x" } },
+      { cwd: tmp, sandbox: "off", mode: "always-approve", role },
+    );
+    assert.equal(refused.isError, true, `${role}: ${refused.content}`);
+    assert.match(refused.content, new RegExp(`${role} was not offered write_file`));
+    assert.equal(existsSync(path.join(tmp, `${role}.txt`)), false, `an ${role} wrote a file it was never offered`);
+  }
+  // A worker's catalog keeps the workspace tools, and so does the desk's.
+  for (const role of ["worker", "orchestrator"] as const) {
+    const wrote = await executeCustomTool(
+      { id: `w-${role}`, name: "write_file", input: { path: `${role}.txt`, content: "x" } },
+      { cwd: tmp, sandbox: "off", mode: "always-approve", role },
+    );
+    assert.equal(wrote.isError, undefined, `${role}: ${wrote.content}`);
+  }
+  // The worker's own refusal still reads as it did.
+  const vendor = await executeCustomTool(
+    { id: "v", name: "workhorse_request_vendor", input: { vendor: "codex" } },
+    { cwd: tmp, sandbox: "off", mode: "always-approve", role: "worker" },
+  );
+  assert.equal(vendor.isError, true);
+  assert.doesNotMatch(vendor.content, /was not offered/);
+
+  // The host refuses before any card, so nobody approves a call that cannot run.
+  let executed = 0;
+  const cards: string[] = [];
+  const host = new CustomSessionHost(
+    async (_config, request) => {
+      if (request.messages.some((message) => message.toolResults?.length)) return { text: "done" };
+      return { text: "", toolUses: [{ id: "w", name: "write_file", input: { path: "x.txt", content: "x" } }] };
+    },
+    {
+      executeTool: async (use) => {
+        executed += 1;
+        return { id: use.id, name: use.name, content: "Wrote" };
+      },
+    },
+  );
+  const reply = await host.prompt({ ...customTurn("s-helper-offer", "ask"), parentId: "orch", hidden: true, role: "helper" }, (event) => {
+    if (event.type === "permission") cards.push(event.requestId);
+  });
+  assert.equal(reply.stopReason, "end_turn");
+  assert.equal(executed, 0);
+  assert.deepEqual(cards, []);
+});
+
+/**
+ * The chat path redacted a key a host quoted back, but the connection probe
+ * and a mid-stream error event did not. The probe is where a key is first
+ * tried, and a desk bot's setup hands its message to the model that asked.
+ */
+test("a key the host quotes back is redacted on the probe and in a stream error", async () => {
+  // Built at run time so no key-shaped literal sits in the repository.
+  const key = ["sk", "-live-", "9f8e7d6c5b4a3928", "1706f5e4d3c2b1a0"].join("");
+  const rejected = JSON.stringify({ error: { message: `Invalid API key: ${key}` } });
+  const probe = await probeCustomHttp(
+    { baseUrl: "https://gateway.example.test/v1", apiKey: key, model: "m" },
+    async () => new Response(rejected, { status: 401 }),
+  );
+  assert.equal(probe.ok, false);
+  assert.match(probe.message, /^HTTP 401/);
+  assert.ok(!probe.message.includes(key), probe.message);
+
+  const thrown = await probeCustomHttp(
+    { baseUrl: "https://gateway.example.test/v1", apiKey: key, model: "m" },
+    async () => {
+      throw new Error(`request to https://gateway.example.test/v1?api_key=${key} failed`);
+    },
+  );
+  assert.ok(!thrown.message.includes(key), thrown.message);
+
+  await assert.rejects(
+    streamCustomHttp(
+      { baseUrl: "https://gateway.example.test/v1", apiKey: key, model: "m", api: "openai-completions" },
+      { messages: [{ role: "user", text: "hi" }] },
+      {},
+      async () =>
+        new Response(`data: ${JSON.stringify({ type: "error", error: { message: `bad key ${key}` } })}\n\n`, {
+          status: 200,
+          headers: { "content-type": "text/event-stream" },
+        }),
+    ),
+    (error: Error) => {
+      assert.match(error.message, /bad key/);
+      assert.ok(!error.message.includes(key), error.message);
+      return true;
+    },
+  );
+});
+
+const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+
+/**
+ * Cuts measured in UTF-16 units landed between the halves of an emoji. The
+ * lone half travels as a `\ud83c` escape, and a host that requires well-formed
+ * text rejects the request — and every later one in the turn, because the
+ * transcript still holds it.
+ */
+test("custom tool text is cut between characters, never inside one", async () => {
+  const party = "🎉".repeat(40_000);
+  for (const max of [64_000, 1_001, 1_002, 333]) {
+    const limited = limitCustomToolResult({ id: "t", name: "read_file", content: party }, max).content;
+    assert.ok(!LONE_SURROGATE.test(limited), `limit ${max} split a character`);
+    assert.ok(limited.length <= max);
+  }
+
+  const tmp = mkdtempSync(path.join(os.tmpdir(), "wh-surrogate-"));
+  writeFileSync(path.join(tmp, "party.txt"), party);
+  const read = await executeCustomTool(
+    { id: "r", name: "read_file", input: { path: "party.txt", limit: 101 } },
+    { cwd: tmp, sandbox: "workspace" },
+  );
+  assert.ok(!LONE_SURROGATE.test(read.content), "read_file's limit split a character");
+
+  const compacted = compactCustomTurnTranscript(
+    [
+      { role: "user", text: "go" },
+      ...Array.from({ length: 12 }, (_, index): CustomChatMessage[] => [
+        { role: "assistant", text: "", toolUses: [{ id: `c${index}`, name: "read_file", input: { path: "🎉".repeat(400) } }] },
+        { role: "user", text: "", toolResults: [{ id: `c${index}`, name: "read_file", content: `x${"🎉".repeat(2_000)}` }] },
+      ]).flat(),
+    ],
+    1,
+    10_000,
+  );
+  assert.ok(!LONE_SURROGATE.test(compacted[0]?.text ?? ""), "the compaction checkpoint split a character");
+});
+
+/**
+ * run_command decoded each pipe read on its own, so a character whose bytes
+ * arrived in two reads came back as replacement marks.
+ */
+test("run_command output keeps a character whose bytes arrive in two reads", async () => {
+  const tmp = mkdtempSync(path.join(os.tmpdir(), "wh-utf8-"));
+  const script = "process.stdout.write(Buffer.from([226,130]));setTimeout(()=>process.stdout.write(Buffer.from([172])),150)";
+  const result = await executeCustomTool(
+    { id: "c", name: "run_command", input: { command: `"${process.execPath}" -e "${script}"` } },
+    { cwd: tmp, sandbox: "workspace", mode: "always-approve" },
+  );
+  assert.equal(result.isError, undefined, result.content);
+  assert.equal(result.content, "€");
 });

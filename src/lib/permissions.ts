@@ -324,12 +324,9 @@ function flagIs(token: string, flag: string): boolean {
   return /^-[^-]$/.test(flag) && token.length > flag.length && token.startsWith(flag);
 }
 
-/** Any of these flags, in any of the three shapes. */
-function hasFlag(args: string[], flags: readonly string[]): boolean {
-  return args.some((arg) => {
-    const token = dequote(arg);
-    return flags.some((flag) => flagIs(token, flag));
-  });
+/** Any of these flags, in any of the three shapes. Takes words, not raw tokens. */
+function hasFlag(words: string[], flags: readonly string[]): boolean {
+  return words.some((word) => flags.some((flag) => flagIs(word, flag)));
 }
 
 /**
@@ -391,25 +388,24 @@ const GH_UNBOUND_FLAGS = ["-R", "--repo", "--hostname"] as const;
 const GH_NAMES_A_REPO = /^[^/\s]+\/[^/\s]+$/;
 
 /** Whether any argument names a repository other than the one the seat is in. */
-function ghTargetsAnotherRepo(args: string[]): boolean {
-  return positionals(args).some((arg) => {
-    const word = dequote(arg);
+function ghTargetsAnotherRepo(words: string[]): boolean {
+  return positionals(words).some((word) => {
     if (word.includes("://") || word.toLowerCase().includes("github.com")) return true;
     return GH_NAMES_A_REPO.test(word);
   });
 }
 
 /** Everything gh can do that is not on the read table. */
-function ghWrites(args: string[]): boolean {
-  const words = positionals(args).map((arg) => dequote(arg).toLowerCase());
-  const group = words[0];
+function ghWrites(words: string[]): boolean {
+  const named = positionals(words).map((word) => word.toLowerCase());
+  const group = named[0];
   if (!group || GH_NEVER_READ.has(group)) return true;
   const allowed = GH_READ_SUBCOMMANDS.get(group);
   if (!allowed) return true;
-  const sub = words[1];
+  const sub = named[1];
   if (!sub || !allowed.has(sub)) return true;
-  if (hasFlag(args, GH_UNBOUND_FLAGS)) return true;
-  return ghTargetsAnotherRepo(args);
+  if (hasFlag(words, GH_UNBOUND_FLAGS)) return true;
+  return ghTargetsAnotherRepo(words);
 }
 
 /**
@@ -470,14 +466,13 @@ const GIT_FETCH_READ_FLAGS: ReadonlySet<string> = new Set([
  * refs. A refspec with a `:` writes whatever local ref sits on its right-hand
  * side, so it is a write, and so is every flag off the short list above.
  */
-function gitFetchWrites(args: string[]): boolean {
-  for (const arg of args.slice(1)) {
-    const token = dequote(arg);
-    if (!token.startsWith("-")) continue;
-    const name = token.includes("=") ? token.slice(0, token.indexOf("=")) : token;
+function gitFetchWrites(words: string[]): boolean {
+  for (const word of words.slice(1)) {
+    if (!word.startsWith("-")) continue;
+    const name = word.includes("=") ? word.slice(0, word.indexOf("=")) : word;
     if (!GIT_FETCH_READ_FLAGS.has(name)) return true;
   }
-  return positionals(args).slice(1).some((arg) => dequote(arg).includes(":"));
+  return positionals(words).slice(1).some((word) => word.includes(":"));
 }
 
 type CommandStage = { program: string; args: string[] };
@@ -632,6 +627,52 @@ function escapesNext(next: string | undefined, single: boolean, double: boolean)
   return double ? DQ_ESCAPABLE.test(next) : SHELL_ESCAPABLE.test(next);
 }
 
+/**
+ * The word a POSIX shell hands the program. Outside quotes a backslash escapes
+ * whatever follows it and comes off, so `\-delete` reaches find as `-delete`
+ * and `r\m` runs rm. `dequote` keeps a backslash in front of an ordinary
+ * character, the way Windows shells read it, so a flag behind one was never
+ * seen: `find d \-delete` and `sort \-o out in` were answered "once" on a
+ * read-only seat, and ran.
+ */
+function posixWord(raw: string): string {
+  let out = "";
+  let single = false;
+  let double = false;
+  for (let index = 0; index < raw.length; index += 1) {
+    const char = raw[index] as string;
+    if (char === "\\" && !single) {
+      const next = raw[index + 1];
+      if (next === undefined || (double && !DQ_ESCAPABLE.test(next))) {
+        out += char;
+        continue;
+      }
+      index += 1;
+      // A backslash before a newline joins the lines and leaves neither.
+      if (next !== "\n") out += next;
+      continue;
+    }
+    if (char === "'" && !double) {
+      single = !single;
+      continue;
+    }
+    if (char === '"' && !single) {
+      double = !double;
+      continue;
+    }
+    out += char;
+  }
+  return out;
+}
+
+/**
+ * The two ways a token can reach a program: as a POSIX shell passes it, and as
+ * a Windows shell does, backslashes kept. A stage is a read only when it reads
+ * under both, and a write when it writes under either, because this side does
+ * not know which shell the vendor runs.
+ */
+const READINGS: ReadonlyArray<(raw: string) => string> = [dequote, posixWord];
+
 /** A token that walks out of its own folder. Nothing else can leave the cwd. */
 function climbsOut(value: string): boolean {
   return /(?:^|[\\/])\.\.(?:[\\/]|$)/.test(value);
@@ -761,25 +802,120 @@ function expandsSomewhere(command: string): boolean {
   );
 }
 
-function programName(raw: string): string {
+function programName(raw: string, reading: (raw: string) => string = dequote): string {
   // Quoting is taken off the way the shell takes it off, so `r"m"` is rm.
-  return dequote(raw)
+  return reading(raw)
     .replace(/^.*[\\/]/, "")
     .replace(/\.exe$/i, "")
     .toLowerCase();
 }
 
-function positionals(args: string[]): string[] {
-  return args.filter((arg) => !arg.startsWith("-"));
+/** Words that are not flags. Takes words, not raw tokens: `\-o` is a flag. */
+function positionals(words: string[]): string[] {
+  return words.filter((word) => !word.startsWith("-"));
 }
 
+/** A sed address: a line number, `$` for the last line, or `/regex/`. */
+const SED_ADDRESS = /(?:\d+|\$|\/(?:\\.|[^/\\])*\/)/.source;
+/** No address, one, or a range of two: `1,20`, `1,$`, `/a/,/b/`. */
+const SED_RANGE = `(?:${SED_ADDRESS}(?:,${SED_ADDRESS})?)?`;
 /**
  * A sed substitution with no `w` and no `e` flag: `s/a/b/`, `1,20s|x|y|g`. The
  * delimiter is whatever follows the `s`, so it is captured and matched back.
  */
-const SED_SUBSTITUTION = /^\d*(?:,\d*)?s(.)(?:\\.|(?!\1)[^\\])*\1(?:\\.|(?!\1)[^\\])*\1[gpiImM0-9]*$/;
-/** An addressed print or delete: `p`, `1,20p`, `$d`, `/foo/p`. */
-const SED_PRINT = /^(?:\d+(?:,\d+)?|\$|\/(?:\\.|[^/\\])*\/)?[pdq=lnN]$/;
+const SED_SUBSTITUTION = new RegExp(`^${SED_RANGE}s(.)(?:\\\\.|(?!\\1)[^\\\\])*\\1(?:\\\\.|(?!\\1)[^\\\\])*\\1[gpiImM0-9]*$`);
+/** An addressed print or delete: `p`, `1,20p`, `1,$p`, `$d`, `/foo/p`. */
+const SED_PRINT = new RegExp(`^${SED_RANGE}[pdq=lnN]$`);
+
+/**
+ * Whether a long option is `name` or an abbreviation of it. GNU getopt takes
+ * any unambiguous prefix, so `sed --in-pl` is `--in-place` and `sort --out=x`
+ * is `--output=x`. `min` is the shortest prefix that is still unambiguous for
+ * that program; anything shorter is refused by the program itself.
+ */
+function longOptionIs(token: string, name: string, min: number): boolean {
+  const flag = token.includes("=") ? token.slice(0, token.indexOf("=")) : token;
+  return flag.length >= min && name.startsWith(flag);
+}
+
+/**
+ * Every script a sed call will run, or null when one of them cannot be read
+ * from here. Only the first positional used to be judged, so a second `-e`
+ * rode through unread: `sed -e p -e 'e touch x'` ran a command, and
+ * `sed -n p --expression='w out'` wrote a file, both answered "once" on a
+ * read-only seat. With any `-e` the positionals are input files; without one
+ * the first positional is the script.
+ */
+function sedScripts(args: string[]): string[] | null {
+  const scripts: string[] = [];
+  const positional: string[] = [];
+  for (let index = 0; index < args.length; index += 1) {
+    const token = args[index] ?? "";
+    if (token === "--") {
+      positional.push(...args.slice(index + 1));
+      break;
+    }
+    if (token.startsWith("--")) {
+      // `-i` edits in place and `-f` runs a script file this side cannot read.
+      if (longOptionIs(token, "--in-place", 3) || longOptionIs(token, "--file", 4)) return null;
+      if (longOptionIs(token, "--expression", 3)) {
+        const joined = token.includes("=") ? token.slice(token.indexOf("=") + 1) : undefined;
+        const script = joined ?? (index + 1 < args.length ? args[++index] ?? "" : undefined);
+        if (script === undefined) return null;
+        scripts.push(script);
+      } else if (longOptionIs(token, "--line-length", 3)) {
+        if (!token.includes("=")) index += 1;
+      }
+      continue;
+    }
+    if (token.length > 1 && token.startsWith("-")) {
+      // Short flags cluster, and `-i` takes its suffix attached: `-ni` is
+      // `-n -i`, and `-in` is `-i` with the suffix "n". Either edits in place.
+      for (let at = 1; at < token.length; at += 1) {
+        const flag = token[at];
+        if (flag === "i" || flag === "f") return null;
+        if (flag === "e" || flag === "l") {
+          const rest = token.slice(at + 1);
+          const value = rest || (index + 1 < args.length ? args[++index] ?? "" : undefined);
+          if (value === undefined) return null;
+          if (flag === "e") scripts.push(value);
+          break;
+        }
+      }
+      continue;
+    }
+    positional.push(token);
+  }
+  if (scripts.length === 0) {
+    if (positional.length === 0) return null;
+    scripts.push(positional[0] ?? "");
+  }
+  return scripts;
+}
+
+/**
+ * The program an awk call runs, or null when a flag it carries could run or
+ * write something else. Only `-F` is allowed: gawk's other flags load a source
+ * file (`-f`, `-i`), a shared-object extension (`-l`), a second program
+ * (`-e`), or write a file of their own (`-p`, `-o`, `-d`). The first
+ * positional used to be taken as the program, so `awk -F , 'BEGIN{system("rm
+ * x")}'` judged the "," and ran the rest, and `awk -e 'BEGIN{}' -e '…'` hid the
+ * second program behind a harmless first one.
+ */
+function awkProgram(args: string[]): string | null {
+  for (let index = 0; index < args.length; index += 1) {
+    const token = args[index] ?? "";
+    if (token === "--") return index + 1 < args.length ? args[index + 1] ?? "" : null;
+    if (token === "-F" || token === "--field-separator") {
+      index += 1;
+      continue;
+    }
+    if (token.startsWith("-F") || token.startsWith("--field-separator=")) continue;
+    if (token.length > 1 && token.startsWith("-")) return null;
+    return token;
+  }
+  return null;
+}
 
 /**
  * sed and awk are the two programs on the read-only list that take a program
@@ -791,35 +927,102 @@ const SED_PRINT = /^(?:\d+(?:,\d+)?|\$|\/(?:\\.|[^/\\])*\/)?[pdq=lnN]$/;
  * never reaches here.
  */
 function interpreterScriptReads(program: string, args: string[]): boolean {
-  if (args.some((arg) => /^-i/.test(arg) || arg === "--in-place")) return false;
-  const scripts = args.filter((arg) => !arg.startsWith("-"));
   if (program === "sed") {
-    // -e and -f take the script as their own argument; -f names a file this
-    // side cannot read, so it is never a search.
-    if (args.some((arg) => /^(?:-f|--file)/.test(arg))) return false;
-    if (scripts.length === 0) return false;
-    const script = dequote(scripts[0] ?? "");
-    return script
-      .split(/[;\n]/)
-      .every((piece) => {
-        const text = piece.trim();
-        return text.length > 0 && (SED_SUBSTITUTION.test(text) || SED_PRINT.test(text));
-      });
+    const scripts = sedScripts(args);
+    if (!scripts) return false;
+    // An empty piece is a stray `;`, as in `p;`, and runs nothing.
+    return scripts.every((script) =>
+      script
+        .split(/[;\n]/)
+        .map((piece) => piece.trim())
+        .filter(Boolean)
+        .every((text) => SED_SUBSTITUTION.test(text) || SED_PRINT.test(text)),
+    );
   }
-  if (args.some((arg) => /^(?:-f|--file|--source|-v)/.test(arg))) return false;
-  const program_text = scripts[0] ?? "";
-  return !/system|exec|ENVIRON|getline|close\s*\(|[|>]/.test(program_text);
+  const program_text = awkProgram(args);
+  if (program_text === null) return false;
+  const code = awkCode(program_text);
+  if (code === null) return false;
+  // `system`, a command pipe, `getline` and `close()` run or read outside the
+  // program. `@` is gawk's include, load, and indirect call, and an indirect
+  // call reaches `system` through a name built out of strings.
+  if (/system|exec|ENVIRON|getline|close\s*\(|@/.test(code)) return false;
+  // A lone `|` pipes to a command; `||` is a logical or.
+  if (code.replace(/\|\|/g, "").includes("|")) return false;
+  // `>` writes a file only after print or printf. With neither in the
+  // program, `$1 > 10` can only compare.
+  return !(code.includes(">") && /\bprintf?\b/.test(code));
 }
 
-/** Programs on the list that still hold a way to write, and the flag that does it. */
+/**
+ * awk code with every string literal emptied, so a word inside a string is not
+ * read as code: `{print "execution"}` names no exec. Null for a string that
+ * never closes, which this side cannot judge.
+ */
+function awkCode(program: string): string | null {
+  let out = "";
+  let inString = false;
+  for (let index = 0; index < program.length; index += 1) {
+    const char = program[index] as string;
+    if (inString) {
+      if (char === "\\") index += 1;
+      else if (char === '"') {
+        inString = false;
+        out += '""';
+      }
+      continue;
+    }
+    if (char === '"') inString = true;
+    else out += char;
+  }
+  return inString ? null : out;
+}
+
+/**
+ * ripgrep flags that run another program. `--pre` runs a command on every file
+ * it searches, `--search-zip` (`-z`) runs a decompressor, and `--hostname-bin`
+ * runs a binary to learn the hostname. `rg --pre 'sh -c …' x .` read as a
+ * search and answered "once" on a read-only seat.
+ */
+function ripgrepRuns(args: string[]): boolean {
+  return args.some((token) => {
+    if (token.startsWith("--")) {
+      const flag = token.includes("=") ? token.slice(0, token.indexOf("=")) : token;
+      return flag === "--pre" || flag === "--search-zip" || flag === "--hostname-bin";
+    }
+    // A short cluster: `-z`, `-nz`. rg reads no prefix of a long flag.
+    return token.length > 1 && token.startsWith("-") && token.slice(1).includes("z");
+  });
+}
+
+/**
+ * sort writes through `-o`, in every shape the flag takes: `-o out`, `-oout`,
+ * and inside a cluster, `-uo out`. `--compress-program` runs a program. Only
+ * the bare `-o` and `--output` were refused before.
+ */
+function sortWrites(args: string[]): boolean {
+  return args.some((token) => {
+    if (token.startsWith("--")) {
+      return longOptionIs(token, "--output", 3) || longOptionIs(token, "--compress-program", 4);
+    }
+    return token.length > 1 && token.startsWith("-") && token.slice(1).includes("o");
+  });
+}
+
+/**
+ * Programs on the list that still hold a way to write, and the flag that does
+ * it. `args` are words, as one reading of the shell hands them over, so a flag
+ * behind a backslash or in quotes is the flag it becomes.
+ */
 function stageWrites(program: string, args: string[]): boolean {
   if (program === "sed" || program === "awk" || program === "gawk" || program === "mawk") {
     return !interpreterScriptReads(program === "sed" ? "sed" : "awk", args);
   }
   if (program === "find") {
-    return args.some((arg) => /^-(?:delete|exec|execdir|ok|okdir|fprint|fprintf|fls)$/.test(arg));
+    return args.some((arg) => /^-(?:delete|exec|execdir|ok|okdir|fprint|fprint0|fprintf|fls)$/.test(arg));
   }
-  if (program === "sort") return args.some((arg) => arg === "-o" || arg.startsWith("--output"));
+  if (program === "sort") return sortWrites(args);
+  if (program === "rg" || program === "ripgrep") return ripgrepRuns(args);
   // `uniq in out` writes its second file.
   if (program === "uniq") return positionals(args).length > 1;
   // `env FOO=1 rm x` runs rm, so env only reads when it names no program.
@@ -828,7 +1031,7 @@ function stageWrites(program: string, args: string[]): boolean {
   if (program === "git") {
     const sub = positionals(args)[0];
     if (!sub || !GIT_READ_SUBCOMMANDS.has(sub.toLowerCase())) return true;
-    if (args.some((arg) => GIT_OUTPUT_FLAG.test(dequote(arg)))) return true;
+    if (args.some((arg) => GIT_OUTPUT_FLAG.test(arg))) return true;
     // Anything naming a program, a path or a config runs before the subcommand
     // gets a say, so it is judged before the subcommand is trusted.
     if (hasFlag(gitGlobalArgs(args), GIT_UNSAFE_GLOBALS)) return true;
@@ -905,7 +1108,7 @@ function detailRunsAWrite(detail: string, filePath?: string): boolean {
   if (unsafe) return true;
   return stages.some((stage) => {
     if (stage.program.includes("://")) return false;
-    return WRITE_PROGRAMS.has(programName(stage.program));
+    return READINGS.some((reading) => WRITE_PROGRAMS.has(programName(stage.program, reading)));
   });
 }
 
@@ -916,11 +1119,13 @@ function readOnlyPipeline(command: string): boolean {
   // A token the shell rewrites could name anything, so the command cannot be
   // called a search on the strength of the programs alone.
   if (expandsSomewhere(command)) return false;
-  return stages.every((stage) => {
-    const program = programName(stage.program);
-    if (!READ_ONLY_PROGRAMS.has(program)) return false;
-    return !stageWrites(program, stage.args);
-  });
+  return stages.every((stage) =>
+    READINGS.every((reading) => {
+      const program = programName(stage.program, reading);
+      if (!READ_ONLY_PROGRAMS.has(program)) return false;
+      return !stageWrites(program, stage.args.map(reading));
+    }),
+  );
 }
 
 /**
@@ -1712,7 +1917,14 @@ export function applyPermissionAnswer(
         : next.permissionGrants;
       return {
         ...next,
-        status: answer === "deny" ? "idle" : stillWaiting ? "needs-input" : "running",
+        // A denial refuses one call. The vendor decides whether its turn goes
+        // on and ends it with its own done; painting the chat idle here let the
+        // queue drainer send the next prompt into a turn that was still live.
+        // A card answered after its turn already ended leaves the chat idle.
+        status:
+          session.status === "idle"
+            ? "idle"
+            : permissionResumeStatus({ hasOtherPending: stillWaiting, agentRun: next.agentRun }),
         permissionGrants: grants,
         messages: [
           ...next.messages,

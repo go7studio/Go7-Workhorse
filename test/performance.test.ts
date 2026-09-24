@@ -18,7 +18,8 @@ import {
 } from "../src/lib/store-select";
 import { createPinScheduler } from "../src/lib/transcript-scroll";
 import { applyStreamQueues, createStreamCommitScheduler } from "../src/lib/stream-commit";
-import { mergeStreamedText } from "../src/lib/markdown";
+import { expandMashedRows, mergeStreamedText, parseChatMarkdown, parseInline, peelAskMarkup } from "../src/lib/markdown";
+import { titleFromIntent } from "../src/lib/titles";
 import { searchChats } from "../src/lib/search";
 import { dropDrafts } from "../src/lib/chats";
 import { deskPersistBodyEqual } from "../src/lib/desk-persist";
@@ -1006,4 +1007,92 @@ test("ten thousand events in one fast session do not reopen the cross product", 
   // cross product. Same process, same machine, so no runner speed is in it.
   const small = collapseWork(syntheticUsage(100, 41, 1, 40)).steps;
   assert.ok(steps < small * 400, `100x the events took ${steps} steps against ${small}`);
+});
+
+test("a table rule row streaming in without its closing pipe parses in bounded time", () => {
+  // The mashed-row pattern once split a run of dashes every possible way when
+  // no closing pipe followed: 51 dashes took 1.4 s and 60 took 44 s, on the
+  // renderer thread, once per streamed delta. A wide rule cell streams exactly
+  // that shape until its pipe lands, and a table with no outer pipes keeps it.
+  // Together these cost the old pattern about 3 s; the new one takes about 1 ms,
+  // so the bound leaves a slow runner plenty of room. Nothing here is long
+  // enough to hang the suite if the old pattern ever came back.
+  const inputs: string[] = [];
+  for (let dashes = 3; dashes <= 51; dashes += 3) {
+    inputs.push(`Here is the summary:\n\n| Name | Description |\n|${"-".repeat(dashes)}`);
+  }
+  inputs.push(`Name | Value\n-----|${"-".repeat(48)}\nfoo | bar`);
+  inputs.push(`A | B | C\n---|---|${"-".repeat(48)}\n1 | 2 | 3`);
+  const started = performance.now();
+  for (const input of inputs) parseChatMarkdown(input);
+  const ms = performance.now() - started;
+  assert.ok(ms < 500, `parsing ${inputs.length} streamed rule rows took ${ms}ms`);
+});
+
+test("the mashed-row split reads every line the way the old pattern did", () => {
+  // The rewrite exists only to stop the backtracking. Any line the old pattern
+  // split, the new one splits at the same places. Short random lines over the
+  // characters a rule row is made of keep the old pattern cheap enough to be
+  // the reference.
+  const OLD = /\|\s*(\|?\s*:?-{3,}:?\s*)+\|/g;
+  const parts = ["|", "-", "-", "-", " ", ":", "a", "---", "|---", " | "];
+  let seed = 7;
+  const next = () => {
+    seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+    return seed / 0x7fffffff;
+  };
+  for (let round = 0; round < 50_000; round += 1) {
+    let line = "";
+    const length = 1 + Math.floor(next() * 12);
+    for (let index = 0; index < length; index += 1) line += parts[Math.floor(next() * parts.length)];
+    const expected = line
+      .replace(OLD, "|\n$&\n|")
+      .split("\n")
+      .map((item) => item.trim())
+      .filter(Boolean);
+    assert.deepEqual(expandMashedRows(line), expected, JSON.stringify(line));
+  }
+  assert.deepEqual(expandMashedRows("| SKU | Action | |---|---| | Darkest Dungeon PC | Keep |"), [
+    "| SKU | Action |",
+    "| |---|---|",
+    "| | Darkest Dungeon PC | Keep |",
+  ]);
+});
+
+test("a reply full of unclosed brackets or stray ask tags parses in bounded time", () => {
+  // Each of these rescanned the rest of the reply from every bracket, tag, or
+  // line break: 20k of `[a ` took 1.3 s in the inline parse, 8k of `<ask` about
+  // 1 s in the ask peel, and 20k blank lines 1.2 s. All of it runs on every
+  // streamed delta. Together they cost the old patterns about 3.5 s and the new
+  // ones well under 100 ms; nothing here is long enough to hang the suite if an
+  // old pattern came back.
+  const inputs: Array<() => unknown> = [
+    () => parseInline("[a ".repeat(20_000)),
+    () => peelAskMarkup("<ask".repeat(8_000)),
+    () => peelAskMarkup(`${"\n".repeat(20_000)}x`),
+    () => peelAskMarkup("- The worker picked up the task and returned -> done with the subtask list.\n".repeat(1_600)),
+  ];
+  const started = performance.now();
+  for (const run of inputs) run();
+  const ms = performance.now() - started;
+  assert.ok(ms < 1_000, `the inline parse and ask peel took ${ms}ms`);
+  // A real ask dump still becomes a list.
+  assert.equal(
+    peelAskMarkup("<ask><question>Pick one</question><item><label>A</label></item><item><label>B</label></item></ask>"),
+    "Pick one\n\n1. **A**\n\n2. **B**",
+  );
+});
+
+test("a prompt with a long run of filler words titles in bounded time", () => {
+  // The trailing-filler pattern ran over the whole prompt, so a long run of
+  // filler that was not at the end was rescanned from every word: 30,000 "ok"
+  // took 6 s. 15,000 cost the old pattern about 1.6 s.
+  const started = performance.now();
+  titleFromIntent(`x${" ok".repeat(15_000)} y`);
+  const ms = performance.now() - started;
+  assert.ok(ms < 500, `titling a long filler run took ${ms}ms`);
+  assert.equal(titleFromIntent("hey can you fix the login redirect bug please thanks ok"), "Fix login redirect bug");
+  // A filler tail longer than the searched stretch still comes off.
+  assert.equal(titleFromIntent(`fix the flaky upload test${" please".repeat(100)}`), "Fix flaky upload test");
+  assert.equal(titleFromIntent("could you add a dark mode toggle to settings for me lol"), "Add dark mode toggle to settings");
 });

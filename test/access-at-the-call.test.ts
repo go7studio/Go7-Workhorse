@@ -592,7 +592,7 @@ test("store.tsx shuts the ordinary door on a hidden worker", () => {
   // The plain enqueue must still exist below, for the visible chat that owns it.
   assert.match(
     store,
-    /pending: enqueuePermission\(current\.pending, \{\n\s*id: event\.requestId,\n\s*sessionId: event\.sessionId,\n\s*provider,\n\s*tool: event\.tool,\n\s*detail: event\.detail,\n\s*path: event\.path,\n\s*\}\),/,
+    /pending: enqueuePermission\(current\.pending, \{\n\s*id: event\.requestId,\n\s*sessionId: event\.sessionId,\n\s*provider,\n\s*tool: event\.tool,\n\s*detail: event\.detail,\n\s*path: event\.path,\n(?:\s*\.\.\.\(event\.preview \? \{ preview: event\.preview \} : \{\}\),\n)?\s*\}\),/,
     "a visible chat's own Ask is still a question for the person",
   );
 });

@@ -217,6 +217,29 @@ function rowAudit(row: Record<string, unknown>): RetrievalAudit {
   };
 }
 
+/**
+ * A kept compiler run whose watermark is a purged event would lose its place:
+ * the lookup by id finds nothing, the watermark is dropped, and the lane reads
+ * every event since its first as new, compiling the whole history again. The
+ * run is pointed at the newest kept event at or before the purged one instead,
+ * which leaves exactly the same later events waiting.
+ */
+function keptWatermarks(runs: CompilerRun[], events: LearningEvent[], dropped: ReadonlySet<string>): CompilerRun[] {
+  const order = (a: LearningEvent, b: LearningEvent) => a.createdAt - b.createdAt || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+  const byId = new Map(events.map((event) => [event.id, event]));
+  const kept = events.filter((event) => !dropped.has(event.id)).sort(order);
+  return runs.map((run) => {
+    const gone = run.eventWatermark && dropped.has(run.eventWatermark) ? byId.get(run.eventWatermark) : undefined;
+    if (!gone) return run;
+    let before: LearningEvent | undefined;
+    for (const event of kept) {
+      if (order(event, gone) > 0) break;
+      before = event;
+    }
+    return { ...run, eventWatermark: before?.id };
+  });
+}
+
 export class SqliteMemoryStore implements MemoryStore {
   readonly path: string;
   private db: SqliteDatabase | null = null;
@@ -233,16 +256,28 @@ export class SqliteMemoryStore implements MemoryStore {
       (this.io.mkdirSync ?? fs.mkdirSync)(dir, { recursive: true });
     }
     this.db = new DatabaseSync(this.path);
-    this.db.exec(`PRAGMA busy_timeout = ${BUSY_MS};`);
-    if (this.path !== ":memory:") {
-      try {
-        this.db.exec("PRAGMA journal_mode = WAL;");
-      } catch {
-        /* some volumes reject WAL; capture still works */
+    try {
+      this.db.exec(`PRAGMA busy_timeout = ${BUSY_MS};`);
+      if (this.path !== ":memory:") {
+        try {
+          this.db.exec("PRAGMA journal_mode = WAL;");
+        } catch {
+          /* some volumes reject WAL; capture still works */
+        }
       }
+      this.migrate();
+      this.prepareFts();
+    } catch (error) {
+      // A store that will not open lets go of its file. Held, it stayed locked
+      // on Windows for the rest of the session, whatever took its place.
+      try {
+        this.db.close();
+      } catch {
+        /* already unusable */
+      }
+      this.db = null;
+      throw error;
     }
-    this.migrate();
-    this.prepareFts();
   }
 
   private conn(): SqliteDatabase {
@@ -463,7 +498,8 @@ export class SqliteMemoryStore implements MemoryStore {
       const dropMemoryIds = expandDependentMemoryIds(snapshot.memories, directMemoryIds);
       const keepMemories = snapshot.memories.filter((memory) => !dropMemoryIds.has(memory.id));
       for (const memory of keepMemories) this.putMemory(memory);
-      for (const run of snapshot.compilerRuns.filter((item) => !item.outputMemoryIds?.some((id) => dropMemoryIds.has(id)))) this.putCompilerRun(run);
+      const keepRuns = snapshot.compilerRuns.filter((item) => !item.outputMemoryIds?.some((id) => dropMemoryIds.has(id)));
+      for (const run of keptWatermarks(keepRuns, snapshot.events, dropEvents)) this.putCompilerRun(run);
       for (const audit of snapshot.audits.filter((item) => !item.selectedIds.some((id) => dropMemoryIds.has(id)))) this.putRetrievalAudit(audit);
       return {
         ok: true,
@@ -486,26 +522,47 @@ export class SqliteMemoryStore implements MemoryStore {
     ).map((memory) => memory.id));
     const dropMemoryIds = expandDependentMemoryIds(snapshot.memories, directMemoryIds);
     const keepMemories = snapshot.memories.filter((memory) => !dropMemoryIds.has(memory.id));
-    const keepRuns = snapshot.compilerRuns.filter((run) => !run.outputMemoryIds?.some((id) => dropMemoryIds.has(id)));
+    const keepRuns = keptWatermarks(
+      snapshot.compilerRuns.filter((run) => !run.outputMemoryIds?.some((id) => dropMemoryIds.has(id))),
+      snapshot.events,
+      dropEventIds,
+    );
     const keepAudits = snapshot.audits.filter((audit) => !audit.selectedIds.some((id) => dropMemoryIds.has(id)));
+    /*
+     * The new database is built whole, in one transaction, beside the live
+     * one, and only then renamed over it. This used to delete the live file
+     * first, rename an empty schema into its place, and put the kept rows back
+     * one at a time from memory: a crash or a force-quit in that stretch,
+     * seconds long with the loop held on a large desk, lost every row not yet
+     * put back. A rebuild file such a crash left behind then made every later
+     * purge fail, and the store stayed closed. A failure anywhere now reopens
+     * the live file as it was.
+     */
+    const temp = `${this.path}.rebuild`;
     let walRemoved = false;
-    if (this.path !== ":memory:") {
-      const temp = `${this.path}.rebuild`;
+    try {
+      for (const leftover of [temp, `${temp}-journal`, `${temp}-wal`, `${temp}-shm`]) fs.rmSync(leftover, { force: true });
       const rebuilt = new DatabaseSync(temp);
-      rebuilt.exec(MIGRATIONS[0]);
+      this.db = rebuilt;
       try {
-        rebuilt.exec("CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING fts5(memory_id UNINDEXED, statement, summary, tokenize='porter');");
-      } catch {
-        /* lexical fallback after rebuild */
+        this.migrate();
+        this.prepareFts();
+        rebuilt.exec("BEGIN");
+        try {
+          for (const event of keepEvents) this.recordEvent(event);
+          for (const memory of keepMemories) this.putMemory(memory);
+          for (const run of keepRuns) this.putCompilerRun(run);
+          for (const audit of keepAudits) this.putRetrievalAudit(audit);
+          rebuilt.exec("COMMIT");
+        } catch (error) {
+          rebuilt.exec("ROLLBACK");
+          throw error;
+        }
+      } finally {
+        this.db = null;
+        rebuilt.close();
       }
-      rebuilt.prepare("INSERT INTO schema_meta (key, value) VALUES ('schema_version', ?)").run(String(LEARNING_SCHEMA_VERSION));
-      rebuilt.close();
-      try {
-        fs.unlinkSync(this.path);
-      } catch {
-        /* dest may already be absent after close */
-      }
-      removeSidecars(this.path, fs.existsSync, fs.unlinkSync);
+      walRemoved = removeSidecars(this.path, fs.existsSync, fs.unlinkSync);
       boundedReplace(temp, this.path, {
         renameSync: fs.renameSync,
         unlinkSync: fs.unlinkSync,
@@ -517,13 +574,12 @@ export class SqliteMemoryStore implements MemoryStore {
           }
         },
       });
-      walRemoved = removeSidecars(this.path, fs.existsSync, fs.unlinkSync);
+      walRemoved = removeSidecars(this.path, fs.existsSync, fs.unlinkSync) || walRemoved;
+    } catch (error) {
+      this.reopen();
+      throw error;
     }
     this.reopen();
-    for (const event of keepEvents) this.recordEvent(event);
-    for (const memory of keepMemories) this.putMemory(memory);
-    for (const run of keepRuns) this.putCompilerRun(run);
-    for (const audit of keepAudits) this.putRetrievalAudit(audit);
     const verifiedAbsent = this.listEvents({ includeTombstones: true }).every((event) => !matchesForgetTarget(event, target)) &&
       this.listMemories({ includeDeleted: true }).every(
         (memory) => !matchesForgetTarget({ id: memory.id, projectId: memory.projectId, providerScope: memory.providerScope }, target),
@@ -770,6 +826,25 @@ export class SqliteMemoryStore implements MemoryStore {
   integrityCheck(): { ok: boolean; fts: boolean } {
     const probe = this.probe();
     return { ok: probe.integrity && probe.writable, fts: this.fts };
+  }
+}
+
+/**
+ * The learning store on disk, or one in memory when the file will not open.
+ *
+ * The desk opens this in its ready handler, before its window exists. A
+ * learning.sqlite that is not a database, or a disk too full to migrate it,
+ * threw out of that handler: no window, the single-instance lock still held,
+ * and every relaunch focused a window that was never made. Learning is
+ * optional and the desk is not, so this session learns in memory and the file
+ * stays where it is for the person to keep or remove.
+ */
+export function openSqliteMemoryStore(userData: string, onFail?: (error: unknown) => void): SqliteMemoryStore {
+  try {
+    return new SqliteMemoryStore(userData);
+  } catch (error) {
+    onFail?.(error);
+    return new SqliteMemoryStore(":memory:");
   }
 }
 

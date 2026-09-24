@@ -111,7 +111,24 @@ export function upsertHermesMcpServers(yamlText: string, launch: ExternalMcpLaun
     const end = next < 0 ? text.length : start + workhorse[0].length + next + 1;
     return `${text.slice(0, start)}${hermesWorkhorseYamlBlock(launch, indent || "  ")}${text.slice(end).replace(/^\n/, "")}`;
   }
-  return text.replace(/^mcp_servers:\s*$/m, `mcp_servers:\n${block.replace(/\n$/, "")}`);
+  // A new entry sits at the indent the file already uses. Two spaces under a
+  // file indented by four made the existing servers children of workhorse:
+  // `github:` read as a key inside the new block and left mcp_servers.
+  const indent = firstServerIndent(text) || "  ";
+  const entry = hermesWorkhorseYamlBlock(launch, indent);
+  return text.replace(/^mcp_servers:\s*$/m, `mcp_servers:\n${entry.replace(/\n$/, "")}`);
+}
+
+/** Leading whitespace of the first entry under `mcp_servers:`, or "" when it has none. */
+function firstServerIndent(text: string): string {
+  const lines = text.split("\n");
+  const header = lines.findIndex((line) => /^mcp_servers:\s*$/.test(line));
+  if (header < 0) return "";
+  for (const line of lines.slice(header + 1)) {
+    if (!line.trim() || line.trim().startsWith("#")) continue;
+    return /^[ ]+/.exec(line)?.[0] ?? "";
+  }
+  return "";
 }
 
 export function openClawConfigPath(home: string, platform: "darwin" | "win32" | "linux"): string {
@@ -247,7 +264,10 @@ export function installWorkhorseLink(input: InstallLinkInput): InstallReport {
           existing = JSON.parse(input.io.readFile(cursorPath));
         }
         const next = mergeExternalMcpServer(existing, server);
-        if (mcpConfigContainsBearer(next)) {
+        // Only what Workhorse writes is judged. The person's own servers often
+        // carry an Authorization header, and scanning the whole file refused to
+        // connect Cursor for anyone with a remote GitHub server configured.
+        if (mcpConfigContainsBearer(server)) {
           skipped.push({ target: "cursor", reason: "refused to write a bearer token" });
         } else {
           input.io.mkdirp(dirnameOf(cursorPath));
@@ -279,7 +299,7 @@ export function installWorkhorseLink(input: InstallLinkInput): InstallReport {
         existing = JSON.parse(input.io.readFile(openclawPath));
       }
       const next = mergeOpenClawMcpConfig(existing, launch);
-      if (mcpConfigContainsBearer(next)) {
+      if (mcpConfigContainsBearer(launch)) {
         skipped.push({ target: "openclaw", reason: "refused to write a bearer token" });
       } else {
         input.io.mkdirp(dirnameOf(openclawPath));
@@ -303,7 +323,7 @@ export function installWorkhorseLink(input: InstallLinkInput): InstallReport {
   } else try {
     const current = input.io.existsSync(hermesPath) ? input.io.readFile(hermesPath) : "";
     const next = upsertHermesMcpServers(current, launch);
-    if (/bearer|WORKHORSE_BRIDGE_TOKEN|authorization/i.test(next)) {
+    if (/bearer|WORKHORSE_BRIDGE_TOKEN|authorization/i.test(hermesWorkhorseYamlBlock(launch))) {
       skipped.push({ target: "hermes", reason: "refused to write a bearer token" });
     } else {
       input.io.mkdirp(dirnameOf(hermesPath));

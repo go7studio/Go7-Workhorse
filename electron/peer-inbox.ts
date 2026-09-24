@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { ChatImage, MissionIteration, WorkerHandoff, WorkerSeed } from "../src/lib/types";
+import { atomicWriteJson } from "./state-persistence";
 
 export type PeerAction =
   | "list"
@@ -206,10 +207,39 @@ export type BridgeRecordIo = {
   chmodSync(file: string, mode: number): void;
 };
 
+/**
+ * The inbox carries one chat's prompt to another and the reply back, so it is
+ * owner-only like the bridge record beside it. It was created at the default
+ * 0755 with 0644 files, readable by anyone who could reach the folder.
+ */
+export const INBOX_DIR_MODE = 0o700;
+export const INBOX_FILE_MODE = 0o600;
+
+function ensureInbox(dir: string): void {
+  fs.mkdirSync(dir, { recursive: true, mode: INBOX_DIR_MODE });
+  try {
+    // mkdir only sets the mode on a new folder; repair one an older build made.
+    fs.chmodSync(dir, INBOX_DIR_MODE);
+  } catch {
+    /* Windows has no POSIX mode. */
+  }
+}
+
+/**
+ * Whole or not at all. The desk's watcher wakes when a request file is
+ * created, which is before its bytes are in it: it read an empty file, answered
+ * "Unexpected end of JSON input", and never looked at that request again. The
+ * reply had the same gap on the asker's side. Each file is now written under a
+ * temporary name the scan ignores and renamed into place.
+ */
+function writeInboxFile(file: string, value: unknown): void {
+  atomicWriteJson(file, value, INBOX_FILE_MODE, { fsync: false });
+}
+
 function defaultBridgeRecordIo(): BridgeRecordIo {
   return {
     mkdirSync: (dir) => {
-      fs.mkdirSync(dir, { recursive: true });
+      ensureInbox(dir);
     },
     writeFileSync: (file, data, mode) => fs.writeFileSync(file, data, { encoding: "utf8", mode }),
     chmodSync: (file, mode) => fs.chmodSync(file, mode),
@@ -258,6 +288,20 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/**
+ * The answer, or nothing while there is none that parses. A reply read as it
+ * was being written used to throw out of the wait, and the cleanup after it
+ * deleted the real answer when it landed a moment later. Now the wait goes on.
+ */
+function readInboxAnswer(resPath: string): PeerAskResult | undefined {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(resPath, "utf8")) as unknown;
+    return parsed && typeof parsed === "object" ? (parsed as PeerAskResult) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /** The clock and the wait, so a test can put an answer in the window this used to throw away. */
 export type InboxAskIo = { now?: () => number; sleep?: (ms: number) => Promise<void> };
 
@@ -269,30 +313,36 @@ export async function askViaInbox(
 ): Promise<string> {
   const now = io.now ?? Date.now;
   const waitFor = io.sleep ?? sleep;
-  fs.mkdirSync(inbox, { recursive: true });
+  ensureInbox(inbox);
   const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const reqPath = path.join(inbox, `${id}.req.json`);
   const resPath = path.join(inbox, `${id}.res.json`);
-  fs.writeFileSync(reqPath, JSON.stringify({ ...ask, id }), "utf8");
+  // Stamped with the wall clock, which is the one the desk reads it by. A
+  // request whose asker is gone was run whenever the desk next started: a
+  // helper that exited mid-wait left the file behind, and nothing said how old
+  // it was.
+  const stamped = Date.now();
+  writeInboxFile(reqPath, { ...ask, id, createdAt: stamped, deadline: stamped + timeoutMs });
+  pendingRequests.add(reqPath);
   const start = now();
+  const settle = (result: PeerAskResult): string => {
+    if ("error" in result && result.error) throw new Error(result.error);
+    return "text" in result ? result.text : "";
+  };
   try {
     while (now() - start < timeoutMs) {
-      if (fs.existsSync(resPath)) {
-        const result = JSON.parse(fs.readFileSync(resPath, "utf8")) as PeerAskResult;
-        if ("error" in result && result.error) throw new Error(result.error);
-        return "text" in result ? result.text : "";
-      }
+      const result = readInboxAnswer(resPath);
+      if (result) return settle(result);
       await waitFor(80);
     }
     // One last look. The answer can land during that final sleep, or while a
     // busy machine overruns it, and throwing then loses a reply that arrived.
-    if (fs.existsSync(resPath)) {
-      const result = JSON.parse(fs.readFileSync(resPath, "utf8")) as PeerAskResult;
-      if ("error" in result && result.error) throw new Error(result.error);
-      return "text" in result ? result.text : "";
-    }
+    const result = readInboxAnswer(resPath);
+    if (result) return settle(result);
+    if (fs.existsSync(resPath)) throw new Error("the other chat's answer could not be read");
     throw new Error("the other chat did not answer in time");
   } finally {
+    pendingRequests.delete(reqPath);
     try {
       fs.unlinkSync(reqPath);
     } catch {
@@ -304,6 +354,26 @@ export async function askViaInbox(
       /* ignore */
     }
   }
+}
+
+/** Requests this process is still waiting on, so an exit can take them back. */
+const pendingRequests = new Set<string>();
+
+/**
+ * Take back every request this process is still waiting on. A helper whose
+ * host closed its stdin exits at once, and that skipped the cleanup above: the
+ * request stayed in the inbox for the next desk to run, long after anyone was
+ * waiting for it. Synchronous, so it can run from an exit handler.
+ */
+export function abandonInboxAsks(): void {
+  for (const file of pendingRequests) {
+    try {
+      fs.unlinkSync(file);
+    } catch {
+      /* already answered and cleaned up */
+    }
+  }
+  pendingRequests.clear();
 }
 
 /**
@@ -322,6 +392,8 @@ export type InboxWatchIo = {
   watch?: (dir: string, onChange: () => void) => { close: () => void; on: (event: "error", fn: () => void) => void };
   /** Runs `tick` every `ms` and returns the cancel. */
   schedule?: (tick: () => void, ms: number) => () => void;
+  /** The wall clock a request's deadline is read against. */
+  now?: () => number;
 };
 
 export function watchPeerInbox(
@@ -329,7 +401,8 @@ export function watchPeerInbox(
   handler: (ask: PeerAsk) => Promise<PeerAskResult>,
   io: InboxWatchIo = {},
 ): () => void {
-  fs.mkdirSync(inbox, { recursive: true });
+  ensureInbox(inbox);
+  const now = io.now ?? Date.now;
   const seen = new Set<string>();
   const scan = () => {
     let names: string[] = [];
@@ -345,15 +418,29 @@ export function watchPeerInbox(
       const resPath = reqPath.replace(/\.req\.json$/, ".res.json");
       void (async () => {
         try {
-          const ask = JSON.parse(fs.readFileSync(reqPath, "utf8")) as PeerAsk;
+          // The file's id names the file, not the ask. Handed on, it took the
+          // place of the id the desk waits on for the reply (main spreads the
+          // ask over its own), so an ask that came this way was run and its
+          // answer went to a waiter that did not exist.
+          const { id: _file, createdAt: _created, deadline, ...ask } = JSON.parse(fs.readFileSync(reqPath, "utf8")) as PeerAsk & {
+            id?: unknown;
+            createdAt?: unknown;
+            deadline?: unknown;
+          };
+          // Its asker has stopped waiting, so nobody is left to read the answer
+          // and running it now would be work nobody asked for any more.
+          if (typeof deadline === "number" && now() > deadline) {
+            try {
+              fs.unlinkSync(reqPath);
+            } catch {
+              /* the asker cleaned it up */
+            }
+            return;
+          }
           const result = await handler(ask);
-          fs.writeFileSync(resPath, JSON.stringify(result), "utf8");
+          writeInboxFile(resPath, result);
         } catch (error) {
-          fs.writeFileSync(
-            resPath,
-            JSON.stringify({ error: error instanceof Error ? error.message : String(error) }),
-            "utf8",
-          );
+          writeInboxFile(resPath, { error: error instanceof Error ? error.message : String(error) });
         }
       })();
     }

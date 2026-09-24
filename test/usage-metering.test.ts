@@ -16,6 +16,7 @@ import {
   chatSpend,
   crewSpendRows,
   crewSpendTotal,
+  cursorLaneEvents,
   deskUsageCards,
   heatCellBots,
   eventTotal,
@@ -25,6 +26,7 @@ import {
   heatmapPeak,
   heatmapTotal,
   leftoverForCard,
+  modelsForProvider,
   deskPulseLines,
   inRange,
   normalizeUsage,
@@ -36,6 +38,7 @@ import {
   usageTimestamp,
   visibleUsageEvents,
   usageFocusFacts,
+  vendorTidePercent,
 } from "../src/lib/usage";
 import type { UsageDraft } from "../src/lib/types";
 
@@ -215,6 +218,27 @@ test("the ledger on disk: a summed-prompt event is capped at one prompt, tagged 
   assert.equal(untouched.inputTokens, 900_000);
   const tagged = repairSummedPromptTurn({ inputTokens: 3_000_000, source: "request" }, 1_050_000);
   assert.equal(tagged.inputTokens, 3_000_000, "a tagged bill is trusted as written");
+});
+
+test("a custom bot's turns survive a relaunch as separate rows", () => {
+  // Three real turns, ten minutes apart. The prompt grows with the history, as
+  // it does in every chat, and the stacked-request collapse read that growth as
+  // one turn's requests: it kept the 9k row and dropped the other two on every
+  // launch, then the desk saved the loss.
+  const minute = 60_000;
+  const turns = [
+    { id: "t3", at: 1_790_000_000_000 + 20 * minute, inputTokens: 9_000, outputTokens: 800 },
+    { id: "t2", at: 1_790_000_000_000 + 10 * minute, inputTokens: 6_000, outputTokens: 900 },
+    { id: "t1", at: 1_790_000_000_000, inputTokens: 3_000, outputTokens: 700 },
+  ].map((turn) => ({ ...KIMI, ...turn, customBotId: "bot_kimi", cacheReadTokens: 0, cacheWriteTokens: 0, source: "request" }));
+  const stored = normalizeUsage(turns);
+  assert.deepEqual(stored.map((event) => event.id), ["t3", "t2", "t1"]);
+  assert.equal(chatSpend(stored, KIMI.sessionId).totalTokens, 20_400);
+
+  // Rows written before usage carried a source are the stacked requests the
+  // collapse was written for, and it still keeps only the last of them.
+  const legacy = normalizeUsage(turns.map(({ source: _source, ...rest }) => rest));
+  assert.deepEqual(legacy.map((event) => event.id), ["t3"]);
 });
 
 test("what a row shows adds up to what a row totals", () => {
@@ -783,6 +807,73 @@ test("Cursor Composer billed bars and stretch cells use cursor grey, not Grok wh
   );
   const api = heatCellBots([{ ...event, model: "gpt-5.4" }]);
   assert.equal(api[0]?.provider, "codex");
+});
+
+test("a Cursor pool's drill-in lists only that pool's models", () => {
+  // Cursor bills two pools. The Composer card's total was lane-filtered, but
+  // its model list was built from every Cursor event, so it listed a 50k
+  // Sonnet row from the API pool beside 1k of Composer and split its bars
+  // across both.
+  const event = (id: string, model: string, lane: "cursor-models" | "other-models", inputTokens: number) => ({
+    id,
+    at: 1,
+    provider: "cursor" as const,
+    model,
+    lane,
+    inputTokens,
+    outputTokens: 0,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+  });
+  const events = [event("a", "composer-2.5", "cursor-models", 1_000), event("b", "claude-sonnet-4.6", "other-models", 50_000)];
+  const listed = (key: "cursor:cursor-models" | "cursor:other-models") =>
+    modelsForProvider(cursorLaneEvents(events, key), "cursor")
+      .filter((row) => row.totalTokens > 0)
+      .map((row) => row.totalTokens);
+  assert.deepEqual(listed("cursor:cursor-models"), [1_000]);
+  assert.deepEqual(listed("cursor:other-models"), [50_000]);
+  const pane = readFileSync(path.join(ROOT, "src", "ui", "UsagePane.tsx"), "utf8");
+  assert.match(pane, /modelsForProvider\(focusedEvents, focused\.provider\)/);
+  assert.doesNotMatch(pane, /modelsForProvider\(events, focused\.provider\)/);
+});
+
+test("a Cursor chat's setup tide reads its own pool's plan and spend", () => {
+  // The setup sheet passed no Cursor plan and named the row plain "cursor".
+  // A Composer chat with 10% of its pool used showed 100% left with no
+  // budget, or a budget share of both pools with one. Handed the plan, the
+  // row "cursor" mapped to the API pool instead.
+  const event = (id: string, model: string, lane: "cursor-models" | "other-models", inputTokens: number) => ({
+    id,
+    at: 1,
+    provider: "cursor" as const,
+    model,
+    lane,
+    inputTokens,
+    outputTokens: 0,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+  });
+  const events = [event("a", "composer-2.5", "cursor-models", 1_000), event("b", "claude-sonnet-4.6", "other-models", 50_000)];
+  const cursor = {
+    usedPercent: 10,
+    leftPercent: 90,
+    period: "monthly" as const,
+    prepaidBalance: 0,
+    products: [
+      { product: "cursor-models", label: "Composer", usagePercent: 10 },
+      { product: "other-models", label: "API", usagePercent: 95 },
+    ],
+  };
+  const composer = { focus: "cursor:cursor-models" as const, provider: "cursor" as const, key: "cursor:cursor-models" };
+  const api = { focus: "cursor:other-models" as const, provider: "cursor" as const, key: "cursor:other-models" };
+  assert.equal(vendorTidePercent(composer, { cursor }, events, 60_000), 90);
+  assert.equal(vendorTidePercent(api, { cursor }, events, 60_000), 5);
+  // With no plan yet, the budget share counts this pool's spend only.
+  assert.equal(Math.round(vendorTidePercent(composer, {}, events, 10_000)), 90);
+
+  const setup = readFileSync(path.join(ROOT, "src", "ui", "SessionSetup.tsx"), "utf8");
+  assert.match(setup, /cursorWatchLane\(session\.model\)/);
+  assert.match(setup, /cursor: cursorPlan/);
 });
 
 test("disabled LLMs stay out of the usage view until they are turned back on", () => {

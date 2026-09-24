@@ -1,7 +1,7 @@
 import { deskCss } from "./desk-css";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -31,6 +31,7 @@ import {
   fetchCursorPlanUsage,
   parseCursorPlanUsage,
   readCursorAuthToken,
+  readCursorStateAccessToken,
 } from "../electron/cursor-plan";
 import { cursorExtensionResult, extractToolEvent } from "../electron/grok-agent";
 import { CURSOR_SESSION_RULES, WORKHORSE_SESSION_RULES } from "../src/lib/workhorse-rules";
@@ -353,6 +354,39 @@ test("Cursor discovery finds the official Windows CLI folder, never Cursor.exe",
   );
 });
 
+test("building a Cursor launch never runs the Cursor CLI to ask about the login", () => {
+  // The launch spec is built for every Cursor prompt, twice for a new runtime.
+  // It used to run the whole login detection, and with it `cursor-agent about`
+  // under spawnSync: each Cursor prompt froze the desk's main process — every
+  // other chat's stream and every IPC reply — for as long as that took, up to 8s.
+  const asked: string[] = [];
+  const spec = buildCursorLaunchSpec({
+    model: "composer-2.5",
+    effort: "medium",
+    cwd: "/proj",
+    mode: "ask",
+    detect: {
+      env: { PATH: "/bin" },
+      platform: "linux",
+      homedir: "/no-home",
+      pathDirs: ["/bin"],
+      extraDirs: [],
+      existsSync: (file) => file === "/bin/cursor-agent",
+      probeAuth: (file) => {
+        asked.push(`about ${file}`);
+        return true;
+      },
+      probeBinary: (file) => {
+        asked.push(`--help ${file}`);
+        return true;
+      },
+    },
+  });
+  assert.equal(spec.command, "/bin/cursor-agent");
+  assert.deepEqual(spec.argv, ["--model", "composer-2.5", "acp"]);
+  assert.deepEqual(asked, []);
+});
+
 test("reading the Cursor model list spawns the same node+script a launch does", () => {
   const local = "C:\\Users\\desk\\AppData\\Local";
   const node = `${local}\\cursor-agent\\versions\\2026.08.11-e8db854\\node.exe`;
@@ -673,6 +707,31 @@ test("readCursorAuthToken prefers env then injected Cursor state db", () => {
   );
 });
 
+test("a locked Cursor state db is copied into a private folder, and the folder goes after", () => {
+  // The copy carries the Cursor login, and copyFileSync keeps the source's mode.
+  // It used to sit under a guessable name in the shared temp folder, which on
+  // Linux any local user can read.
+  const copies: string[] = [];
+  const source = path.join("cursor", "state.vscdb");
+  const token = readCursorStateAccessToken(
+    source,
+    (src, dest) => {
+      copies.push(dest);
+      writeFileSync(dest, src);
+    },
+    (target) => {
+      if (target === source) throw new Error("database is locked");
+      const folder = path.dirname(target);
+      assert.notEqual(path.resolve(folder), path.resolve(os.tmpdir()), "the copy sat in the shared temp folder");
+      if (process.platform !== "win32") assert.equal(statSync(folder).mode & 0o777, 0o700);
+      return "jwt-from-copy";
+    },
+  );
+  assert.equal(token, "jwt-from-copy");
+  assert.equal(copies.length, 2, "the db and its wal");
+  assert.equal(existsSync(path.dirname(copies[0])), false, "the private folder was left behind");
+});
+
 test("fetchCursorPlanUsage reads official JSON when a token is present", async () => {
   const plan = await fetchCursorPlanUsage({
     token: "ck-test",
@@ -955,4 +1014,30 @@ test("Available models chips do not ellipsis-clip Cursor Grok names", () => {
   const modelsGrid = css.slice(css.indexOf(".session-setup .setup-models"), css.indexOf(".session-setup .setup-models") + 160);
   assert.match(modelsGrid, /repeat\(2,/);
   assert.doesNotMatch(modelsGrid.split("}")[0] ?? "", /repeat\(3,/);
+});
+
+/*
+ * Switching a chat's model, mode, sandbox or network policy stops its running
+ * turn, so the next one runs on what the person just chose. Four of those
+ * switches carried their own copy of the vendor router, without a Cursor
+ * branch: a Cursor chat's stop went to the Grok host, which held no such
+ * session, and the Cursor run kept writing under the access just taken away.
+ * The store's callbacks only run inside React, so this reads them as text.
+ */
+test("every vendor stop in the store goes through the one router that knows Cursor", () => {
+  const store = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
+  const router = store.slice(store.indexOf("function cancelVendorSession("));
+  const routerBody = router.slice(0, router.indexOf("\n}\n"));
+  assert.match(routerBody, /session\.provider === "cursor"\) void window\.workhorse\?\.cursorCancel\?\.\(session\.id\)/);
+  const stops = /window\.workhorse\?\.(?:grok|claude|codex|cursor|custom)Cancel\?\.\(/g;
+  assert.equal(
+    (store.match(stops) ?? []).length,
+    (routerBody.match(stops) ?? []).length,
+    "a vendor stop outside cancelVendorSession",
+  );
+  for (const name of ["setSessionModel", "setMode", "setSandbox", "setSecurityPolicy"]) {
+    const start = store.indexOf(`const ${name} = useCallback(`);
+    assert.ok(start >= 0, name);
+    assert.match(store.slice(start, store.indexOf("}, [", start)), /cancelVendorSession\(session\)/, name);
+  }
 });

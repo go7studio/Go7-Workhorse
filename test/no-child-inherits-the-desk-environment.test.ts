@@ -280,7 +280,8 @@ test("the two modules a test cannot load still pass a builder at every child", (
     /await run\("git", \["fetch", "origin", "--tags", "--force"\], root, 120_000, sourceEnv\)/,
     /await run\("git", \["merge", "--ff-only", tag\], root, 120_000, sourceEnv\)/,
     /await run\("git", \["checkout", tag\], root, 120_000, sourceEnv\)/,
-    /await run\(npm, \["install"\], root, 300_000, sourceEnv\)/,
+    // npm.cmd goes through cmd.exe on Windows; it still takes the git env.
+    /await run\(npm\.command, npm\.args, root, 300_000, sourceEnv\)/,
   ]) {
     assert.match(update, command);
   }

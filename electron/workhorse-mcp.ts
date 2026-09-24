@@ -74,9 +74,11 @@ import { probeCustomHttp } from "./custom-http";
 import { GROK_BOT_LEFTOVER_FILE, parseGrokBotPlanUsage } from "./custom-plan";
 import { isGrokBotUrl } from "../src/lib/custom-http-identity";
 import {
+  abandonInboxAsks,
   askViaInbox,
   interpretPeerAskHttp,
   isRetryablePeerAskTransport,
+  peerAskTimeoutMs,
   readBridgeRecord,
   type PeerAsk,
 } from "./peer-inbox";
@@ -117,6 +119,7 @@ import {
   type InboundLearningDraft,
 } from "../src/lib/learning-inbound";
 import { runGrokBotInboxCli } from "./grok-bot-inbox";
+import { atomicWriteJson } from "./state-persistence";
 import { watchWorkerCompletions } from "./link-watch";
 import type { WorkerRunRow } from "../src/lib/worker-settled";
 import { createFramedSender } from "../src/lib/link-notify";
@@ -1230,7 +1233,7 @@ function publicLocalHosts(discovery: LocalRuntimeDiscovery) {
 async function runtimeLinkHandshake(profile: ReturnType<typeof currentMcpProfile>) {
   const discovery = await discoverLocalRuntime(profile);
   const handshake = linkHandshake({
-    deskOnline: deskIsOnline(),
+    deskOnline: await deskAnswers(),
     ...(discovery ? { local: { tools: callableLocalToolNames(discovery, profile), hosts: publicLocalHosts(discovery) } } : {}),
   });
   const tools = handshake.tools.filter((tool) => isMcpToolAdvertised(profile, tool));
@@ -1349,6 +1352,9 @@ function emitInboundLearning(draft: InboundLearningDraft): void {
   }
 }
 
+/** How long past the desk's own bound this side keeps listening for its answer. */
+const BRIDGE_ANSWER_GRACE_MS = 5_000;
+
 async function postBridge(
   pathName: string,
   body: PeerAsk,
@@ -1363,36 +1369,43 @@ async function postBridge(
   const live = readBridgeRecord(process.env.WORKHORSE_STATE_PATH);
   const url = live?.url || process.env.WORKHORSE_BRIDGE_URL;
   const token = live?.token || process.env.WORKHORSE_BRIDGE_TOKEN;
-  const timeoutMs =
-    opts?.timeoutMs ??
-    (body.action === "await-agents"
-      ? body.wait === true
-        ? Math.max(30, Math.min(3_600, body.timeoutSeconds ?? 600)) * 1_000
-        : 15_000
-      : body.mode === "bots"
-        ? 45_000
-        : 10 * 60 * 1000);
+  // The desk's own bound plus a margin, so the desk's answer, its timeout
+  // included, reaches this side before this side stops listening. A flat ten
+  // minutes here gave up on a spawn the desk was still holding for thirty.
+  const timeoutMs = opts?.timeoutMs ?? peerAskTimeoutMs(body).timeoutMs + BRIDGE_ANSWER_GRACE_MS;
   const allowInbox = opts?.inbox !== false;
   if (url && token) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      let response: Response | null = null;
       try {
-        const response = await fetch(`${url.replace(/\/$/, "")}${pathName}`, {
+        response = await fetch(`${url.replace(/\/$/, "")}${pathName}`, {
           method: "POST",
           headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
           body: JSON.stringify(body),
           signal: controller.signal,
         });
+      } catch (error) {
+        // Our own wait ran out. The desk has held this request the whole time
+        // and may still be running it, so the inbox would run it a second time.
+        if (controller.signal.aborted) {
+          throw new Error(`Workhorse did not answer within ${Math.ceil(timeoutMs / 1_000)} s. The request was not sent again.`);
+        }
+        // Only a request that never reached the desk may try the inbox.
+        if (!allowInbox || !live?.inbox || !isRetryablePeerAskTransport(error)) throw error;
+      }
+      if (response) {
         const payload = (await response.json().catch(() => null)) as { text?: string; error?: string } | null;
         const outcome = interpretPeerAskHttp(response.status, payload);
         if (outcome.ok) return outcome.text;
+        // The desk answered, and its answer stands whatever words are in it. This
+        // used to fall into the transport test above, so a worker that failed
+        // with "fetch failed" read as a dropped socket and was spawned again.
         if (!outcome.retryable || !live?.inbox || !allowInbox) throw new Error(outcome.error);
-      } finally {
-        clearTimeout(timer);
       }
-    } catch (error) {
-      if (!allowInbox || !live?.inbox || !isRetryablePeerAskTransport(error)) throw error;
+    } finally {
+      clearTimeout(timer);
     }
   }
   if (!allowInbox || !live?.inbox) throw new Error("Workhorse bridge is not running");
@@ -1586,11 +1599,20 @@ function createWorkhorseProjectLocal(input: {
 }): string {
   const dest = process.env.WORKHORSE_STATE_PATH?.trim();
   if (!dest) throw new Error("Workhorse state is not available");
+  // Only a desk that has never saved starts from nothing. Any other failure to
+  // read, a torn or locked file included, used to start from `{}` too and write
+  // a desk holding one project over every chat the person had.
   let full: Record<string, unknown> = {};
+  let text: string | null = null;
   try {
-    full = JSON.parse(fs.readFileSync(dest, "utf8")) as Record<string, unknown>;
-  } catch {
-    full = {};
+    text = fs.readFileSync(dest, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+  if (text !== null) {
+    const parsed = JSON.parse(text) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("Workhorse state is not a desk");
+    full = parsed as Record<string, unknown>;
   }
   const projects = (Array.isArray(full.projects) ? full.projects : [])
     .map((item) => normalizeProject(item))
@@ -1607,8 +1629,9 @@ function createWorkhorseProjectLocal(input: {
     activeProjectId: applied.activeProjectId,
     ...(applied.activeSessionId ? { activeSessionId: applied.activeSessionId } : {}),
   };
-  fs.mkdirSync(path.dirname(dest), { recursive: true });
-  fs.writeFileSync(dest, JSON.stringify(next, null, 2), "utf8");
+  // Whole or not at all, the way the desk writes it: a helper stopped mid write
+  // must not leave a torn file where the desk's state was.
+  atomicWriteJson(dest, next);
   return JSON.stringify(
     {
       ...applied.result,
@@ -2879,15 +2902,65 @@ function linkReplayFingerprint(name: string, args: Record<string, unknown>): str
     .digest("hex");
 }
 
+/**
+ * Whether there is a desk address to try. A read tries it and falls back to
+ * the file on any failure, so this only saves a doomed request; it does not
+ * say the desk is up. `deskAnswers` does.
+ */
 function deskIsOnline(): boolean {
   if (deskAsk) return true;
   const live = readBridgeRecord(process.env.WORKHORSE_STATE_PATH);
   return Boolean(live?.url || process.env.WORKHORSE_BRIDGE_URL);
 }
 
+/** How long the capabilities handshake waits on a desk before calling it offline. */
+const DESK_PING_TIMEOUT_MS = 1_000;
+
+/**
+ * Whether a desk answers right now. The bridge record outlives the desk that
+ * wrote it, so reading its presence told every harness the desk was online on
+ * every day after the first launch, closed or not. This asks the bridge's own
+ * ping route, which answers only a caller holding the token.
+ */
+async function deskAnswers(): Promise<boolean> {
+  if (deskAsk) return true;
+  const live = readBridgeRecord(process.env.WORKHORSE_STATE_PATH);
+  const url = live?.url || process.env.WORKHORSE_BRIDGE_URL;
+  const token = live?.token || process.env.WORKHORSE_BRIDGE_TOKEN;
+  if (!url || !token) return false;
+  try {
+    const response = await fetch(`${url.replace(/\/$/, "")}/link/ping`, {
+      headers: { authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(DESK_PING_TIMEOUT_MS),
+    });
+    const payload = (await response.json().catch(() => null)) as { ok?: unknown } | null;
+    return response.ok && payload?.ok === true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * A worker or an auditor acts as itself and no one else.
+ *
+ * Its tools are chosen from its own row, but every door that takes a parent
+ * read `fromSessionId` from the call. A worker that had spent its one helper
+ * named its parent chat there instead and got a root spawn: no depth cap, no
+ * helper cap, its own timeout, and the seat of the chat it named. Link names a
+ * parent on purpose and keeps doing so; this is only the desk's own children.
+ */
+function assertActsAsItself(profile: ReturnType<typeof currentMcpProfile>, args: Record<string, unknown>, from?: string): void {
+  if (profile !== "worker" && profile !== "auditor") return;
+  const named = typeof args.fromSessionId === "string" ? args.fromSessionId.trim() : "";
+  if (named && named !== fromSessionId(from)) {
+    throw new Error("fromSessionId names another chat. A worker or auditor acts only as itself; leave fromSessionId unset.");
+  }
+}
+
 async function callTool(name: string, args: Record<string, unknown>, from?: string): Promise<string> {
   const profile = profileForCaller(currentMcpProfile(), deskRoleOf(callerSession(from)));
   assertMcpToolAllowed(profile, name);
+  assertActsAsItself(profile, args, from);
   if (name === "workhorse_capabilities") {
     return JSON.stringify(await runtimeLinkHandshake(profile), null, 2);
   }
@@ -3862,7 +3935,15 @@ export async function handleWorkhorseRpc(
       currentMcpProfile(),
       deskRoleOf(runWithLinkState(callerState, () => callerSession(ctx?.fromSessionId))),
     );
-    const localDiscovery = await discoverLocalRuntime(profile);
+    // A local host this helper cannot read is a host it does not list. A bad
+    // host setting used to throw out of here, and with nothing to catch it the
+    // helper died with this and every other request unanswered.
+    let localDiscovery: LocalRuntimeDiscovery | null = null;
+    try {
+      localDiscovery = await discoverLocalRuntime(profile);
+    } catch {
+      localDiscovery = null;
+    }
     const capabilityIds = localDiscovery?.capabilityIds ?? new Set<string>();
     const listed = TOOLS.filter((tool) =>
       isMcpToolAdvertised(profile, tool.name) &&
@@ -3980,6 +4061,21 @@ async function onMessage(message: JsonRpc, framing: McpFraming): Promise<void> {
   if (response) process.stdout.write(encodeMcpFrame(response, framing));
 }
 
+/**
+ * What a request that threw gets instead of silence. A throw out of the
+ * handler was an unhandled rejection, which ends a Node process: the host lost
+ * the helper and every request it had in flight. A notification has no id and
+ * gets nothing, as JSON-RPC says.
+ */
+export function rpcFailureFrame(message: JsonRpc, error: unknown): object | undefined {
+  if (message.id === undefined) return undefined;
+  return {
+    jsonrpc: "2.0",
+    id: message.id,
+    error: { code: -32603, message: error instanceof Error ? error.message : String(error) },
+  };
+}
+
 export async function runWorkhorseMcp(): Promise<void> {
   let buffer: Buffer<ArrayBufferLike> = Buffer.alloc(0);
   // The desk cannot write to this stdout — the host spawned this helper, not
@@ -4014,7 +4110,10 @@ export async function runWorkhorseMcp(): Promise<void> {
     buffer = parsed.rest;
     for (const frame of parsed.frames) {
       sender.framingIs(frame.framing);
-      void onMessage(frame.message, frame.framing);
+      void onMessage(frame.message, frame.framing).catch((error: unknown) => {
+        const failure = rpcFailureFrame(frame.message, error);
+        if (failure) process.stdout.write(encodeMcpFrame(failure, frame.framing));
+      });
     }
   });
   process.stdin.resume();
@@ -4319,6 +4418,9 @@ export async function runLinkCli(argv: string[]): Promise<number> {
 }
 
 if (isMcpEntry()) {
+  // A host that closes stdin gets an immediate exit, which skipped the wait's
+  // own cleanup. Whatever this helper still had in the inbox goes with it.
+  process.once("exit", abandonInboxAsks);
   const linkAt = process.argv.indexOf("link");
   if (linkAt > 1) {
     void runLinkCli(process.argv.slice(linkAt + 1)).then((code) => process.exit(code));

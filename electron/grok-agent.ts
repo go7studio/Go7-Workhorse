@@ -1,5 +1,6 @@
 import { spawnCwd } from "./spawn-cwd";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { groupSpawnOptions, sessionIdFromSpec, stopProcessGroup, trackProcessGroup } from "./process-registry";
 import fs from "node:fs";
 import os from "node:os";
@@ -432,6 +433,9 @@ type Pending = {
   resolve: (value: Record<string, unknown>) => void;
   reject: (error: Error) => void;
 };
+
+/** How much of a vendor's stderr the agent keeps to explain an exit. */
+export const STDERR_TAIL_CHARS = 4_000;
 
 function resolveGrokBinary(): string {
   if (process.env.GROK_BIN && process.env.GROK_BIN.trim()) return process.env.GROK_BIN.trim();
@@ -1108,6 +1112,14 @@ export class GrokAgent {
   private stderr = "";
   private pending = new Map<JsonRpcId, Pending>();
   private permissionWaiters = new Map<string, (answer: PermissionAnswer) => void>();
+  /**
+   * What makes this agent's permission asks its own. Every vendor numbers its
+   * requests from 0 in each process, and the desk used that number as the ask's
+   * id, so two chats waiting at once both held "0": the host answered whichever
+   * slot it found first, and approving one chat's `ls` approved the other
+   * chat's `rm -rf`. The vendor still gets its own id back in the reply.
+   */
+  private readonly askTag = `acp-${randomUUID()}`;
   private handlers: GrokAgentHandlers = {};
   private closed = false;
   private promptTail: Promise<unknown> = Promise.resolve();
@@ -1134,7 +1146,9 @@ export class GrokAgent {
     child.stderr.setEncoding("utf8");
     child.stdout.on("data", (chunk: string) => this.onStdout(chunk));
     child.stderr.on("data", (chunk: string) => {
-      this.stderr += chunk;
+      // The tail is what explains an exit. The whole of it grew for as long as
+      // the chat stayed open, and was pasted entire into the exit's error.
+      this.stderr = `${this.stderr}${chunk}`.slice(-STDERR_TAIL_CHARS);
     });
     child.on("error", (error) => {
       if (this.closed) return;
@@ -1150,19 +1164,28 @@ export class GrokAgent {
     const initialize = await this.request("initialize", this.spec.initializeParams);
     const wanted = options?.vendorSessionId?.trim();
     if (wanted) {
+      let loaded: Record<string, unknown> | undefined;
       try {
-        const loaded = await this.request("session/load", {
+        loaded = await this.request("session/load", {
           sessionId: wanted,
           cwd: this.spec.sessionParams.cwd,
           mcpServers: this.spec.sessionParams.mcpServers,
           ...(this.spec.sessionParams._meta ? { _meta: this.spec.sessionParams._meta } : {}),
         });
+      } catch {
+        // missing or failed load → create a new vendor session
+      }
+      if (loaded) {
         const sessionId = typeof loaded.sessionId === "string" && loaded.sessionId ? loaded.sessionId : wanted;
         this.sessionId = sessionId;
         this.opened = "session/load";
+        // A reopened chat keeps the effort, Fast, persona and model it picked.
+        // These ride on config options, which a load answers with just as a new
+        // session does, and only this call sets them: a desk restart used to put
+        // every loaded chat back on the vendor's default effort, and let a typed
+        // model the vendor refuses run on whatever it fell back to.
+        await this.applySessionConfig(sessionId, loaded);
         return { initialize, sessionNew: loaded, sessionId, opened: "session/load" };
-      } catch {
-        // missing or failed load → create a new vendor session
       }
     }
     let sessionNew: Record<string, unknown>;
@@ -1449,18 +1472,11 @@ export class GrokAgent {
   cancel(): void {
     if (!this.sessionId) return;
     this.notify("session/cancel", { sessionId: this.sessionId });
-    for (const [id, waiter] of this.permissionWaiters) {
-      waiter("deny");
-      this.permissionWaiters.delete(id);
-    }
+    this.denyWaitingAsks();
   }
 
   dispose(): void {
     this.closed = true;
-    for (const [id, waiter] of this.permissionWaiters) {
-      waiter("deny");
-      this.permissionWaiters.delete(id);
-    }
     this.failAll(new Error(`${this.who} agent disposed`));
     // The group, never the pid. `child.kill()` stopped the CLI and left every
     // shell the CLI had started running — that is how 28 spinners outlived
@@ -1599,17 +1615,18 @@ export class GrokAgent {
       return;
     }
     if (message.method !== "session/request_permission") {
+      // An error reply carries no `result`. With both, the ACP SDK read the
+      // answer as a malformed response (-32600) instead of "method not found".
       this.write({
         jsonrpc: "2.0",
         id,
-        result: null,
         error: { code: -32601, message: `Unsupported method ${message.method}` },
       });
       return;
     }
     const params = asRecord(message.params);
     const options = Array.isArray(params.options) ? (params.options as Array<{ optionId?: string; kind?: string }>) : [];
-    const requestId = String(id);
+    const requestId = `${this.askTag}:${String(id)}`;
     const ask: GrokPermissionAsk = {
       requestId,
       tool: toolTitle(params),
@@ -1635,5 +1652,15 @@ export class GrokAgent {
   private failAll(error: Error): void {
     for (const pending of this.pending.values()) pending.reject(error);
     this.pending.clear();
+    // A vendor that died holding a permission ask left it waiting forever: the
+    // handler never finished and the ask stayed answerable, for no one.
+    this.denyWaitingAsks();
+  }
+
+  private denyWaitingAsks(): void {
+    for (const [id, waiter] of this.permissionWaiters) {
+      waiter("deny");
+      this.permissionWaiters.delete(id);
+    }
   }
 }

@@ -10,6 +10,7 @@ import {
   readComposerDraftFile,
   readStringMapFile,
   readVersionedState,
+  setAsideNewerState,
   writeComposerDraftFile,
   writeStringMapFile,
   writeVersionedState,
@@ -46,6 +47,32 @@ test("state reader falls back through backups after corruption", () => {
   assert.equal(result.recovered, true);
   assert.equal((result.state.sessions as Array<{ id: string }>)[0]?.id, "recovered");
   assert.equal(result.state.stateVersion, CURRENT_STATE_VERSION);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("a state file a newer Workhorse wrote is kept aside, never written over", () => {
+  // Going back a version read the newer file as a torn one, loaded the older
+  // backup, and the recovery wrote that backup over the live file: everything
+  // done since the upgrade gone, and no copy kept.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "workhorse-newer-"));
+  const file = path.join(dir, "state.json");
+  fs.writeFileSync(file, JSON.stringify({ stateVersion: CURRENT_STATE_VERSION + 1, sessions: [{ id: "since the upgrade" }] }), "utf8");
+  fs.writeFileSync(`${file}.bak`, JSON.stringify({ stateVersion: CURRENT_STATE_VERSION, sessions: [{ id: "before it" }] }), "utf8");
+
+  const read = readVersionedState(file);
+  assert.equal(read.source, `${file}.bak`);
+  assert.deepEqual(read.newer, [{ file, version: CURRENT_STATE_VERSION + 1 }]);
+  const kept = setAsideNewerState(read, 1_234);
+  // The recovery write main makes next, exactly as it makes it.
+  writeVersionedState(file, read.state, (state) => state, { rotateBackups: false, fsync: true });
+
+  assert.deepEqual(kept, [`${file}.newer-v${CURRENT_STATE_VERSION + 1}-1234`]);
+  assert.equal(JSON.parse(fs.readFileSync(kept[0], "utf8")).sessions[0].id, "since the upgrade");
+  assert.equal(JSON.parse(fs.readFileSync(file, "utf8")).sessions[0].id, "before it");
+  const main = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "electron", "main.ts"), "utf8");
+  const load = main.slice(main.indexOf("function readStateInner"));
+  assert.ok(load.indexOf("setAsideNewerState(result)") > 0, "main sets newer state aside when it reads");
+  assert.ok(load.indexOf("setAsideNewerState(result)") < load.indexOf("writeVersionedState("), "and before it writes anything");
   fs.rmSync(dir, { recursive: true, force: true });
 });
 

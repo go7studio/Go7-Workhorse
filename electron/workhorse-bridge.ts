@@ -1,6 +1,7 @@
 import http from "node:http";
 import crypto from "node:crypto";
-import { LINK_CHATS_MAX_BYTES, LINK_READ_MAX_BYTES, parseLinkReadPath } from "../src/lib/link-read";
+import { LINK_CHATS_MAX_BYTES, LINK_READ_MAX_BYTES, parseLinkReadPath, type LinkReadRequest } from "../src/lib/link-read";
+import { authorizationBearer, tokensMatch } from "../src/lib/grok-bot-shim";
 import type { PeerAsk, PeerAskResult } from "./peer-inbox";
 
 export type { PeerAsk, PeerAskResult };
@@ -19,14 +20,31 @@ export function bridgeReplyTooLarge(bytes: number, max = BRIDGE_MAX_REPLY_BYTES)
   return { error: `Workhorse bridge reply is ${bytes} bytes, over the ${max} byte bound. Ask for a smaller slice.` };
 }
 
-export async function startWorkhorseBridge(handler: (ask: PeerAsk) => Promise<PeerAskResult>): Promise<{
+/**
+ * Bounds on the socket, not on the work. A request has to arrive promptly; its
+ * answer may take as long as the desk's longest wait, an hour for an awaited
+ * spawn, and a minute past that. Without them a request that never got an
+ * answer held its socket open for as long as the desk ran.
+ */
+export const BRIDGE_REQUEST_TIMEOUT_MS = 30_000;
+export const BRIDGE_IDLE_SOCKET_MS = (3_600 + 60) * 1_000;
+
+export async function startWorkhorseBridge(
+  handler: (ask: PeerAsk) => Promise<PeerAskResult>,
+  bounds: { requestTimeoutMs?: number; idleSocketMs?: number } = {},
+): Promise<{
   url: string;
   token: string;
   close: () => void;
 }> {
   const token = crypto.randomBytes(16).toString("hex");
   const inflight = new Set<string>();
-  const server = http.createServer((req, res) => {
+  const requestTimeout = bounds.requestTimeoutMs ?? BRIDGE_REQUEST_TIMEOUT_MS;
+  const server = http.createServer({
+    requestTimeout,
+    headersTimeout: requestTimeout,
+    connectionsCheckingInterval: Math.min(30_000, requestTimeout),
+  }, (req, res) => {
     const pathName = req.url?.split("?")[0] ?? "";
     /**
      * Every answer goes out through here so no route can hand a helper an
@@ -44,14 +62,36 @@ export async function startWorkhorseBridge(handler: (ask: PeerAsk) => Promise<Pe
       res.writeHead(status, { "content-type": "application/json" });
       res.end(body);
     };
-    const readRequest = req.method === "GET" ? parseLinkReadPath(req.url ?? "") : null;
-    if (!readRequest && (req.method !== "POST" || (pathName !== "/ask" && pathName !== "/spawn" && pathName !== "/bots"))) {
+    const read = req.method === "GET" && pathName.startsWith("/link/");
+    if (!read && (req.method !== "POST" || (pathName !== "/ask" && pathName !== "/spawn" && pathName !== "/bots"))) {
       send(404, { error: "not found" });
       return;
     }
-    if (req.headers.authorization !== `Bearer ${token}`) {
+    // The token is checked before anything the caller sent is parsed. The read
+    // path used to be decoded first, so `/link/chat/%E0` from anyone on this
+    // machine threw inside the handler and left the socket open with no reply.
+    if (!tokensMatch(token, authorizationBearer(req.headers.authorization))) {
       send(401, { error: "unauthorized" });
       return;
+    }
+    // Liveness, for a helper that holds a record of this bridge and needs to
+    // know whether the desk that wrote it is still here. Nothing is asked of it.
+    if (read && pathName === "/link/ping") {
+      send(200, { ok: true });
+      return;
+    }
+    let readRequest: LinkReadRequest | null = null;
+    if (read) {
+      try {
+        readRequest = parseLinkReadPath(req.url ?? "");
+      } catch {
+        send(400, { error: "the read path is not valid URL encoding" });
+        return;
+      }
+      if (!readRequest) {
+        send(404, { error: "not found" });
+        return;
+      }
     }
     if (readRequest) {
       const from = new URLSearchParams(req.url?.split("?")[1] ?? "").get("from") ?? "";
@@ -183,6 +223,7 @@ export async function startWorkhorseBridge(handler: (ask: PeerAsk) => Promise<Pe
       })();
     });
   });
+  server.setTimeout(bounds.idleSocketMs ?? BRIDGE_IDLE_SOCKET_MS);
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
     server.listen(0, "127.0.0.1", () => resolve());

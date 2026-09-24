@@ -4,6 +4,7 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import {
+  applyAuditorWaveAdmission,
   applyPlanAuditorSpawn,
   auditorEvidenceFromReport,
   joinAndAdmit,
@@ -115,6 +116,24 @@ test("pickAuditorVendor skips builder vendors and spent rows", () => {
   );
   assert.deepEqual(pick, { provider: "grok", model: "grok-4.6" });
   assert.equal(pickAuditorVendor([{ provider: "codex" }], [{ provider: "codex", canCall: true }]), null);
+});
+
+test("the auditor seat never goes to Grok Bot, by model or by name", () => {
+  // A desk with Grok and the Grok Bot preset connected: the builders ran on
+  // Grok, so the first unused callable row was the bot, and the auditor — a
+  // worker seat AGENTS.md keeps off grok-bot — was handed to it.
+  const grokBot = { provider: "custom" as const, canCall: true, kind: "custom" as const, id: "bot:bot_gb", model: "grok-bot", name: "Grok Bot" };
+  assert.equal(pickAuditorVendor([{ provider: "grok" }], [{ provider: "grok", canCall: true }, grokBot]), null);
+  assert.equal(
+    pickAuditorVendor([{ provider: "grok" }], [{ ...grokBot, model: "grok-bot-2" }]),
+    null,
+    "a Grok Bot slot serving another model id is still the bot",
+  );
+  // Any other custom bot can still audit.
+  assert.deepEqual(
+    pickAuditorVendor([{ provider: "grok" }], [grokBot, { ...grokBot, id: "bot:bot_kimi", model: "kimi-k3", name: "Kimi" }]),
+    { provider: "custom", model: "kimi-k3", customBotId: "bot_kimi" },
+  );
 });
 
 test("builder wave join spawns a sibling auditor on a different vendor; the parent still joins", () => {
@@ -376,4 +395,121 @@ test("a spawn onto a folder that is gone is refused at both doors", () => {
   assert.ok(block, "the store still admits spawns through admitSpawn");
   assert.match(block![0], /allowNested: isNested,/);
   assert.match(block![0], /\bfolderExists,/, "the store passes its own folderExists to admitSpawn");
+});
+
+/** A finished auditor whose receipt says pass or fail, started at `startedAt`. */
+function auditorAt(id: string, startedAt: number, status: "pass" | "fail", head = HEAD): Session {
+  return parent({
+    id,
+    parentId: "sess_parent",
+    hidden: true,
+    provider: "grok",
+    sandbox: "read-only",
+    agentRun: { status: "completed", startedAt, finishedAt: startedAt + 1, isolation: "shared", seed: "fresh", role: "auditor" },
+    messages: [{
+      id: `${id}_report`,
+      role: "assistant",
+      text: `HEAD: ${head}\nGATE: npm test\nLAST: tests ${status === "pass" ? "1 passed" : "1 failed"}\nSTATUS: ${status}\n`,
+      createdAt: startedAt + 1,
+    }],
+  });
+}
+
+/** Two independent builder steps under one gate, both assigned in turn. */
+function twoStepPlan(): { plan: PlanRun; first: string; second: string } {
+  let plan = parseMarkdownPlan({
+    markdown: "### Task 1: Add\n### Task 2: Wire\nNamed test gate: `npm test`\n",
+    now: 1,
+    id: "plan_two",
+  });
+  plan = planOf(startPlanRun(planOf(approvePlanRun(plan, 2)), 3));
+  const [first, second] = plan.steps.map((step) => step.id) as [string, string];
+  return { plan, first, second };
+}
+
+function assignRunning(plan: PlanRun, stepId: string, sessionId: string, at: number): PlanRun {
+  const assigned = planOf(assignPlanStep(plan, stepId, {
+    sessionId,
+    provider: "codex",
+    model: "gpt-5.4",
+    rationale: "builder slice",
+    skills: [],
+    tools: [],
+    constraints: [],
+  }, at));
+  return planOf(setPlanStepStatus(assigned, stepId, "running", { now: at + 1 }));
+}
+
+function builderAt(id: string, startedAt: number): Session {
+  const row = builder(id);
+  return { ...row, agentRun: { ...row.agentRun!, startedAt, finishedAt: startedAt + 5 } };
+}
+
+test("an earlier wave's auditor pass cannot admit a later step its own auditor failed", () => {
+  const { plan: started, first, second } = twoStepPlan();
+  const b1 = builderAt("sess_b1", 4);
+  const a1 = auditorAt("sess_a1", 10, "pass");
+  let plan = assignRunning(started, first, "sess_b1", 4);
+  let sessions = applyAuditorWaveAdmission([parent({ planRun: plan }), b1, a1], "sess_parent", 12);
+  plan = sessions.find((session) => session.id === "sess_parent")!.planRun!;
+  assert.equal(plan.steps.find((step) => step.id === first)?.status, "completed", "precondition: wave one admitted");
+
+  // Wave two: a new builder, then a new auditor whose gate fails. Wave one's
+  // auditor is still a finished child of this parent, and it used to be read
+  // first and complete the step on its old pass.
+  plan = assignRunning(plan, second, "sess_b2", 20);
+  const b2 = builderAt("sess_b2", 20);
+  const a2 = auditorAt("sess_a2", 30, "fail", "fedcba9876543210fedcba9876543210fedcba98");
+  sessions = applyAuditorWaveAdmission([parent({ planRun: plan }), b1, b2, a1, a2], "sess_parent", 40);
+  const after = sessions.find((session) => session.id === "sess_parent")!.planRun!;
+  const step = after.steps.find((item) => item.id === second)!;
+  assert.equal(step.status, "failed", "the step's own auditor failed it");
+  assert.equal(step.evidence.some((row) => row.sessionId === "sess_a1"), false, "wave one's receipt is not evidence for wave two");
+  assert.equal(after.steps.find((item) => item.id === first)?.status, "completed", "wave one stays admitted");
+});
+
+test("an auditor that finished beside its builders is admitted, not replaced by another auditor", () => {
+  // The parent was still talking when the builder finished, so the join did
+  // not reset the lineup and the auditor's row was appended beside the
+  // builder's. Every settle then read that builder as unaudited and spawned
+  // another auditor, and the one that had reported was never admitted.
+  const { plan: started, first } = twoStepPlan();
+  const plan = assignRunning(started, first, "sess_b1", 4);
+  let lineup = addLineupRow(emptyLineup("/repo", 4), {
+    childId: "sess_b1", title: "Wren", slice: "add", folder: "/repo", vendor: "codex", status: "completed", startedAt: 4, finishedAt: 9,
+  });
+  lineup = addLineupRow(lineup, {
+    childId: "sess_a1", title: "Piper", slice: "Plan admission", folder: "/repo", vendor: "grok", status: "completed", startedAt: 10, finishedAt: 11,
+  });
+  const orch = parent({ status: "running", planRun: plan, lineup });
+  const result = applyPlanAuditorSpawn(
+    [orch, builderAt("sess_b1", 4), auditorAt("sess_a1", 10, "fail")],
+    "sess_parent",
+    [{ provider: "grok", canCall: true }, { provider: "claude", canCall: true }],
+    { childId: "sess_again", now: 12 },
+  );
+  assert.equal(result.auditor, undefined, "no second auditor for work already audited");
+  assert.equal(result.sessions.some((session) => session.id === "sess_again"), false);
+  const step = result.sessions.find((session) => session.id === "sess_parent")!.planRun!.steps.find((item) => item.id === first);
+  assert.equal(step?.status, "failed", "the auditor that reported is the one admitted");
+});
+
+test("a builder that started after the lineup's auditor still gets an auditor of its own", () => {
+  const { plan: started, second } = twoStepPlan();
+  const plan = assignRunning(started, second, "sess_b2", 20);
+  let lineup = addLineupRow(emptyLineup("/repo", 10), {
+    childId: "sess_a1", title: "Piper", slice: "Plan admission", folder: "/repo", vendor: "grok", status: "completed", startedAt: 10, finishedAt: 11,
+  });
+  lineup = addLineupRow(lineup, {
+    childId: "sess_b2", title: "Dexter", slice: "wire", folder: "/repo", vendor: "codex", status: "completed", startedAt: 20, finishedAt: 25,
+  });
+  const result = applyPlanAuditorSpawn(
+    [parent({ status: "running", planRun: plan, lineup }), builderAt("sess_b2", 20), auditorAt("sess_a1", 10, "pass")],
+    "sess_parent",
+    [{ provider: "grok", canCall: true }],
+    { childId: "sess_a2", now: 30 },
+  );
+  assert.equal(result.auditor?.id, "sess_a2", "the old auditor did not see this builder's work");
+  const step = result.sessions.find((session) => session.id === "sess_parent")!.planRun!.steps.find((item) => item.id === second);
+  assert.equal(step?.status, "running", "and its old pass does not admit it");
 });

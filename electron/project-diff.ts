@@ -19,6 +19,7 @@ export function projectGitEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.Pro
 import { sameEditPath, stripPathSizeSuffix } from "../src/lib/project-edits";
 import {
   countCreatedReview,
+  INSTANCE_MAX_CHARS,
   instancePathKey,
   rememberInstance,
   reviewCreatedDiff,
@@ -153,6 +154,10 @@ export function readGitHead(cwd: string): string {
 /** Repo-relative changes, optionally including commits made after `baseRef`. */
 export function listGitChanges(cwd: string, baseRef?: string): GitChange[] {
   if (!isAbsolutePath(cwd) || !fs.existsSync(cwd)) return [];
+  // The base is the commit a worker started from, as `readGitHead` names it.
+  // It arrives over IPC and goes to `git diff` ahead of `--`, where anything
+  // else, `--output=<file>` among it, is an option.
+  if (typeof baseRef === "string" && baseRef.trim() && !/^[0-9a-f]{7,64}$/i.test(baseRef.trim())) return [];
   try {
     const root = execFileSync("git", ["-C", cwd, "rev-parse", "--show-toplevel"], {
       encoding: "utf8",
@@ -202,14 +207,11 @@ export function listGitChanges(cwd: string, baseRef?: string): GitChange[] {
       for (let index = 0; index < fields.length; index += 1) {
         const row = fields[index]!;
         const status = row.slice(0, 2);
-        let relative = row.slice(3);
-        if (/[RC]/.test(status)) {
-          const renamed = fields[index + 1];
-          if (renamed) {
-            relative = fs.existsSync(path.resolve(root, renamed)) ? renamed : relative;
-            index += 1;
-          }
-        }
+        const relative = row.slice(3);
+        // `-z` writes a rename as the new path, then the old one. Taking the
+        // old name whenever it existed on disk dropped the renamed file when a
+        // new file took its old name.
+        if (/[RC]/.test(status) && fields[index + 1]) index += 1;
         changes.push({ path: relative.replaceAll("\\", "/"), status: status.trim() || "M" });
       }
     }
@@ -485,6 +487,8 @@ export function recordFileInstance(filePath: string, roots: string[] = [], input
   if (!abs) return "";
   let text = "";
   try {
+    // A file the review would not keep is not read whole to find that out.
+    if (!input.readFile && fs.statSync(abs).size > INSTANCE_MAX_CHARS * 4) return "";
     text = existsSync(abs) ? readFile(abs) : "";
   } catch {
     text = "";

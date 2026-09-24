@@ -6,7 +6,6 @@ import { groupSpawnOptions, stopProcessGroup, trackProcessGroup } from "./proces
 import { permissionPolicyAnswer, looksLikeWriteTool, autoAllowPermission, type PermissionAnswer } from "../src/lib/permissions";
 import {
   deskRoleOf,
-  isWorkerOmittedTool,
   toolsForDeskRole,
   workerOmittedToolError,
   type DeskRole,
@@ -30,6 +29,35 @@ export type CustomToolResult = {
 
 export const MAX_CUSTOM_TOOL_RESULT_CHARS = 64_000;
 
+/*
+ * A cut measured in UTF-16 units can land between the two halves of an emoji
+ * and leave one half behind. JSON carries it as a lone \ud83c escape, and a
+ * host that requires well-formed text rejects the whole request — then every
+ * later request in the turn, since the transcript still holds it.
+ */
+function highSurrogate(code: number): boolean {
+  return code >= 0xd800 && code <= 0xdbff;
+}
+
+function lowSurrogate(code: number): boolean {
+  return code >= 0xdc00 && code <= 0xdfff;
+}
+
+/** At most `max` units from the start, never ending on half a character. */
+export function headWithoutSplit(text: string, max: number): string {
+  if (max <= 0) return "";
+  if (text.length <= max) return text;
+  return text.slice(0, highSurrogate(text.charCodeAt(max - 1)) ? max - 1 : max);
+}
+
+/** At most `max` units from the end, never starting on half a character. */
+export function tailWithoutSplit(text: string, max: number): string {
+  if (max <= 0) return "";
+  if (text.length <= max) return text;
+  const start = text.length - max;
+  return text.slice(lowSurrogate(text.charCodeAt(start)) ? start + 1 : start);
+}
+
 export function limitCustomToolResult(
   result: CustomToolResult,
   maxChars = MAX_CUSTOM_TOOL_RESULT_CHARS,
@@ -41,7 +69,7 @@ export function limitCustomToolResult(
   const tail = available - head;
   return {
     ...result,
-    content: `${result.content.slice(0, head)}${marker}${tail > 0 ? result.content.slice(-tail) : ""}`,
+    content: `${headWithoutSplit(result.content, head)}${marker}${tailWithoutSplit(result.content, tail)}`,
   };
 }
 
@@ -373,6 +401,21 @@ const DESK_TOOLS: { name: string; description: string; input_schema: Record<stri
   },
 ];
 
+/**
+ * Whether this role's catalog carried the tool. The catalog is the offer, and a
+ * name from outside it is refused rather than run: only a worker's omissions
+ * used to be checked, so an auditor or helper that guessed `write_file`, or
+ * named an MCP tool it was never shown, had the call executed anyway.
+ */
+export function customToolOffered(name: string, role: DeskRole): boolean {
+  return toolsForDeskRole([{ name }], role).length > 0;
+}
+
+export function customToolNotOffered(name: string, role: DeskRole): string {
+  if (role === "worker") return workerOmittedToolError(name);
+  return `This ${role} was not offered ${name}. Use only the tools listed for this turn.`;
+}
+
 export function isFanOutDeskTool(name: string): boolean {
   const key = normalizeCustomToolName(name);
   return key === "workhorse_spawn_agent";
@@ -575,19 +618,65 @@ export function parseOpenAiToolCall(raw: unknown): CustomToolUse | null {
  * A write target usually does not exist yet, so resolve the nearest ancestor
  * that does and keep the remainder: a new file cannot be contained by a
  * directory that is itself a link out.
+ *
+ * "Does not exist" has to mean nothing is there. A link whose target is
+ * missing fails to resolve too, and walking up past it measured the folder the
+ * link sits in — so `notes.txt -> ../../.zshenv` read as inside, and the write
+ * followed the link and created the file out there. An entry that is present
+ * but will not resolve is refused instead.
  */
-function realPathOrNearest(target: string, realpath: (value: string) => string): string {
+function realPathOrNearest(
+  target: string,
+  realpath: (value: string) => string,
+  lstat: (value: string) => unknown,
+): string {
   const tail: string[] = [];
   let current = path.normalize(target);
   for (;;) {
     try {
       return tail.length === 0 ? realpath(current) : path.join(realpath(current), ...tail.slice().reverse());
     } catch {
+      let present = true;
+      try {
+        lstat(current);
+      } catch {
+        present = false;
+      }
+      if (present) throw new Error(`Path is a link that does not resolve: ${current}`);
       const parent = path.dirname(current);
       if (parent === current) return path.normalize(target);
       tail.push(path.basename(current));
       current = parent;
     }
+  }
+}
+
+/**
+ * A contained write opens the file without following a link at the last step.
+ * The containment check measured the path a moment earlier; a link planted
+ * there in between would otherwise carry the write wherever it points. A link
+ * that was already there has been measured, so it is resolved first and the
+ * file it names is the one opened. Windows has no O_NOFOLLOW, so there the
+ * plain write stands.
+ */
+function writeWithoutFollowing(filePath: string, content: string): void {
+  const noFollow = fs.constants.O_NOFOLLOW;
+  if (typeof noFollow !== "number") {
+    fs.writeFileSync(filePath, content, "utf8");
+    return;
+  }
+  let target = filePath;
+  try {
+    if (fs.lstatSync(filePath).isSymbolicLink()) target = fs.realpathSync(filePath);
+  } catch {
+    // Nothing there yet: the open below creates it.
+  }
+  const { O_WRONLY, O_CREAT, O_TRUNC } = fs.constants;
+  const handle = fs.openSync(target, O_WRONLY | O_CREAT | O_TRUNC | noFollow, 0o666);
+  try {
+    fs.writeFileSync(handle, content, "utf8");
+  } finally {
+    fs.closeSync(handle);
   }
 }
 
@@ -601,17 +690,18 @@ export function resolveWorkspacePath(
   cwd: string,
   folders: string[],
   sandbox: SandboxProfile,
-  options?: { realpath?: (value: string) => string; platform?: NodeJS.Platform },
+  options?: { realpath?: (value: string) => string; lstat?: (value: string) => unknown; platform?: NodeJS.Platform },
 ): string {
   const base = cwd.trim() || process.cwd();
   const raw = (requested ?? "").trim() || base;
   const abs = path.normalize(path.isAbsolute(raw) ? raw : path.join(base, raw));
   if (sandbox === "off") return abs;
   const realpath = options?.realpath ?? ((value: string) => fs.realpathSync(value));
+  const lstat = options?.lstat ?? ((value: string) => fs.lstatSync(value));
   const platform = options?.platform ?? process.platform;
-  const real = samePathCase(realPathOrNearest(abs, realpath), platform);
+  const real = samePathCase(realPathOrNearest(abs, realpath, lstat), platform);
   const roots = [base, ...folders.map((item) => item.trim()).filter(Boolean)]
-    .map((item) => samePathCase(realPathOrNearest(path.normalize(item), realpath), platform));
+    .map((item) => samePathCase(realPathOrNearest(path.normalize(item), realpath, lstat), platform));
   const allowed = roots.some((root) => real === root || real.startsWith(`${root}${path.sep}`));
   if (!allowed) throw new Error(`Path is outside the workspace: ${abs}`);
   return abs;
@@ -627,8 +717,8 @@ export async function executeCustomTool(
   const sandbox = policy.sandbox ?? "off";
   const role = policy.role ?? deskRoleOf({ parentId: policy.parentId, hidden: policy.hidden });
   try {
-    if (role === "worker" && isWorkerOmittedTool(name)) {
-      return { id: use.id, name, content: workerOmittedToolError(name), isError: true };
+    if (!customToolOffered(name, role)) {
+      return { id: use.id, name, content: customToolNotOffered(name, role), isError: true };
     }
     if (name === "workhorse_list_tools") {
       return {
@@ -666,13 +756,14 @@ export async function executeCustomTool(
       const filePath = resolveWorkspacePath(typeof use.input.path === "string" ? use.input.path : "", cwd, folders, sandbox);
       const limit = typeof use.input.limit === "number" && use.input.limit > 0 ? Math.round(use.input.limit) : 80_000;
       const text = fs.readFileSync(filePath, "utf8");
-      return { id: use.id, name, content: text.length > limit ? `${text.slice(0, limit)}\n…` : text };
+      return { id: use.id, name, content: text.length > limit ? `${headWithoutSplit(text, limit)}\n…` : text };
     }
     if (name === "write_file") {
       const filePath = resolveWorkspacePath(typeof use.input.path === "string" ? use.input.path : "", cwd, folders, sandbox);
       const content = typeof use.input.content === "string" ? use.input.content : "";
       fs.mkdirSync(path.dirname(filePath), { recursive: true });
-      fs.writeFileSync(filePath, content, "utf8");
+      if (sandbox === "off") fs.writeFileSync(filePath, content, "utf8");
+      else writeWithoutFollowing(filePath, content);
       return { id: use.id, name, content: `Wrote ${filePath} (${content.length} chars)` };
     }
     if (name === "run_command") {
@@ -707,8 +798,13 @@ export async function executeCustomTool(
         const collect = (chunk: Buffer | string) => {
           if (out.length >= RUN_COMMAND_MAX_OUTPUT) return;
           out += String(chunk);
-          if (out.length > RUN_COMMAND_MAX_OUTPUT) out = out.slice(0, RUN_COMMAND_MAX_OUTPUT);
+          if (out.length > RUN_COMMAND_MAX_OUTPUT) out = headWithoutSplit(out, RUN_COMMAND_MAX_OUTPUT);
         };
+        // Decoded per stream, so a character split across two pipe reads is
+        // joined again. String(chunk) decoded each read alone and turned the
+        // halves of an é or a € into replacement marks.
+        child.stdout?.setEncoding("utf8");
+        child.stderr?.setEncoding("utf8");
         child.stdout?.on("data", collect);
         child.stderr?.on("data", collect);
         function stop() {

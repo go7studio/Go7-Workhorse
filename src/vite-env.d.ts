@@ -32,6 +32,8 @@ type GrokBridgeEvent =
       rawTool?: string;
       detail: string;
       path?: string;
+      /** Shown on the card beside the detail. Never classified and never part of a grant. */
+      preview?: string;
       elevate?: { mode?: import("./lib/types").PermissionMode; sandbox?: import("./lib/types").SandboxProfile };
       vendor?: { provider: import("./lib/types").ProviderId; name: string; status?: string };
     }
@@ -369,7 +371,7 @@ type WorkhorseBridge = {
   workshopRevealCollector?: (input: { id: string }) => Promise<boolean>;
   workshopOpenBreakout?: () => Promise<boolean>;
   workshopCloseBreakout?: () => Promise<boolean>;
-  deskOpenLocalPath?: (path: string) => Promise<boolean>;
+  deskOpenLocalPath?: (path: string, kind?: "image" | "video") => Promise<boolean>;
   deskRevealLocalPath?: (path: string) => Promise<boolean>;
   localMediaCreate?: (input: {
     hostId: string;

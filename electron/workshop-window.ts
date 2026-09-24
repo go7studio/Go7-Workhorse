@@ -7,6 +7,12 @@ export function createWorkshopBreakoutWindow(input: {
   icon?: string;
   /** Prefer the desk theme; fall back to OS when omitted. */
   dark?: boolean;
+  /**
+   * The desk's theme choice, for the page. The breakout keeps no store of its
+   * own — a second store saved a stale desk over the live one — so it cannot
+   * read the theme from state and is handed it in the URL.
+   */
+  theme?: string;
 }): BrowserWindow {
   const dark = typeof input.dark === "boolean" ? input.dark : nativeTheme.shouldUseDarkColors;
   const win = new BrowserWindow({
@@ -28,7 +34,8 @@ export function createWorkshopBreakoutWindow(input: {
   });
   win.setMenu(null);
   win.once("ready-to-show", () => win.show());
-  if (input.deskUrl) win.loadURL(input.deskUrl.replace(/\/$/, "") + "/?workshop=1");
-  else win.loadFile(input.deskFile, { query: { workshop: "1" } });
+  const theme = input.theme ?? "system";
+  if (input.deskUrl) win.loadURL(`${input.deskUrl.replace(/\/$/, "")}/?workshop=1&theme=${encodeURIComponent(theme)}`);
+  else win.loadFile(input.deskFile, { query: { workshop: "1", theme } });
   return win;
 }

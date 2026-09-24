@@ -142,6 +142,73 @@ test("redaction strips keys, tokens, env, and keychain text", () => {
   assert.doesNotMatch(JSON.stringify(event), /ghp_abcdefghijklmnop/);
 });
 
+test("redaction catches the key shapes people actually paste", () => {
+  // Each of these went into the store as written, and from there to the
+  // compiler bot. The secret half of each is what must not survive.
+  // Built at run time: written out whole, these are exactly what a push-time
+  // secret scanner stops, fake or not.
+  const k = (...parts: string[]) => parts.join("");
+  const leaks: Array<[string, string]> = [
+    [k("stripe sk", "_live_", "51HAbCdEfGhIjKlMnOpQrStUv"), "51HAbCdEfGhIjKlMnOpQrStUv"],
+    [k("stripe rk", "_test_", "51HAbCdEfGhIjKlMnOpQrStUv"), "51HAbCdEfGhIjKlMnOpQrStUv"],
+    [k("gh auth token printed gh", "o_", "AbCdEfGhIjKlMnOpQrStUvWxYz0123456789"), "AbCdEfGhIjKlMnOpQrStUvWxYz0123456789"],
+    [k("app token gh", "s_", "AbCdEfGhIjKlMnOpQrStUvWxYz0123456789"), "AbCdEfGhIjKlMnOpQrStUvWxYz0123456789"],
+    [k("aws AKIA", "IOSFODNN7EXAMPLE"), "IOSFODNN7EXAMPLE"],
+    [k("aws_secret_access_key = ", "wJalrXUtnFEMI/K7MDENG", "/bPxRfiCYEXAMPLEKEY"), "wJalrXUtnFEMI"],
+    [k("google AI", "za", "SyA1234567890abcdefghijklmnopqrstu"), "SyA1234567890abcdef"],
+    [k("hf hf", "_", "AbCdEfGhIjKlMnOpQrStUvWxYz012345"), "AbCdEfGhIjKlMnOpQrStUvWxYz012345"],
+    [k("npm np", "m_", "AbCdEfGhIjKlMnOpQrStUvWxYz0123456789"), "AbCdEfGhIjKlMnOpQrStUvWxYz0123456789"],
+    [k("gitlab glp", "at-", "AbCdEfGhIjKlMnOpQrSt"), "AbCdEfGhIjKlMnOpQrSt"],
+    ["curl -H 'Authorization: Basic dXNlcjpwYXNzd29yZA=='", "dXNlcjpwYXNzd29yZA"],
+    ['{"api_key": "8f3b2c1d9e8f7a6b5c4d3e2f1a0b9c8d"}', "8f3b2c1d9e8f7a6b5c4d3e2f1a0b9c8d"],
+    ['{"password":"hunter2hunter2"}', "hunter2hunter2"],
+    ["export openai_api_key=abcdefghijk", "abcdefghijk"],
+    ["client_secret: 9a8b7c6d5e4f", "9a8b7c6d5e4f"],
+    ["postgres://admin:S3cretPassw0rd@db.example.com:5432/app", "S3cretPassw0rd"],
+    [
+      k("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9", ".", "eyJzdWIiOiIxMjM0NTY3ODkwIn0", ".", "dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U"),
+      "dozjgNryP4J3jVmNHl0w5N",
+    ],
+    [
+      k("-----BEGIN OPENSSH ", "PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQ\n-----END OPENSSH ", "PRIVATE KEY-----"),
+      "b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQ",
+    ],
+  ];
+  for (const [sample, secret] of leaks) {
+    const redacted = redactText(sample);
+    assert.equal(redacted.sensitivity, "secret", sample);
+    assert.ok(!redacted.text.includes(secret), `${sample} -> ${redacted.text}`);
+    assert.equal(containsSecret(redacted.text), false, redacted.text);
+  }
+  // A URL keeps its scheme, user and host, so the memory still says where.
+  assert.equal(
+    redactText("postgres://admin:S3cretPassw0rd@db.example.com:5432/app").text,
+    "postgres://admin:[redacted]@db.example.com:5432/app",
+  );
+});
+
+test("redaction leaves ordinary prose and code names alone", () => {
+  // Wider patterns must not eat the words a prompt is made of. Each of these
+  // brushes a secret shape and none of them is one.
+  const prose = [
+    "Set max_tokens: 128000 for this call.",
+    "The tokenizer: cl100k_base splits it.",
+    "Use hf_hub_download to fetch the weights.",
+    "npm_config_registry points at the mirror.",
+    "Basic authentication is disabled on staging.",
+    "The secret sauce is caching, and the password field is required.",
+    "invalid_api_key for this project, api_rate_limit exceeded, token expired after 30s",
+    "Clone ssh://git@github.com/org/repo.git and open http://localhost:8080/api.",
+    "Mail a.b@example.com about AKIA prefixes and sk_live keys in general.",
+    "The eyJ prefix marks base64 JSON.",
+  ];
+  for (const sample of prose) {
+    const redacted = redactText(sample);
+    assert.equal(redacted.text, sample);
+    assert.equal(redacted.sensitivity, "normal", sample);
+  }
+});
+
 test("memory Off records nothing and cannot retrieve", () => {
   const store = new InMemoryStore(":memory:");
   const service = new LearningService({ store, settings: () => ({ mode: "off", autoRetrieve: false }), allowStub: true });

@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -514,4 +514,29 @@ test("the local orchestration fixture cannot redispatch a hidden join", () => {
     encoding: "utf8",
   });
   assert.match(output, /fixture self-test passed/);
+});
+
+/*
+ * `npm run build` validates the kit, and the kit checks baselineRef against
+ * history. A depth-1 clone or a release's Source code archive has none, so
+ * README's own build steps failed there with "baselineRef must be an
+ * ancestor". Without the history the check is skipped out loud; CI clones
+ * with fetch-depth 0 and still enforces it.
+ */
+test("a tree without full Git history still validates, and says what it skipped", () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), "wh-shallow-"));
+  try {
+    execFileSync("git", ["clone", "-q", "--depth", "1", pathToFileURL(ROOT).href, dir], { stdio: "ignore" });
+    copyFileSync(path.join(ROOT, "scripts", "workhorse-eval.mjs"), path.join(dir, "scripts", "workhorse-eval.mjs"));
+    const result = spawnSync(process.execPath, [path.join(dir, "scripts", "workhorse-eval.mjs"), "validate"], {
+      cwd: dir,
+      encoding: "utf8",
+      timeout: 60_000,
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stderr, /no full Git history here/);
+    assert.match(result.stdout, /Workhorse eval kit valid/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

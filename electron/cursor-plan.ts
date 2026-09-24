@@ -209,8 +209,14 @@ export function readCursorStateAccessToken(
   } catch {
     /* locked or missing; try a copy next */
   }
-  const copy = path.join(os.tmpdir(), `workhorse-cursor-state-${process.pid}.vscdb`);
+  // The copy holds the Cursor login, and copyFileSync keeps the source's mode,
+  // usually 0644. It used to land under a guessable name straight in the shared
+  // temp folder, where on Linux any local user could read it. A fresh directory
+  // from mkdtemp is 0700 and ours alone.
+  let dir: string | undefined;
   try {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "workhorse-cursor-state-"));
+    const copy = path.join(dir, "state.vscdb");
     copyFile(filePath, copy);
     try {
       copyFile(`${filePath}-wal`, `${copy}-wal`);
@@ -221,15 +227,12 @@ export function readCursorStateAccessToken(
   } catch {
     return undefined;
   } finally {
-    try {
-      fs.unlinkSync(copy);
-    } catch {
-      /* ignore */
-    }
-    try {
-      fs.unlinkSync(`${copy}-wal`);
-    } catch {
-      /* ignore */
+    if (dir) {
+      try {
+        fs.rmSync(dir, { recursive: true, force: true });
+      } catch {
+        /* ignore */
+      }
     }
   }
 }

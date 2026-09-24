@@ -282,8 +282,10 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
   its staged changes staged. Only a rescue the desk wrote down is ever
   restored. A folder git cannot save whole (a large file, a nested repository,
   a submodule, ignored files nothing shows are a cache) stays, named with the
-  reason, and Settings → Profile lists what the last sweep kept. Godot's editor
-  cache and TypeScript's build record count as rebuildable.
+  reason, and Settings → Profile lists what the last sweep kept. Only links,
+  Godot's editor cache, TypeScript's build record and Python bytecode count as
+  a cache, each read by what it holds. A folder's name counts for nothing, so
+  an installed `node_modules` keeps the folder.
 - A worker that ends with uncommitted files in its own folder says so in the
   chat that sent it. A folder made in the last hour is never swept.
 - If the parent does the work itself, the run records that it took over.
@@ -494,8 +496,9 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
 
 ## Skills, MCP servers, Workshop, Local Compute
 
-- **Skills** two ship with the desk: `desk` for chat-to-chat control, `setup`
-  for adding bots and references. Spark login is an optional add-on: Settings →
+- **Skills** three ship with the desk and are seeded into `~/.workhorse/skills`
+  on first run: `desk` for chat-to-chat control, `setup` for adding bots and
+  references, and `workhorse-workshop-pack` for building Workshop packs. Spark login is an optional add-on: Settings →
   Skills → Import the `dgx-spark` folder from
   github.com/go7studio/workshop-pack-dgx-spark (or the private skills hub).
 - Skills are also listed from Grok, Codex, Claude and Cursor homes, and can be

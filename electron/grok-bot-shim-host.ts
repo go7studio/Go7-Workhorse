@@ -142,6 +142,23 @@ function waitForReply(inbox: string, reqId: string): Promise<{ text?: string; er
   });
 }
 
+/**
+ * The port this install's row names, read without minting a row that is not
+ * there. The desk probes and dials the row's port, so the shim has to listen
+ * on it and say so from /health. It listened on 8787 whatever the row said and
+ * reported 8787, so a row that named another port read as a dead shim: the
+ * desk relaunched it, the relaunch lost the bind, and every call was refused.
+ */
+export function shimRowPort(userData: string): number {
+  try {
+    const parsed = parseGrokBotShimSecrets(JSON.parse(fs.readFileSync(grokBotShimSecretsPath(userData, sepFor(userData)), "utf8")));
+    if (parsed) return parsed.port;
+  } catch {
+    /* no row yet */
+  }
+  return Number(GROK_BOT_SHIM_PORT);
+}
+
 export function readOrMintShimSecrets(userData: string): GrokBotShimSecrets {
   const file = grokBotShimSecretsPath(userData, sepFor(userData));
   try {
@@ -174,7 +191,9 @@ function deny(res: http.ServerResponse, code: number, message: string): void {
 export function createGrokBotShimServer(userData: string, token?: string): http.Server {
   const inbox = grokBotInboxDir(userData, sepFor(userData));
   fs.mkdirSync(inbox, { recursive: true, mode: 0o700 });
-  const expected = token || readOrMintShimSecrets(userData).token;
+  const row = token ? undefined : readOrMintShimSecrets(userData);
+  const expected = token || row!.token;
+  const port = row?.port ?? shimRowPort(userData);
   return http.createServer((req, res) => {
     if (!isLoopbackAddress(req.socket.remoteAddress)) {
       deny(res, 403, "loopback only");
@@ -183,7 +202,7 @@ export function createGrokBotShimServer(userData: string, token?: string): http.
     const url = new URL(req.url || "/", "http://127.0.0.1");
     const route = url.pathname.replace(/\/+$/, "") || "/";
     if (req.method === "GET" && (route === "/health" || route === "/")) {
-      sendJson(res, 200, grokBotPublicHealth());
+      sendJson(res, 200, grokBotPublicHealth(port));
       return;
     }
     if (!tokensMatch(expected, authorizationBearer(req.headers.authorization))) {
@@ -406,9 +425,10 @@ if (isShimEntry()) {
     process.stderr.write("grok-bot-shim-host needs WORKHORSE_USER_DATA\n");
     process.exit(2);
   }
+  const shim = readOrMintShimSecrets(userData);
   const server = createGrokBotShimServer(userData);
-  server.listen(Number(GROK_BOT_SHIM_PORT), "127.0.0.1", () => {
-    process.stdout.write(`Grok Bot shim on http://127.0.0.1:${GROK_BOT_SHIM_PORT}/v1\n`);
+  server.listen(shim.port, "127.0.0.1", () => {
+    process.stdout.write(`Grok Bot shim on http://127.0.0.1:${shim.port}/v1\n`);
   });
   server.on("error", (error) => {
     process.stderr.write(`[grok-bot-shim] ${error.message}\n`);

@@ -419,7 +419,8 @@ test("applyPermissionAnswer updates the real pending queue and session", () => {
   const denied = applyPermissionAnswer(start, request.id, "deny");
   assert.ok(denied);
   assert.equal(denied.pending.length, 0);
-  assert.equal(denied.sessions[0].status, "idle");
+  // A denial refuses the call, not the turn: the vendor ends it with a done.
+  assert.equal(denied.sessions[0].status, "running");
   assert.equal(denied.sessions[0].messages.length, session.messages.length + 1);
   assert.equal(denied.sessions[0].messages.at(-1)?.kind, "tool");
   assert.equal(denied.sessions[0].messages.at(-1)?.toolStatus, "failed");
@@ -2435,7 +2436,8 @@ test("chat markdown turns status dumps into facts and renders inline marks", () 
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "SessionPane.tsx"), "utf8"), /nearby=\{nearby\}/);
   assert.match(readFileSync(path.join(ROOT, "src", "lib", "turns.ts"), "utf8"), /recentTranscriptText/);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "FileOpen.tsx"), "utf8"), /harvestFilePath/);
-  assert.match(readFileSync(path.join(ROOT, "electron", "main.ts"), "utf8"), /setWindowOpenHandler/);
+  assert.match(readFileSync(path.join(ROOT, "electron", "main.ts"), "utf8"), /guardNavigation\(contents/);
+  assert.match(readFileSync(path.join(ROOT, "electron", "ipc-sender.ts"), "utf8"), /setWindowOpenHandler/);
   assert.match(readFileSync(path.join(ROOT, "electron", "main.ts"), "utf8"), /shell\.openExternal/);
   assert.match(readFileSync(path.join(ROOT, "electron", "preload.ts"), "utf8"), /shell:open/);
   const picture = parseInline("![A moonlit workhorse](https://imagine.x.ai/out.png)");
@@ -7625,7 +7627,8 @@ test("unsent composer text and images survive normalizeSession", () => {
   assert.match(store, /if \(!commit\) return;/);
   assert.match(store, /settleSessionGoals/);
   assert.match(store, /if \(!settled\.changed\) return current;/);
-  assert.match(store, /busy \? 2_000 : 400/);
+  assert.match(store, /persistDelayMs\(\{ settled: settledPending\.current, busy, dirtySince, now \}\)/);
+  assert.match(readFileSync(path.join(ROOT, "src", "lib", "desk-persist.ts"), "utf8"), /input\.busy \? 2_000 : 400/);
   assert.match(composer, /setComposerDraft\(sessionId, value, images\)/);
   assert.match(composer, /setComposerDraft\(sessionId, valueRef\.current, imagesRef\.current, true\)/);
 });
@@ -10763,7 +10766,7 @@ test("packages use platform Electron and mac release builds require a stable sig
   assert.match(hook, /assertStableReleaseIdentity/);
   assert.match(hook, /Developer ID Application/);
   const install = readFileSync(path.join(ROOT, "scripts", "install-mac.sh"), "utf8");
-  assert.match(install, /rm -rf "\/Applications\/\$\{APP\}"/);
+  assert.match(install, /swap_app "\$\{mount\}\/\$\{APP\}" "\/Applications\/\$\{APP\}"/);
   assert.match(install, /rm -rf \/Applications\/Workhorse\.app/);
   assert.match(install, /refresh_mac_app_icon "\/Applications\/\$\{APP\}"/);
   assert.match(install, /WORKHORSE_MAC_DOCK_REFRESH/);
@@ -10835,6 +10838,9 @@ test("the repo tracks no symlinks and states its working rules", () => {
   assert.match(tryDesk, /delete env\.CSC_LINK/);
   assert.match(tryDesk, /packWindowsDir/);
   assert.match(tryDesk, /installWinDevApp/);
+  // Installs the pack it just made for this Mac, never a leftover of the other arch.
+  assert.match(tryDesk, /builtAppPath\(macArch\(\)\)/);
+  assert.match(tryDesk, /arch === "arm64" \? \["mac-arm64"\] : \["mac", "mac-x64"\]/);
   assert.match(tryDesk, /WORKHORSE_USER_DATA_PATH/);
   assert.match(tryDesk, /Start-Process/);
   assert.doesNotMatch(tryDesk, /--workhorse-user-data=/);

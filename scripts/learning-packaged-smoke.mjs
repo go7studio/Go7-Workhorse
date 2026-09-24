@@ -75,6 +75,13 @@ if (!packed) fail(`No packaged ${platform} artifact under release/. Run pack:win
 const files = countFiles(packed.artifactDir);
 if (files < 20) fail(`Packaged artifact looks hollow (${files} entries) at ${packed.artifactDir}`);
 if (!fs.existsSync(packed.binary)) fail(`Missing packaged binary ${packed.binary}`);
+// The skills that ship with the desk are copied from Resources on first run.
+// Nothing failed when they were missing: the desk just seeded none.
+const resources = platform === "mac" ? path.join(packed.appPath, "Contents", "Resources") : path.join(packed.artifactDir, "resources");
+for (const name of ["desk", "setup"]) {
+  const skill = path.join(resources, "skills", name, "SKILL.md");
+  if (!fs.existsSync(skill)) fail(`Missing shipped skill ${skill}`);
+}
 
 const userData = fs.mkdtempSync(path.join(os.tmpdir(), "workhorse-learning-smoke-"));
 const smokeEnv = { ...process.env };

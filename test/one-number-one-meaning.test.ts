@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
-import { formatTokens, planRingView, planWindowChip } from "../src/lib/usage";
+import { formatPlanReset, formatTokens, planRingView, planWindowChip } from "../src/lib/usage";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -26,6 +26,23 @@ test("a big number is a number a person can hold", () => {
   // The desk printed 1657.5M here.
   assert.equal(formatTokens(1_657_500_000), "1.66B");
   assert.equal(formatTokens(1_000_000_000), "1.00B");
+  // Just under a boundary rounds up into the next unit, never "1000k".
+  assert.equal(formatTokens(999.6), "1.0k");
+  assert.equal(formatTokens(9_960), "10k");
+  assert.equal(formatTokens(999_600), "1.0M");
+  assert.equal(formatTokens(999_999_999), "1.00B");
+  assert.equal(formatTokens(999_400), "999k");
+  assert.equal(formatTokens(999_940_000), "999.9M");
+});
+
+test("a reset time never prints sixty minutes", () => {
+  const now = Date.UTC(2026, 8, 24, 12, 0, 0);
+  const at = (seconds: number) => new Date(now + seconds * 1000).toISOString();
+  // 1 h 59 m 45 s read "1 hr 60 min", and 59 m 50 s read "60 min".
+  assert.equal(formatPlanReset(at(3600 + 59 * 60 + 45), now), "Resets in 2 hr");
+  assert.equal(formatPlanReset(at(59 * 60 + 50), now), "Resets in 1 hr");
+  assert.equal(formatPlanReset(at(3600 + 5 * 60 + 10), now), "Resets in 1 hr 5 min");
+  assert.equal(formatPlanReset(at(20 * 60), now), "Resets in 20 min");
 });
 
 test("the ring and the line under it count the same way", () => {

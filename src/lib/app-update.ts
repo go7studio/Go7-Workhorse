@@ -130,17 +130,44 @@ export function pickWinSetupAsset(release: unknown): WinSetupAsset | null {
   return named.find((asset) => /Setup-.+\.exe$/i.test(asset.name)) ?? null;
 }
 
-export type UpdateInstallKind = "mac-dmg" | "win-nsis" | "git-checkout" | "none";
+export type UpdateInstallKind = "mac-dmg" | "win-nsis" | "git-checkout" | "development" | "none";
+
+/**
+ * A development desk never installs a release. The Dev app is packaged, so it
+ * read as a Mac or Windows install: Update copied the production bundle over
+ * Go7 Workhorse Dev.app — which from then on ran as production, on production's
+ * userData and Keychain — or ran the production installer from a try build.
+ * Unpackaged, it checked a release tag out in the working clone. It may still
+ * say a release exists; it only refuses to install one.
+ */
+export const DEVELOPMENT_DESK_UPDATE_MESSAGE =
+  "This is a development desk, so it does not install releases. Update its source, or install the release as Go7 Workhorse.";
 
 export function updateInstallKind(input: {
   platform: string;
   packaged: boolean;
   hasGitCheckout: boolean;
+  development?: boolean;
 }): UpdateInstallKind {
+  if (input.development) return "development";
   if (input.platform === "darwin" && input.packaged) return "mac-dmg";
   if (input.platform === "win32" && input.packaged) return "win-nsis";
   if (input.hasGitCheckout) return "git-checkout";
   return "none";
+}
+
+/**
+ * How the source-checkout update runs `npm install`.
+ *
+ * npm on Windows is npm.cmd, a batch file, and Node refuses to start a batch
+ * file without a shell (EINVAL since the CVE-2024-27980 fix). The update ran it
+ * directly, so on Windows it failed every time — after git had already moved
+ * the checkout to the new tag. It goes through cmd.exe the way the Claude and
+ * Codex logins start their .cmd shims.
+ */
+export function npmInstallCommand(platform: string, comspec?: string): { command: string; args: string[] } {
+  if (platform !== "win32") return { command: "npm", args: ["install"] };
+  return { command: comspec?.trim() || "C:\\Windows\\System32\\cmd.exe", args: ["/d", "/s", "/c", "npm.cmd install"] };
 }
 
 export function packagedUpdateMissingMessage(platform: string): string {
@@ -346,6 +373,42 @@ fi
 `;
 }
 
+/**
+ * Put a new app bundle in place without ever leaving none.
+ *
+ * Both the in-app updater and scripts/install-mac.sh ran `rm -rf` on the live
+ * app and then `cp -R` the new one over its name, so a copy that failed part
+ * way — a full disk, an image that went away — left the person with no app at
+ * all. The copy now lands beside the live app, and only a complete copy takes
+ * its name; the old one comes back if the rename fails. A run that died
+ * between the two renames is healed first. install-mac.sh carries this exact
+ * text; keep the two in sync.
+ */
+export function macStagedSwapScript(): string {
+  return `# WORKHORSE_MAC_STAGED_SWAP
+swap_app() {
+  local from="$1" to="$2"
+  local staged="$to.new" previous="$to.old"
+  if [ ! -e "$to" ] && [ -e "$previous" ]; then mv "$previous" "$to" 2>/dev/null || true; fi
+  rm -rf "$staged" "$previous"
+  if ! cp -R "$from" "$staged"; then
+    rm -rf "$staged" 2>/dev/null || true
+    return 1
+  fi
+  if [ -e "$to" ] && ! mv "$to" "$previous"; then
+    rm -rf "$staged" 2>/dev/null || true
+    return 1
+  fi
+  if ! mv "$staged" "$to"; then
+    if [ -e "$previous" ]; then mv "$previous" "$to" 2>/dev/null || true; fi
+    rm -rf "$staged" 2>/dev/null || true
+    return 1
+  fi
+  rm -rf "$previous" 2>/dev/null || true
+}
+`;
+}
+
 export function macReplaceScript(input: {
   pid: number;
   srcApp: string;
@@ -374,12 +437,20 @@ while IFS= read -r shim_pid; do
   [ "$shim_command" = "$expected_shim" ] || continue
   kill -TERM "$shim_pid" 2>/dev/null || true
 done < <(pgrep -f 'grok-bot-shim-host\.js$' 2>/dev/null || true)
-rm -rf "$dest"
-cp -R "$src" "$dest"
-if [ -n "$device" ]; then
-  hdiutil detach "$device" -quiet 2>/dev/null || hdiutil detach "$device" -force -quiet 2>/dev/null || true
+detach_image() {
+  if [ -n "$device" ]; then
+    hdiutil detach "$device" -quiet 2>/dev/null || hdiutil detach "$device" -force -quiet 2>/dev/null || true
+  fi
+  rm -rf "$tmp" 2>/dev/null || true
+}
+${macStagedSwapScript()}if ! swap_app "$src" "$dest"; then
+  # The app that was there is still there. Open it again: the person asked
+  # for an update, not for their desk to disappear.
+  detach_image
+  open "$dest" 2>/dev/null || true
+  exit 1
 fi
-rm -rf "$tmp" 2>/dev/null || true
+detach_image
 ${macRefreshRegistrationScript('"$dest"')}
 open "$dest"
 `;

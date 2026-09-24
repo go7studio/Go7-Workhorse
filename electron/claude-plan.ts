@@ -364,11 +364,22 @@ export function parseClaudePlanUsage(raw: unknown): ClaudePlanUsage | undefined 
 }
 
 type NodeGetJson = (url: string, headers: Record<string, string>) => Promise<{ status: number; json: unknown }>;
-function nodeGetJson(url: string, headers: Record<string, string>): Promise<{ status: number; json: unknown }> {
+
+/** How long one usage read may take before the ring stops waiting for it. */
+export const CLAUDE_USAGE_TIMEOUT_MS = 15_000;
+
+export function nodeGetJson(
+  url: string,
+  headers: Record<string, string>,
+  timeoutMs = CLAUDE_USAGE_TIMEOUT_MS,
+): Promise<{ status: number; json: unknown }> {
   return new Promise((resolve, reject) => {
     const req = https.get(url, { headers }, (res) => {
       const chunks: Buffer[] = [];
       res.on("data", (chunk) => chunks.push(chunk as Buffer));
+      // A reply cut off mid-body fails on the response, not the request.
+      // Unheard, that escaped as an uncaught exception and the read never settled.
+      res.on("error", reject);
       res.on("end", () => {
         const body = Buffer.concat(chunks).toString("utf8");
         try {
@@ -378,6 +389,10 @@ function nodeGetJson(url: string, headers: Record<string, string>): Promise<{ st
         }
       });
     });
+    // Node's client has no timeout of its own: a server that accepted and then
+    // said nothing held this read, and the ring behind it, for as long as the
+    // socket stayed open.
+    req.setTimeout(timeoutMs, () => req.destroy(new Error(`Claude usage read timed out after ${timeoutMs} ms`)));
     req.on("error", reject);
   });
 }

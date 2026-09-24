@@ -85,14 +85,26 @@ export function cursorProbeEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.Pr
   return deskToolEnv(base);
 }
 
+/**
+ * What each bare `agent` turned out to be. The answer does not change while the
+ * desk runs, and the launch spec asks on every Cursor prompt, so a desk that
+ * only had `agent` spent up to 3s of its main process on `--help` each time.
+ */
+const probedAgents = new Map<string, boolean>();
+
 function probeCursorBinary(filePath: string, prefixArgs: string[] = []): boolean {
+  const key = [filePath, ...prefixArgs].join("\0");
+  const known = probedAgents.get(key);
+  if (known !== undefined) return known;
   const result = spawnSync(filePath, [...prefixArgs, "--help"], {
     encoding: "utf8",
     timeout: 3_000,
     windowsHide: true,
     env: cursorProbeEnv(),
   });
-  return /Cursor Agent/i.test(`${result.stdout ?? ""}\n${result.stderr ?? ""}`);
+  const cursor = /Cursor Agent/i.test(`${result.stdout ?? ""}\n${result.stderr ?? ""}`);
+  probedAgents.set(key, cursor);
+  return cursor;
 }
 
 export function cursorAboutLoggedIn(output: string): boolean | undefined {
@@ -229,8 +241,10 @@ export function hasCursorLoginArtifact(
   return false;
 }
 
-export function resolveCursorPrefixArgs(input: CursorLoginDetectInput = {}): string[] {
-  const binary = resolveCursorBinary(input);
+export function resolveCursorPrefixArgs(
+  input: CursorLoginDetectInput = {},
+  binary: string | null = resolveCursorBinary(input),
+): string[] {
   const winPack = resolveCursorWindowsPackage(input);
   if (binary && winPack && binary === winPack.command) return [winPack.script];
   return [];
@@ -245,7 +259,7 @@ export function detectCursorLogin(input: CursorLoginDetectInput = {}): CursorLog
   const cursorHome = (env.CURSOR_HOME?.trim() || join(homedir, ".cursor")).replace(/[\\/]+$/, "");
   const resolved = { ...input, env, homedir, platform, existsSync };
   const binary = resolveCursorBinary(resolved);
-  const prefixArgs = resolveCursorPrefixArgs(resolved);
+  const prefixArgs = resolveCursorPrefixArgs(resolved, binary);
   if (!binary || isCursorAppCommand(binary) || isGrokCommand(binary)) {
     return {
       connected: false,

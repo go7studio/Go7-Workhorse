@@ -1159,19 +1159,28 @@ export class GrokAgent {
     const initialize = await this.request("initialize", this.spec.initializeParams);
     const wanted = options?.vendorSessionId?.trim();
     if (wanted) {
+      let loaded: Record<string, unknown> | undefined;
       try {
-        const loaded = await this.request("session/load", {
+        loaded = await this.request("session/load", {
           sessionId: wanted,
           cwd: this.spec.sessionParams.cwd,
           mcpServers: this.spec.sessionParams.mcpServers,
           ...(this.spec.sessionParams._meta ? { _meta: this.spec.sessionParams._meta } : {}),
         });
+      } catch {
+        // missing or failed load → create a new vendor session
+      }
+      if (loaded) {
         const sessionId = typeof loaded.sessionId === "string" && loaded.sessionId ? loaded.sessionId : wanted;
         this.sessionId = sessionId;
         this.opened = "session/load";
+        // A reopened chat keeps the effort, Fast, persona and model it picked.
+        // These ride on config options, which a load answers with just as a new
+        // session does, and only this call sets them: a desk restart used to put
+        // every loaded chat back on the vendor's default effort, and let a typed
+        // model the vendor refuses run on whatever it fell back to.
+        await this.applySessionConfig(sessionId, loaded);
         return { initialize, sessionNew: loaded, sessionId, opened: "session/load" };
-      } catch {
-        // missing or failed load → create a new vendor session
       }
     }
     let sessionNew: Record<string, unknown>;

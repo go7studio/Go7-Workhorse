@@ -1,5 +1,6 @@
 import { spawnCwd } from "./spawn-cwd";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { groupSpawnOptions, sessionIdFromSpec, stopProcessGroup, trackProcessGroup } from "./process-registry";
 import fs from "node:fs";
 import os from "node:os";
@@ -1108,6 +1109,14 @@ export class GrokAgent {
   private stderr = "";
   private pending = new Map<JsonRpcId, Pending>();
   private permissionWaiters = new Map<string, (answer: PermissionAnswer) => void>();
+  /**
+   * What makes this agent's permission asks its own. Every vendor numbers its
+   * requests from 0 in each process, and the desk used that number as the ask's
+   * id, so two chats waiting at once both held "0": the host answered whichever
+   * slot it found first, and approving one chat's `ls` approved the other
+   * chat's `rm -rf`. The vendor still gets its own id back in the reply.
+   */
+  private readonly askTag = `acp-${randomUUID()}`;
   private handlers: GrokAgentHandlers = {};
   private closed = false;
   private promptTail: Promise<unknown> = Promise.resolve();
@@ -1609,7 +1618,7 @@ export class GrokAgent {
     }
     const params = asRecord(message.params);
     const options = Array.isArray(params.options) ? (params.options as Array<{ optionId?: string; kind?: string }>) : [];
-    const requestId = String(id);
+    const requestId = `${this.askTag}:${String(id)}`;
     const ask: GrokPermissionAsk = {
       requestId,
       tool: toolTitle(params),

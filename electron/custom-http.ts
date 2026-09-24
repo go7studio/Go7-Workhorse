@@ -858,7 +858,9 @@ export async function streamCustomHttp(
     };
     const ingest = (parsed: unknown): boolean => {
       const failed = customStreamError(parsed);
-      if (failed) throw new Error(failed);
+      // An error event mid-stream is the host's own words too, and it can quote
+      // the key back just as a rejected body does.
+      if (failed) throw new Error(redactSecrets(failed));
       const next =
         api === "openai-completions"
           ? applyOpenAiChunk(parsed, sink, openAiPending)
@@ -1190,7 +1192,10 @@ export async function probeCustomHttp(
     const response = await fetchImpl(url, { method: "POST", headers, body: JSON.stringify(body) });
     const text = await response.text();
     if (!response.ok) {
-      return { ok: false, message: `HTTP ${response.status}${text ? `: ${text.slice(0, 180)}` : ""}`, api, model };
+      // The probe is how a key is first tried, so a host that repeats the key
+      // in its 401 does it here first — and a desk bot's setup hands this
+      // message to the model that asked for it.
+      return { ok: false, message: `HTTP ${response.status}${text ? `: ${redactSecrets(text).slice(0, 180)}` : ""}`, api, model };
     }
     let parsed: unknown = null;
     try {
@@ -1216,6 +1221,6 @@ export async function probeCustomHttp(
       api,
     };
   } catch (error) {
-    return { ok: false, message: grokBotShimDownMessage(baseUrl, error), api, model };
+    return { ok: false, message: redactSecrets(grokBotShimDownMessage(baseUrl, error)), api, model };
   }
 }

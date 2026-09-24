@@ -2786,3 +2786,47 @@ test("a custom tool the role was not offered is refused, not run", async () => {
   assert.equal(executed, 0);
   assert.deepEqual(cards, []);
 });
+
+/**
+ * The chat path redacted a key a host quoted back, but the connection probe
+ * and a mid-stream error event did not. The probe is where a key is first
+ * tried, and a desk bot's setup hands its message to the model that asked.
+ */
+test("a key the host quotes back is redacted on the probe and in a stream error", async () => {
+  // Built at run time so no key-shaped literal sits in the repository.
+  const key = ["sk", "-live-", "9f8e7d6c5b4a3928", "1706f5e4d3c2b1a0"].join("");
+  const rejected = JSON.stringify({ error: { message: `Invalid API key: ${key}` } });
+  const probe = await probeCustomHttp(
+    { baseUrl: "https://gateway.example.test/v1", apiKey: key, model: "m" },
+    async () => new Response(rejected, { status: 401 }),
+  );
+  assert.equal(probe.ok, false);
+  assert.match(probe.message, /^HTTP 401/);
+  assert.ok(!probe.message.includes(key), probe.message);
+
+  const thrown = await probeCustomHttp(
+    { baseUrl: "https://gateway.example.test/v1", apiKey: key, model: "m" },
+    async () => {
+      throw new Error(`request to https://gateway.example.test/v1?api_key=${key} failed`);
+    },
+  );
+  assert.ok(!thrown.message.includes(key), thrown.message);
+
+  await assert.rejects(
+    streamCustomHttp(
+      { baseUrl: "https://gateway.example.test/v1", apiKey: key, model: "m", api: "openai-completions" },
+      { messages: [{ role: "user", text: "hi" }] },
+      {},
+      async () =>
+        new Response(`data: ${JSON.stringify({ type: "error", error: { message: `bad key ${key}` } })}\n\n`, {
+          status: 200,
+          headers: { "content-type": "text/event-stream" },
+        }),
+    ),
+    (error: Error) => {
+      assert.match(error.message, /bad key/);
+      assert.ok(!error.message.includes(key), error.message);
+      return true;
+    },
+  );
+});

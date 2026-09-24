@@ -1772,3 +1772,23 @@ test("workhorse_list_external_agents lists the catalog, not past tasks", async (
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+/**
+ * The Workhorse entry was always written two spaces in. Under a Hermes config
+ * indented by four, the existing servers then sat deeper than it, and YAML read
+ * `github:` as a key inside the workhorse block: the user's server left
+ * mcp_servers and stopped launching.
+ */
+test("Hermes install keeps the file's own indent, so existing servers stay servers", () => {
+  const launch = workhorseExternalMcpLaunch({ command: "/app/node", script: "/app/mcp.js", statePath: "/state.json" });
+  const four = "mcp_servers:\n    github:\n        command: gh\n        args: []\n";
+  const written = upsertHermesMcpServers(four, launch);
+  const keys = written.split("\n").filter((line) => /^\s*[A-Za-z_]+:\s*$/.test(line) && !/^\s{5,}/.test(line));
+  assert.deepEqual(keys, ["mcp_servers:", "    workhorse:", "    github:"], written);
+  // Installing again replaces the entry in place rather than adding a second.
+  const again = upsertHermesMcpServers(written, launch);
+  assert.equal((again.match(/workhorse:/g) ?? []).length, 1);
+  assert.match(again, /^ {4}github:\n {8}command: gh$/m);
+  // A two-space file is written as before.
+  assert.match(upsertHermesMcpServers("mcp_servers:\n  github:\n    command: gh\n", launch), /^mcp_servers:\n {2}workhorse:\n/);
+});

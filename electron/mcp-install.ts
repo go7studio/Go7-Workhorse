@@ -111,7 +111,24 @@ export function upsertHermesMcpServers(yamlText: string, launch: ExternalMcpLaun
     const end = next < 0 ? text.length : start + workhorse[0].length + next + 1;
     return `${text.slice(0, start)}${hermesWorkhorseYamlBlock(launch, indent || "  ")}${text.slice(end).replace(/^\n/, "")}`;
   }
-  return text.replace(/^mcp_servers:\s*$/m, `mcp_servers:\n${block.replace(/\n$/, "")}`);
+  // A new entry sits at the indent the file already uses. Two spaces under a
+  // file indented by four made the existing servers children of workhorse:
+  // `github:` read as a key inside the new block and left mcp_servers.
+  const indent = firstServerIndent(text) || "  ";
+  const entry = hermesWorkhorseYamlBlock(launch, indent);
+  return text.replace(/^mcp_servers:\s*$/m, `mcp_servers:\n${entry.replace(/\n$/, "")}`);
+}
+
+/** Leading whitespace of the first entry under `mcp_servers:`, or "" when it has none. */
+function firstServerIndent(text: string): string {
+  const lines = text.split("\n");
+  const header = lines.findIndex((line) => /^mcp_servers:\s*$/.test(line));
+  if (header < 0) return "";
+  for (const line of lines.slice(header + 1)) {
+    if (!line.trim() || line.trim().startsWith("#")) continue;
+    return /^[ ]+/.exec(line)?.[0] ?? "";
+  }
+  return "";
 }
 
 export function openClawConfigPath(home: string, platform: "darwin" | "win32" | "linux"): string {

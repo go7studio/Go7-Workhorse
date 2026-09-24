@@ -2654,6 +2654,49 @@ async function until(check: () => boolean, what: string): Promise<void> {
 }
 
 /**
+ * Stop is checked between model calls, and one reply can carry several tool
+ * calls. Stop killed the command in flight and the write queued behind it in
+ * the same reply ran anyway — as did one queued behind an open card.
+ */
+test("Stop ends the rest of a custom tool batch, not only the call in flight", async () => {
+  for (const scene of ["running command", "open card"] as const) {
+    const ran: string[] = [];
+    const cards: string[] = [];
+    const host = new CustomSessionHost(
+      async (_config, request) => {
+        if (request.messages.some((message) => message.toolResults?.length)) return { text: "done" };
+        return {
+          text: "",
+          toolUses: [
+            { id: "cmd", name: "run_command", input: { command: "sleep 5" } },
+            { id: "write", name: "write_file", input: { path: "after-stop.txt", content: "x" } },
+          ],
+        };
+      },
+      {
+        executeTool: async (use, policy) => {
+          ran.push(use.name);
+          if (use.name === "run_command") {
+            await new Promise((resolve) => policy.signal?.addEventListener("abort", resolve, { once: true }));
+            return { id: use.id, name: use.name, content: "Command cancelled", isError: true };
+          }
+          return { id: use.id, name: use.name, content: "Wrote" };
+        },
+      },
+    );
+    // Always-approve runs the command at once; accept-edits cards the command
+    // and would auto-approve the write behind it.
+    const turn = host.prompt(customTurn(`s-stop-${scene}`, scene === "running command" ? "always-approve" : "accept-edits"), (event) => {
+      if (event.type === "permission") cards.push(event.requestId);
+    });
+    await until(() => (scene === "running command" ? ran.length > 0 : cards.length > 0), scene);
+    host.cancel(`s-stop-${scene}`);
+    assert.equal((await turn).stopReason, "cancelled");
+    assert.equal(ran.includes("write_file"), false, `the write ran after Stop (${scene})`);
+  }
+});
+
+/**
  * One host serves every custom chat. Stop on one of them answered every open
  * card on the desk with deny, so another chat's write failed while its card
  * was still on screen, and answering that card later did nothing.

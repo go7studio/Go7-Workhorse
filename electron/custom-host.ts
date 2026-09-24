@@ -551,6 +551,10 @@ export class CustomSessionHost {
           return executed;
         };
         for (const group of toolGroups) {
+          // Stop ends the batch, not only the call in flight. The loop used to
+          // check only between model calls, so after Stop killed a command the
+          // write queued behind it in the same reply still ran.
+          if (abort.signal.aborted) throw new Error("cancelled");
           if (group.length > 1 && group.every((use) => use.name === "workhorse_spawn_agent" || use.name.endsWith("spawn_agent"))) {
             results.push(...(await Promise.all(group.map((use) => executeSpawnUse(use)))));
             continue;
@@ -792,6 +796,8 @@ export class CustomSessionHost {
             });
             continue;
           }
+          // An Allow that lands in the same moment as Stop does not run the call.
+          if (abort.signal.aborted) throw new Error("cancelled");
           const executed = limitCustomToolResult(mcp.has(use.name)
             ? await mcp.call(use)
             : await this.executeTool(use, {

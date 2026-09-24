@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import {
   applyWorkerBudgetUsage,
   beginAssignmentBudget,
+  bookWorkerUsage,
   billedFreshInput,
   budgetThresholds,
   missionUsedTokens,
@@ -109,7 +110,8 @@ test("no ceiling never exceeds, warns, or reserves", () => {
 
 test("the live usage path uses slice spend, not input plus output", () => {
   const store = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
-  assert.match(store, /applyWorkerBudgetUsage\(/);
+  // bookWorkerUsage is applyWorkerBudgetUsage, read from the committed run.
+  assert.match(store, /bookWorkerUsage\(/);
   assert.match(store, /beginAssignmentBudget\(/);
   assert.doesNotMatch(store, /nextBudgetRunState\(/);
   assert.doesNotMatch(store, /BUDGET_HANDOFF_PROMPT/);
@@ -378,4 +380,28 @@ test("FEATURES.md says the desk does not stop on a token ceiling or a runtime li
   );
   assert.match(features, /Billed spend for that chat and each orchestrated bot is on the left/);
   assert.doesNotMatch(features, /Runtime timeout still ends a run as timed-out/);
+});
+
+test("two usage reports that land before a render both reach the meter", () => {
+  // The store read the run off its last rendered snapshot and wrote absolute
+  // totals, so the second of two quick reports started from the same count
+  // as the first and erased its output and cached tokens.
+  const sessions = [
+    { id: "worker", agentRun: { status: "running", outputTokensTotal: 100, cacheTokensTotal: 0 } },
+    { id: "other", agentRun: { status: "running", outputTokensTotal: 7 } },
+  ];
+  const first = { inputTokens: 1_000, outputTokens: 50, cacheReadTokens: 0 };
+  const second = { inputTokens: 1_000, outputTokens: 30, cacheReadTokens: 200 };
+  const booked = bookWorkerUsage(bookWorkerUsage(sessions, "worker", first), "worker", second);
+  assert.equal(booked[0]?.agentRun?.outputTokensTotal, 180, "both reports' output is on the meter");
+  assert.equal(booked[0]?.agentRun?.cacheTokensTotal, 200);
+  assert.equal(booked[1], sessions[1], "another worker is untouched");
+
+  const store = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
+  assert.match(
+    store,
+    /setState\(\(current\) => \(\{ \.\.\.current, sessions: bookWorkerUsage\(current\.sessions, event\.sessionId, event\) \}\)\)/,
+    "the store books the report against the committed run, inside the updater",
+  );
+  assert.doesNotMatch(store, /applyWorkerBudgetUsage\(liveSession\.agentRun, event\)/);
 });

@@ -173,6 +173,34 @@ export function applyWorkerBudgetUsage(
 }
 
 /**
+ * One usage report booked onto its worker's slice, reading the spend so far
+ * from the sessions it is applied to. The store used to read that spend off
+ * the last rendered snapshot and write back absolute totals, so two reports
+ * landing before a render both started from the same count and the second
+ * erased the first's output and cached tokens.
+ */
+export function bookWorkerUsage<T extends { id: string; agentRun?: WorkerBudgetState }>(
+  sessions: T[],
+  sessionId: string,
+  event: WorkerBudgetMeter,
+): T[] {
+  return sessions.map((session) => {
+    if (session.id !== sessionId || !session.agentRun) return session;
+    const spend = applyWorkerBudgetUsage(session.agentRun, event);
+    return {
+      ...session,
+      agentRun: {
+        ...session.agentRun,
+        usedTokens: spend.usedTokens,
+        budgetBaseline: spend.budgetBaseline,
+        outputTokensTotal: spend.outputTokensTotal,
+        cacheTokensTotal: spend.cacheTokensTotal,
+      },
+    };
+  });
+}
+
+/**
  * A new assignment starts a new accounting window. The previous slice's
  * consumed count does not carry over. Lifetime is a running total for the
  * meter, never a brake. No assignment writes a token ceiling.

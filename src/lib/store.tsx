@@ -379,8 +379,8 @@ import {
   usageHomeForReport,
 } from "./usage";
 import {
-  applyWorkerBudgetUsage,
   beginAssignmentBudget,
+  bookWorkerUsage,
   missionUsedTokens,
 } from "./worker-budget";
 import { clampPaneWidth, SIDEBAR_PANE, THREAD_PANE } from "./pane";
@@ -7881,23 +7881,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         }
         const liveSession = stateRef.current.sessions.find((item) => item.id === event.sessionId);
         if (liveSession?.agentRun?.status === "running") {
-          const spend = applyWorkerBudgetUsage(liveSession.agentRun, event);
-          setState((current) => ({
-            ...current,
-            sessions: current.sessions.map((session) => {
-              if (session.id !== event.sessionId || !session.agentRun) return session;
-              return {
-                ...session,
-                agentRun: {
-                  ...session.agentRun,
-                  usedTokens: spend.usedTokens,
-                  budgetBaseline: spend.budgetBaseline,
-                  outputTokensTotal: spend.outputTokensTotal,
-                  cacheTokensTotal: spend.cacheTokensTotal,
-                },
-              };
-            }),
-          }));
+          // Summed from the committed run, not the snapshot this event read.
+          setState((current) => ({ ...current, sessions: bookWorkerUsage(current.sessions, event.sessionId, event) }));
         }
         const occupancy = occupancyFromUsage(
           incoming,

@@ -11,6 +11,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { emptyWorktreeTrash, pruneOrphanWorktrees, worktreeTrashDir } from "../electron/worktree-host";
 import { durable, git, repoWithWorktree } from "./worktree-fixtures";
@@ -102,5 +103,19 @@ test("a worker folder cut from a bare repository can be let go", () => {
   assert.ok(pruned.removed.includes("sess_bare"), JSON.stringify(pruned.kept));
   assert.ok(!fs.existsSync(wt));
   assert.ok(!git(remote, ["worktree", "list"]).includes("sess_bare"));
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test("a file beside the worker folders is not a worker folder", () => {
+  // Revealing the worktrees folder in Finder leaves a `.DS_Store` there, and
+  // the sweep held it for ever as a folder that "still holds files".
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "workhorse-worktrees-file-"));
+  fs.writeFileSync(path.join(root, ".DS_Store"), "Finder's view settings");
+
+  const pruned = pruneOrphanWorktrees(root, []);
+
+  assert.deepEqual(pruned.kept, []);
+  assert.deepEqual(pruned.removed, []);
+  assert.ok(fs.existsSync(path.join(root, ".DS_Store")));
   fs.rmSync(root, { recursive: true, force: true });
 });

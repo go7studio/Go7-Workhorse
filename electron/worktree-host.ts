@@ -1957,7 +1957,11 @@ export function pruneOrphanWorktrees(
     // that; compare the real paths instead.
     let link = false;
     try {
-      link = fs.lstatSync(target).isSymbolicLink();
+      const stat = fs.lstatSync(target);
+      // A file here is no worker's folder: revealing this folder in Finder
+      // leaves a `.DS_Store`, and the sweep held it for ever as one.
+      if (stat.isFile()) continue;
+      link = stat.isSymbolicLink();
     } catch {
       continue;
     }

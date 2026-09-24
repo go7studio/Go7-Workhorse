@@ -212,11 +212,27 @@ export function parseRegPathValue(output: string): string {
   return match?.[1]?.trim() ?? "";
 }
 
+/**
+ * How long one registry read of the persisted PATH stands.
+ *
+ * Every env the desk builds for a child reads it, and each read was two
+ * synchronous `reg query` spawns on the main process: every vendor launch,
+ * every custom-tool shell call, every probe in a runtime detect. The registry
+ * is read so a CLI installed while the desk is open is found without a
+ * restart; half a minute keeps that true and makes the reads rare.
+ */
+export const WINDOWS_PERSISTED_PATH_TTL_MS = 30_000;
+
+const persistedPathReads = new WeakMap<(hivePath: string) => string, { at: number; value: string }>();
+
 export function readWindowsPersistedPath(
   query: (hivePath: string) => string = defaultRegPathQuery,
   platform: NodeJS.Platform = process.platform,
+  now: () => number = Date.now,
 ): string {
   if (platform !== "win32") return "";
+  const held = persistedPathReads.get(query);
+  if (held && now() - held.at < WINDOWS_PERSISTED_PATH_TTL_MS) return held.value;
   const user = query("HKCU\\Environment");
   const machine = query("HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment");
   const seen = new Set<string>();
@@ -227,7 +243,9 @@ export function readWindowsPersistedPath(
     seen.add(key);
     dirs.push(dir);
   }
-  return dirs.join(path.delimiter);
+  const value = dirs.join(path.delimiter);
+  persistedPathReads.set(query, { at: now(), value });
+  return value;
 }
 
 function defaultRegPathQuery(hivePath: string): string {

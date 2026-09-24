@@ -575,19 +575,65 @@ export function parseOpenAiToolCall(raw: unknown): CustomToolUse | null {
  * A write target usually does not exist yet, so resolve the nearest ancestor
  * that does and keep the remainder: a new file cannot be contained by a
  * directory that is itself a link out.
+ *
+ * "Does not exist" has to mean nothing is there. A link whose target is
+ * missing fails to resolve too, and walking up past it measured the folder the
+ * link sits in — so `notes.txt -> ../../.zshenv` read as inside, and the write
+ * followed the link and created the file out there. An entry that is present
+ * but will not resolve is refused instead.
  */
-function realPathOrNearest(target: string, realpath: (value: string) => string): string {
+function realPathOrNearest(
+  target: string,
+  realpath: (value: string) => string,
+  lstat: (value: string) => unknown,
+): string {
   const tail: string[] = [];
   let current = path.normalize(target);
   for (;;) {
     try {
       return tail.length === 0 ? realpath(current) : path.join(realpath(current), ...tail.slice().reverse());
     } catch {
+      let present = true;
+      try {
+        lstat(current);
+      } catch {
+        present = false;
+      }
+      if (present) throw new Error(`Path is a link that does not resolve: ${current}`);
       const parent = path.dirname(current);
       if (parent === current) return path.normalize(target);
       tail.push(path.basename(current));
       current = parent;
     }
+  }
+}
+
+/**
+ * A contained write opens the file without following a link at the last step.
+ * The containment check measured the path a moment earlier; a link planted
+ * there in between would otherwise carry the write wherever it points. A link
+ * that was already there has been measured, so it is resolved first and the
+ * file it names is the one opened. Windows has no O_NOFOLLOW, so there the
+ * plain write stands.
+ */
+function writeWithoutFollowing(filePath: string, content: string): void {
+  const noFollow = fs.constants.O_NOFOLLOW;
+  if (typeof noFollow !== "number") {
+    fs.writeFileSync(filePath, content, "utf8");
+    return;
+  }
+  let target = filePath;
+  try {
+    if (fs.lstatSync(filePath).isSymbolicLink()) target = fs.realpathSync(filePath);
+  } catch {
+    // Nothing there yet: the open below creates it.
+  }
+  const { O_WRONLY, O_CREAT, O_TRUNC } = fs.constants;
+  const handle = fs.openSync(target, O_WRONLY | O_CREAT | O_TRUNC | noFollow, 0o666);
+  try {
+    fs.writeFileSync(handle, content, "utf8");
+  } finally {
+    fs.closeSync(handle);
   }
 }
 
@@ -601,17 +647,18 @@ export function resolveWorkspacePath(
   cwd: string,
   folders: string[],
   sandbox: SandboxProfile,
-  options?: { realpath?: (value: string) => string; platform?: NodeJS.Platform },
+  options?: { realpath?: (value: string) => string; lstat?: (value: string) => unknown; platform?: NodeJS.Platform },
 ): string {
   const base = cwd.trim() || process.cwd();
   const raw = (requested ?? "").trim() || base;
   const abs = path.normalize(path.isAbsolute(raw) ? raw : path.join(base, raw));
   if (sandbox === "off") return abs;
   const realpath = options?.realpath ?? ((value: string) => fs.realpathSync(value));
+  const lstat = options?.lstat ?? ((value: string) => fs.lstatSync(value));
   const platform = options?.platform ?? process.platform;
-  const real = samePathCase(realPathOrNearest(abs, realpath), platform);
+  const real = samePathCase(realPathOrNearest(abs, realpath, lstat), platform);
   const roots = [base, ...folders.map((item) => item.trim()).filter(Boolean)]
-    .map((item) => samePathCase(realPathOrNearest(path.normalize(item), realpath), platform));
+    .map((item) => samePathCase(realPathOrNearest(path.normalize(item), realpath, lstat), platform));
   const allowed = roots.some((root) => real === root || real.startsWith(`${root}${path.sep}`));
   if (!allowed) throw new Error(`Path is outside the workspace: ${abs}`);
   return abs;
@@ -672,7 +719,8 @@ export async function executeCustomTool(
       const filePath = resolveWorkspacePath(typeof use.input.path === "string" ? use.input.path : "", cwd, folders, sandbox);
       const content = typeof use.input.content === "string" ? use.input.content : "";
       fs.mkdirSync(path.dirname(filePath), { recursive: true });
-      fs.writeFileSync(filePath, content, "utf8");
+      if (sandbox === "off") fs.writeFileSync(filePath, content, "utf8");
+      else writeWithoutFollowing(filePath, content);
       return { id: use.id, name, content: `Wrote ${filePath} (${content.length} chars)` };
     }
     if (name === "run_command") {

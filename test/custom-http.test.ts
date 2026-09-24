@@ -2569,3 +2569,64 @@ test("a custom chat whose folder has moved names the folder, not the tool", asyn
   // handed to an MCP server that would then run in it.
   assert.equal(modelCalls, 0, "the folder is checked before anything is launched or asked");
 });
+
+/**
+ * A link whose target is missing fails to resolve exactly as a file that does
+ * not exist yet does. Treating the two alike measured the folder the link sits
+ * in, so `notes.txt -> ../outside/pwned.txt` passed as inside and the write
+ * followed the link and created the file out there.
+ */
+test("a link that points nowhere is not a new file inside the workspace", async (t) => {
+  const workspace = path.join(path.sep, "work", "repo");
+  const dangling = path.join(workspace, "notes.txt");
+  const missing = () => Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+  const fake = {
+    realpath: (value: string) => {
+      if (value === workspace) return value;
+      throw missing();
+    },
+    lstat: (value: string) => {
+      if (value === workspace || value === dangling) return {};
+      throw missing();
+    },
+  };
+  assert.equal(
+    resolveWorkspacePath("new.txt", workspace, [], "workspace", fake),
+    path.join(workspace, "new.txt"),
+    "a file that really does not exist yet is still a new file inside",
+  );
+  assert.throws(() => resolveWorkspacePath("notes.txt", workspace, [], "workspace", fake), /does not resolve/);
+  assert.throws(() => resolveWorkspacePath(path.join("notes.txt", "child.txt"), workspace, [], "workspace", fake), /does not resolve/);
+
+  const tmp = mkdtempSync(path.join(os.tmpdir(), "wh-dangling-"));
+  const inside = path.join(tmp, "workspace");
+  const outside = path.join(tmp, "outside");
+  mkdirSync(inside);
+  mkdirSync(outside);
+  writeFileSync(path.join(inside, "real.md"), "before");
+  try {
+    symlinkSync(path.join(outside, "pwned.txt"), path.join(inside, "notes.txt"));
+    symlinkSync(path.join(inside, "real.md"), path.join(inside, "alias.md"));
+  } catch (err) {
+    const code = err && typeof err === "object" && "code" in err ? String((err as NodeJS.ErrnoException).code) : "";
+    if (code === "EPERM" || code === "EACCES") {
+      t.skip("Windows without symlink privilege");
+      return;
+    }
+    throw err;
+  }
+  const escaped = await executeCustomTool(
+    { id: "w1", name: "write_file", input: { path: "notes.txt", content: "escaped" } },
+    { cwd: inside, sandbox: "workspace", mode: "accept-edits" },
+  );
+  assert.equal(escaped.isError, true, escaped.content);
+  assert.equal(existsSync(path.join(outside, "pwned.txt")), false, "the write followed a dangling link out of the sandbox");
+
+  // A link that stays inside was measured, and it still takes the write.
+  const aliased = await executeCustomTool(
+    { id: "w2", name: "write_file", input: { path: "alias.md", content: "after" } },
+    { cwd: inside, sandbox: "workspace", mode: "accept-edits" },
+  );
+  assert.equal(aliased.isError, undefined, aliased.content);
+  assert.equal(readFileSync(path.join(inside, "real.md"), "utf8"), "after");
+});

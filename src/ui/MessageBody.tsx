@@ -223,8 +223,10 @@ export const MessageBody = memo(function MessageBody({
         if (block.type === "facts") {
           return (
             <dl key={index} className="facts">
-              {block.rows.map((row) => (
-                <div key={row.label} className="fact">
+              {/* By position: a reply can repeat a label ("Status" twice), and a
+                  repeated key made React drop or duplicate rows as it streamed. */}
+              {block.rows.map((row, rowIndex) => (
+                <div key={rowIndex} className="fact">
                   <dt>{row.label}</dt>
                   <dd>
                     <Inlines parts={parseInline(row.value)} nearby={text} cwd={cwd} vendorSessionId={vendorSessionId} />

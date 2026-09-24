@@ -119,6 +119,7 @@ import {
   type InboundLearningDraft,
 } from "../src/lib/learning-inbound";
 import { runGrokBotInboxCli } from "./grok-bot-inbox";
+import { atomicWriteJson } from "./state-persistence";
 import { watchWorkerCompletions } from "./link-watch";
 import type { WorkerRunRow } from "../src/lib/worker-settled";
 import { createFramedSender } from "../src/lib/link-notify";
@@ -1598,11 +1599,20 @@ function createWorkhorseProjectLocal(input: {
 }): string {
   const dest = process.env.WORKHORSE_STATE_PATH?.trim();
   if (!dest) throw new Error("Workhorse state is not available");
+  // Only a desk that has never saved starts from nothing. Any other failure to
+  // read, a torn or locked file included, used to start from `{}` too and write
+  // a desk holding one project over every chat the person had.
   let full: Record<string, unknown> = {};
+  let text: string | null = null;
   try {
-    full = JSON.parse(fs.readFileSync(dest, "utf8")) as Record<string, unknown>;
-  } catch {
-    full = {};
+    text = fs.readFileSync(dest, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+  if (text !== null) {
+    const parsed = JSON.parse(text) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("Workhorse state is not a desk");
+    full = parsed as Record<string, unknown>;
   }
   const projects = (Array.isArray(full.projects) ? full.projects : [])
     .map((item) => normalizeProject(item))
@@ -1619,8 +1629,9 @@ function createWorkhorseProjectLocal(input: {
     activeProjectId: applied.activeProjectId,
     ...(applied.activeSessionId ? { activeSessionId: applied.activeSessionId } : {}),
   };
-  fs.mkdirSync(path.dirname(dest), { recursive: true });
-  fs.writeFileSync(dest, JSON.stringify(next, null, 2), "utf8");
+  // Whole or not at all, the way the desk writes it: a helper stopped mid write
+  // must not leave a torn file where the desk's state was.
+  atomicWriteJson(dest, next);
   return JSON.stringify(
     {
       ...applied.result,

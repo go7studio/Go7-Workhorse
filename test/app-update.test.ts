@@ -152,7 +152,8 @@ test("a packaged Mac desk installs the arch-matched dmg, not a git checkout", ()
     tmp,
   });
   assert.match(script, /kill -0 "\$pid"/);
-  assert.match(script, /cp -R "\$src" "\$dest"/);
+  assert.match(script, /swap_app "\$src" "\$dest"/);
+  assert.doesNotMatch(script, /rm -rf "\$dest"/, "the live app is never deleted before the new one is whole");
   assert.match(script, /hdiutil detach "\$device"/);
   assert.match(script, /open "\$dest"/);
   assert.match(script, /4242/);
@@ -163,7 +164,7 @@ test("a packaged Mac desk installs the arch-matched dmg, not a git checkout", ()
   assert.match(script, /WORKHORSE_MAC_GROK_BOT_SHIM_STOP/);
   assert.match(script, /launchctl bootout/);
   assert.ok(script.includes("grok-bot-shim-host.js$"));
-  assert.ok(script.indexOf("WORKHORSE_MAC_GROK_BOT_SHIM_STOP") < script.indexOf('rm -rf "$dest"'));
+  assert.ok(script.indexOf("WORKHORSE_MAC_GROK_BOT_SHIM_STOP") < script.indexOf('swap_app "$src" "$dest"'));
 
 });
 

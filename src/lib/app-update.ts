@@ -359,6 +359,42 @@ fi
 `;
 }
 
+/**
+ * Put a new app bundle in place without ever leaving none.
+ *
+ * Both the in-app updater and scripts/install-mac.sh ran `rm -rf` on the live
+ * app and then `cp -R` the new one over its name, so a copy that failed part
+ * way — a full disk, an image that went away — left the person with no app at
+ * all. The copy now lands beside the live app, and only a complete copy takes
+ * its name; the old one comes back if the rename fails. A run that died
+ * between the two renames is healed first. install-mac.sh carries this exact
+ * text; keep the two in sync.
+ */
+export function macStagedSwapScript(): string {
+  return `# WORKHORSE_MAC_STAGED_SWAP
+swap_app() {
+  local from="$1" to="$2"
+  local staged="$to.new" previous="$to.old"
+  if [ ! -e "$to" ] && [ -e "$previous" ]; then mv "$previous" "$to" 2>/dev/null || true; fi
+  rm -rf "$staged" "$previous"
+  if ! cp -R "$from" "$staged"; then
+    rm -rf "$staged" 2>/dev/null || true
+    return 1
+  fi
+  if [ -e "$to" ] && ! mv "$to" "$previous"; then
+    rm -rf "$staged" 2>/dev/null || true
+    return 1
+  fi
+  if ! mv "$staged" "$to"; then
+    if [ -e "$previous" ]; then mv "$previous" "$to" 2>/dev/null || true; fi
+    rm -rf "$staged" 2>/dev/null || true
+    return 1
+  fi
+  rm -rf "$previous" 2>/dev/null || true
+}
+`;
+}
+
 export function macReplaceScript(input: {
   pid: number;
   srcApp: string;
@@ -387,12 +423,20 @@ while IFS= read -r shim_pid; do
   [ "$shim_command" = "$expected_shim" ] || continue
   kill -TERM "$shim_pid" 2>/dev/null || true
 done < <(pgrep -f 'grok-bot-shim-host\.js$' 2>/dev/null || true)
-rm -rf "$dest"
-cp -R "$src" "$dest"
-if [ -n "$device" ]; then
-  hdiutil detach "$device" -quiet 2>/dev/null || hdiutil detach "$device" -force -quiet 2>/dev/null || true
+detach_image() {
+  if [ -n "$device" ]; then
+    hdiutil detach "$device" -quiet 2>/dev/null || hdiutil detach "$device" -force -quiet 2>/dev/null || true
+  fi
+  rm -rf "$tmp" 2>/dev/null || true
+}
+${macStagedSwapScript()}if ! swap_app "$src" "$dest"; then
+  # The app that was there is still there. Open it again: the person asked
+  # for an update, not for their desk to disappear.
+  detach_image
+  open "$dest" 2>/dev/null || true
+  exit 1
 fi
-rm -rf "$tmp" 2>/dev/null || true
+detach_image
 ${macRefreshRegistrationScript('"$dest"')}
 open "$dest"
 `;

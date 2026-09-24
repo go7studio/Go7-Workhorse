@@ -10765,7 +10765,7 @@ test("packages use platform Electron and mac release builds require a stable sig
   assert.match(hook, /assertStableReleaseIdentity/);
   assert.match(hook, /Developer ID Application/);
   const install = readFileSync(path.join(ROOT, "scripts", "install-mac.sh"), "utf8");
-  assert.match(install, /rm -rf "\/Applications\/\$\{APP\}"/);
+  assert.match(install, /swap_app "\$\{mount\}\/\$\{APP\}" "\/Applications\/\$\{APP\}"/);
   assert.match(install, /rm -rf \/Applications\/Workhorse\.app/);
   assert.match(install, /refresh_mac_app_icon "\/Applications\/\$\{APP\}"/);
   assert.match(install, /WORKHORSE_MAC_DOCK_REFRESH/);

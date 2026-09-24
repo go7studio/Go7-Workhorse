@@ -88,6 +88,31 @@ stop_grok_bot_shim() {
   done < <(pgrep -f 'grok-bot-shim-host\.js$' 2>/dev/null || true)
 }
 
+# Keep in sync with macStagedSwapScript in src/lib/app-update.ts. This used to
+# delete the installed app and then copy the new one over its name, so a copy
+# that failed part way left no app at all.
+# WORKHORSE_MAC_STAGED_SWAP
+swap_app() {
+  local from="$1" to="$2"
+  local staged="$to.new" previous="$to.old"
+  if [ ! -e "$to" ] && [ -e "$previous" ]; then mv "$previous" "$to" 2>/dev/null || true; fi
+  rm -rf "$staged" "$previous"
+  if ! cp -R "$from" "$staged"; then
+    rm -rf "$staged" 2>/dev/null || true
+    return 1
+  fi
+  if [ -e "$to" ] && ! mv "$to" "$previous"; then
+    rm -rf "$staged" 2>/dev/null || true
+    return 1
+  fi
+  if ! mv "$staged" "$to"; then
+    if [ -e "$previous" ]; then mv "$previous" "$to" 2>/dev/null || true; fi
+    rm -rf "$staged" 2>/dev/null || true
+    return 1
+  fi
+  rm -rf "$previous" 2>/dev/null || true
+}
+
 [ "$(uname -s)" = "Darwin" ] || die "This installer is for macOS. On Windows, run the .exe from the releases page."
 
 # Apple silicon takes the arm64 dmg, Intel the x64 one. Running the arm64
@@ -150,8 +175,8 @@ fi
 stop_grok_bot_shim "/Applications/${APP}"
 
 say "Installing to /Applications..."
-rm -rf "/Applications/${APP}"
-cp -R "${mount}/${APP}" /Applications/
+swap_app "${mount}/${APP}" "/Applications/${APP}" ||
+  die "Could not put the new app in place. The app that was installed is still there."
 # One live app. The old short name must not stay beside the current one.
 if [ -d /Applications/Workhorse.app ]; then
   say "Removing the pre-rename Workhorse.app..."

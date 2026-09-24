@@ -93,9 +93,49 @@ export function autoRenameChat(sessions: Session[], id: string, title: string): 
   return renameChat(sessions, id, title, false);
 }
 
+/**
+ * These chats and everything they spawned, at every depth. A worker can hold a
+ * nested helper of its own; deleting only direct children left that helper
+ * behind with a parent that no longer existed, hidden from the sidebar and
+ * never cancelled.
+ */
+function withDescendants(sessions: Array<Pick<Session, "id" | "parentId">>, ids: Iterable<string>): Set<string> {
+  const gone = new Set(ids);
+  let grew = gone.size > 0;
+  while (grew) {
+    grew = false;
+    for (const session of sessions) {
+      if (session.parentId && gone.has(session.parentId) && !gone.has(session.id)) {
+        gone.add(session.id);
+        grew = true;
+      }
+    }
+  }
+  return gone;
+}
+
 export function deleteChat(sessions: Session[], id: string): Session[] | null {
   if (!sessions.some((session) => session.id === id)) return null;
-  return sessions.filter((session) => session.id !== id && session.parentId !== id);
+  const gone = withDescendants(sessions, [id]);
+  return sessions.filter((session) => !gone.has(session.id));
+}
+
+/**
+ * Chats a deletion removed that still have a vendor turn to stop. The chat the
+ * person deleted counts as much as its workers: skipping every chat without a
+ * parent left a deleted chat's turn running, still spending and still able to
+ * write, with nowhere left to report.
+ */
+export function deletedLiveSessions<T extends Pick<Session, "id" | "status" | "agentRun">>(before: T[], after: Array<Pick<Session, "id">>): T[] {
+  const kept = new Set(after.map((session) => session.id));
+  return before.filter(
+    (session) =>
+      !kept.has(session.id) &&
+      (session.agentRun?.status === "running" ||
+        session.agentRun?.status === "interrupted" ||
+        session.status === "running" ||
+        session.status === "needs-input"),
+  );
 }
 
 export function deleteWorkerChats(sessions: Session[], parentId: string): Session[] | null {
@@ -105,8 +145,9 @@ export function deleteWorkerChats(sessions: Session[], parentId: string): Sessio
       .map((session) => session.id),
   );
   if (childIds.size === 0) return null;
+  const gone = withDescendants(sessions, childIds);
   return sessions
-    .filter((session) => !childIds.has(session.id))
+    .filter((session) => !gone.has(session.id))
     .map((session) => {
       if (session.id !== parentId) return session;
       return {

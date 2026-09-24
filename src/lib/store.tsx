@@ -34,6 +34,7 @@ import {
   archiveChat,
   autoRenameChat,
   deleteChat,
+  deletedLiveSessions,
   dropDrafts,
   appendUserMessage,
   deleteWorkerChats,
@@ -1116,18 +1117,7 @@ function cancelVendorSession(session: Pick<Session, "id" | "provider" | "agentRu
 }
 
 function stopDeletedWorkerSessions(before: Session[], after: Session[]) {
-  const kept = new Set(after.map((session) => session.id));
-  for (const session of before) {
-    if (kept.has(session.id) || !session.parentId) continue;
-    if (
-      session.agentRun?.status === "running" ||
-      session.agentRun?.status === "interrupted" ||
-      session.status === "running" ||
-      session.status === "needs-input"
-    ) {
-      cancelVendorSession(session);
-    }
-  }
+  for (const session of deletedLiveSessions(before, after)) cancelVendorSession(session);
 }
 
 function occupancyForSession(
@@ -2116,23 +2106,25 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       stopDeletedWorkerSessions(current.sessions, sessions);
       const leases = releaseDeletedSessionLeases(current.leases ?? [], current.sessions, sessions);
       pathLeasesRef.current = leases;
+      // The chat's workers and helpers went with it, and so do their cards.
+      const kept = new Set(sessions.map((session) => session.id));
       return {
         ...current,
         sessions,
         leases,
-        pending: current.pending.filter((item) => item.sessionId !== id),
-        activeSessionId: current.activeSessionId === id ? null : current.activeSessionId,
+        pending: current.pending.filter((item) => kept.has(item.sessionId)),
+        activeSessionId: current.activeSessionId && kept.has(current.activeSessionId) ? current.activeSessionId : null,
       };
     });
   }, []);
 
   const deleteWorkers = useCallback((parentId: string) => {
     setState((current) => {
-      const kids = current.sessions.filter((session) => session.parentId === parentId);
       const sessions = deleteWorkerChats(current.sessions, parentId);
       if (!sessions) return current;
       stopDeletedWorkerSessions(current.sessions, sessions);
-      const gone = new Set(kids.map((kid) => kid.id));
+      const kept = new Set(sessions.map((session) => session.id));
+      const gone = new Set(current.sessions.filter((session) => !kept.has(session.id)).map((session) => session.id));
       const leases = releaseDeletedSessionLeases(current.leases ?? [], current.sessions, sessions);
       pathLeasesRef.current = leases;
       return {
@@ -2930,11 +2922,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           stopDeletedWorkerSessions(current.sessions, sessions);
           const leases = releaseDeletedSessionLeases(current.leases ?? [], current.sessions, sessions);
           pathLeasesRef.current = leases;
+          const kept = new Set(sessions.map((session) => session.id));
           return {
             ...current,
             sessions,
             leases,
-            pending: current.pending.filter((item) => item.sessionId !== current.activeSessionId),
+            pending: current.pending.filter((item) => kept.has(item.sessionId)),
             activeSessionId: null,
           };
         });

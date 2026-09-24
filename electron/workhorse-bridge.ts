@@ -74,6 +74,12 @@ export async function startWorkhorseBridge(
       send(401, { error: "unauthorized" });
       return;
     }
+    // Liveness, for a helper that holds a record of this bridge and needs to
+    // know whether the desk that wrote it is still here. Nothing is asked of it.
+    if (read && pathName === "/link/ping") {
+      send(200, { ok: true });
+      return;
+    }
     let readRequest: LinkReadRequest | null = null;
     if (read) {
       try {

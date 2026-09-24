@@ -74,6 +74,7 @@ import { probeCustomHttp } from "./custom-http";
 import { GROK_BOT_LEFTOVER_FILE, parseGrokBotPlanUsage } from "./custom-plan";
 import { isGrokBotUrl } from "../src/lib/custom-http-identity";
 import {
+  abandonInboxAsks,
   askViaInbox,
   interpretPeerAskHttp,
   isRetryablePeerAskTransport,
@@ -1231,7 +1232,7 @@ function publicLocalHosts(discovery: LocalRuntimeDiscovery) {
 async function runtimeLinkHandshake(profile: ReturnType<typeof currentMcpProfile>) {
   const discovery = await discoverLocalRuntime(profile);
   const handshake = linkHandshake({
-    deskOnline: deskIsOnline(),
+    deskOnline: await deskAnswers(),
     ...(discovery ? { local: { tools: callableLocalToolNames(discovery, profile), hosts: publicLocalHosts(discovery) } } : {}),
   });
   const tools = handshake.tools.filter((tool) => isMcpToolAdvertised(profile, tool));
@@ -2890,10 +2891,42 @@ function linkReplayFingerprint(name: string, args: Record<string, unknown>): str
     .digest("hex");
 }
 
+/**
+ * Whether there is a desk address to try. A read tries it and falls back to
+ * the file on any failure, so this only saves a doomed request; it does not
+ * say the desk is up. `deskAnswers` does.
+ */
 function deskIsOnline(): boolean {
   if (deskAsk) return true;
   const live = readBridgeRecord(process.env.WORKHORSE_STATE_PATH);
   return Boolean(live?.url || process.env.WORKHORSE_BRIDGE_URL);
+}
+
+/** How long the capabilities handshake waits on a desk before calling it offline. */
+const DESK_PING_TIMEOUT_MS = 1_000;
+
+/**
+ * Whether a desk answers right now. The bridge record outlives the desk that
+ * wrote it, so reading its presence told every harness the desk was online on
+ * every day after the first launch, closed or not. This asks the bridge's own
+ * ping route, which answers only a caller holding the token.
+ */
+async function deskAnswers(): Promise<boolean> {
+  if (deskAsk) return true;
+  const live = readBridgeRecord(process.env.WORKHORSE_STATE_PATH);
+  const url = live?.url || process.env.WORKHORSE_BRIDGE_URL;
+  const token = live?.token || process.env.WORKHORSE_BRIDGE_TOKEN;
+  if (!url || !token) return false;
+  try {
+    const response = await fetch(`${url.replace(/\/$/, "")}/link/ping`, {
+      headers: { authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(DESK_PING_TIMEOUT_MS),
+    });
+    const payload = (await response.json().catch(() => null)) as { ok?: unknown } | null;
+    return response.ok && payload?.ok === true;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -4348,6 +4381,9 @@ export async function runLinkCli(argv: string[]): Promise<number> {
 }
 
 if (isMcpEntry()) {
+  // A host that closes stdin gets an immediate exit, which skipped the wait's
+  // own cleanup. Whatever this helper still had in the inbox goes with it.
+  process.once("exit", abandonInboxAsks);
   const linkAt = process.argv.indexOf("link");
   if (linkAt > 1) {
     void runLinkCli(process.argv.slice(linkAt + 1)).then((code) => process.exit(code));

@@ -317,7 +317,13 @@ export async function askViaInbox(
   const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const reqPath = path.join(inbox, `${id}.req.json`);
   const resPath = path.join(inbox, `${id}.res.json`);
-  writeInboxFile(reqPath, { ...ask, id });
+  // Stamped with the wall clock, which is the one the desk reads it by. A
+  // request whose asker is gone was run whenever the desk next started: a
+  // helper that exited mid-wait left the file behind, and nothing said how old
+  // it was.
+  const stamped = Date.now();
+  writeInboxFile(reqPath, { ...ask, id, createdAt: stamped, deadline: stamped + timeoutMs });
+  pendingRequests.add(reqPath);
   const start = now();
   const settle = (result: PeerAskResult): string => {
     if ("error" in result && result.error) throw new Error(result.error);
@@ -336,6 +342,7 @@ export async function askViaInbox(
     if (fs.existsSync(resPath)) throw new Error("the other chat's answer could not be read");
     throw new Error("the other chat did not answer in time");
   } finally {
+    pendingRequests.delete(reqPath);
     try {
       fs.unlinkSync(reqPath);
     } catch {
@@ -347,6 +354,26 @@ export async function askViaInbox(
       /* ignore */
     }
   }
+}
+
+/** Requests this process is still waiting on, so an exit can take them back. */
+const pendingRequests = new Set<string>();
+
+/**
+ * Take back every request this process is still waiting on. A helper whose
+ * host closed its stdin exits at once, and that skipped the cleanup above: the
+ * request stayed in the inbox for the next desk to run, long after anyone was
+ * waiting for it. Synchronous, so it can run from an exit handler.
+ */
+export function abandonInboxAsks(): void {
+  for (const file of pendingRequests) {
+    try {
+      fs.unlinkSync(file);
+    } catch {
+      /* already answered and cleaned up */
+    }
+  }
+  pendingRequests.clear();
 }
 
 /**
@@ -365,6 +392,8 @@ export type InboxWatchIo = {
   watch?: (dir: string, onChange: () => void) => { close: () => void; on: (event: "error", fn: () => void) => void };
   /** Runs `tick` every `ms` and returns the cancel. */
   schedule?: (tick: () => void, ms: number) => () => void;
+  /** The wall clock a request's deadline is read against. */
+  now?: () => number;
 };
 
 export function watchPeerInbox(
@@ -373,6 +402,7 @@ export function watchPeerInbox(
   io: InboxWatchIo = {},
 ): () => void {
   ensureInbox(inbox);
+  const now = io.now ?? Date.now;
   const seen = new Set<string>();
   const scan = () => {
     let names: string[] = [];
@@ -392,7 +422,21 @@ export function watchPeerInbox(
           // place of the id the desk waits on for the reply (main spreads the
           // ask over its own), so an ask that came this way was run and its
           // answer went to a waiter that did not exist.
-          const { id: _file, ...ask } = JSON.parse(fs.readFileSync(reqPath, "utf8")) as PeerAsk & { id?: unknown };
+          const { id: _file, createdAt: _created, deadline, ...ask } = JSON.parse(fs.readFileSync(reqPath, "utf8")) as PeerAsk & {
+            id?: unknown;
+            createdAt?: unknown;
+            deadline?: unknown;
+          };
+          // Its asker has stopped waiting, so nobody is left to read the answer
+          // and running it now would be work nobody asked for any more.
+          if (typeof deadline === "number" && now() > deadline) {
+            try {
+              fs.unlinkSync(reqPath);
+            } catch {
+              /* the asker cleaned it up */
+            }
+            return;
+          }
           const result = await handler(ask);
           writeInboxFile(resPath, result);
         } catch (error) {

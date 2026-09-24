@@ -106,7 +106,7 @@ import { customBotEnabled, customBotModels } from "../src/lib/custom-bots";
 import { routingProfileForModel } from "../src/lib/routing";
 import type { AdaptiveCandidate } from "../src/lib/learning-policy";
 import { LearningService } from "./learning-service";
-import { SqliteMemoryStore } from "./learning-sqlite";
+import { openSqliteMemoryStore } from "./learning-sqlite";
 import { attachLearningIpc } from "./learning-ipc";
 import { runLearningSmoke } from "./learning-smoke";
 import { probeLocalComputeHosts } from "./local-compute-registry";
@@ -1093,7 +1093,9 @@ app.whenReady().then(async () => {
       fs.unlinkSync(dest);
     },
   };
-  const learningStore = new SqliteMemoryStore(app.getPath("userData"));
+  const learningStore = openSqliteMemoryStore(app.getPath("userData"), (error) =>
+    mainLog.record("learn:open", `failed ${faultDetail(error, 1)}; learning is in memory this session`),
+  );
   const learningService = new LearningService({
     store: learningStore,
     settings: () => liveSettings.learning,
@@ -2564,6 +2566,25 @@ app.whenReady().then(async () => {
     if (!liveDeskWindow()) createWindow();
     setDockIcon();
   });
+}).catch((error) => {
+  /*
+   * A throw above used to end here as an unhandled rejection, with no window
+   * made and the single-instance lock still held: the app sat running and
+   * every relaunch focused a window that did not exist. Say what failed and let
+   * go of the lock, so the next launch can try again.
+   */
+  mainLog.record("ready", `failed ${faultDetail(error)}`);
+  console.error("workhorse could not start", error);
+  if (liveDeskWindow()) return;
+  process.exitCode = 1;
+  // The packaged learning smoke has nobody to dismiss a dialog.
+  if (!process.argv.includes("--workhorse-learning-smoke")) {
+    dialog.showErrorBox(
+      "Workhorse could not start",
+      `${error instanceof Error ? error.message : String(error)}\n\nThe details are in the desk's main log.`,
+    );
+  }
+  app.quit();
 });
 
 /**

@@ -256,16 +256,28 @@ export class SqliteMemoryStore implements MemoryStore {
       (this.io.mkdirSync ?? fs.mkdirSync)(dir, { recursive: true });
     }
     this.db = new DatabaseSync(this.path);
-    this.db.exec(`PRAGMA busy_timeout = ${BUSY_MS};`);
-    if (this.path !== ":memory:") {
-      try {
-        this.db.exec("PRAGMA journal_mode = WAL;");
-      } catch {
-        /* some volumes reject WAL; capture still works */
+    try {
+      this.db.exec(`PRAGMA busy_timeout = ${BUSY_MS};`);
+      if (this.path !== ":memory:") {
+        try {
+          this.db.exec("PRAGMA journal_mode = WAL;");
+        } catch {
+          /* some volumes reject WAL; capture still works */
+        }
       }
+      this.migrate();
+      this.prepareFts();
+    } catch (error) {
+      // A store that will not open lets go of its file. Held, it stayed locked
+      // on Windows for the rest of the session, whatever took its place.
+      try {
+        this.db.close();
+      } catch {
+        /* already unusable */
+      }
+      this.db = null;
+      throw error;
     }
-    this.migrate();
-    this.prepareFts();
   }
 
   private conn(): SqliteDatabase {
@@ -814,6 +826,25 @@ export class SqliteMemoryStore implements MemoryStore {
   integrityCheck(): { ok: boolean; fts: boolean } {
     const probe = this.probe();
     return { ok: probe.integrity && probe.writable, fts: this.fts };
+  }
+}
+
+/**
+ * The learning store on disk, or one in memory when the file will not open.
+ *
+ * The desk opens this in its ready handler, before its window exists. A
+ * learning.sqlite that is not a database, or a disk too full to migrate it,
+ * threw out of that handler: no window, the single-instance lock still held,
+ * and every relaunch focused a window that was never made. Learning is
+ * optional and the desk is not, so this session learns in memory and the file
+ * stays where it is for the person to keep or remove.
+ */
+export function openSqliteMemoryStore(userData: string, onFail?: (error: unknown) => void): SqliteMemoryStore {
+  try {
+    return new SqliteMemoryStore(userData);
+  } catch (error) {
+    onFail?.(error);
+    return new SqliteMemoryStore(":memory:");
   }
 }
 

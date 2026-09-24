@@ -38,6 +38,7 @@ import {
   type GrokBotInboxIo,
 } from "../electron/grok-bot-inbox";
 import { linkGrokBotOneshot } from "../src/lib/workhorse-link";
+import { ownsShimKeepalive, workhorseRuntimeIdentity } from "../src/lib/app-identity";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -476,7 +477,22 @@ test("the desk decides it from the profile it was pinned to", () => {
   // argument in main.ts leaves every isolated build clobbering the agent again,
   // and no unit test would notice.
   const main = readFileSync(new URL("../electron/main.ts", import.meta.url), "utf8");
-  assert.match(main, /manageKeepalive: !workhorseUserDataOverride\(\)/, "main must not manage the agent on an isolated profile");
+  assert.match(
+    main,
+    /manageKeepalive: ownsShimKeepalive\(runtimeIdentity, workhorseUserDataOverride\(\)\)/,
+    "main must not manage the agent on an isolated profile or a development desk",
+  );
+});
+
+test("only the installed release desk owns the keepalive", () => {
+  // `npm run try` opens the Dev app with no profile override, and `npm run dev`
+  // runs unpackaged with none either. Both passed the isolated-profile check,
+  // so a Mac Dev desk rewrote the agent to its own binary and profile and
+  // restarted it, and the installed desk's Grok Bot calls failed.
+  assert.equal(ownsShimKeepalive(workhorseRuntimeIdentity(true, "release"), undefined), true);
+  assert.equal(ownsShimKeepalive(workhorseRuntimeIdentity(true, "development"), undefined), false, "the Dev app");
+  assert.equal(ownsShimKeepalive(workhorseRuntimeIdentity(false), undefined), false, "npm run dev");
+  assert.equal(ownsShimKeepalive(workhorseRuntimeIdentity(true, "release"), "/tmp/throwaway"), false, "an isolated profile");
 });
 
 test("the liveness probe finds the shim on the port its own row names", async () => {

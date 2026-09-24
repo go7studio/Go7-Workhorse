@@ -124,12 +124,14 @@ case "$(uname -m)" in
 esac
 
 say "Finding the latest release for ${arch}..."
+# `|| true` on each: under pipefail a grep that matches nothing fails the
+# assignment and the script exits with no word, before the message below.
 urls=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" \
-  | grep -o '"browser_download_url": *"[^"]*-mac[^"]*\.dmg"' | cut -d'"' -f4)
-asset=$(printf '%s\n' "$urls" | grep -- "-mac-${arch}\.dmg$" | head -1)
+  | grep -o '"browser_download_url": *"[^"]*-mac[^"]*\.dmg"' | cut -d'"' -f4) || true
+asset=$(printf '%s\n' "$urls" | grep -- "-mac-${arch}\.dmg$" | head -1) || true
 # Releases up to 0.1.9 shipped one unlabelled dmg, and it was arm64 only.
 if [ -z "$asset" ] && [ "$arch" = "arm64" ]; then
-  asset=$(printf '%s\n' "$urls" | grep -- '-mac\.dmg$' | head -1)
+  asset=$(printf '%s\n' "$urls" | grep -- '-mac\.dmg$' | head -1) || true
 fi
 if [ -z "$asset" ]; then
   die "No ${arch} macOS dmg on the latest release. Check https://github.com/${REPO}/releases"

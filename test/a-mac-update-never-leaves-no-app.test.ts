@@ -97,3 +97,23 @@ test("the updater and the installer both use the staged swap, word for word", ()
   assert.doesNotMatch(installer, /rm -rf "\/Applications\/\$\{APP\}"/);
   assert.doesNotMatch(installer, /cp -R "\$\{mount\}\/\$\{APP\}" \/Applications\//);
 });
+
+/*
+ * Under `set -euo pipefail` an assignment from a pipeline whose grep matched
+ * nothing fails, and the installer exited with no word at all, before the
+ * "No <arch> macOS dmg" message that says what went wrong could run.
+ */
+test("install-mac.sh says so when no dmg matches, instead of exiting silently", () => {
+  const installer = readFileSync(path.join(ROOT, "scripts", "install-mac.sh"), "utf8");
+  assert.match(installer, /set -euo pipefail/);
+  const lines = installer.split("\n");
+  const picks = lines
+    .map((line, index) => ({ line, index }))
+    .filter(({ line }) => /^\s*(urls|asset)=\$\(/.test(line));
+  assert.ok(picks.length >= 3, "the dmg picks moved; update this test");
+  for (const { line, index } of picks) {
+    // A pick may continue onto the next line; the guard sits where it ends.
+    const end = line.trimEnd().endsWith("\\") ? lines[index + 1] ?? "" : line;
+    assert.match(end, /\|\| true\s*$/, `unguarded pick: ${line.trim()}`);
+  }
+});

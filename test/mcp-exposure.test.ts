@@ -27,6 +27,7 @@ import {
   cursorMcpConfigPath,
   hermesConfigPath,
   installWorkhorseExternalMcp,
+  installWorkhorseLink,
   mcpConfigContainsBearer,
   mergeExternalMcpServer,
   mergeOpenClawMcpConfig,
@@ -1791,4 +1792,55 @@ test("Hermes install keeps the file's own indent, so existing servers stay serve
   assert.match(again, /^ {4}github:\n {8}command: gh$/m);
   // A two-space file is written as before.
   assert.match(upsertHermesMcpServers("mcp_servers:\n  github:\n    command: gh\n", launch), /^mcp_servers:\n {2}workhorse:\n/);
+});
+
+/**
+ * The bearer guard read the whole merged file. The person's own servers often
+ * carry an Authorization header — a remote GitHub server always does — so
+ * Connect refused every such machine with "refused to write a bearer token",
+ * when Workhorse had written nothing of the kind.
+ */
+test("Link install judges only its own entry for a bearer, not the person's servers", () => {
+  const home = path.join(path.sep, "home", "ci");
+  const cursorPath = path.join(home, ".cursor", "mcp.json");
+  const openclawPath = path.join(home, ".openclaw", "openclaw.json");
+  const hermesPath = path.join(home, ".hermes", "config.yaml");
+  const github = { url: "https://api.githubcopilot.com/mcp/", headers: { Authorization: "Bearer ghp_example" } };
+  const seeded = () =>
+    new Map<string, string>([
+      [cursorPath, JSON.stringify({ mcpServers: { github } })],
+      [openclawPath, JSON.stringify({ gateway: { auth: { authorization: "token" } } })],
+      [hermesPath, "mcp_servers:\n  github:\n    url: https://api.githubcopilot.com/mcp/\n    headers:\n      Authorization: Bearer ghp_example\n"],
+    ]);
+  const install = (files: Map<string, string>, command: string) =>
+    installWorkhorseLink({
+      home,
+      platform: path.sep === "\\" ? "win32" : "linux",
+      command,
+      script: path.join(path.sep, "app", "workhorse-mcp.js"),
+      statePath: path.join(path.sep, "app", "state.json"),
+      hosts: ["cursor", "openclaw", "hermes"],
+      io: {
+        existsSync: (file) => files.has(file),
+        readFile: (file) => files.get(file) ?? "",
+        writeFile: (file, text) => {
+          files.set(file, text);
+        },
+        mkdirp: () => undefined,
+      },
+    });
+
+  const files = seeded();
+  const report = install(files, path.join(path.sep, "app", "node"));
+  assert.deepEqual(report.skipped, []);
+  assert.deepEqual(report.written.map((item) => item.target).sort(), ["cursor", "hermes", "openclaw"]);
+  const cursor = JSON.parse(files.get(cursorPath) ?? "{}") as { mcpServers: Record<string, unknown> };
+  assert.deepEqual(cursor.mcpServers.github, github, "the person's own server is kept as it was");
+  assert.ok(cursor.mcpServers.workhorse);
+  assert.match(files.get(hermesPath) ?? "", /Authorization: Bearer ghp_example/);
+
+  // The guard still refuses when the Workhorse entry itself would carry one.
+  const refused = install(seeded(), path.join(path.sep, "WORKHORSE_BRIDGE_TOKEN", "node"));
+  assert.deepEqual(refused.written, []);
+  assert.equal(refused.skipped.length, 3);
 });

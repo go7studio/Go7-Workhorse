@@ -264,7 +264,10 @@ export function installWorkhorseLink(input: InstallLinkInput): InstallReport {
           existing = JSON.parse(input.io.readFile(cursorPath));
         }
         const next = mergeExternalMcpServer(existing, server);
-        if (mcpConfigContainsBearer(next)) {
+        // Only what Workhorse writes is judged. The person's own servers often
+        // carry an Authorization header, and scanning the whole file refused to
+        // connect Cursor for anyone with a remote GitHub server configured.
+        if (mcpConfigContainsBearer(server)) {
           skipped.push({ target: "cursor", reason: "refused to write a bearer token" });
         } else {
           input.io.mkdirp(dirnameOf(cursorPath));
@@ -296,7 +299,7 @@ export function installWorkhorseLink(input: InstallLinkInput): InstallReport {
         existing = JSON.parse(input.io.readFile(openclawPath));
       }
       const next = mergeOpenClawMcpConfig(existing, launch);
-      if (mcpConfigContainsBearer(next)) {
+      if (mcpConfigContainsBearer(launch)) {
         skipped.push({ target: "openclaw", reason: "refused to write a bearer token" });
       } else {
         input.io.mkdirp(dirnameOf(openclawPath));
@@ -320,7 +323,7 @@ export function installWorkhorseLink(input: InstallLinkInput): InstallReport {
   } else try {
     const current = input.io.existsSync(hermesPath) ? input.io.readFile(hermesPath) : "";
     const next = upsertHermesMcpServers(current, launch);
-    if (/bearer|WORKHORSE_BRIDGE_TOKEN|authorization/i.test(next)) {
+    if (/bearer|WORKHORSE_BRIDGE_TOKEN|authorization/i.test(hermesWorkhorseYamlBlock(launch))) {
       skipped.push({ target: "hermes", reason: "refused to write a bearer token" });
     } else {
       input.io.mkdirp(dirnameOf(hermesPath));

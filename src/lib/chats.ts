@@ -172,7 +172,13 @@ export function archiveChat(sessions: Session[], id: string, archived: boolean, 
 export function moveChat(sessions: Session[], id: string, projectId: string): Session[] | null {
   const session = sessions.find((item) => item.id === id);
   if (!session || !projectId || session.projectId === projectId) return null;
-  return sessions.map((item) => (item.id === id ? { ...item, projectId } : item));
+  // The chat's crew moves with it. Left behind, each worker lost its parent in
+  // the old project's list and showed there as a chat of its own. A worker
+  // bound to some other project by its folder stays bound there.
+  const crew = withDescendants(sessions, [id]);
+  return sessions.map((item) =>
+    item.id === id || (crew.has(item.id) && item.projectId === session.projectId) ? { ...item, projectId } : item,
+  );
 }
 
 export type ListedChatHit = { id: string; title: string; provider?: string };

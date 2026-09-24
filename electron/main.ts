@@ -90,7 +90,7 @@ import { offloadStateTranscripts, readTranscriptSidecar, repairRetiredSidecars, 
 import { applyComposerDrafts, type ComposerDraftSnap } from "../src/lib/chats";
 import { createSaveQueue, dueByInterval, readComposerDraftFile, readStringMapFile, readVersionedState, sameJsonValue, STATE_BACKUP_INTERVAL_MS, STATE_FSYNC_INTERVAL_MS, syncFileInPlace, worktreeKeepSet,
   worktreeResumableSet, worktreePruneDecision, writeComposerDraftFile, writeStringMapFile, writeVersionedState, writeVersionedStateAsync } from "./state-persistence";
-import { createDebouncedWrite } from "./state-persistence";
+import { createDebouncedWrite, setAsideNewerState } from "./state-persistence";
 import { boundInstances } from "../src/lib/file-instances";
 import { workhorseUserDataOverride, workhorseVolatileCredentials } from "../src/lib/user-data";
 import {
@@ -560,6 +560,8 @@ function readStateWithSource(): StateLoad {
 
 function readStateInner(): StateLoad {
   const result = readVersionedState(statePath());
+  // Before anything below writes: a newer Workhorse's state is never written over.
+  for (const kept of setAsideNewerState(result)) mainLog.record("state:read", `kept newer state aside as ${path.basename(kept)}`);
   const { state } = result;
   const origin = { source: result.source, recovered: result.recovered, primary: result.source === statePath() };
   if (!origin.primary) {

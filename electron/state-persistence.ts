@@ -13,6 +13,8 @@ export type StateReadResult = {
   state: PersistableState;
   source: string | null;
   recovered: boolean;
+  /** Files read before `source` that a newer Workhorse wrote. Never loaded, and never to be written over. */
+  newer?: Array<{ file: string; version: number }>;
 };
 
 export function migrateState(raw: PersistableState): PersistableState {
@@ -366,17 +368,52 @@ export function dueByInterval(lastAt: number, now: number, intervalMs: number): 
 
 export function readVersionedState(file: string): StateReadResult {
   const candidates = [file, `${file}.bak`, `${file}.bak.1`, `${file}.bak.2`];
+  const newer: NonNullable<StateReadResult["newer"]> = [];
+  const found = () => (newer.length > 0 ? { newer } : {});
   for (const candidate of candidates) {
     const parsed = parseObject(candidate);
     if (!parsed) continue;
+    if (typeof parsed.stateVersion === "number" && parsed.stateVersion > CURRENT_STATE_VERSION) {
+      newer.push({ file: candidate, version: parsed.stateVersion });
+      continue;
+    }
     try {
       const state = migrateState(parsed);
-      return { state, source: candidate, recovered: candidate !== file };
+      return { state, source: candidate, recovered: candidate !== file, ...found() };
     } catch {
       continue;
     }
   }
-  return { state: { stateVersion: CURRENT_STATE_VERSION }, source: null, recovered: false };
+  return { state: { stateVersion: CURRENT_STATE_VERSION }, source: null, recovered: false, ...found() };
+}
+
+/**
+ * Keep state a newer Workhorse wrote out of this one's way, before it writes.
+ *
+ * A version this build does not know was read like a torn file: an older
+ * backup loaded in its place, and the recovery wrote that backup over the
+ * live file. Going back one version destroyed everything done since the
+ * upgrade and kept no copy. The newer file now moves aside under its own
+ * name, where the newer app's state can be put back from, and this build
+ * carries on from what it can read. A file that will not move is copied.
+ */
+export function setAsideNewerState(read: StateReadResult, now = Date.now()): string[] {
+  const kept: string[] = [];
+  for (const { file, version } of read.newer ?? []) {
+    const aside = `${file}.newer-v${version}-${now}`;
+    try {
+      fs.renameSync(file, aside);
+      kept.push(aside);
+    } catch {
+      try {
+        fs.copyFileSync(file, aside, fs.constants.COPYFILE_EXCL);
+        kept.push(aside);
+      } catch {
+        /* nothing more to try; the read stays as it was */
+      }
+    }
+  }
+  return kept;
 }
 
 function rotateFileBackups(file: string) {

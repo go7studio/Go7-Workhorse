@@ -419,7 +419,8 @@ test("applyPermissionAnswer updates the real pending queue and session", () => {
   const denied = applyPermissionAnswer(start, request.id, "deny");
   assert.ok(denied);
   assert.equal(denied.pending.length, 0);
-  assert.equal(denied.sessions[0].status, "idle");
+  // A denial refuses the call, not the turn: the vendor ends it with a done.
+  assert.equal(denied.sessions[0].status, "running");
   assert.equal(denied.sessions[0].messages.length, session.messages.length + 1);
   assert.equal(denied.sessions[0].messages.at(-1)?.kind, "tool");
   assert.equal(denied.sessions[0].messages.at(-1)?.toolStatus, "failed");

@@ -1834,7 +1834,14 @@ export function applyPermissionAnswer(
         : next.permissionGrants;
       return {
         ...next,
-        status: answer === "deny" ? "idle" : stillWaiting ? "needs-input" : "running",
+        // A denial refuses one call. The vendor decides whether its turn goes
+        // on and ends it with its own done; painting the chat idle here let the
+        // queue drainer send the next prompt into a turn that was still live.
+        // A card answered after its turn already ended leaves the chat idle.
+        status:
+          session.status === "idle"
+            ? "idle"
+            : permissionResumeStatus({ hasOtherPending: stillWaiting, agentRun: next.agentRun }),
         permissionGrants: grants,
         messages: [
           ...next.messages,

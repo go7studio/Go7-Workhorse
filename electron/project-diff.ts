@@ -203,14 +203,11 @@ export function listGitChanges(cwd: string, baseRef?: string): GitChange[] {
       for (let index = 0; index < fields.length; index += 1) {
         const row = fields[index]!;
         const status = row.slice(0, 2);
-        let relative = row.slice(3);
-        if (/[RC]/.test(status)) {
-          const renamed = fields[index + 1];
-          if (renamed) {
-            relative = fs.existsSync(path.resolve(root, renamed)) ? renamed : relative;
-            index += 1;
-          }
-        }
+        const relative = row.slice(3);
+        // `-z` writes a rename as the new path, then the old one. Taking the
+        // old name whenever it existed on disk dropped the renamed file when a
+        // new file took its old name.
+        if (/[RC]/.test(status) && fields[index + 1]) index += 1;
         changes.push({ path: relative.replaceAll("\\", "/"), status: status.trim() || "M" });
       }
     }

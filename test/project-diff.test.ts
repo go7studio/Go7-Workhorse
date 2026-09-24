@@ -67,6 +67,21 @@ test("spawn-head changes are repo-relative and a commit cannot hide an out-of-al
   }
 });
 
+test("a renamed file keeps its new name in the change list when a new file takes the old one", () => {
+  // `status -z` writes a rename as the new path, then the old one. Taking the
+  // old name whenever it existed on disk dropped the renamed file entirely.
+  const repo = makeRepo("wh-rename-");
+  try {
+    commitFile(repo, "old.txt", "moved\n");
+    git(repo, ["mv", "old.txt", "new.txt"]);
+    writeFileSync(path.join(repo, "old.txt"), "a new file under the old name\n");
+    const changes = listGitChanges(repo);
+    assert.deepEqual(changes.map((change) => [change.path, change.status]).sort(), [["new.txt", "R"], ["old.txt", "??"]]);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
 test("project diffs use the linked-root file, not a whole-file or sibling steal", () => {
   const treeA = makeRepo("wh-diff-a-");
   const treeB = makeRepo("wh-diff-b-");

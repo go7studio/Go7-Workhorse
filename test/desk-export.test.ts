@@ -279,6 +279,27 @@ test("chat markdown export skips archived and hidden chats", () => {
   assert.match(files[0].relPath, /projects\/walk-test\/what-do-you-have-access-to\.md/);
 });
 
+test("chat export never gives two chats the same file", () => {
+  const files = chatExportFiles(
+    "grok",
+    [
+      sampleSession({ id: "a", title: "Notes" }),
+      sampleSession({ id: "b", title: "Notes" }),
+      sampleSession({ id: "c", title: "Notes 2" }),
+      sampleSession({ id: "d", title: "Notes" }),
+    ],
+    [{ id: "proj_1", name: "Walk Test", createdAt: 1, openedAt: 1, folders: [], references: [] }],
+  );
+  const paths = files.map((file) => file.relPath);
+  assert.equal(new Set(paths).size, 4, paths.join(", "));
+  assert.deepEqual(paths, [
+    "projects/walk-test/notes.md",
+    "projects/walk-test/notes-2.md",
+    "projects/walk-test/notes-2-2.md",
+    "projects/walk-test/notes-3.md",
+  ]);
+});
+
 test("mass send writes vendor skills and chats without auth files", () => {
   const home = mkdtempSync(path.join(os.tmpdir(), "wh-home-"));
   const dest = mkdtempSync(path.join(os.tmpdir(), "wh-dest-"));

@@ -2027,8 +2027,9 @@ app.whenReady().then(async () => {
 
   ipcMain.handle("app:quit", () => app.quit());
   ipcMain.handle("app:check-update", () => checkAppUpdate());
+  // A Dev desk may hear of a release; it never installs one over itself.
   ipcMain.handle("app:apply-update", (_event, version: unknown) =>
-    applyAppUpdate(typeof version === "string" ? version : ""),
+    applyAppUpdate(typeof version === "string" ? version : "", runtimeIdentity.userDataDirectory === WORKHORSE_DEV_USER_DATA_DIR),
   );
   ipcMain.handle("notify:desktop", (_event, payload: { title?: string; body?: string }) =>
     showDesktopNotice({

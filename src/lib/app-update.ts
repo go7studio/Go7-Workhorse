@@ -130,13 +130,26 @@ export function pickWinSetupAsset(release: unknown): WinSetupAsset | null {
   return named.find((asset) => /Setup-.+\.exe$/i.test(asset.name)) ?? null;
 }
 
-export type UpdateInstallKind = "mac-dmg" | "win-nsis" | "git-checkout" | "none";
+export type UpdateInstallKind = "mac-dmg" | "win-nsis" | "git-checkout" | "development" | "none";
+
+/**
+ * A development desk never installs a release. The Dev app is packaged, so it
+ * read as a Mac or Windows install: Update copied the production bundle over
+ * Go7 Workhorse Dev.app — which from then on ran as production, on production's
+ * userData and Keychain — or ran the production installer from a try build.
+ * Unpackaged, it checked a release tag out in the working clone. It may still
+ * say a release exists; it only refuses to install one.
+ */
+export const DEVELOPMENT_DESK_UPDATE_MESSAGE =
+  "This is a development desk, so it does not install releases. Update its source, or install the release as Go7 Workhorse.";
 
 export function updateInstallKind(input: {
   platform: string;
   packaged: boolean;
   hasGitCheckout: boolean;
+  development?: boolean;
 }): UpdateInstallKind {
+  if (input.development) return "development";
   if (input.platform === "darwin" && input.packaged) return "mac-dmg";
   if (input.platform === "win32" && input.packaged) return "win-nsis";
   if (input.hasGitCheckout) return "git-checkout";

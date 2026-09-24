@@ -7,6 +7,7 @@ import { app } from "electron";
 import { APP_VERSION } from "../src/lib/app-info";
 import { deskGitEnv, deskHelperEnv, deskToolEnv } from "./desk-path";
 import {
+  DEVELOPMENT_DESK_UPDATE_MESSAGE,
   MAC_APP_NAME,
   macBundleFromExecPath,
   macInstallerArch,
@@ -285,17 +286,20 @@ async function installWinNsis(version: string): Promise<AppUpdateApplyResult> {
   return { ok: true };
 }
 
-export async function applyAppUpdate(version: string): Promise<AppUpdateApplyResult> {
+/** `development` is the desk's runtime identity: a try build or a source run. */
+export async function applyAppUpdate(version: string, development = false): Promise<AppUpdateApplyResult> {
+  const kind = updateInstallKind({
+    platform: process.platform,
+    packaged: app.isPackaged,
+    hasGitCheckout: Boolean(deskRoot()),
+    development,
+  });
+  if (kind === "development") return { ok: false, message: DEVELOPMENT_DESK_UPDATE_MESSAGE };
   const wanted = versionFromRef(version);
   if (!parseVersion(wanted)) return { ok: false, message: "That version is not a Workhorse build." };
   const { offer, error } = await checkAppUpdate();
   if (error) return { ok: false, message: error };
   if (!offer || offer.version !== wanted) return { ok: false, message: "No newer GitHub build to install." };
-  const kind = updateInstallKind({
-    platform: process.platform,
-    packaged: app.isPackaged,
-    hasGitCheckout: Boolean(deskRoot()),
-  });
   if (kind === "mac-dmg") return installMacDmg(wanted);
   if (kind === "win-nsis") return installWinNsis(wanted);
   if (kind === "none") return { ok: false, message: packagedUpdateMissingMessage(process.platform) };

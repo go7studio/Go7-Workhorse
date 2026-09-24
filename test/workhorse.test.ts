@@ -10835,6 +10835,9 @@ test("the repo tracks no symlinks and states its working rules", () => {
   assert.match(tryDesk, /delete env\.CSC_LINK/);
   assert.match(tryDesk, /packWindowsDir/);
   assert.match(tryDesk, /installWinDevApp/);
+  // Installs the pack it just made for this Mac, never a leftover of the other arch.
+  assert.match(tryDesk, /builtAppPath\(macArch\(\)\)/);
+  assert.match(tryDesk, /arch === "arm64" \? \["mac-arm64"\] : \["mac", "mac-x64"\]/);
   assert.match(tryDesk, /WORKHORSE_USER_DATA_PATH/);
   assert.match(tryDesk, /Start-Process/);
   assert.doesNotMatch(tryDesk, /--workhorse-user-data=/);

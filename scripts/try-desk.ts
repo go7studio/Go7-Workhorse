@@ -69,9 +69,12 @@ function planLines(applicationsDir: string): string[] {
   ];
 }
 
-function builtAppPath(): string | null {
+function builtAppPath(arch: "arm64" | "x64"): string | null {
   const names = [`${WORKHORSE_APP_NAME}.app`, "Go7 Workhorse Dev.app"];
-  const dirs = ["mac-arm64", "mac", "mac-x64"];
+  // Only this Mac's own architecture: electron-builder writes an arm64 pack
+  // to mac-arm64 and an x64 one to mac. Looking in mac-arm64 first made an
+  // Intel Mac with a leftover pack:mac tree install that stale arm64 app.
+  const dirs = arch === "arm64" ? ["mac-arm64"] : ["mac", "mac-x64"];
   for (const dir of dirs) {
     for (const name of names) {
       const candidate = path.join(ROOT, "release", dir, name);
@@ -253,8 +256,8 @@ function main() {
     die("try-desk packs a Mac or Windows desk. Use --dry to print the dest on this machine.");
   }
   if (!args.skipPack) packCurrentArch();
-  const built = builtAppPath();
-  if (!built) die("No packed Go7 Workhorse.app under release/mac*. Run without --skip-pack.");
+  const built = builtAppPath(macArch());
+  if (!built) die(`No packed ${macArch()} Go7 Workhorse.app under release/. Run without --skip-pack.`);
   installDevApp(built, target.dest);
   say(`Opening ${target.dest}`);
   const opened = spawnSync("open", ["-na", target.dest], { stdio: "inherit" });

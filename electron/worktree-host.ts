@@ -1643,6 +1643,101 @@ async function restoreFromRescue(gitRoot: string, target: string, rescue: string
 }
 
 /**
+ * Where a released folder waits for its files to be deleted: beside the
+ * worker folders, so moving one there is a single rename. Beside the real
+ * path, so a managed root that links to another disk still gets a rename.
+ */
+export function worktreeTrashDir(managedRoot: string): string {
+  return `${canonicalPath(managedRoot)}.trash`;
+}
+
+/** The folder git keeps this worktree's registration in, when it is plainly one of the repository's own. */
+function registrationDir(target: string, home: string): string | null {
+  try {
+    const match = /^gitdir:\s*(.+)$/m.exec(fs.readFileSync(path.join(target, ".git"), "utf8"));
+    if (!match) return null;
+    const dir = path.resolve(target, match[1].trim());
+    return sameFilesystemPath(path.dirname(dir), path.join(home, "worktrees")) ? dir : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Let a folder go in one step nothing can cut short.
+ *
+ * `git worktree remove` deletes file by file, and the sweep ran it under a
+ * three-second timeout. A tree with a large `node_modules` was killed part
+ * way: its `.git` link and half its files gone, every later sweep holding the
+ * remains for ever as "no longer a Git worktree", and a rescued worker coming
+ * back to that half, or not coming back at all.
+ *
+ * So git moves the folder aside, which is one rename and refuses a locked tree
+ * or one holding submodules as removal did; this folder's registration goes;
+ * and the files are deleted afterwards, off the loop and with no clock on them
+ * (`emptyWorktreeTrash`). Without `force`, the question `git worktree remove`
+ * asks before it deletes anything is asked first, the same way. Only this
+ * folder's registration is dropped: a repository-wide prune would also forget a
+ * tree that sits on a disk that is not plugged in.
+ */
+function releaseWorktree(
+  repo: string,
+  target: string,
+  managedRoot: string,
+  force: boolean,
+): { ok: true } | { ok: false; reason: string } {
+  if (!force) {
+    const status = gitSync(["-C", target, "status", "--porcelain", "--ignore-submodules=none"]);
+    if (!status.ok) return { ok: false, reason: "git could not say what it holds, so nothing can vouch for its contents" };
+    if (status.out) return { ok: false, reason: "it holds modified or untracked files" };
+  }
+  const home = repoHome(target);
+  const registration = home ? registrationDir(target, home) : null;
+  const trash = worktreeTrashDir(managedRoot);
+  const aside = path.join(trash, `${path.basename(target)}-${Date.now().toString(36)}-${crypto.randomBytes(3).toString("hex")}`);
+  try {
+    fs.mkdirSync(trash, { recursive: true });
+  } catch {
+    return { ok: false, reason: "the desk could not make a place to set it aside" };
+  }
+  const moved = gitSync(["-C", repo, "worktree", "move", target, aside]);
+  if (fs.existsSync(target) || !fs.existsSync(aside)) {
+    return { ok: false, reason: moved.out.replace(/^fatal:\s*/i, "").split("\n")[0] || "git declined to move it" };
+  }
+  if (registration) {
+    try {
+      fs.rmSync(registration, { recursive: true });
+    } catch {
+      /* git lists it as prunable, and its own gc drops it */
+    }
+  }
+  return { ok: true };
+}
+
+/**
+ * Delete what the sweep set aside. Every folder here passed every refusal and
+ * went in one rename, so a delete cut short, by quitting say, loses nothing
+ * and the next sweep finishes it.
+ */
+export async function emptyWorktreeTrash(managedRoot: string): Promise<void> {
+  const trash = worktreeTrashDir(managedRoot);
+  let names: string[];
+  try {
+    if (!(await fs.promises.lstat(trash)).isDirectory()) return;
+    names = await fs.promises.readdir(trash);
+  } catch {
+    return;
+  }
+  for (const name of names) {
+    try {
+      await fs.promises.rm(path.join(trash, name), { recursive: true });
+    } catch {
+      /* the next sweep tries again */
+    }
+  }
+}
+
+/**
  * Drop one managed worktree, but only when Git agrees it holds nothing.
  *
  * `git worktree remove` without `--force` refuses a tree that still has modified
@@ -1744,13 +1839,9 @@ function dropManagedWorktree(
     // Git refuses a dirty folder without --force. Only a folder the rescue
     // just proved it holds byte for byte, and read again unchanged, is given
     // it, and only once nothing but rebuildable caches is left beside it.
-    const result =
-      rescued && status.held
-        ? rescueGit(["-C", repo, "worktree", "remove", "--force", target], options.deadline)
-        : gitSync(["-C", repo, "worktree", "remove", target]);
-    if (!fs.existsSync(target)) return { dropped: true, reason: "", ...(rescued ? { rescued } : {}) };
-    const reason = result.out.replace(/^fatal:\s*/i, "").split("\n")[0] || "git declined to remove it";
-    return { dropped: false, reason, ...(rescued ? { rescued } : {}) };
+    const released = releaseWorktree(repo, target, options.managedRoot, Boolean(rescued && status.held));
+    if (released.ok) return { dropped: true, reason: "", ...(rescued ? { rescued } : {}) };
+    return { dropped: false, reason: released.reason, ...(rescued ? { rescued } : {}) };
   }
   // Git could not answer. A directory that still carries a `.git` link was a worktree
   // whose repository has since been deleted, so nothing can vouch for what it holds and
@@ -1857,7 +1948,7 @@ export function pruneOrphanWorktrees(
     const target = path.join(managedRoot, name);
     if (!containedPath(managedRoot, target)) continue;
 
-    // `git worktree remove` resolves its argument through symlinks, so a link planted here
+    // `git worktree move` resolves its argument through symlinks, so a link planted here
     // would aim git at a checkout outside the managed root. Lexical containment cannot see
     // that; compare the real paths instead.
     let link = false;
@@ -1893,5 +1984,7 @@ export function pruneOrphanWorktrees(
       if (outcome.rescued) rescued.push({ name, ref: outcome.rescued });
     } else kept.push({ name, reason: outcome.reason });
   }
+  // The files of every folder let go, and any a quit cut short last time.
+  void emptyWorktreeTrash(managedRoot);
   return { removed, kept, rescued };
 }

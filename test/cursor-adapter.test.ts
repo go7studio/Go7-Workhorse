@@ -989,3 +989,29 @@ test("Available models chips do not ellipsis-clip Cursor Grok names", () => {
   assert.match(modelsGrid, /repeat\(2,/);
   assert.doesNotMatch(modelsGrid.split("}")[0] ?? "", /repeat\(3,/);
 });
+
+/*
+ * Switching a chat's model, mode, sandbox or network policy stops its running
+ * turn, so the next one runs on what the person just chose. Four of those
+ * switches carried their own copy of the vendor router, without a Cursor
+ * branch: a Cursor chat's stop went to the Grok host, which held no such
+ * session, and the Cursor run kept writing under the access just taken away.
+ * The store's callbacks only run inside React, so this reads them as text.
+ */
+test("every vendor stop in the store goes through the one router that knows Cursor", () => {
+  const store = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
+  const router = store.slice(store.indexOf("function cancelVendorSession("));
+  const routerBody = router.slice(0, router.indexOf("\n}\n"));
+  assert.match(routerBody, /session\.provider === "cursor"\) void window\.workhorse\?\.cursorCancel\?\.\(session\.id\)/);
+  const stops = /window\.workhorse\?\.(?:grok|claude|codex|cursor|custom)Cancel\?\.\(/g;
+  assert.equal(
+    (store.match(stops) ?? []).length,
+    (routerBody.match(stops) ?? []).length,
+    "a vendor stop outside cancelVendorSession",
+  );
+  for (const name of ["setSessionModel", "setMode", "setSandbox", "setSecurityPolicy"]) {
+    const start = store.indexOf(`const ${name} = useCallback(`);
+    assert.ok(start >= 0, name);
+    assert.match(store.slice(start, store.indexOf("}, [", start)), /cancelVendorSession\(session\)/, name);
+  }
+});

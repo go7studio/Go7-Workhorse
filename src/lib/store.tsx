@@ -1941,10 +1941,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       session.model !== model ||
       session.effort !== effort;
     if (switched) {
-      if (session.provider === "codex") void window.workhorse?.codexCancel?.(session.id);
-      else if (session.provider === "claude") void window.workhorse?.claudeCancel?.(session.id);
-      else if (session.provider === "custom") void window.workhorse?.customCancel?.(session.id);
-      else void window.workhorse?.grokCancel?.(session.id);
+      // One router for every vendor: this and the mode, sandbox and network
+      // switches below had copies with no Cursor branch, so a Cursor run kept
+      // going on the model or the access the person had just taken from it.
+      cancelVendorSession(session);
     }
     setState((latest) => {
       const live = latest.sessions.find((item) => item.id === latest.activeSessionId);
@@ -2174,10 +2174,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const setMode = useCallback((mode: PermissionMode) => {
     const session = stateRef.current.sessions.find((item) => item.id === stateRef.current.activeSessionId);
     if (session && session.mode !== mode) {
-      if (session.provider === "codex") void window.workhorse?.codexCancel?.(session.id);
-      else if (session.provider === "claude") void window.workhorse?.claudeCancel?.(session.id);
-      else if (session.provider === "custom") void window.workhorse?.customCancel?.(session.id);
-      else void window.workhorse?.grokCancel?.(session.id);
+      cancelVendorSession(session);
     }
     setState((current) => {
       const live = current.sessions.find((item) => item.id === current.activeSessionId);
@@ -2203,10 +2200,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const setSandbox = useCallback((sandbox: SandboxProfile) => {
     const session = stateRef.current.sessions.find((item) => item.id === stateRef.current.activeSessionId);
     if (session && session.sandbox !== sandbox) {
-      if (session.provider === "codex") void window.workhorse?.codexCancel?.(session.id);
-      else if (session.provider === "claude") void window.workhorse?.claudeCancel?.(session.id);
-      else if (session.provider === "custom") void window.workhorse?.customCancel?.(session.id);
-      else void window.workhorse?.grokCancel?.(session.id);
+      cancelVendorSession(session);
     }
     setState((current) => {
       const live = current.sessions.find((item) => item.id === current.activeSessionId);
@@ -2226,10 +2220,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const current = session.securityPolicy ?? { network: "allowed", root: "allowed" };
     const securityPolicy: SessionSecurityPolicy = { ...current, ...patch };
     if (securityPolicy.network === current.network && securityPolicy.root === current.root) return;
-    if (session.provider === "codex") void window.workhorse?.codexCancel?.(session.id);
-    else if (session.provider === "claude") void window.workhorse?.claudeCancel?.(session.id);
-    else if (session.provider === "custom") void window.workhorse?.customCancel?.(session.id);
-    else void window.workhorse?.grokCancel?.(session.id);
+    cancelVendorSession(session);
     setState((state) => ({
       ...state,
       sessions: state.sessions.map((item) =>

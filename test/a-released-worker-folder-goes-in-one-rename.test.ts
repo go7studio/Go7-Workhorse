@@ -13,7 +13,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { emptyWorktreeTrash, pruneOrphanWorktrees, worktreeTrashDir } from "../electron/worktree-host";
-import { git, repoWithWorktree } from "./worktree-fixtures";
+import { durable, git, repoWithWorktree } from "./worktree-fixtures";
 
 test("a removal cut short never leaves half a worker folder behind", async (t) => {
   if (process.platform === "win32") {
@@ -84,5 +84,23 @@ test("a locked worker folder is still refused, as git's own removal refused it",
   assert.deepEqual(pruned.removed, []);
   assert.match(pruned.kept[0].reason, /locked/);
   assert.ok(fs.existsSync(path.join(wt, "tracked.txt")));
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test("a worker folder cut from a bare repository can be let go", () => {
+  const { root, managed, remote } = repoWithWorktree("bare");
+  const wt = path.join(managed, "sess_bare");
+  git(remote, ["worktree", "add", "--quiet", "--detach", wt, "main"]);
+  const earlier = new Date(Date.now() - 2 * 60 * 60 * 1000);
+  fs.utimesSync(path.join(wt, ".git"), earlier, earlier);
+  fs.writeFileSync(path.join(wt, "notes.md"), "untracked, kept at a rescue ref first\n");
+
+  const pruned = pruneOrphanWorktrees(managed, [], durable(root));
+
+  // The owning repository was taken as the folder above `remote.git`, which is
+  // no repository at all, so every removal failed with "not a git repository".
+  assert.ok(pruned.removed.includes("sess_bare"), JSON.stringify(pruned.kept));
+  assert.ok(!fs.existsSync(wt));
+  assert.ok(!git(remote, ["worktree", "list"]).includes("sess_bare"));
   fs.rmSync(root, { recursive: true, force: true });
 });

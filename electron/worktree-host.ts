@@ -352,12 +352,16 @@ function headContentIsOnDefaultBranch(target: string): boolean {
   return !drifted.out.split("\0").some((row) => row.length > 0 && paths.has(row));
 }
 
-/** The repository a managed worktree belongs to, or null when Git disowns the directory. */
+/**
+ * The repository a managed worktree belongs to, as its common git directory,
+ * or null when Git disowns the directory. Not the folder above it: for a bare
+ * repository that folder is no repository at all, and every git call aimed
+ * there failed, so its trees were never let go.
+ */
 function owningRepo(target: string): string | null {
   const common = gitSync(["-C", target, "rev-parse", "--git-common-dir"]);
   if (!common.ok || !common.out) return null;
-  const absolute = path.isAbsolute(common.out) ? common.out : path.resolve(target, common.out);
-  return path.resolve(absolute, "..");
+  return path.isAbsolute(common.out) ? common.out : path.resolve(target, common.out);
 }
 
 /**

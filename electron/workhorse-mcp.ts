@@ -77,6 +77,7 @@ import {
   askViaInbox,
   interpretPeerAskHttp,
   isRetryablePeerAskTransport,
+  peerAskTimeoutMs,
   readBridgeRecord,
   type PeerAsk,
 } from "./peer-inbox";
@@ -1349,6 +1350,9 @@ function emitInboundLearning(draft: InboundLearningDraft): void {
   }
 }
 
+/** How long past the desk's own bound this side keeps listening for its answer. */
+const BRIDGE_ANSWER_GRACE_MS = 5_000;
+
 async function postBridge(
   pathName: string,
   body: PeerAsk,
@@ -1363,36 +1367,43 @@ async function postBridge(
   const live = readBridgeRecord(process.env.WORKHORSE_STATE_PATH);
   const url = live?.url || process.env.WORKHORSE_BRIDGE_URL;
   const token = live?.token || process.env.WORKHORSE_BRIDGE_TOKEN;
-  const timeoutMs =
-    opts?.timeoutMs ??
-    (body.action === "await-agents"
-      ? body.wait === true
-        ? Math.max(30, Math.min(3_600, body.timeoutSeconds ?? 600)) * 1_000
-        : 15_000
-      : body.mode === "bots"
-        ? 45_000
-        : 10 * 60 * 1000);
+  // The desk's own bound plus a margin, so the desk's answer, its timeout
+  // included, reaches this side before this side stops listening. A flat ten
+  // minutes here gave up on a spawn the desk was still holding for thirty.
+  const timeoutMs = opts?.timeoutMs ?? peerAskTimeoutMs(body).timeoutMs + BRIDGE_ANSWER_GRACE_MS;
   const allowInbox = opts?.inbox !== false;
   if (url && token) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      let response: Response | null = null;
       try {
-        const response = await fetch(`${url.replace(/\/$/, "")}${pathName}`, {
+        response = await fetch(`${url.replace(/\/$/, "")}${pathName}`, {
           method: "POST",
           headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
           body: JSON.stringify(body),
           signal: controller.signal,
         });
+      } catch (error) {
+        // Our own wait ran out. The desk has held this request the whole time
+        // and may still be running it, so the inbox would run it a second time.
+        if (controller.signal.aborted) {
+          throw new Error(`Workhorse did not answer within ${Math.ceil(timeoutMs / 1_000)} s. The request was not sent again.`);
+        }
+        // Only a request that never reached the desk may try the inbox.
+        if (!allowInbox || !live?.inbox || !isRetryablePeerAskTransport(error)) throw error;
+      }
+      if (response) {
         const payload = (await response.json().catch(() => null)) as { text?: string; error?: string } | null;
         const outcome = interpretPeerAskHttp(response.status, payload);
         if (outcome.ok) return outcome.text;
+        // The desk answered, and its answer stands whatever words are in it. This
+        // used to fall into the transport test above, so a worker that failed
+        // with "fetch failed" read as a dropped socket and was spawned again.
         if (!outcome.retryable || !live?.inbox || !allowInbox) throw new Error(outcome.error);
-      } finally {
-        clearTimeout(timer);
       }
-    } catch (error) {
-      if (!allowInbox || !live?.inbox || !isRetryablePeerAskTransport(error)) throw error;
+    } finally {
+      clearTimeout(timer);
     }
   }
   if (!allowInbox || !live?.inbox) throw new Error("Workhorse bridge is not running");

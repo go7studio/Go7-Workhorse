@@ -41,7 +41,7 @@ import { existingPeerReply } from "../src/lib/session-bridge";
 import { listDropFiles } from "./drop-files";
 import { attachDialogProperties, attachDialogTitle, windowsNeedsAttachChoice } from "./attach-pick";
 
-import { displaySrcForHref, resolveMediaProtocolFile } from "./media-src";
+import { displaySrcForHref, resolveMediaProtocolFile, safeLocalPath } from "./media-src";
 import { findSourceFile, listGitChanges, readEditStatsAsync, readFileDiff, readGitHead, readSourceText, recordFileInstance } from "./project-diff";
 import { TerminalHost, type TerminalEvent } from "./terminal-host";
 import {
@@ -1965,18 +1965,7 @@ app.whenReady().then(async () => {
     return true;
   });
 
-  const safeLocalPath = (input: unknown): string | null => {
-    if (typeof input !== "string" || !input || input.length > 4096 || input.includes("\0")) return null;
-    if (!path.isAbsolute(input)) return null;
-    const resolved = path.resolve(input);
-    try {
-      const stat = fs.statSync(resolved);
-      if (!stat.isFile() && !stat.isDirectory()) return null;
-      return resolved;
-    } catch {
-      return null;
-    }
-  };
+  // safeLocalPath (media-src) refuses a path on another machine before any stat.
   ipcMain.handle("desk:open-local-path", async (_event, input: unknown) => {
     const target = safeLocalPath(input);
     if (!target) return false;

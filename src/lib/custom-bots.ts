@@ -245,7 +245,10 @@ export function normalizeCustomBot(raw: unknown): CustomBot | null {
     apiKey,
     ...(credentialId ? { credentialId } : {}),
     ...(hasCredential ? { hasCredential: true } : {}),
-    api: record.api === "openai-completions" ? "openai-completions" : inferCustomApi(baseUrl),
+    // A saved choice of dialect stands in both directions. Only openai was
+    // kept before, so an Anthropic-compatible host whose URL does not say
+    // "anthropic" came back from disk as openai and every request then failed.
+    api: record.api === "openai-completions" || record.api === "anthropic-messages" ? record.api : inferCustomApi(baseUrl),
     contextWindow:
       typeof record.contextWindow === "number" && record.contextWindow > 0 ? Math.round(record.contextWindow) : 128_000,
     createdAt: typeof record.createdAt === "number" ? record.createdAt : Date.now(),

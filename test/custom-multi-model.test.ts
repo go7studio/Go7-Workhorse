@@ -190,3 +190,18 @@ test("discovery offers; only the owner approves", () => {
   assert.match(storeSource, /model: session\.model \|\| custom\.model/);
   assert.doesNotMatch(storeSource, /model: custom\.model \|\| session\.model/);
 });
+
+/**
+ * Only an explicit openai dialect survived a load; anything else was inferred
+ * again from the URL. An Anthropic-compatible host whose URL does not contain
+ * "anthropic" came back from disk as openai, and every request then failed.
+ */
+test("a saved anthropic-messages dialect survives a reload", () => {
+  const saved = { id: "bot_kimi", baseUrl: "https://api.kimi.com/coding", model: "kimi-for-coding", apiKey: "sk-test" };
+  assert.equal(normalizeCustomBot({ ...saved, api: "anthropic-messages" })?.api, "anthropic-messages");
+  assert.equal(normalizeCustomBot({ ...saved, api: "openai-completions" })?.api, "openai-completions");
+  // Nothing saved still means infer from the URL, in both directions.
+  assert.equal(normalizeCustomBot(saved)?.api, "openai-completions");
+  assert.equal(normalizeCustomBot({ ...saved, baseUrl: "https://api.minimax.io/anthropic" })?.api, "anthropic-messages");
+  assert.equal(normalizeCustomBot({ ...saved, api: "something-else" })?.api, "openai-completions");
+});

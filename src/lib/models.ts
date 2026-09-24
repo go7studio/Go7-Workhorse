@@ -1,4 +1,5 @@
 import { cursorFamilyId } from "./cursor-catalog";
+import { isGrokBotModel } from "./custom-http-identity";
 import type { EffortLevel, ProviderId, SandboxProfile } from "./types";
 
 export type ReasoningLevel = {
@@ -441,6 +442,10 @@ export function unlistedChoice(query: string): ModelChoice | null {
   const id = query.trim();
   const slug = id.toLowerCase();
   if (!slug || /\s/.test(slug)) return null;
+  // grok-bot is the Grok Bot custom slot on 127.0.0.1:8787, never ACP Grok.
+  // Read as a grok- id, `/model grok-bot` relaunched the Grok CLI on a model
+  // it does not serve.
+  if (isGrokBotModel(slug)) return null;
   const provider: ProviderId | null = slug.startsWith("claude-")
     ? "claude"
     : slug.startsWith("gpt-") || slug.startsWith("codex") || /^o[1-9]/.test(slug)

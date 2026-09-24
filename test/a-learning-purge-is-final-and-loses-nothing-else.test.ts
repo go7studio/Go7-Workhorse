@@ -120,3 +120,28 @@ test("a rebuild file a crash left behind does not stop the next purge", () => {
   store.close();
   fs.rmSync(userData, { recursive: true, force: true });
 });
+
+test("a purge that takes the compiler's place in the log does not send the lane back to its first event", () => {
+  const userData = tempUserData();
+  const store = new SqliteMemoryStore(userData);
+  for (let index = 0; index < 10; index += 1) store.recordEvent(said(`lev_${index}`, index === 9 ? "proj_drop" : "proj_keep", 1_000 + index));
+  store.putCompilerRun({
+    id: "lcr_done",
+    intelligenceLane: "human-intent",
+    status: "completed",
+    attempt: 1,
+    inputHash: "h",
+    startedAt: 1,
+    eventWatermark: "lev_9",
+    outputMemoryIds: [],
+  });
+  store.recordEvent(said("lev_later", "proj_keep", 2_000));
+
+  store.purge({ projectId: "proj_drop" });
+
+  const last = store.lastSettledRun("human-intent");
+  const pending = store.listEvents({ afterWatermark: last?.eventWatermark, actorClass: "human" }).map((event) => event.id);
+  assert.deepEqual(pending, ["lev_later"], "every event the compiler had already read came back as new");
+  store.close();
+  fs.rmSync(userData, { recursive: true, force: true });
+});

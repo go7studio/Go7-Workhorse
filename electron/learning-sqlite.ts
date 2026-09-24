@@ -217,6 +217,29 @@ function rowAudit(row: Record<string, unknown>): RetrievalAudit {
   };
 }
 
+/**
+ * A kept compiler run whose watermark is a purged event would lose its place:
+ * the lookup by id finds nothing, the watermark is dropped, and the lane reads
+ * every event since its first as new, compiling the whole history again. The
+ * run is pointed at the newest kept event at or before the purged one instead,
+ * which leaves exactly the same later events waiting.
+ */
+function keptWatermarks(runs: CompilerRun[], events: LearningEvent[], dropped: ReadonlySet<string>): CompilerRun[] {
+  const order = (a: LearningEvent, b: LearningEvent) => a.createdAt - b.createdAt || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+  const byId = new Map(events.map((event) => [event.id, event]));
+  const kept = events.filter((event) => !dropped.has(event.id)).sort(order);
+  return runs.map((run) => {
+    const gone = run.eventWatermark && dropped.has(run.eventWatermark) ? byId.get(run.eventWatermark) : undefined;
+    if (!gone) return run;
+    let before: LearningEvent | undefined;
+    for (const event of kept) {
+      if (order(event, gone) > 0) break;
+      before = event;
+    }
+    return { ...run, eventWatermark: before?.id };
+  });
+}
+
 export class SqliteMemoryStore implements MemoryStore {
   readonly path: string;
   private db: SqliteDatabase | null = null;
@@ -463,7 +486,8 @@ export class SqliteMemoryStore implements MemoryStore {
       const dropMemoryIds = expandDependentMemoryIds(snapshot.memories, directMemoryIds);
       const keepMemories = snapshot.memories.filter((memory) => !dropMemoryIds.has(memory.id));
       for (const memory of keepMemories) this.putMemory(memory);
-      for (const run of snapshot.compilerRuns.filter((item) => !item.outputMemoryIds?.some((id) => dropMemoryIds.has(id)))) this.putCompilerRun(run);
+      const keepRuns = snapshot.compilerRuns.filter((item) => !item.outputMemoryIds?.some((id) => dropMemoryIds.has(id)));
+      for (const run of keptWatermarks(keepRuns, snapshot.events, dropEvents)) this.putCompilerRun(run);
       for (const audit of snapshot.audits.filter((item) => !item.selectedIds.some((id) => dropMemoryIds.has(id)))) this.putRetrievalAudit(audit);
       return {
         ok: true,
@@ -486,7 +510,11 @@ export class SqliteMemoryStore implements MemoryStore {
     ).map((memory) => memory.id));
     const dropMemoryIds = expandDependentMemoryIds(snapshot.memories, directMemoryIds);
     const keepMemories = snapshot.memories.filter((memory) => !dropMemoryIds.has(memory.id));
-    const keepRuns = snapshot.compilerRuns.filter((run) => !run.outputMemoryIds?.some((id) => dropMemoryIds.has(id)));
+    const keepRuns = keptWatermarks(
+      snapshot.compilerRuns.filter((run) => !run.outputMemoryIds?.some((id) => dropMemoryIds.has(id))),
+      snapshot.events,
+      dropEventIds,
+    );
     const keepAudits = snapshot.audits.filter((audit) => !audit.selectedIds.some((id) => dropMemoryIds.has(id)));
     /*
      * The new database is built whole, in one transaction, beside the live

@@ -202,4 +202,10 @@ test("folder picker asks macOS for a scoped bookmark and claims it later", () =>
   const entitlements = readFileSync(path.join(ROOT, "build", "entitlements.mac.plist"), "utf8");
   assert.match(entitlements, /files.bookmarks.app-scope/);
   assert.match(entitlements, /files.user-selected.read-write/);
+  // With library validation off, honouring DYLD_* would let any process that
+  // can set an environment load code into the signed desk and borrow its
+  // folder grants and Keychain items. Nothing here uses DYLD_*.
+  for (const file of ["entitlements.mac.plist", "entitlements.mac.inherit.plist"]) {
+    assert.doesNotMatch(readFileSync(path.join(ROOT, "build", file), "utf8"), /allow-dyld-environment-variables/, file);
+  }
 });

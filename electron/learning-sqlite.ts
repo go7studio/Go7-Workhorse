@@ -488,24 +488,41 @@ export class SqliteMemoryStore implements MemoryStore {
     const keepMemories = snapshot.memories.filter((memory) => !dropMemoryIds.has(memory.id));
     const keepRuns = snapshot.compilerRuns.filter((run) => !run.outputMemoryIds?.some((id) => dropMemoryIds.has(id)));
     const keepAudits = snapshot.audits.filter((audit) => !audit.selectedIds.some((id) => dropMemoryIds.has(id)));
+    /*
+     * The new database is built whole, in one transaction, beside the live
+     * one, and only then renamed over it. This used to delete the live file
+     * first, rename an empty schema into its place, and put the kept rows back
+     * one at a time from memory: a crash or a force-quit in that stretch,
+     * seconds long with the loop held on a large desk, lost every row not yet
+     * put back. A rebuild file such a crash left behind then made every later
+     * purge fail, and the store stayed closed. A failure anywhere now reopens
+     * the live file as it was.
+     */
+    const temp = `${this.path}.rebuild`;
     let walRemoved = false;
-    if (this.path !== ":memory:") {
-      const temp = `${this.path}.rebuild`;
+    try {
+      for (const leftover of [temp, `${temp}-journal`, `${temp}-wal`, `${temp}-shm`]) fs.rmSync(leftover, { force: true });
       const rebuilt = new DatabaseSync(temp);
-      rebuilt.exec(MIGRATIONS[0]);
+      this.db = rebuilt;
       try {
-        rebuilt.exec("CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING fts5(memory_id UNINDEXED, statement, summary, tokenize='porter');");
-      } catch {
-        /* lexical fallback after rebuild */
+        this.migrate();
+        this.prepareFts();
+        rebuilt.exec("BEGIN");
+        try {
+          for (const event of keepEvents) this.recordEvent(event);
+          for (const memory of keepMemories) this.putMemory(memory);
+          for (const run of keepRuns) this.putCompilerRun(run);
+          for (const audit of keepAudits) this.putRetrievalAudit(audit);
+          rebuilt.exec("COMMIT");
+        } catch (error) {
+          rebuilt.exec("ROLLBACK");
+          throw error;
+        }
+      } finally {
+        this.db = null;
+        rebuilt.close();
       }
-      rebuilt.prepare("INSERT INTO schema_meta (key, value) VALUES ('schema_version', ?)").run(String(LEARNING_SCHEMA_VERSION));
-      rebuilt.close();
-      try {
-        fs.unlinkSync(this.path);
-      } catch {
-        /* dest may already be absent after close */
-      }
-      removeSidecars(this.path, fs.existsSync, fs.unlinkSync);
+      walRemoved = removeSidecars(this.path, fs.existsSync, fs.unlinkSync);
       boundedReplace(temp, this.path, {
         renameSync: fs.renameSync,
         unlinkSync: fs.unlinkSync,
@@ -517,13 +534,12 @@ export class SqliteMemoryStore implements MemoryStore {
           }
         },
       });
-      walRemoved = removeSidecars(this.path, fs.existsSync, fs.unlinkSync);
+      walRemoved = removeSidecars(this.path, fs.existsSync, fs.unlinkSync) || walRemoved;
+    } catch (error) {
+      this.reopen();
+      throw error;
     }
     this.reopen();
-    for (const event of keepEvents) this.recordEvent(event);
-    for (const memory of keepMemories) this.putMemory(memory);
-    for (const run of keepRuns) this.putCompilerRun(run);
-    for (const audit of keepAudits) this.putRetrievalAudit(audit);
     const verifiedAbsent = this.listEvents({ includeTombstones: true }).every((event) => !matchesForgetTarget(event, target)) &&
       this.listMemories({ includeDeleted: true }).every(
         (memory) => !matchesForgetTarget({ id: memory.id, projectId: memory.projectId, providerScope: memory.providerScope }, target),

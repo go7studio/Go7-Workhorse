@@ -45,3 +45,24 @@ test("invokeMediaCreate returns the empty-caps message when the client is forced
   assert.equal(result.ok, false);
   if (!result.ok) assert.match(result.reason, /Local Compute host has no allowed capabilities/);
 });
+
+/**
+ * The gate checks the template id, but the constraints were built as
+ * `{ templateId, ...fields }`, and templateId is a legal field name. A field of
+ * that name replaced the checked id with one that never passed the gate.
+ */
+test("invokeMediaCreate sends the template id the gate checked, whatever the fields say", async () => {
+  const sent: Array<{ hostId: string; constraints: Record<string, unknown> }> = [];
+  const client = {
+    submit: async (hostId: string, request: { constraints: Record<string, unknown> }) => {
+      sent.push({ hostId, constraints: request.constraints });
+      return { id: "job_0123456789abcdef0123456789abcdef" };
+    },
+  } as unknown as NonNullable<Parameters<typeof invokeMediaCreate>[0]["client"]>;
+  const result = await invokeMediaCreate(
+    { hosts: [host()], stateDir: "/unused", client },
+    { hostId: "box", capability: "comfy.flux", templateId: "flux-still", fields: { prompt: "hi", templateId: "../../unchecked" } },
+  );
+  assert.equal(result.ok, true);
+  assert.deepEqual(sent, [{ hostId: "box", constraints: { prompt: "hi", templateId: "flux-still" } }]);
+});

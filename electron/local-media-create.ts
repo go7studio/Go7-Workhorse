@@ -83,9 +83,11 @@ function buildRequest(input: MediaCreateInput, fields: Record<string, MediaCreat
     deadline: null,
     inputs: [],
     requiredOutputs: [{ role: "output", kind: "file", mediaTypes: ["image/*", "video/*"], required: true }],
+    // The gate checked this template id, so it is set last: a field named
+    // templateId used to replace it with one that was never checked.
     constraints: {
-      templateId: input.templateId.trim(),
       ...fields,
+      templateId: input.templateId.trim(),
     },
     workflow: { autoContinue: false, approvedCapabilities: [], maxContinuations: 0 },
     metadata: { surface: "media-create" },

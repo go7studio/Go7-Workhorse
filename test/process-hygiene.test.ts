@@ -145,12 +145,24 @@ function psField(pid: number, field: "pgid" | "ppid"): number {
   }
 }
 
+/*
+ * A killed process nobody has reaped yet is a zombie, and signal 0 still finds
+ * it. That happens whenever the orphan's new parent does not wait on children:
+ * a container whose pid 1 is not an init. A zombie runs nothing, so it counts
+ * as gone here. On Windows there is no `ps`, and no zombies to rule out.
+ */
 function alive(pid: number): boolean {
   try {
     process.kill(pid, 0);
-    return true;
   } catch (error) {
     return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
+  if (!POSIX) return true;
+  try {
+    return !execFileSync("ps", ["-o", "stat=", "-p", String(pid)], { encoding: "utf8" }).trim().startsWith("Z");
+  } catch {
+    // ps exits non-zero once the pid is gone.
+    return false;
   }
 }
 

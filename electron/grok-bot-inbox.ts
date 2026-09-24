@@ -75,9 +75,16 @@ export function listGrokBotPending(inbox: string, io: GrokBotInboxIo = defaultIo
     const match = /^(gb_[a-f0-9]{16})\.req\.json$/i.exec(name);
     if (!match) continue;
     const id = match[1]!;
-    if (io.exists(responseFile(inbox, id))) continue;
-    const request = parseRequest(io.read(requestFile(inbox, id)), id);
-    if (request) pending.push(request);
+    // The shim deletes a request once its answer is delivered, which can fall
+    // between the listing and this read. That one is no longer pending; it
+    // used to throw and fail the whole list for the others.
+    try {
+      if (io.exists(responseFile(inbox, id))) continue;
+      const request = parseRequest(io.read(requestFile(inbox, id)), id);
+      if (request) pending.push(request);
+    } catch {
+      continue;
+    }
   }
   return pending.sort((left, right) => left.createdAt - right.createdAt || left.id.localeCompare(right.id));
 }

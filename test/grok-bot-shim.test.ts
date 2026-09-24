@@ -97,6 +97,28 @@ test("pending lists only valid unpaired Workhorse requests", () => {
   }]);
 });
 
+/**
+ * The shim deletes a request once its answer reaches the desk, and that can
+ * land between grok-pending's listing and its read of the file. The read threw
+ * ENOENT out of the loop and the whole list failed, so every other pending
+ * request went unanswered on that run.
+ */
+test("a request the shim delivers mid-listing is skipped, not a failed list", () => {
+  const inbox = grokBotInboxFromStatePath(path.join(path.parse(process.cwd()).root, "fixture", "workhorse-state.json"));
+  const gone = "gb_1111111111111111";
+  const waiting = "gb_2222222222222222";
+  const { io } = inboxMemoryIo({
+    [path.join(inbox, `${gone}.req.json`)]: inboxRequest(gone, 1),
+    [path.join(inbox, `${waiting}.req.json`)]: inboxRequest(waiting, 2),
+  });
+  const read = io.read;
+  io.read = (file) => {
+    if (file.endsWith(`${gone}.req.json`)) throw Object.assign(new Error("ENOENT: no such file"), { code: "ENOENT" });
+    return read(file);
+  };
+  assert.deepEqual(listGrokBotPending(inbox, io).map((request) => request.id), [waiting]);
+});
+
 test("reply requires a matching pending request and fails closed on path traversal", () => {
   const inbox = "/fixture/grok-bot-inbox";
   const id = "gb_aaaaaaaaaaaaaaaa";

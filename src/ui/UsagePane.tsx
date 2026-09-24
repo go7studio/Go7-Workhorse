@@ -423,7 +423,10 @@ export function UsagePane({
             ...row,
             label: shortModelName("custom", row.label),
           }))
-        : modelsForProvider(events, focused.provider)
+        : // The card's own events: a Cursor pool lists only its own models. Fed
+          // every Cursor event, the Composer card listed API models too and
+          // split its bars across both pools.
+          modelsForProvider(focusedEvents, focused.provider)
             .filter((row) => row.totalTokens > 0 || row.events > 0)
             .map((row) => ({
               ...row,

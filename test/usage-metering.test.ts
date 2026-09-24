@@ -16,6 +16,7 @@ import {
   chatSpend,
   crewSpendRows,
   crewSpendTotal,
+  cursorLaneEvents,
   deskUsageCards,
   heatCellBots,
   eventTotal,
@@ -25,6 +26,7 @@ import {
   heatmapPeak,
   heatmapTotal,
   leftoverForCard,
+  modelsForProvider,
   deskPulseLines,
   inRange,
   normalizeUsage,
@@ -804,6 +806,34 @@ test("Cursor Composer billed bars and stretch cells use cursor grey, not Grok wh
   );
   const api = heatCellBots([{ ...event, model: "gpt-5.4" }]);
   assert.equal(api[0]?.provider, "codex");
+});
+
+test("a Cursor pool's drill-in lists only that pool's models", () => {
+  // Cursor bills two pools. The Composer card's total was lane-filtered, but
+  // its model list was built from every Cursor event, so it listed a 50k
+  // Sonnet row from the API pool beside 1k of Composer and split its bars
+  // across both.
+  const event = (id: string, model: string, lane: "cursor-models" | "other-models", inputTokens: number) => ({
+    id,
+    at: 1,
+    provider: "cursor" as const,
+    model,
+    lane,
+    inputTokens,
+    outputTokens: 0,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+  });
+  const events = [event("a", "composer-2.5", "cursor-models", 1_000), event("b", "claude-sonnet-4.6", "other-models", 50_000)];
+  const listed = (key: "cursor:cursor-models" | "cursor:other-models") =>
+    modelsForProvider(cursorLaneEvents(events, key), "cursor")
+      .filter((row) => row.totalTokens > 0)
+      .map((row) => row.totalTokens);
+  assert.deepEqual(listed("cursor:cursor-models"), [1_000]);
+  assert.deepEqual(listed("cursor:other-models"), [50_000]);
+  const pane = readFileSync(path.join(ROOT, "src", "ui", "UsagePane.tsx"), "utf8");
+  assert.match(pane, /modelsForProvider\(focusedEvents, focused\.provider\)/);
+  assert.doesNotMatch(pane, /modelsForProvider\(events, focused\.provider\)/);
 });
 
 test("disabled LLMs stay out of the usage view until they are turned back on", () => {

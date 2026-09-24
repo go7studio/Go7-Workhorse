@@ -339,7 +339,7 @@ if (!isPrimaryInstance) {
   app.quit();
 } else if (!isMcpHelper) {
   app.on("second-instance", () => {
-    const win = BrowserWindow.getAllWindows()[0];
+    const win = liveDeskWindow() ?? BrowserWindow.getAllWindows()[0];
     if (!win) return;
     if (win.isMinimized()) win.restore();
     win.show();
@@ -901,6 +901,25 @@ function isDeskAppUrl(url: string): boolean {
   return url.startsWith("file:");
 }
 
+/*
+ * The one window that holds the desk's state. The Workshop breakout loads the
+ * same page, and "the first window" or "every window" used to include it: it
+ * ran a second store of its own, saved a stale copy of the whole desk over the
+ * live one, and queued and sent the same scheduled job the desk did. Desk
+ * traffic goes to this window, and desk-state writes are taken only from it.
+ */
+let deskWindow: BrowserWindow | null = null;
+
+function liveDeskWindow(): BrowserWindow | null {
+  return deskWindow && !deskWindow.isDestroyed() && !deskWindow.webContents.isDestroyed() ? deskWindow : null;
+}
+
+/** True when a desk-state write came from the desk window, not the breakout or anything else. */
+function fromDesk(event: Electron.IpcMainInvokeEvent): boolean {
+  const desk = liveDeskWindow();
+  return Boolean(desk && event.sender === desk.webContents);
+}
+
 function createWindow() {
   const dark = nativeTheme.shouldUseDarkColors;
 
@@ -955,8 +974,10 @@ function createWindow() {
     mainLog.record("render-process-gone", `reason=${details.reason} exit_code=${details.exitCode ?? "none"}`);
   });
   win.on("closed", () => {
+    if (deskWindow === win) deskWindow = null;
     mainLog.record("window", "destroyed");
   });
+  deskWindow = win;
   mainLog.record("window", `created id=${win.id}`);
 
   if (process.env.VITE_DEV_SERVER_URL) {
@@ -1040,9 +1061,8 @@ app.whenReady().then(async () => {
 
   process.env.WORKHORSE_STATE_PATH = statePath();
   jobEngine = new DurableJobEngine(path.join(app.getPath("userData"), "workhorse-jobs.json"), (events) => {
-    for (const win of BrowserWindow.getAllWindows()) {
-      if (!win.webContents.isDestroyed()) win.webContents.send("jobs:due", events);
-    }
+    // The desk alone: every window that heard this queued the job and sent it.
+    liveDeskWindow()?.webContents.send("jobs:due", events);
   });
   jobEngine.start();
   debugStartup("job engine ready");
@@ -1181,6 +1201,7 @@ app.whenReady().then(async () => {
         deskFile: path.join(__dirname, "../dist/index.html"),
         icon: appIconPath(),
         dark,
+        theme: liveTheme,
       });
     },
   });
@@ -1201,7 +1222,7 @@ app.whenReady().then(async () => {
   debugStartup("learning ready");
   const peerBusy = new Set<string>();
   const handlePeerAsk = async (ask: PeerAsk) => {
-    const win = BrowserWindow.getAllWindows()[0];
+    const win = liveDeskWindow();
     if (!win || win.webContents.isDestroyed()) return { error: "Workhorse window is closed" };
     const bots = ask.mode === "bots";
     const spawn = !bots && ask.mode === "spawn";
@@ -1286,8 +1307,7 @@ app.whenReady().then(async () => {
   }
   watchGrokBotLateAnswers(grokBotInbox, (answers) => {
     // One window holds the state of record; a broadcast would append twice.
-    const win = BrowserWindow.getAllWindows().find((candidate) => !candidate.webContents.isDestroyed());
-    win?.webContents.send("grok-bot:late-answer", answers);
+    liveDeskWindow()?.webContents.send("grok-bot:late-answer", answers);
   });
   ipcMain.handle("grokBot:lateAnswers", () => listGrokBotLateAnswers(grokBotInbox));
   ipcMain.handle("grokBot:ackLateAnswer", (_event, reqId: unknown) => {
@@ -1759,7 +1779,11 @@ app.whenReady().then(async () => {
     }
   };
 
-  ipcMain.handle("state:save", (_event, state: Persistable) => {
+  ipcMain.handle("state:save", (event, state: Persistable) => {
+    if (!fromDesk(event)) {
+      mainLog.record("state:save", "refused a save from a window that is not the desk");
+      return { written: false };
+    }
     if (!state || typeof state !== "object") return { written: false };
     const saved = (state as { sessions?: unknown }).sessions;
     if ("settings" in state) {
@@ -1786,7 +1810,8 @@ app.whenReady().then(async () => {
       return result;
     });
   });
-  ipcMain.handle("state:save-drafts", (_event, drafts: unknown) => {
+  ipcMain.handle("state:save-drafts", (event, drafts: unknown) => {
+    if (!fromDesk(event)) return;
     if (!drafts || typeof drafts !== "object" || Array.isArray(drafts)) return;
     writeComposerDraftFile(statePath(), drafts);
   });
@@ -1996,7 +2021,7 @@ app.whenReady().then(async () => {
       input,
     );
   });
-  ipcMain.handle("jobs:sync", (_event, sessions: unknown) => jobEngine?.sync(sessions) ?? []);
+  ipcMain.handle("jobs:sync", (event, sessions: unknown) => (fromDesk(event) ? jobEngine?.sync(sessions) ?? [] : []));
 
   ipcMain.handle("app:quit", () => app.quit());
   ipcMain.handle("app:check-update", () => checkAppUpdate());
@@ -2535,7 +2560,8 @@ app.whenReady().then(async () => {
   setDockIcon();
 
   app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    // The breakout can outlive the desk on macOS; it is not a desk to come back to.
+    if (!liveDeskWindow()) createWindow();
     setDockIcon();
   });
 });

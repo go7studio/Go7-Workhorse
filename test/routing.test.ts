@@ -11,6 +11,7 @@ import {
   detectsImageGenerationIntent,
   effortForRoutingTier,
   inferRoutingTier,
+  routingTierSliceText,
   mergeInputRequirements,
   outcomesFromLearningEvents,
   rankRoutingCandidates,
@@ -814,8 +815,8 @@ test("spawn route= beats keyword inference; auditor, builder, size, attachments,
   assert.equal(inferRoutingTier("Quick: list these names", [], { parentTier: "deep" }), "deep");
   assert.equal(inferRoutingTier("Architect a production migration", [], { parentTier: "quick" }), "quick");
   assert.equal(inferRoutingTier("Quick: list these names", [], { role: "auditor" }), "deep");
-  assert.equal(inferRoutingTier("Quick: list these names", [], { role: "builder" }), "balanced");
-  assert.equal(inferRoutingTier("Quick: list these names", [], { role: "worker" }), "balanced");
+  assert.equal(inferRoutingTier("Quick: list these names", [], { role: "builder" }), "quick");
+  assert.equal(inferRoutingTier("Quick: list these names", [], { role: "worker" }), "quick");
   assert.equal(inferRoutingTier("x".repeat(1300)), "deep");
   assert.equal(
     inferRoutingTier("Please handle this file", [
@@ -854,7 +855,7 @@ test("spawn route= beats keyword inference; auditor, builder, size, attachments,
   };
   assert.equal(
     inferRoutingTier(workerSpawn.prompt, [], { role: workerSpawn.role, parentTier: workerSpawn.parentTier }),
-    "balanced",
+    "quick",
   );
   assert.equal(
     inferRoutingTier(auditorSpawn.prompt, [], { role: auditorSpawn.role, parentTier: auditorSpawn.parentTier }),
@@ -877,6 +878,12 @@ test("spawn route= beats keyword inference; auditor, builder, size, attachments,
     "a hard slice stated up front still routes deep",
   );
   assert.equal(inferRoutingTier("x".repeat(1300)), "deep", "a long ask from a person still reads as a big one");
+  assert.equal(
+    inferRoutingTier(`SLICE: Quick: list the files in src\n\n${"Background context. ".repeat(200)}`, [], { role: "worker" }),
+    "quick",
+    "tier reads the SLICE line, not the head's background",
+  );
+  assert.equal(routingTierSliceText(`TASK: rename the helper\n${"x".repeat(800)}`, "worker"), "rename the helper");
 
   const rows = [candidate("gpt-5.6-sol"), candidate("gpt-5.6-luna")];
   const workerPick = chooseRoutingDecision(rows, {
@@ -884,8 +891,8 @@ test("spawn route= beats keyword inference; auditor, builder, size, attachments,
     role: workerSpawn.role,
     parentTier: workerSpawn.parentTier,
   }, settings);
-  assert.equal(workerPick?.taskTier, "balanced");
-  assert.equal(workerPick?.effort, "medium");
+  assert.equal(workerPick?.taskTier, "quick");
+  assert.equal(workerPick?.effort, "low");
   const auditorPick = chooseRoutingDecision(rows, {
     prompt: auditorSpawn.prompt,
     role: auditorSpawn.role,

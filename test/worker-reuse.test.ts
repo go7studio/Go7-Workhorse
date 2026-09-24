@@ -13,6 +13,8 @@ import {
   parentCrewSnapshot,
   reserveWorkerName,
   resolveNamedWorker,
+  findRunningWorkerOnSlice,
+  spawnSliceLabel,
   spawnContinuationHowToUse,
   workerTaskTitle,
   workerIsFree,
@@ -165,6 +167,25 @@ test("a name addresses that worker, or nobody", () => {
     null,
   );
   assert.equal(findReusableWorker({ ...want, name: "Nobody" }, crew, scope), null);
+});
+
+test("a named worker who is busy still receives a correction on that worker", () => {
+  const busy = worker({ id: "w2", workerName: "Dexter", status: "running", agentRun: { status: "running" } });
+  const named = resolveNamedWorker({ name: "Dexter" }, [busy], scope);
+  assert.equal(named.ok, true);
+  if (named.ok) assert.equal(named.worker?.id, "w2");
+});
+
+test("a running worker on the same SLICE label is found for continuation", () => {
+  const running = {
+    ...worker({ id: "w3", workerName: "Wanda", status: "running", agentRun: { status: "running" } }),
+    title: "Wanda · Fix the tier row",
+  };
+  assert.equal(spawnSliceLabel("SLICE: Fix the tier row\nDo the work."), "Fix the tier row");
+  assert.equal(
+    findRunningWorkerOnSlice([running], scope, "Fix the tier row")?.id,
+    "w3",
+  );
 });
 
 test("the most recent worker on that bot is preferred", () => {

@@ -320,6 +320,8 @@ const ROUTING_DECISION_FIELDS = [
   "customBotId",
   "score",
   "reason",
+  "taskDomain",
+  "domainScore",
   "usedPercent",
   "expectedUsedPercent",
 ] as const;

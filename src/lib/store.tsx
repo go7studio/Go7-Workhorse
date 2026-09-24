@@ -326,11 +326,13 @@ import {
   resolveSpawnSpec,
   missionForDeskSpawn,
   findReusableWorker,
+  findRunningWorkerOnSlice,
   formatParentCrewLine,
   fileContentsFingerprint,
   leasePathForWrite,
   refreshSharedFileFingerprint,
   resolveNamedWorker,
+  spawnSliceLabel,
   resolveWorkerIsolation,
   parseWorkerHandoff,
   workerStartMessages,
@@ -6096,6 +6098,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                   model: String(payload.model),
                 })
               : [];
+            const runningOnSlice = findRunningWorkerOnSlice(
+              latest.sessions as Array<WorkerRecord & { title?: string }>,
+              { parentId: caller.id, projectId: spawnProjectId },
+              spawnSliceLabel(String(payload.message ?? "")),
+            );
             const routeRequest = {
               prompt: payload.message,
               attachments: payload.attachments,
@@ -6104,10 +6111,24 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               outcomes: outcomesFromLearningEvents(learningOutcomeEvents),
               exclude: effectiveExclusions,
               useOrchestrationBenchmark: orchestrationBench,
-              // The head may say what kind of work a slice is; it knows better
-              // than a prompt that mentions code files while asking for prose.
-              ...((ORCHESTRATION_TASK_DOMAINS as readonly string[]).includes(String(payload.domain))
-                ? { taskDomain: payload.domain as TaskDomain }
+              ...(runningOnSlice
+                ? {
+                    current: {
+                      provider: runningOnSlice.provider,
+                      model: runningOnSlice.model,
+                      customBotId: runningOnSlice.customBotId,
+                    },
+                  }
+                : {}),
+              // Rank and record the slice on the domain the head named, or the
+              // task text implies — never default silently to general when the
+              // head passed a find_bots row without repeating domain on spawn.
+              ...(routeSpawn
+                ? {
+                    taskDomain: (ORCHESTRATION_TASK_DOMAINS as readonly string[]).includes(String(payload.domain))
+                      ? (payload.domain as TaskDomain)
+                      : inferTaskDomain(String(payload.message ?? ""), payload.attachments ?? []),
+                  }
                 : {}),
               effortHint: parseEffort(String(payload.effort ?? "")) ?? null,
               ...(orchestrationBench ? { activeLoad: activeRouteLoad(latest.sessions, recentRoutesRef.current) } : {}),

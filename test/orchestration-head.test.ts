@@ -154,6 +154,10 @@ test("a spawn can say what kind of work its slice is", () => {
   const custom = readFileSync(path.join(ROOT, "electron", "custom-tools.ts"), "utf8");
   assert.match(custom, /domain: \{\s*type: "string",\s*description: "Optional: coding, image-generation, writing/);
   const store = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
-  assert.match(store, /\? \{ taskDomain: payload\.domain as TaskDomain \}/);
+  assert.match(
+    store,
+    /taskDomain: \(ORCHESTRATION_TASK_DOMAINS as readonly string\[]\)\.includes\(String\(payload\.domain\)\)\r?\n\s+\? \(payload\.domain as TaskDomain\)\r?\n\s+: inferTaskDomain/,
+    "spawn ranks on the named domain or what the slice text implies",
+  );
   assert.match(store, /bot: \[vendorDisplayName\(spec\.provider\), spawnModelLabel\]/, "the spawn reply names the bot");
 });

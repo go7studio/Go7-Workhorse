@@ -369,7 +369,7 @@ async function readBotKnowledge(page: Awaited<ReturnType<typeof app.firstWindow>
     const rows = await page
       .locator("table.bot-knowledge-table tr")
       .evaluateAll((trs) => trs.map((tr) => [...tr.querySelectorAll("th,td")].map((cell) => (cell.textContent ?? "").replace(/\s+/g, " ").trim())));
-    const note = ((await page.locator(".bk-scale p").first().textContent()) ?? "").replace(/\s+/g, " ").trim();
+    const note = "";
     views.push({ domain, tier, note, rows, screenshot });
   }
   await page.locator("button.sidebar-settings").first().click();

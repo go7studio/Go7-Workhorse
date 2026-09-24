@@ -148,7 +148,7 @@ test("a chat that staffs workers gets who the desk would pick in the plain bot l
   assert.ok(roster.summary.includes(lines[1]!), "the summary a head reads carries the picks");
   assert.equal(JSON.parse(formatDeskRoster([])).ranked, undefined, "no callable bots, no picks");
   const store = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
-  assert.match(store, /const ranked = listing && orchestrationEnabled\(listing\.crewModes\)\n\s+\? findBotsDigest\(/, "only a chat that staffs workers pays for them");
+  assert.match(store, /const ranked = listing && orchestrationEnabled\(listing\.crewModes\)\r?\n\s+\? findBotsDigest\(/, "only a chat that staffs workers pays for them");
 });
 
 test("a custom head gets find_bots and the mission tool; a custom worker does not", () => {

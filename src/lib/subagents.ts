@@ -426,9 +426,43 @@ export function resolveNamedWorker(
     return { ok: false, error: WORKER_BOUND_ELSEWHERE_ERROR };
   }
   if (holder && !workerIsFree(holder)) {
-    return { ok: true, worker: null, createName: nextWorkerName(takenWorkerNames(workers, scope.parentId)) };
+    // A correction to a slice that worker is already running stays on that
+    // worker. Minting "Wren 2" because Wren is busy was a second hire for
+    // the same slice, not parallel work on a new one.
+    return { ok: true, worker: holder };
   }
   return { ok: true, worker: null, createName: asked };
+}
+
+/** SLICE line from a spawn brief, when the head labeled the slice. */
+export function spawnSliceLabel(message: string): string {
+  for (const line of message.split(/\r?\n/)) {
+    const tagged = line.match(/^\s*SLICE:\s*(.+)/i);
+    if (tagged?.[1]?.trim()) return tagged[1].trim();
+  }
+  return "";
+}
+
+/**
+ * A worker still running this slice on the parent. Corrections should steer
+ * that worker, not open a second one on the same subject.
+ */
+export function findRunningWorkerOnSlice(
+  workers: readonly (WorkerRecord & { title?: string })[],
+  scope: { parentId: string; projectId: string | null },
+  sliceLabel: string,
+): (WorkerRecord & { title?: string }) | undefined {
+  const want = sliceLabel.trim().toLowerCase();
+  if (!want) return undefined;
+  return workers.find(
+    (worker) =>
+      worker.hidden &&
+      !worker.archivedAt &&
+      worker.parentId === scope.parentId &&
+      (worker.projectId == null || worker.projectId === scope.projectId) &&
+      !workerIsFree(worker) &&
+      workerSliceFromTitle(worker.title ?? "", worker.workerName).trim().toLowerCase() === want,
+  );
 }
 
 function namedWorkerOnParent(

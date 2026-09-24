@@ -95,6 +95,30 @@ test("a pool inside its reserve with days to run gives way to an equal model wit
   assert.ok(opus.orchestration!.why.some((line) => /reserve/.test(line)));
 });
 
+test("a higher coding domain score beats a rival with better plan pace", () => {
+  const botKnowledge = {
+    byModel: {
+      "grok:grok-4.7": { domainScores: { coding: 97 } },
+      "codex:gpt-5.6-sol": { domainScores: { coding: 90 } },
+    },
+  };
+  const grok = candidate("grok", "grok-4.7", 75, {
+    capacity: { usedPercent: 75, resetsAt: weeklyReset, period: "weekly", observedAt },
+  });
+  const sol = candidate("codex", "gpt-5.6-sol", 5, {
+    capacity: { usedPercent: 5, resetsAt: weeklyReset, period: "weekly", observedAt },
+  });
+  const ranked = rankRoutingCandidates(
+    [grok, sol],
+    ask("fix the bug in src/routing.ts", { tier: "balanced", taskDomain: "coding", role: "worker" }),
+    settings,
+    botKnowledge,
+  );
+  assert.equal(ranked[0]?.model, "grok-4.7");
+  assert.ok((ranked[0]?.orchestration?.fit.score ?? 0) > (ranked[1]?.orchestration?.fit.score ?? 0));
+  assert.ok((ranked[1]?.orchestration?.plan.pace ?? "") === "spare" || ranked[1]?.orchestration?.plan.pace === "on pace");
+});
+
 test("quality still wins when the gap is real, however cheap and idle the weaker bot is", () => {
   // Sol lists at $2/$10 and is 60% spent; Grok 4.7 is cheaper and idle.
   listPrices([["openai/gpt-5.6-sol", 2, 10], ["x-ai/grok-4.7", 2, 6], ["minimax/minimax-m3", 0.3, 1.2]]);
@@ -115,10 +139,17 @@ test("quick work does not burn a frontier pool, and leftover about to expire is 
     capacity: { usedPercent: 60, resetsAt: new Date(now + 6 * 3_600_000).toISOString(), period: "weekly", observedAt },
   });
   listPrices([["anthropic/claude-fable-5.1", 10, 50], ["x-ai/grok-4.6", 2, 6]]);
+  const botKnowledge = {
+    byModel: {
+      "grok:grok-4.6": { domainScores: { general: 90 } },
+      "claude:claude-fable-5-1": { domainScores: { general: 90 } },
+    },
+  };
   const ranked = rankRoutingCandidates(
     [candidate("claude", "claude-fable-5-1", 20), expiring],
     ask("reply to this", { tier: "quick", taskDomain: "general" }),
     settings,
+    botKnowledge,
   );
   assert.equal(ranked[0]?.model, "grok-4.6");
   assert.equal(ranked[0]?.orchestration?.plan.expiring, true);
@@ -188,10 +219,33 @@ test("workers already running on a pool send the next spawn to another pool", ()
   const busy = rankRoutingCandidates(rows, { ...request, activeLoad: { codex: 1 } }, settings);
   assert.equal(busy[0]?.provider, "cursor");
   assert.equal(busy.find((row) => row.provider === "codex")?.orchestration?.plan.busy, 1);
-  // A real quality gap outlasts a worker or two, not a pile of them.
+  // A higher match score keeps the row on top even when its pool is busier.
   const gap = [candidate("codex", "gpt-5.6-sol"), candidate("claude", "claude-opus-5")];
   assert.equal(rankRoutingCandidates(gap, { ...request, activeLoad: { claude: 2 } }, settings)[0]?.model, "claude-opus-5");
-  assert.equal(rankRoutingCandidates(gap, { ...request, activeLoad: { claude: 5 } }, settings)[0]?.model, "gpt-5.6-sol");
+  assert.equal(rankRoutingCandidates(gap, { ...request, activeLoad: { claude: 5 } }, settings)[0]?.model, "claude-opus-5");
+});
+
+test("the stored routing note names the slice domain score, not general, when taskDomain is set", () => {
+  const rows = [candidate("cursor", "claude-fable-5-1", 20), candidate("codex", "gpt-5.6-sol", 20)];
+  const botKnowledge = {
+    byModel: {
+      "cursor:claude-fable-5-1": { domainScores: { coding: 100, general: 100 } },
+      "codex:gpt-5.6-sol": { domainScores: { coding: 88, general: 88 } },
+    },
+  };
+  const decision = chooseRoutingDecision(
+    rows,
+    {
+      ...ask("PAPER coding slice", { tier: "quick", taskDomain: "coding", role: "worker" }),
+      preferred: [{ provider: "cursor", model: "claude-fable-5-1" }],
+    },
+    settings,
+    botKnowledge,
+  );
+  assert.match(decision!.reason, /coding 100\/100/);
+  assert.doesNotMatch(decision!.reason, /general \d+\/100/);
+  assert.equal(decision!.taskDomain, "coding");
+  assert.equal(decision!.domainScore, 100);
 });
 
 test("a coordinator's named row is kept when it clears the bar, and ranked away when it does not", () => {
@@ -218,15 +272,69 @@ test("a coordinator's named row is kept when it clears the bar, and ranked away 
 
 test("a 5h window close to full stalls a worker, unless it resets in minutes", () => {
   const request = ask("implement the parser", { tier: "balanced", taskDomain: "coding" });
+  const tied = {
+    byModel: {
+      "codex:gpt-5.6-sol": { domainScores: { coding: 88 } },
+      "claude:claude-opus-5": { domainScores: { coding: 88 } },
+    },
+  };
   const tight = (resetInMs: number) =>
     candidate("claude", "claude-opus-5", 20, {
       shortWindow: { usedPercent: 98, resetsAt: new Date(now + resetInMs).toISOString(), observedAt },
     });
-  const stalled = rankRoutingCandidates([tight(3 * 3_600_000), candidate("codex", "gpt-5.6-sol")], request, settings);
+  const stalled = rankRoutingCandidates([tight(3 * 3_600_000), candidate("codex", "gpt-5.6-sol")], request, settings, tied);
   assert.equal(stalled[0]?.model, "gpt-5.6-sol");
   assert.equal(stalled.find((row) => row.provider === "claude")?.orchestration?.plan.shortWindowUsedPercent, 98);
-  const resetting = rankRoutingCandidates([tight(10 * 60_000), candidate("codex", "gpt-5.6-sol")], request, settings);
+  const resetting = rankRoutingCandidates([tight(10 * 60_000), candidate("codex", "gpt-5.6-sol")], request, settings, tied);
   assert.equal(resetting[0]?.model, "claude-opus-5");
+});
+
+test("orchestration worker routes never elect grok-bot", () => {
+  const grokBot = candidate("custom", "grok-bot", 5, { customBotId: "gb", label: "Grok Bot" });
+  const sol = candidate("codex", "gpt-5.6-sol", 20);
+  const decision = chooseRoutingDecision(
+    [grokBot, sol],
+    ask("implement the parser", { tier: "balanced", taskDomain: "coding", role: "worker" }),
+    settings,
+  );
+  assert.equal(decision?.model, "gpt-5.6-sol");
+  const ranked = rankRoutingCandidates(
+    [grokBot, sol],
+    ask("implement the parser", { tier: "balanced", taskDomain: "coding", role: "worker" }),
+    settings,
+  );
+  assert.equal(ranked.some((row) => row.model === "grok-bot"), false);
+});
+
+test("a spent weekly pool loses to the same model on a monthly pool with leftover", () => {
+  const monthlyReset = new Date(now + 20 * 24 * 3_600_000).toISOString();
+  const spentWeekly = candidate("codex", "gpt-5.6-sol", 100, {
+    label: "Codex Sol",
+    capacity: {
+      usedPercent: 100,
+      resetsAt: new Date(now + 2 * 3_600_000).toISOString(),
+      period: "weekly",
+      observedAt,
+    },
+  });
+  const spareMonthly = candidate("cursor", "gpt-5.6-sol", 25, {
+    label: "Cursor Sol",
+    capacity: { usedPercent: 25, resetsAt: monthlyReset, period: "monthly", observedAt },
+  });
+  const tied = {
+    byModel: {
+      "codex:gpt-5.6-sol": { domainScores: { coding: 90 } },
+      "cursor:gpt-5.6-sol": { domainScores: { coding: 90 } },
+    },
+  };
+  const ranked = rankRoutingCandidates(
+    [spentWeekly, spareMonthly],
+    ask("implement the parser", { tier: "balanced", taskDomain: "coding" }),
+    settings,
+    tied,
+  );
+  assert.equal(ranked[0]?.provider, "cursor");
+  assert.equal(ranked.at(-1)?.provider, "codex", "the empty weekly Codex pool sorts behind Cursor's monthly leftover");
 });
 
 test("a spent pool that resets within the day sorts behind a live one", () => {
@@ -344,9 +452,15 @@ test("at alike quality the cheaper list price takes the work, and a dearer model
   listPrices([["openai/gpt-5.6-sol", 2, 10], ["anthropic/claude-opus-5", 5, 25]]);
   const lead = rankRoutingCandidates([candidate("codex", "gpt-5.6-sol"), candidate("claude", "claude-opus-5")], request, settings);
   assert.equal(lead[0]?.model, "claude-opus-5");
-  // At a hundred and fifty times the run cost it is not.
+  // At a hundred and fifty times the run cost it is not, when the match score is tied.
   listPrices([["openai/gpt-5.6-sol", 2, 10], ["anthropic/claude-opus-5", 300, 1500]]);
-  const dear = rankRoutingCandidates([candidate("codex", "gpt-5.6-sol"), candidate("claude", "claude-opus-5")], request, settings);
+  const tied = {
+    byModel: {
+      "codex:gpt-5.6-sol": { domainScores: { coding: 90 } },
+      "claude:claude-opus-5": { domainScores: { coding: 90 } },
+    },
+  };
+  const dear = rankRoutingCandidates([candidate("codex", "gpt-5.6-sol"), candidate("claude", "claude-opus-5")], request, settings, tied);
   assert.equal(dear[0]?.model, "gpt-5.6-sol");
 });
 
@@ -468,7 +582,13 @@ test("quick work takes the faster bot, and deep work takes the better one howeve
     deskOutputPerSecond: 40,
   };
   const rows = withRunDraws([candidate("codex", "gpt-5.6-sol"), candidate("claude", "claude-opus-5")], draws);
-  const quick = rankRoutingCandidates(rows, ask("rename the helper", { tier: "quick", taskDomain: "coding" }), settings);
+  const tied = {
+    byModel: {
+      "codex:gpt-5.6-sol": { domainScores: { coding: 85 } },
+      "claude:claude-opus-5": { domainScores: { coding: 85 } },
+    },
+  };
+  const quick = rankRoutingCandidates(rows, ask("rename the helper", { tier: "quick", taskDomain: "coding" }), settings, tied);
   assert.equal(quick[0]?.model, "gpt-5.6-sol");
   const sol = quick[0]!.orchestration!;
   assert.equal(sol.speed.doublings, 1);

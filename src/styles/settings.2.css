@@ -227,8 +227,26 @@
   display: flex;
   align-items: center;
   gap: 16px;
-  margin: 4px 0 8px;
-  padding-left: calc(var(--bk-pad) + 1px);
+}
+
+.bot-knowledge-pane .settings-row.bk-route-tier-row {
+  align-items: center;
+  padding-bottom: 11px;
+}
+
+.bot-knowledge-pane .bk-route-tier-control {
+  flex: none;
+  flex-wrap: nowrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 12px;
+}
+
+.bot-knowledge-pane .bk-route-meter {
+  flex: none;
+  width: 84px;
+  min-width: 84px;
+  height: 8px;
 }
 
 .bk-scale .bk-ticks {

@@ -4,7 +4,7 @@ import {
   botKnowledgeSnapshot,
   domainIntelligenceBar,
 } from "../lib/domain-benchmark";
-import { activeRouteLoad, orchestrationTierNote } from "../lib/routing";
+import { activeRouteLoad } from "../lib/routing";
 import { useStore } from "../lib/store";
 import type { RoutingTaskTier, TaskDomain } from "../lib/types";
 import { measureRunDraws } from "../lib/usage";
@@ -154,16 +154,13 @@ export function BotKnowledgePane() {
     <div className="settings-pane bot-knowledge-pane">
       <header className="settings-pane-head">
         <h2>Bot knowledge</h2>
-        <p className="settings-pane-lead">
-          What orchestration reads when Orchestrate or Mission is on: task domains, the intelligence bar, callable models in
-          benchmark order, and each vendor&apos;s plan leftover overall — never one spawn, and never keys or URLs.
-        </p>
+        <p className="settings-pane-lead">Orchestrate uses this screen to choose which bots it can elect.</p>
       </header>
       <div className="settings-group">
         <div className="settings-row">
           <div className="settings-row-copy">
             <strong>Task domains</strong>
-            <p className="settings-row-hint">Pick one or more. Orchestration still elects a single domain per prompt.</p>
+            <p className="settings-row-hint">Pick one or more for this view; each spawn still uses one domain from the prompt.</p>
           </div>
           <div className="settings-control">
             <span className="agent-chips bk-domain-chips" role="group" aria-label="Task domains">
@@ -181,11 +178,11 @@ export function BotKnowledgePane() {
             </span>
           </div>
         </div>
-        <label className="settings-row">
+        <div className="settings-row bk-route-tier-row">
           <div className="settings-row-copy">
             <strong>Route tier</strong>
           </div>
-          <div className="settings-control">
+          <div className="settings-control bk-route-tier-control">
             <select value={tier} onChange={(event) => setTier(event.target.value as RoutingTaskTier)} aria-label="Route tier">
               {TIERS.map((item) => (
                 <option key={item.id} value={item.id}>
@@ -193,28 +190,16 @@ export function BotKnowledgePane() {
                 </option>
               ))}
             </select>
+            <span className="bk-ticks bk-route-meter" aria-hidden="true">
+              {Array.from({ length: 10 }, (_, index) => {
+                const step = index + 1;
+                return <i key={step} className={step <= tickOf(bar) ? "fill" : ""} />;
+              })}
+            </span>
           </div>
-        </label>
+        </div>
       </div>
       <div className="bk-board">
-        <div className="bk-scale">
-          <span className="bk-ticks" aria-hidden="true">
-            {Array.from({ length: 10 }, (_, index) => {
-              const step = index + 1;
-              const tone = [step <= tickOf(bar) ? "fill" : "", step === tickOf(bar) ? "bar" : ""].filter(Boolean).join(" ");
-              return <i key={step} className={tone} />;
-            })}
-          </span>
-          <p>
-            Intelligence bar for this view: <strong>{bar}</strong>/100 · {orchestrationTierNote(tier)}
-            {domains.length > 1 ? (
-              <>
-                {" "}
-                · scoring uses the lowest score across {domains.map((id) => DOMAIN_LABEL[id]).join(", ")}
-              </>
-            ) : null}
-          </p>
-        </div>
         <table className="bot-knowledge-table">
           <thead>
             <tr>

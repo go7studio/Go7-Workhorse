@@ -980,6 +980,10 @@ export type RoutingDecision = {
   customBotId?: string;
   score: number;
   reason: string;
+  /** Task domain the slice was ranked for (coding, image-generation, …). */
+  taskDomain?: TaskDomain;
+  /** That domain's fit score out of 100 for the picked model. */
+  domainScore?: number;
   usedPercent?: number;
   expectedUsedPercent?: number;
 };

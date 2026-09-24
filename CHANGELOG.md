@@ -8,6 +8,12 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.7.0](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.93...v0.7.0) (2026-09-24)
+
+### Features
+
+* orchestration ranks workers by slice domain fit; stored routing decisions name the domain and score, not a general score
+
 ## [0.6.93](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.92...v0.6.93) (2026-09-22)
 
 

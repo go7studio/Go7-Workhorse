@@ -133,6 +133,27 @@ const DOMAIN_SHORT: Record<TaskDomain, string> = {
   general: "General",
 };
 
+/** Plain source line for Settings → Bot knowledge. Orchestration keeps the detailed string. */
+export function botKnowledgeDisplaySource(source: string): string {
+  const trimmed = source.trim();
+  if (!trimmed || trimmed === MANUAL_RUBRIC_SOURCE) return trimmed;
+  const multiPart = /^(\S+(?: \S+)?) (\d+\/100) \((.+)\)$/;
+  if (trimmed.includes(" · ") && multiPart.test(trimmed.split(" · ")[0] ?? "")) {
+    return trimmed
+      .split(" · ")
+      .map((part) => {
+        const match = multiPart.exec(part.trim());
+        if (!match) return part;
+        return `${match[1]} ${match[2]} (${botKnowledgeDisplaySource(match[3])})`;
+      })
+      .join(" · ");
+  }
+  if (/Desk table \(hand-kept\)/i.test(trimmed)) return "Pulled from desk table";
+  if (/LMArena|lmarena/i.test(trimmed)) return "Pulled from LMArena";
+  if (trimmed.includes(FAMILY_ROUTING_PRIOR_SOURCE) || /family prior/i.test(trimmed)) return "Pulled from family prior";
+  return trimmed;
+}
+
 function normalizeBotKnowledgeDomains(domain: TaskDomain, domains?: TaskDomain[]): TaskDomain[] {
   const picked = domains?.filter((item) => ORCHESTRATION_TASK_DOMAINS.includes(item as OrchestrationTaskDomain)) ?? [];
   if (picked.length > 0) return [...new Set(picked)];
@@ -167,7 +188,8 @@ function scoreBundleForDomains(
   const parts = domains.map((item) =>
     scoreBundleForDomains(provider, model, [item], routingOverride, botKnowledge, customBotId, effort),
   );
-  const score = Math.min(...parts.map((item) => item.score));
+  const rawAverage = parts.reduce((sum, item) => sum + item.score, 0) / parts.length;
+  const score = Math.min(100, Math.max(0, Math.round(rawAverage)));
   const source = parts.map((item, index) => `${DOMAIN_SHORT[domains[index]]} ${item.score}/100 (${item.source})`).join(" · ");
   const origin = parts.some((item) => item.origin === "public") ? "public" : parts[0].origin;
   return { score, source, origin };
@@ -458,12 +480,13 @@ export function botKnowledgeSnapshot(input: {
     const bWeight = botKnowledgeSortWeight(input.settings.botKnowledge, b.provider, b.model, b.customBotId);
     return (
       Number(b.callable) - Number(a.callable) ||
-      (a.rank ?? 999) - (b.rank ?? 999) ||
       b.score - a.score ||
       bWeight - aWeight ||
+      (b.considerate ?? 0) - (a.considerate ?? 0) ||
       (a.loginLabel ?? a.label).localeCompare(b.loginLabel ?? b.label)
     );
   });
+  for (const row of combined) row.source = botKnowledgeDisplaySource(row.source);
   return {
     domain: scoreDomains[0] ?? input.domain,
     ...(scoreDomains.length > 1 ? { domains: scoreDomains } : {}),

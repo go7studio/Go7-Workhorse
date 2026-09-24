@@ -31,7 +31,6 @@ import type { WatchPlans, WatchVendorStatus } from "./watch";
 import { compareVersions, deskModelKey, nameGeneration } from "./bot-scores";
 import {
   botKnowledgeRubricForModel,
-  botKnowledgeSortWeight,
   MANUAL_RUBRIC_SOURCE,
   type BotKnowledgeSettings,
 } from "./bot-knowledge-rubric";
@@ -777,6 +776,26 @@ export function describeRoutingMiss(
 /** How far into a worker's brief its slice is stated. The rest is the head's background. */
 const WORKER_SLICE_HEAD = 600;
 
+/** The slice prose a spawn tier should read, not the head's surrounding brief. */
+export function routingTierSliceText(prompt: string, role?: RoutingJobRole): string {
+  const trimmed = prompt.trim();
+  const workerBrief = role === "builder" || role === "worker" || role === "auditor";
+  if (!workerBrief) return trimmed;
+  for (const line of trimmed.split(/\r?\n/)) {
+    const tagged = line.match(/^\s*(?:SLICE|TASK)\s*:\s*(.+)/i);
+    if (tagged?.[1]?.trim()) return tagged[1].trim().slice(0, WORKER_SLICE_HEAD);
+  }
+  const onlyTask = /(?:^|\n)\s*(?:your only task|task)\s*:\s*/i.exec(trimmed);
+  if (onlyTask) {
+    const start = onlyTask.index! + onlyTask[0].length;
+    let rest = trimmed.slice(start);
+    const stop = rest.search(/\.\s*(?:background:|no bugs)/i);
+    if (stop >= 0) rest = rest.slice(0, stop + 1);
+    return rest.trim().slice(0, WORKER_SLICE_HEAD);
+  }
+  return trimmed.slice(0, WORKER_SLICE_HEAD);
+}
+
 export function inferRoutingTier(
   prompt: string,
   attachments: ChatImage[] = [],
@@ -797,7 +816,8 @@ export function inferRoutingTier(
   // head wrote around it. A MiniMax head's detailed brief for a 120-word
   // release note routed Deep on its length alone and put Fable 5.1 on it, and
   // a "no bugs" deep in the background reads as bug work.
-  const marked = workerBrief ? lower.slice(0, WORKER_SLICE_HEAD) : lower;
+  const sliceText = routingTierSliceText(text, extras?.role);
+  const marked = workerBrief ? sliceText.toLowerCase() : lower;
   // Hard-work markers route deep even in a short prompt. All three reviews
   // agreed the safe error is expensive (frontier on trivia), not harmful (a
   // light model on "list every concurrency bug and prove linearizability").
@@ -805,11 +825,16 @@ export function inferRoutingTier(
   const creative = /\b(creative|story|narrative|poem|fiction|worldbuild|invent a|brainstorm)\b/.test(marked);
   // A short prompt with a quick keyword still is not quick when it reads like
   // code: "classify this function" deserves the balanced band, not Luna.
-  const quick = text.length < 180 && !looksCodey(text) && /\b(reply|rename|format|translate|summari[sz]e|list|extract|classify|one[- ]line|quick)\b/.test(lower);
+  const quickSource = workerBrief ? sliceText : text;
+  const quick =
+    quickSource.length < 180 &&
+    !looksCodey(quickSource) &&
+    /\b(reply|rename|format|translate|summari[sz]e|list|extract|classify|one[- ]line|quick)\b/.test(marked);
   const media = attachments.some((item) => item.kind === "audio" || item.kind === "video" || item.kind === "document");
   const long = text.length > 1200;
   if (workerBrief) {
-    if (deep || creative || (media && text.length > 240)) return "deep";
+    if (deep || creative || (media && sliceText.length > 240)) return "deep";
+    if (quick && !media) return "quick";
     return "balanced";
   }
   if (deep || creative || long || (media && text.length > 240)) return "deep";
@@ -1769,20 +1794,26 @@ function rankOrchestrationCandidates(
   // A coordinator that read the desk and named a row keeps it, as long as the
   // row clears the bar and its pool can still take work.
   const picked = (row: RankedRoutingCandidate) => row.orchestration?.coordinatorPick === true && routingRowLive(row, now);
+  const incumbent = (row: RankedRoutingCandidate) =>
+    Boolean(request.current && sameRoutingIdentity(request.current, row) && routingRowLive(row, now));
   return ranked.sort((a, b) => {
     const aPick = picked(a);
     const bPick = picked(b);
     if (aPick !== bPick) return aPick ? -1 : 1;
+    const aInc = incumbent(a);
+    const bInc = incumbent(b);
+    if (aInc !== bInc) return aInc ? -1 : 1;
     const aLive = routingRowLive(a, now);
     const bLive = routingRowLive(b, now);
     if (aLive !== bLive) return aLive ? -1 : 1;
-    const aWeight = botKnowledgeSortWeight(context.botKnowledge, a.provider, a.model, a.customBotId);
-    const bWeight = botKnowledgeSortWeight(context.botKnowledge, b.provider, b.model, b.customBotId);
+    const matchScore = (row: RankedRoutingCandidate) => row.orchestration?.fit?.score ?? 0;
+    const aMatch = matchScore(a);
+    const bMatch = matchScore(b);
+    if (aMatch !== bMatch) return bMatch - aMatch;
+    // Cost, speed, and plan terms live in considerate; they break ties only.
+    if (a.score !== b.score) return b.score - a.score;
     return (
-      b.score - a.score ||
-      (b.orchestration?.quality ?? 0) - (a.orchestration?.quality ?? 0) ||
       (a.orchestration?.cost.perRun ?? 0) - (b.orchestration?.cost.perRun ?? 0) ||
-      bWeight - aWeight ||
       a.label.localeCompare(b.label)
     );
   });
@@ -2033,6 +2064,27 @@ export function routingDecisionLogDetail(input: {
   ].join(" ");
 }
 
+function routingDecisionDomainFit(
+  winner: RankedRoutingCandidate,
+  request: RoutingRequest,
+  taskTier: RoutingTaskTier,
+  botKnowledge?: BotKnowledgeSettings,
+): { domain: TaskDomain; score: number } {
+  const domain = request.taskDomain ?? winner.orchestration?.domain ?? inferTaskDomain(request.prompt, request.attachments ?? []);
+  if (winner.orchestration?.domain === domain) {
+    return { domain, score: winner.orchestration.fit.score };
+  }
+  const effort = effortForRoutingTier(winner.provider, winner.model, taskTier, request.effortHint ?? null);
+  const manual = botKnowledgeRubricForModel(botKnowledge, winner.provider, winner.model, winner.customBotId)?.domainScores?.[
+    domain
+  ];
+  const fit =
+    manual !== undefined
+      ? { score: manual, source: MANUAL_RUBRIC_SOURCE, origin: "desk-table" as const }
+      : resolveDomainScore(winner.provider, winner.model, domain, winner.profile.intelligence, effort);
+  return { domain, score: fit.score };
+}
+
 export function chooseRoutingDecision(
   candidates: RoutingCandidate[],
   request: RoutingRequest,
@@ -2042,7 +2094,13 @@ export function chooseRoutingDecision(
   const taskTier =
     request.tier ??
     inferRoutingTier(request.prompt, request.attachments, { role: request.role, parentTier: request.parentTier });
-  const winner = rankRoutingCandidates(candidates, { ...request, tier: taskTier }, settings, botKnowledge)[0];
+  const taskDomain = request.taskDomain ?? inferTaskDomain(request.prompt, request.attachments ?? []);
+  const winner = rankRoutingCandidates(
+    candidates,
+    { ...request, tier: taskTier, taskDomain },
+    settings,
+    botKnowledge,
+  )[0];
   if (!winner) return null;
   const draw = weeklyDrawState(winner.capacity, request.now);
   const expiry = candidateExpiryCredit(winner.capacity, request.now ?? Date.now());
@@ -2058,8 +2116,9 @@ export function chooseRoutingDecision(
             : " · on pace";
   const imageGenReason =
     detectsImageGenerationIntent(request.prompt) && candidateCanGenerateImages(winner) ? " · image generation" : "";
-  const fitReason = winner.orchestration
-    ? ` · ${winner.orchestration.domain} ${winner.orchestration.fit.score}/100${winner.orchestration.coordinatorPick ? " · coordinator's pick" : ""}`
+  const domainFit = winner.orchestration ? routingDecisionDomainFit(winner, { ...request, taskDomain }, taskTier, botKnowledge) : null;
+  const fitReason = domainFit
+    ? ` · ${domainFit.domain} ${domainFit.score}/100${winner.orchestration?.coordinatorPick ? " · coordinator's pick" : ""}`
     : "";
   return {
     at: request.now ?? Date.now(),
@@ -2070,6 +2129,7 @@ export function chooseRoutingDecision(
     customBotId: winner.customBotId,
     score: winner.score,
     reason: `${taskTier === "deep" ? "Deep" : taskTier === "quick" ? "Quick" : "Balanced"} · ${effortForRoutingTier(winner.provider, winner.model, taskTier) ?? "fixed"} effort${capacityReason}${imageGenReason}${fitReason}`,
+    ...(domainFit ? { taskDomain: domainFit.domain, domainScore: domainFit.score } : {}),
     usedPercent: draw.usedPercent,
     expectedUsedPercent: draw.expectedUsedPercent,
   };
@@ -2107,5 +2167,14 @@ export function normalizeRoutingDecision(raw: unknown): RoutingDecision | undefi
     ...(typeof record.expectedUsedPercent === "number" && Number.isFinite(record.expectedUsedPercent)
       ? { expectedUsedPercent: record.expectedUsedPercent }
       : {}),
+    ...(record.taskDomain === "coding" ||
+    record.taskDomain === "image-generation" ||
+    record.taskDomain === "writing" ||
+    record.taskDomain === "visual" ||
+    record.taskDomain === "data" ||
+    record.taskDomain === "general"
+      ? { taskDomain: record.taskDomain }
+      : {}),
+    ...(typeof record.domainScore === "number" && Number.isFinite(record.domainScore) ? { domainScore: record.domainScore } : {}),
   };
 }

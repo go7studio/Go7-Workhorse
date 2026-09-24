@@ -120,6 +120,11 @@ export function deleteChat(sessions: Session[], id: string): Session[] | null {
   return sessions.filter((session) => !gone.has(session.id));
 }
 
+/** A chat whose vendor turn is live: streaming, or holding a request on a card. */
+export function vendorTurnIsLive(session: Pick<Session, "status"> | undefined): boolean {
+  return session?.status === "running" || session?.status === "needs-input";
+}
+
 /**
  * Chats a deletion removed that still have a vendor turn to stop. The chat the
  * person deleted counts as much as its workers: skipping every chat without a
@@ -131,10 +136,7 @@ export function deletedLiveSessions<T extends Pick<Session, "id" | "status" | "a
   return before.filter(
     (session) =>
       !kept.has(session.id) &&
-      (session.agentRun?.status === "running" ||
-        session.agentRun?.status === "interrupted" ||
-        session.status === "running" ||
-        session.status === "needs-input"),
+      (session.agentRun?.status === "running" || session.agentRun?.status === "interrupted" || vendorTurnIsLive(session)),
   );
 }
 

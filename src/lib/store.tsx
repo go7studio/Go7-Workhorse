@@ -35,6 +35,7 @@ import {
   autoRenameChat,
   deleteChat,
   deletedLiveSessions,
+  vendorTurnIsLive,
   dropDrafts,
   appendUserMessage,
   deleteWorkerChats,
@@ -7103,7 +7104,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   /** Caller cancel still shares this path. The desk does not fire it for a runtime limit. */
   const stopWorker = useCallback((childSessionId: string, reason: "timed-out" | "cancelled") => {
     const child = stateRef.current.sessions.find((session) => session.id === childSessionId);
-    if (child?.status === "running") cancelVendorSession(child);
+    // A worker waiting on a card is mid-turn too. Stopped only when running,
+    // it was marked cancelled while its vendor sat on the request and its card
+    // stayed in the inbox for a worker nobody could resume.
+    if (child && vendorTurnIsLive(child)) cancelVendorSession(child);
     setState((current) => {
       const rowStatus = reason === "timed-out" ? "timed-out" as const : "cancelled" as const;
       // The stop names the run it was aimed at. If the worker has been reused
@@ -7122,7 +7126,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       queueMicrotask(() => {
         if (admitted.auditor) sendRef.current(admitted.auditor.brief, { sessionId: admitted.auditor.id, hideUser: true });
       });
-      return { ...current, sessions: admitted.sessions };
+      return {
+        ...current,
+        sessions: admitted.sessions,
+        pending: current.pending.filter((item) => item.sessionId !== childSessionId),
+      };
     });
   }, []);
 

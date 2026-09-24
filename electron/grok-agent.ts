@@ -1615,10 +1615,11 @@ export class GrokAgent {
       return;
     }
     if (message.method !== "session/request_permission") {
+      // An error reply carries no `result`. With both, the ACP SDK read the
+      // answer as a malformed response (-32600) instead of "method not found".
       this.write({
         jsonrpc: "2.0",
         id,
-        result: null,
         error: { code: -32601, message: `Unsupported method ${message.method}` },
       });
       return;

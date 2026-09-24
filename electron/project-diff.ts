@@ -154,6 +154,10 @@ export function readGitHead(cwd: string): string {
 /** Repo-relative changes, optionally including commits made after `baseRef`. */
 export function listGitChanges(cwd: string, baseRef?: string): GitChange[] {
   if (!isAbsolutePath(cwd) || !fs.existsSync(cwd)) return [];
+  // The base is the commit a worker started from, as `readGitHead` names it.
+  // It arrives over IPC and goes to `git diff` ahead of `--`, where anything
+  // else, `--output=<file>` among it, is an option.
+  if (typeof baseRef === "string" && baseRef.trim() && !/^[0-9a-f]{7,64}$/i.test(baseRef.trim())) return [];
   try {
     const root = execFileSync("git", ["-C", cwd, "rev-parse", "--show-toplevel"], {
       encoding: "utf8",

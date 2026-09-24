@@ -388,7 +388,11 @@ export function watchPeerInbox(
       const resPath = reqPath.replace(/\.req\.json$/, ".res.json");
       void (async () => {
         try {
-          const ask = JSON.parse(fs.readFileSync(reqPath, "utf8")) as PeerAsk;
+          // The file's id names the file, not the ask. Handed on, it took the
+          // place of the id the desk waits on for the reply (main spreads the
+          // ask over its own), so an ask that came this way was run and its
+          // answer went to a waiter that did not exist.
+          const { id: _file, ...ask } = JSON.parse(fs.readFileSync(reqPath, "utf8")) as PeerAsk & { id?: unknown };
           const result = await handler(ask);
           writeInboxFile(resPath, result);
         } catch (error) {

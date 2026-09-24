@@ -134,6 +134,21 @@ async function ensureManagedWorktreeNow(
       if (!sameFilesystemPath(existingRoot, target)) {
         return { ok: false, message: "The managed worktree path is occupied by another checkout." };
       }
+      // A chat moved to another project keeps its id, so its folder can be a
+      // checkout of the repository it left. Handing that back ran the worker in
+      // the old repository while the desk named the new one.
+      const [ours, theirs] = await Promise.all(
+        [gitRoot, target].map(async (dir) => {
+          const common = await git(["-C", dir, "rev-parse", "--git-common-dir"]);
+          return path.resolve(dir, common);
+        }),
+      );
+      if (!sameFilesystemPath(ours, theirs)) {
+        return {
+          ok: false,
+          message: `This chat's worktree at ${target} belongs to another repository. Move anything you need out of it and remove it, and the desk will cut a fresh one from this project.`,
+        };
+      }
       const head = await git(["-C", target, "rev-parse", "HEAD"]);
       return { ok: true, path: target, gitRoot, head, reused: true };
     }

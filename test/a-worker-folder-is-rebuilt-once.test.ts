@@ -61,3 +61,16 @@ test("an ask that arrives mid-rebuild waits for the folder rather than taking ha
   assert.equal(second.generated, GENERATED, "the second ask came back to a folder still being rebuilt");
   fs.rmSync(root, { recursive: true, force: true });
 });
+
+test("a worker folder cut from another repository is never handed back as this one's", async () => {
+  const theirs = repoWithWorktree("folder-owner");
+  const ours = repoWithWorktree("folder-asker");
+
+  const got = await ensureManagedWorktree({ sessionId: "sess_gone", root: ours.repo }, theirs.managed);
+
+  assert.equal(got.ok, false, "a folder of the other repository came back as this one's");
+  assert.match(got.ok ? "" : got.message, /another repository/);
+  assert.ok(fs.existsSync(path.join(theirs.wt, "tracked.txt")), "and the folder is left exactly as it was");
+  fs.rmSync(theirs.root, { recursive: true, force: true });
+  fs.rmSync(ours.root, { recursive: true, force: true });
+});

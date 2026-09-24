@@ -42,14 +42,36 @@ export function wrapMarkdown(
   };
 }
 
+/**
+ * Is a web link a picture? Judged by where it points, not by what its text
+ * mentions. The host hints used to be read anywhere in the URL, query
+ * included, so `[xAI docs](https://docs.x.ai/...)`, a grok.com share link, or
+ * any link carrying `cdn.` or `generated` painted as a broken image with no
+ * way to click through. Now a picture has an image file at the end of its
+ * path, or comes from a host that serves only images: Grok Imagine's
+ * `imagine*.x.ai`, Grok's own `/generated/` files, Cloudflare Images, and
+ * Twitter's image CDN, whose URLs carry no extension.
+ */
+function webImageHref(value: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return false;
+  }
+  if (/\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(url.pathname)) return true;
+  const host = url.hostname.toLowerCase();
+  if (host === "imagedelivery.net" || host.endsWith(".twimg.com")) return true;
+  if (/^imagine[a-z0-9-]*\.x\.ai$/.test(host)) return true;
+  return (host === "grok.com" || host.endsWith(".grok.com")) && /\/generated\//i.test(url.pathname);
+}
+
 export function looksLikeImageHref(href: string): boolean {
   const value = href.trim();
   if (!value) return false;
   if (/^data:image\//i.test(value)) return true;
+  if (/^https?:\/\//i.test(value)) return webImageHref(value);
   if (/\.(png|jpe?g|gif|webp|bmp|svg)(\?|#|$)/i.test(value)) return true;
-  if (/^https?:\/\//i.test(value) && /(imagine|imagedelivery|twimg|grok\.com|x\.ai|cdn\.|generated)/i.test(value)) {
-    return true;
-  }
   if (/^(file:|[a-zA-Z]:[\\/]|\\\\|\/)/.test(value) && /\.(png|jpe?g|gif|webp|bmp)$/i.test(value)) return true;
   return false;
 }

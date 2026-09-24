@@ -3924,7 +3924,15 @@ export async function handleWorkhorseRpc(
       currentMcpProfile(),
       deskRoleOf(runWithLinkState(callerState, () => callerSession(ctx?.fromSessionId))),
     );
-    const localDiscovery = await discoverLocalRuntime(profile);
+    // A local host this helper cannot read is a host it does not list. A bad
+    // host setting used to throw out of here, and with nothing to catch it the
+    // helper died with this and every other request unanswered.
+    let localDiscovery: LocalRuntimeDiscovery | null = null;
+    try {
+      localDiscovery = await discoverLocalRuntime(profile);
+    } catch {
+      localDiscovery = null;
+    }
     const capabilityIds = localDiscovery?.capabilityIds ?? new Set<string>();
     const listed = TOOLS.filter((tool) =>
       isMcpToolAdvertised(profile, tool.name) &&
@@ -4042,6 +4050,21 @@ async function onMessage(message: JsonRpc, framing: McpFraming): Promise<void> {
   if (response) process.stdout.write(encodeMcpFrame(response, framing));
 }
 
+/**
+ * What a request that threw gets instead of silence. A throw out of the
+ * handler was an unhandled rejection, which ends a Node process: the host lost
+ * the helper and every request it had in flight. A notification has no id and
+ * gets nothing, as JSON-RPC says.
+ */
+export function rpcFailureFrame(message: JsonRpc, error: unknown): object | undefined {
+  if (message.id === undefined) return undefined;
+  return {
+    jsonrpc: "2.0",
+    id: message.id,
+    error: { code: -32603, message: error instanceof Error ? error.message : String(error) },
+  };
+}
+
 export async function runWorkhorseMcp(): Promise<void> {
   let buffer: Buffer<ArrayBufferLike> = Buffer.alloc(0);
   // The desk cannot write to this stdout — the host spawned this helper, not
@@ -4076,7 +4099,10 @@ export async function runWorkhorseMcp(): Promise<void> {
     buffer = parsed.rest;
     for (const frame of parsed.frames) {
       sender.framingIs(frame.framing);
-      void onMessage(frame.message, frame.framing);
+      void onMessage(frame.message, frame.framing).catch((error: unknown) => {
+        const failure = rpcFailureFrame(frame.message, error);
+        if (failure) process.stdout.write(encodeMcpFrame(failure, frame.framing));
+      });
     }
   });
   process.stdin.resume();

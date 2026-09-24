@@ -7718,6 +7718,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               tool: event.tool,
               detail: event.detail,
               path: event.path,
+              ...(event.preview ? { preview: event.preview } : {}),
               kind: "elevate",
               elevate: need,
             }),
@@ -7839,6 +7840,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             tool: event.tool,
             detail: event.detail,
             path: event.path,
+            ...(event.preview ? { preview: event.preview } : {}),
           }),
           sessions: current.sessions.map((session) =>
             session.id === event.sessionId ? { ...session, status: "needs-input" } : session,

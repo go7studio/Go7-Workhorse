@@ -272,6 +272,21 @@ function safetyPauseMessage(reason: SafetyPause): string {
   return "Workhorse paused after an unusually long continuous run. Progress is preserved in this chat; send Continue to resume.";
 }
 
+/** The longest argument preview a permission card carries. */
+export const MCP_ARGUMENTS_PREVIEW_CHARS = 400;
+
+/** An MCP call's arguments as the card shows them: compact JSON, clipped. */
+export function mcpArgumentsPreview(input: Record<string, unknown> | undefined): string | undefined {
+  let text: string;
+  try {
+    text = JSON.stringify(input ?? {});
+  } catch {
+    return undefined;
+  }
+  if (!text || text === "{}") return undefined;
+  return text.length > MCP_ARGUMENTS_PREVIEW_CHARS ? `${text.slice(0, MCP_ARGUMENTS_PREVIEW_CHARS - 1)}…` : text;
+}
+
 function positiveLimit(value: number | undefined, fallback: number): number {
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : fallback;
 }
@@ -759,6 +774,11 @@ export class CustomSessionHost {
             detail: detail.detail,
             path: detail.path,
           });
+          // An MCP call's detail is its name alone, so the card asked the person
+          // to approve `execute_command` without the command. The arguments ride
+          // beside it for reading only: the detail, which the classifiers judge
+          // and a session grant is keyed on, stays as it was.
+          const preview = mcp.has(use.name) ? mcpArgumentsPreview(use.input) : undefined;
           if (answer === "deny" && blocked) {
             const requestId = uid("perm");
             emit({
@@ -769,6 +789,7 @@ export class CustomSessionHost {
               rawTool: use.name,
               detail: detail.detail,
               path: detail.path,
+              ...(preview ? { preview } : {}),
               elevate: blocked,
             });
             answer = await new Promise<PermissionAnswer>((resolve) => {
@@ -789,6 +810,7 @@ export class CustomSessionHost {
               rawTool: use.name,
               detail: detail.detail,
               path: detail.path,
+              ...(preview ? { preview } : {}),
             });
             answer = await new Promise<PermissionAnswer>((resolve) => {
               this.waiting.set(requestId, { sessionId: input.sessionId, resolve });

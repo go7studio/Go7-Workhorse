@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { buildAnthropicBody, buildOpenAiBody } from "../electron/custom-http";
-import { CustomSessionHost } from "../electron/custom-host";
+import { CustomSessionHost, MCP_ARGUMENTS_PREVIEW_CHARS, mcpArgumentsPreview } from "../electron/custom-host";
 import { McpToolBridge, mcpExposedToolName, mcpNeedsWindowsShell, mcpSpawnEnvironment, mcpToolDefinition, probeMcpServer } from "../electron/mcp-tool-bridge";
 import { mergeMcpServers } from "../electron/grok-launch";
 import { mcpServersForSession, mcpToolAllowed } from "../src/lib/mcp-servers";
@@ -240,4 +240,44 @@ test("custom model host refuses an MCP tool a helper was never offered", async (
   assert.equal(refusal?.isError, true);
   assert.notEqual(refusal?.content, "ok", "the MCP server ran a tool the helper was never offered");
   assert.match(refusal?.content ?? "", /helper was not offered/);
+});
+
+/**
+ * An MCP call's card detail is its name, so the person approved
+ * `mcp__shell__execute_command` without seeing the command. The arguments now
+ * ride beside the detail as a clipped preview. The detail itself is unchanged,
+ * because the classifiers judge it and a session grant is keyed on it.
+ */
+test("an MCP permission card shows the call's arguments beside an unchanged detail", async () => {
+  let round = 0;
+  const cards: Array<{ detail: string; preview?: string }> = [];
+  const host = new CustomSessionHost(async () => {
+    round += 1;
+    if (round === 1) {
+      return { text: "", toolUses: [{ id: "mcp-ask", name: "mcp__memory__search_graph", input: { query: "rm -rf ~", depth: 2 } }] };
+    }
+    return { text: "done", stopReason: "end_turn" };
+  });
+  await host.prompt({
+    sessionId: "mcp-card-preview",
+    text: "Use the graph tool.",
+    model: "local-qwen",
+    effort: "high",
+    cwd: process.cwd(),
+    mode: "ask",
+    sandbox: "workspace",
+    mcpServers: [{ name: "memory", command: process.execPath, args: ["-e", FAKE_MCP], includeTools: ["search_graph"] }],
+    config: { baseUrl: "http://127.0.0.1:1/v1", apiKey: "unused", model: "local-qwen", api: "openai-completions" },
+  }, (event) => {
+    if (event.type !== "permission") return;
+    cards.push({ detail: event.detail, preview: event.preview });
+    // The card is registered just after it is announced.
+    setImmediate(() => host.answerPermission(event.requestId, "once"));
+  });
+  assert.deepEqual(cards, [{ detail: "mcp__memory__search_graph", preview: '{"query":"rm -rf ~","depth":2}' }]);
+
+  assert.equal(mcpArgumentsPreview({}), undefined);
+  const long = mcpArgumentsPreview({ text: "x".repeat(2_000) }) ?? "";
+  assert.equal(long.length, MCP_ARGUMENTS_PREVIEW_CHARS);
+  assert.ok(long.endsWith("…"));
 });

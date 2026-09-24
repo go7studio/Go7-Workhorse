@@ -63,6 +63,8 @@ export type GrokIpcEvent =
       rawTool?: string;
       detail: string;
       path?: string;
+      /** Shown on the card beside the detail. Never classified and never part of a grant. */
+      preview?: string;
       elevate?: { mode?: import("../src/lib/types").PermissionMode; sandbox?: import("../src/lib/types").SandboxProfile };
       vendor?: { provider: import("../src/lib/types").ProviderId; name: string; status?: string };
     }

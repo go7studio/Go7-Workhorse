@@ -21,14 +21,13 @@ export function PermissionCard() {
   const who = child?.hidden || child?.agentRun ? `${label} subagent` : label;
   const elevate = request.kind === "elevate" && request.elevate;
   const action = permissionActionLabel(request.tool);
-  const detail = elevate
-    ? [
-        child && request.elevate ? describeElevation(child, request.elevate) : "",
-        formatPermissionDetail(request.detail, request.path),
-      ]
-        .filter(Boolean)
-        .join(" — ")
-    : formatPermissionDetail(request.detail, request.path);
+  const detail = [
+    elevate && child && request.elevate ? describeElevation(child, request.elevate) : "",
+    formatPermissionDetail(request.detail, request.path),
+    request.preview ?? "",
+  ]
+    .filter(Boolean)
+    .join(" — ");
   const nextMode = request.elevate?.mode ? modeLabel(request.elevate.mode) : null;
   const nextBox = request.elevate?.sandbox ? sandboxLabel(request.elevate.sandbox) : null;
 

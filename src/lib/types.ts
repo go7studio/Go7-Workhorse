@@ -692,6 +692,8 @@ export type PermissionRequest = {
   tool: string;
   detail: string;
   path?: string;
+  /** What the call carries, for the person to read. Never classified and never part of a grant. */
+  preview?: string;
   kind?: "tool" | "elevate" | "vendor";
   elevate?: { mode?: PermissionMode; sandbox?: SandboxProfile };
   vendor?: {

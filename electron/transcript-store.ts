@@ -174,12 +174,15 @@ export type TranscriptIo = {
   write: (file: string, sidecar: TranscriptSidecar) => void;
   read: (file: string) => string;
   exists: (file: string) => boolean;
+  /** Moves a sidecar aside. Without it, a sidecar holding rows a write would drop is not written over. */
+  rename?: (from: string, to: string) => void;
 };
 
 const diskIo: TranscriptIo = {
   write: (file, sidecar) => atomicWriteJson(file, sidecar),
   read: (file) => fs.readFileSync(file, "utf8"),
   exists: (file) => fs.existsSync(file),
+  rename: (from, to) => fs.renameSync(from, to),
 };
 
 /**
@@ -258,6 +261,35 @@ function sidecarMatches(file: string, expected: TranscriptSidecar, io: Transcrip
 }
 
 /**
+ * Keep a sidecar already on disk that holds rows this write would drop.
+ *
+ * The file is named for the chat, so a write replaces whatever is there. A
+ * reused worker whose steps would not come back (a sidecar that did not load,
+ * or rows that did not line up) starts again from its prose and loses its
+ * pointer, and the next offload wrote the new steps over the old ones. Those
+ * rows have no seat in the new array to be merged into, so the old file is
+ * moved aside under a new name and kept. False when it holds such rows and
+ * cannot be moved: then nothing may be written over it.
+ */
+function keepEarlierSidecar(file: string, messages: readonly unknown[], io: TranscriptIo): boolean {
+  if (!io.exists(file)) return true;
+  const held = readTranscriptSidecar(file, io);
+  const ids = new Set(messages.flatMap((message) => {
+    const id = record(message)?.id;
+    return typeof id === "string" ? [id] : [];
+  }));
+  const loses = !held || held.rows.some((row) => typeof row.message?.id !== "string" || !ids.has(row.message.id));
+  if (!loses) return true;
+  if (!io.rename) return false;
+  try {
+    io.rename(file, file.replace(/\.json$/, `.earlier-${Date.now()}.json`));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Move one finished worker's thinking and tool rows to a sidecar.
  *
  * Fails closed in every direction: no user-data folder, no messages, nothing
@@ -293,6 +325,7 @@ export function offloadSessionTranscript(session: unknown, userData: string, io:
   const alreadyOnDisk = verifiedSidecars.get(file) === shape && io.exists(file);
   if (!alreadyOnDisk) {
     verifiedSidecars.delete(file);
+    if (!keepEarlierSidecar(file, messages, io)) return session;
     try {
       io.write(file, sidecar);
     } catch {
@@ -419,6 +452,7 @@ export function retireSessionTranscript(session: unknown, userData: string, io: 
   };
   verifiedSidecars.delete(file);
   retiredSidecars.delete(file);
+  if (!keepEarlierSidecar(file, messages, io)) return session;
   try {
     io.write(file, sidecar);
   } catch {

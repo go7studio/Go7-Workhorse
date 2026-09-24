@@ -86,7 +86,32 @@ function sameFilesystemPath(left: string, right: string): boolean {
   return process.platform === "win32" ? a.toLowerCase() === b.toLowerCase() : a === b;
 }
 
+/**
+ * Asks for a folder still in progress, by folder.
+ *
+ * Resume and a mission reusing the same worker both ask for its folder, and
+ * nothing kept the two apart. The second found the folder the first was still
+ * rebuilding and handed it back half made, or failed to add it and removed the
+ * first one's folder on its way out. Now each ask waits for the one before it.
+ */
+const folderAsks = new Map<string, Promise<EnsureWorktreeResult>>();
+
 export async function ensureManagedWorktree(
+  input: EnsureWorktreeInput,
+  managedRoot: string,
+): Promise<EnsureWorktreeResult> {
+  const folder = path.join(path.resolve(managedRoot), safeSegment(input.sessionId));
+  const key = process.platform === "win32" ? folder.toLowerCase() : folder;
+  const ask = (folderAsks.get(key) ?? Promise.resolve(null)).then(() => ensureManagedWorktreeNow(input, managedRoot));
+  folderAsks.set(key, ask);
+  try {
+    return await ask;
+  } finally {
+    if (folderAsks.get(key) === ask) folderAsks.delete(key);
+  }
+}
+
+async function ensureManagedWorktreeNow(
   input: EnsureWorktreeInput,
   managedRoot: string,
 ): Promise<EnsureWorktreeResult> {
@@ -1572,9 +1597,12 @@ async function restoreFromRescue(gitRoot: string, target: string, rescue: string
       if (!safeRescuePath(rel)) throw new Error(`the rescue names a path outside the folder (${rel})`);
     }
 
-    // Set before the add: a checkout that fails part way leaves a folder too.
-    made = true;
+    // Set once the add has made the folder, not before it: an add that fails
+    // cleans up after itself, and a folder that was already there is not this
+    // rebuild's to remove. Set before, a second ask's failed add took the
+    // folder the first ask had just rebuilt.
     await git(["-C", gitRoot, "worktree", "add", "--detach", target, base]);
+    made = true;
     // What a hook made and git ignores is not the rescue's to judge.
     const ignored = await gitOut(["-C", target, "ls-files", "--others", "--ignored", "--exclude-standard", "--directory", "-z"]);
     const skip = new Set(ignored.split("\0").filter(Boolean).map((row) => row.replace(/\/$/, "")));

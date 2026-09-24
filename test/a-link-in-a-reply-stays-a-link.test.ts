@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { looksLikeImageHref, parseInline } from "../src/lib/markdown";
+import { looksLikeImageHref, parseChatMarkdown, parseInline } from "../src/lib/markdown";
 
 function kinds(source: string): string[] {
   return parseInline(source).map((part) => part.type);
@@ -40,4 +40,19 @@ test("Grok Imagine output and other picture links still paint inline", () => {
     assert.equal(looksLikeImageHref(href), true, href);
   }
   assert.deepEqual(kinds("[A fox](https://imagine-public.x.ai/imagine-public/images/9a4f0c2e.jpg)"), ["image"]);
+});
+
+test("a link whose URL holds parentheses keeps all of it", () => {
+  // The target stopped at the first ")", so the link lost its last character
+  // and a stray ")" was left in the text after it.
+  const parts = parseInline("See [Foo](https://en.wikipedia.org/wiki/Foo_(bar)) for more.");
+  assert.deepEqual(parts, [
+    { type: "text", text: "See " },
+    { type: "link", text: "Foo", href: "https://en.wikipedia.org/wiki/Foo_(bar)" },
+    { type: "text", text: " for more." },
+  ]);
+  // The link still ends at its own ")" when a parenthesis follows it.
+  assert.deepEqual(parseInline("[a](https://a.example/x) (note)").map((part) => part.type), ["link", "text"]);
+  const block = parseChatMarkdown("![Chart](https://a.example/Chart_(q3).png)");
+  assert.deepEqual(block, [{ type: "image", alt: "Chart", href: "https://a.example/Chart_(q3).png" }]);
 });

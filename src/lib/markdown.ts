@@ -88,9 +88,15 @@ function asLinkedMedia(label: string, href: string, forcedImage: boolean): Inlin
   return { type: "link", text: label, href };
 }
 
+/*
+ * A link's target is read with one level of balanced parentheses inside it:
+ * `(?:[^()]|\([^()]*\))*`. It used to be `[^)]*`, which stopped at the first
+ * `)`, so `[Foo](https://en.wikipedia.org/wiki/Foo_(bar))` linked to
+ * `…Foo_(bar` and left a stray `)` in the text.
+ */
 export function parseInline(source: string): Inline[] {
   const out: Inline[] = [];
-  const re = /(\*\*[^*]+?\*\*|`[^`]+`|!?\[[^\]]*\]\([^)]*\)|\*[^*\n]+?\*)/g;
+  const re = /(\*\*[^*]+?\*\*|`[^`]+`|!?\[[^\]]*\]\((?:[^()]|\([^()]*\))*\)|\*[^*\n]+?\*)/g;
   let last = 0;
   for (const match of source.matchAll(re)) {
     const at = match.index ?? 0;
@@ -99,11 +105,11 @@ export function parseInline(source: string): Inline[] {
     if (token.startsWith("**")) out.push({ type: "strong", text: token.slice(2, -2) });
     else if (token.startsWith("`")) out.push({ type: "code", text: token.slice(1, -1) });
     else if (token.startsWith("![")) {
-      const image = token.match(/^!\[([^\]]*)\]\(([^)]*)\)$/);
+      const image = token.match(/^!\[([^\]]*)\]\(((?:[^()]|\([^()]*\))*)\)$/);
       if (image) out.push(asLinkedMedia(image[1], image[2], true));
       else out.push({ type: "text", text: token });
     } else if (token.startsWith("[")) {
-      const link = token.match(/^\[([^\]]+)\]\(([^)]*)\)$/);
+      const link = token.match(/^\[([^\]]+)\]\(((?:[^()]|\([^()]*\))*)\)$/);
       if (link) out.push(asLinkedMedia(link[1], link[2], false));
       else out.push({ type: "text", text: token });
     } else if (token.startsWith("*")) {
@@ -712,7 +718,7 @@ export function parseChatMarkdown(source: string): MdBlock[] {
       blocks.push({ type: "pre", text: body.join("\n") });
       continue;
     }
-    const picture = lines[i].trim().match(/^!?\[([^\]]*)\]\(([^)]*)\)\.?$/);
+    const picture = lines[i].trim().match(/^!?\[([^\]]*)\]\(((?:[^()]|\([^()]*\))*)\)\.?$/);
     if (picture) {
       blocks.push({ type: "image", alt: picture[1], href: picture[2] });
       i += 1;

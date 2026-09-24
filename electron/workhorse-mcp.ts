@@ -2896,9 +2896,27 @@ function deskIsOnline(): boolean {
   return Boolean(live?.url || process.env.WORKHORSE_BRIDGE_URL);
 }
 
+/**
+ * A worker or an auditor acts as itself and no one else.
+ *
+ * Its tools are chosen from its own row, but every door that takes a parent
+ * read `fromSessionId` from the call. A worker that had spent its one helper
+ * named its parent chat there instead and got a root spawn: no depth cap, no
+ * helper cap, its own timeout, and the seat of the chat it named. Link names a
+ * parent on purpose and keeps doing so; this is only the desk's own children.
+ */
+function assertActsAsItself(profile: ReturnType<typeof currentMcpProfile>, args: Record<string, unknown>, from?: string): void {
+  if (profile !== "worker" && profile !== "auditor") return;
+  const named = typeof args.fromSessionId === "string" ? args.fromSessionId.trim() : "";
+  if (named && named !== fromSessionId(from)) {
+    throw new Error("fromSessionId names another chat. A worker or auditor acts only as itself; leave fromSessionId unset.");
+  }
+}
+
 async function callTool(name: string, args: Record<string, unknown>, from?: string): Promise<string> {
   const profile = profileForCaller(currentMcpProfile(), deskRoleOf(callerSession(from)));
   assertMcpToolAllowed(profile, name);
+  assertActsAsItself(profile, args, from);
   if (name === "workhorse_capabilities") {
     return JSON.stringify(await runtimeLinkHandshake(profile), null, 2);
   }

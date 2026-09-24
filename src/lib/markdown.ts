@@ -89,6 +89,11 @@ function asLinkedMedia(label: string, href: string, forcedImage: boolean): Inlin
 }
 
 /*
+ * Link text stops at another `[`, so a reply full of unclosed brackets is read
+ * once instead of rescanned to the end from every bracket (20k of `[a ` took
+ * 1.3 s). A stray `[` before a link now stays text, and the link starts at the
+ * bracket its `]` closes.
+ *
  * A link's target is read with one level of balanced parentheses inside it:
  * `(?:[^()]|\([^()]*\))*`. It used to be `[^)]*`, which stopped at the first
  * `)`, so `[Foo](https://en.wikipedia.org/wiki/Foo_(bar))` linked to
@@ -96,7 +101,7 @@ function asLinkedMedia(label: string, href: string, forcedImage: boolean): Inlin
  */
 export function parseInline(source: string): Inline[] {
   const out: Inline[] = [];
-  const re = /(\*\*[^*]+?\*\*|`[^`]+`|!?\[[^\]]*\]\((?:[^()]|\([^()]*\))*\)|\*[^*\n]+?\*)/g;
+  const re = /(\*\*[^*]+?\*\*|`[^`]+`|!?\[[^\][]*\]\((?:[^()]|\([^()]*\))*\)|\*[^*\n]+?\*)/g;
   let last = 0;
   for (const match of source.matchAll(re)) {
     const at = match.index ?? 0;
@@ -264,16 +269,33 @@ function isConclusionParagraph(text: string): boolean {
 
 const ASK_NAMES = "ask|question|options|option|item|label|description";
 
+/*
+ * The ask peel runs on every reply, on every streamed delta. Its tag
+ * attributes are bounded, and a block is looked for only up to its last
+ * closing tag. Unbounded, every open tag with no close after it scanned to
+ * the end of the reply, and `<?ask` also matches inside "task": 20k of `<ask`
+ * took 5 s, and a long reply full of "task" and "->" took 50 ms per parse.
+ */
+const TAG_ATTRS = "[^>]{0,200}";
+
+/** The text up to and including the last `</name>`, and what follows it. */
+function throughLastClose(text: string, name: string): [string, string] {
+  let end = -1;
+  for (const match of text.matchAll(new RegExp(`</${name}>`, "gi"))) end = (match.index ?? 0) + match[0].length;
+  return end < 0 ? ["", text] : [text.slice(0, end), text.slice(end)];
+}
+
 function tidyAskText(value: string): string {
   return value
-    .replace(new RegExp(`</?(?:${ASK_NAMES})\\b[^>]*>`, "gi"), " ")
+    .replace(new RegExp(`</?(?:${ASK_NAMES})\\b${TAG_ATTRS}>`, "gi"), " ")
     .replace(new RegExp(`(?:^|[\\s*])(?:${ASK_NAMES})>`, "gi"), " ")
     .replace(/\s+/g, " ")
     .trim();
 }
 
 function tagInner(block: string, name: string): string {
-  const match = block.match(new RegExp(`<?${name}\\b[^>]*>([\\s\\S]*?)</${name}>`, "i"));
+  const [through] = throughLastClose(block, name);
+  const match = through.match(new RegExp(`<?${name}\\b${TAG_ATTRS}>([\\s\\S]*?)</${name}>`, "i"));
   return tidyAskText(match?.[1] ?? "");
 }
 
@@ -288,10 +310,13 @@ function formatAskItem(index: number, label: string, description: string): strin
 
 /** Turn MiniMax <Ask>/<options> dumps into a readable list. Never leave the tags on the page. */
 export function peelAskMarkup(text: string): string {
-  let next = String(text ?? "");
-  next = next.replace(/<?ask\b[^>]*>[\s\S]*?<\/ask>/gi, (block) => {
+  const [asks, rest] = throughLastClose(String(text ?? ""), "ask");
+  let next = asks.replace(new RegExp(`<?ask\\b${TAG_ATTRS}>[\\s\\S]*?</ask>`, "gi"), (block) => {
     const question = tagInner(block, "question");
-    const chunks = [...block.matchAll(/<?item\b[^>]*>([\s\S]*?)<\/item>/gi)].map((item) => item[1] ?? "");
+    const [itemized] = throughLastClose(block, "item");
+    const chunks = [...itemized.matchAll(new RegExp(`<?item\\b${TAG_ATTRS}>([\\s\\S]*?)</item>`, "gi"))].map(
+      (item) => item[1] ?? "",
+    );
     const items = chunks.flatMap((chunk, index) => {
       const label = tagInner(chunk, "label") || tidyAskText(chunk);
       const description = tagInner(chunk, "description");
@@ -299,13 +324,13 @@ export function peelAskMarkup(text: string): string {
       return line ? [line] : [];
     });
     return [question, ...items].filter(Boolean).join("\n\n");
-  });
-  next = next.replace(new RegExp(`</?(?:${ASK_NAMES})\\b[^>]*>`, "gi"), "");
-  next = next.replace(new RegExp(`(?:^|\\n)\\s*(\\d+\\.\\s*)?(?:\\*\\*)?(?:${ASK_NAMES})>\\s*`, "gi"), (_all, num: string) =>
+  }) + rest;
+  next = next.replace(new RegExp(`</?(?:${ASK_NAMES})\\b${TAG_ATTRS}>`, "gi"), "");
+  next = next.replace(new RegExp(`(?:^|\\n)\\s{0,200}(\\d+\\.\\s{0,200})?(?:\\*\\*)?(?:${ASK_NAMES})>\\s*`, "gi"), (_all, num: string) =>
     num ? `\n${num}` : "\n",
   );
   next = next.replace(new RegExp(`(?:^|[\\s*])(?:${ASK_NAMES})>`, "gi"), " ");
-  return next.replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+  return next.replace(/(?<![ \t])[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 
 const THINK_TAG = /<\/?(?:[a-z][\w-]*:)?think(?:ing)?\b[^>]*>/gi;

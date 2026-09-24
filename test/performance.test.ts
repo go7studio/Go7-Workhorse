@@ -18,7 +18,8 @@ import {
 } from "../src/lib/store-select";
 import { createPinScheduler } from "../src/lib/transcript-scroll";
 import { applyStreamQueues, createStreamCommitScheduler } from "../src/lib/stream-commit";
-import { expandMashedRows, mergeStreamedText, parseChatMarkdown } from "../src/lib/markdown";
+import { expandMashedRows, mergeStreamedText, parseChatMarkdown, parseInline, peelAskMarkup } from "../src/lib/markdown";
+import { titleFromIntent } from "../src/lib/titles";
 import { searchChats } from "../src/lib/search";
 import { dropDrafts } from "../src/lib/chats";
 import { deskPersistBodyEqual } from "../src/lib/desk-persist";
@@ -1056,4 +1057,42 @@ test("the mashed-row split reads every line the way the old pattern did", () => 
     "| |---|---|",
     "| | Darkest Dungeon PC | Keep |",
   ]);
+});
+
+test("a reply full of unclosed brackets or stray ask tags parses in bounded time", () => {
+  // Each of these rescanned the rest of the reply from every bracket, tag, or
+  // line break: 20k of `[a ` took 1.3 s in the inline parse, 8k of `<ask` about
+  // 1 s in the ask peel, and 20k blank lines 1.2 s. All of it runs on every
+  // streamed delta. Together they cost the old patterns about 3.5 s and the new
+  // ones well under 100 ms; nothing here is long enough to hang the suite if an
+  // old pattern came back.
+  const inputs: Array<() => unknown> = [
+    () => parseInline("[a ".repeat(20_000)),
+    () => peelAskMarkup("<ask".repeat(8_000)),
+    () => peelAskMarkup(`${"\n".repeat(20_000)}x`),
+    () => peelAskMarkup("- The worker picked up the task and returned -> done with the subtask list.\n".repeat(1_600)),
+  ];
+  const started = performance.now();
+  for (const run of inputs) run();
+  const ms = performance.now() - started;
+  assert.ok(ms < 1_000, `the inline parse and ask peel took ${ms}ms`);
+  // A real ask dump still becomes a list.
+  assert.equal(
+    peelAskMarkup("<ask><question>Pick one</question><item><label>A</label></item><item><label>B</label></item></ask>"),
+    "Pick one\n\n1. **A**\n\n2. **B**",
+  );
+});
+
+test("a prompt with a long run of filler words titles in bounded time", () => {
+  // The trailing-filler pattern ran over the whole prompt, so a long run of
+  // filler that was not at the end was rescanned from every word: 30,000 "ok"
+  // took 6 s. 15,000 cost the old pattern about 1.6 s.
+  const started = performance.now();
+  titleFromIntent(`x${" ok".repeat(15_000)} y`);
+  const ms = performance.now() - started;
+  assert.ok(ms < 500, `titling a long filler run took ${ms}ms`);
+  assert.equal(titleFromIntent("hey can you fix the login redirect bug please thanks ok"), "Fix login redirect bug");
+  // A filler tail longer than the searched stretch still comes off.
+  assert.equal(titleFromIntent(`fix the flaky upload test${" please".repeat(100)}`), "Fix flaky upload test");
+  assert.equal(titleFromIntent("could you add a dark mode toggle to settings for me lol"), "Add dark mode toggle to settings");
 });

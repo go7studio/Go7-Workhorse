@@ -87,6 +87,17 @@ function replaceUrls(text: string): string {
   return text.replace(/https?:\/\/[^\s]+/gi, hostFromUrl);
 }
 
+const TRAILING_FILLER = /(\s+(please|thanks|thank you|extra|for me|lol|tho|though|ok|okay))+$/i;
+
+/*
+ * Only the end of a prompt can be trailing filler, so only its last stretch is
+ * searched; a longer filler tail comes off over more passes of the loop. Run
+ * over the whole prompt, a long run of filler words that was not at the end
+ * ("ok ok ok … fix it") was rescanned from every word: 30,000 of them took
+ * 6 s, on every launch that re-derived the title.
+ */
+const FILLER_TAIL_CHARS = 200;
+
 function stripFiller(text: string): string {
   let next = text.replace(/\s+/g, " ").trim();
   let previous = "";
@@ -99,9 +110,10 @@ function stripFiller(text: string): string {
       .replace(/^(i\s+)?(just\s+)?(want|need|like)\s+(you\s+to\s+)?/i, "")
       .replace(/^help\s+me\s+(to\s+)?/i, "")
       .replace(/^(what|how|why|when|where|who)\s+(do|can|are|is|does|did|would|should|could)\s+(you\s+)?/i, "")
-      .replace(/^do\s+you\s+/i, "")
-      .replace(/(\s+(please|thanks|thank you|extra|for me|lol|tho|though|ok|okay))+$/i, "")
-      .trim();
+      .replace(/^do\s+you\s+/i, "");
+    const filler = next.slice(-FILLER_TAIL_CHARS).match(TRAILING_FILLER);
+    if (filler) next = next.slice(0, next.length - filler[0].length);
+    next = next.trim();
   }
   return next.replace(/[?!.,;:]+$/g, "").trim();
 }

@@ -146,16 +146,25 @@ export function killProcessGroup(target: number | ChildProcess | null | undefine
   const pid = typeof target === "number" ? target : target?.pid;
   if (!pid || pid <= 0) return false;
   const resolved = killIo(io);
+  // A child that has already exited no longer owns its pid. A host keeps a dead
+  // CLI's slot until the chat's next prompt or the quit, hours later, and by
+  // then the number can belong to anyone: signalling it, or `taskkill /T`-ing
+  // it, stopped a stranger's process tree.
+  const exited = hasExited(target);
   if (resolved.platform === "win32") {
+    // taskkill walks the tree from a live parent; a dead one has none to walk.
+    if (exited) return false;
     resolved.taskkill(pid);
     return true;
   }
   try {
     resolved.kill(-pid, "SIGTERM");
   } catch {
-    // No group with that id: the child was spawned without `detached`, or it is
-    // already gone. Take the pid rather than nothing — stopping the CLI and
+    // No group with that id. A dead leader's group is simply gone, and its pid
+    // is not its own any more. Otherwise the child was spawned without
+    // `detached`: take the pid rather than nothing — stopping the CLI and
     // missing its children is still better than stopping neither.
+    if (exited) return false;
     try {
       resolved.kill(pid, "SIGTERM");
     } catch {
@@ -171,6 +180,12 @@ export function killProcessGroup(target: number | ChildProcess | null | undefine
     }
   }, resolved.graceMs);
   return true;
+}
+
+/** The child has reported its exit, so its pid may already be someone else's. */
+function hasExited(target: number | ChildProcess | null | undefined): boolean {
+  if (!target || typeof target === "number") return false;
+  return typeof target.exitCode === "number" || typeof target.signalCode === "string";
 }
 
 /* --------------------------------------------------- the on-disk registry */
@@ -289,7 +304,7 @@ export function forgetProcessGroup(pgid: number | undefined): void {
 /** Kill the group and drop its record in one move. Every stop path uses this. */
 export function stopProcessGroup(target: number | ChildProcess | null | undefined, io: Partial<KillIo> = {}): boolean {
   const pid = typeof target === "number" ? target : target?.pid;
-  const killed = killProcessGroup(pid, io);
+  const killed = killProcessGroup(target, io);
   forgetProcessGroup(pid);
   return killed;
 }
@@ -381,6 +396,13 @@ export function stopProcessTree(
   const pid = typeof target === "number" ? target : target?.pid;
   if (!pid || pid <= 0) return false;
   const resolved = killIo(io);
+  if (hasExited(target)) {
+    // A dead shell's pid may be someone else's by now, so there is no tree to
+    // walk from it. Its own group, if anything is left in it, is still its own.
+    const killed = killProcessGroup(target, resolved);
+    forgetProcessGroup(pid);
+    return killed;
+  }
   if (resolved.platform === "win32") {
     // taskkill /T already walks the tree, which is why Windows never had this.
     resolved.taskkill(pid);

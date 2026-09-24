@@ -454,6 +454,48 @@ test("Windows lets taskkill walk the tree, which is why it never had this bug", 
 });
 
 /*
+ * A host keeps a crashed CLI's slot until that chat's next prompt, or the quit,
+ * and only then stops it. By then its pid can be anybody's. The group kill
+ * found no group and fell back to the bare pid; Windows ran `taskkill /T /F`
+ * on it. Either one stopped whatever process had been handed that number.
+ */
+test("stopping a child that already exited never signals the pid it used to have", () => {
+  const exited = { pid: 4343, exitCode: 1, signalCode: null } as unknown as ChildProcess;
+  const live = { pid: 4344, exitCode: null, signalCode: null } as unknown as ChildProcess;
+  const noGroup = (sent: [number, string | number][]) => ({
+    platform: "linux" as const,
+    kill: (pid: number, signal: string | number) => {
+      if (signal === 0) throw Object.assign(new Error("ESRCH"), { code: "ESRCH" });
+      sent.push([pid, signal]);
+      if (pid < 0) throw Object.assign(new Error("ESRCH"), { code: "ESRCH" });
+    },
+    schedule: () => {},
+    snapshot: () => [{ pid: 4343, ppid: 1, pgid: 4343 }, { pid: 5000, ppid: 4343, pgid: 5000 }],
+  });
+
+  const sent: [number, string | number][] = [];
+  assert.equal(stopProcessGroup(exited, noGroup(sent)), false);
+  assert.deepEqual(sent, [[-4343, "SIGTERM"]], "a dead leader's survivors are still its group's; its pid is not");
+
+  const tree: [number, string | number][] = [];
+  assert.equal(stopProcessTree(exited, noGroup(tree)), false);
+  assert.deepEqual(tree, [[-4343, "SIGTERM"]], "no walk from a pid that may now be a stranger's");
+
+  const trees: number[] = [];
+  const win = { platform: "win32" as const, taskkill: (pid: number) => trees.push(pid) };
+  assert.equal(stopProcessGroup(exited, win), false);
+  assert.equal(stopProcessTree(exited, win), false);
+  assert.deepEqual(trees, [], "taskkill /T /F on a recycled pid takes a stranger's tree");
+
+  // A live child that leads no group still goes by its pid, as before.
+  const liveSent: [number, string | number][] = [];
+  assert.equal(stopProcessGroup(live, noGroup(liveSent)), true);
+  assert.deepEqual(liveSent, [[-4344, "SIGTERM"], [4344, "SIGTERM"]]);
+  assert.equal(stopProcessGroup(live, win), true);
+  assert.deepEqual(trees, [4344]);
+});
+
+/*
  * The desk's own terminal is the shortest route to a runaway: whatever the
  * person types starts under that shell. Closing the terminal used to kill the
  * shell and leave all of it running.

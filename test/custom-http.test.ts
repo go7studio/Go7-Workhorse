@@ -2630,3 +2630,60 @@ test("a link that points nowhere is not a new file inside the workspace", async 
   assert.equal(aliased.isError, undefined, aliased.content);
   assert.equal(readFileSync(path.join(inside, "real.md"), "utf8"), "after");
 });
+
+function customTurn(sessionId: string, mode: "ask" | "accept-edits" | "always-approve") {
+  return {
+    sessionId,
+    text: "go",
+    model: "MiniMax-M3",
+    effort: "medium" as const,
+    cwd: ROOT,
+    mode,
+    sandbox: "workspace" as const,
+    history: [],
+    config: { baseUrl: "https://api.minimax.io/anthropic", apiKey: "sk", model: "MiniMax-M3" },
+  };
+}
+
+async function until(check: () => boolean, what: string): Promise<void> {
+  const deadline = Date.now() + 5_000;
+  while (!check()) {
+    if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+}
+
+/**
+ * One host serves every custom chat. Stop on one of them answered every open
+ * card on the desk with deny, so another chat's write failed while its card
+ * was still on screen, and answering that card later did nothing.
+ */
+test("Stop on one custom chat leaves another chat's permission card open", async () => {
+  const ran: string[] = [];
+  const cards: Array<{ sessionId: string; requestId: string }> = [];
+  const host = new CustomSessionHost(
+    async (_config, request) => {
+      if (request.messages.some((message) => message.toolResults?.length)) return { text: "done" };
+      return { text: "", toolUses: [{ id: "w", name: "write_file", input: { path: "x.txt", content: "hi" } }] };
+    },
+    {
+      executeTool: async (use, policy) => {
+        ran.push(policy.sessionId ?? "");
+        return { id: use.id, name: use.name, content: "Wrote" };
+      },
+    },
+  );
+  const emit = (event: { type: string; sessionId: string; requestId?: string }) => {
+    if (event.type === "permission" && event.requestId) cards.push({ sessionId: event.sessionId, requestId: event.requestId });
+  };
+  const a = host.prompt(customTurn("chat-a", "ask"), emit);
+  const b = host.prompt(customTurn("chat-b", "ask"), emit);
+  await until(() => cards.length === 2, "both cards");
+  host.cancel("chat-a");
+  assert.equal((await a).stopReason, "cancelled");
+  const bCard = cards.find((card) => card.sessionId === "chat-b");
+  assert.ok(bCard);
+  assert.equal(host.answerPermission(bCard.requestId, "once"), true, "stopping chat A answered chat B's card");
+  assert.equal((await b).stopReason, "end_turn");
+  assert.deepEqual(ran, ["chat-b"]);
+});

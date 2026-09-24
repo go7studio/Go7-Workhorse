@@ -278,7 +278,12 @@ function positiveLimit(value: number | undefined, fallback: number): number {
 export class CustomSessionHost {
   private tails = new Map<string, Promise<unknown>>();
   private aborts = new Map<string, AbortController>();
-  private waiting = new Map<string, (answer: PermissionAnswer) => void>();
+  /**
+   * Open permission cards, each with the chat it belongs to. One host serves
+   * every custom chat, and Stop on one of them used to answer every card on
+   * the desk with deny — another chat's write failed while its card stayed up.
+   */
+  private waiting = new Map<string, { sessionId: string; resolve: (answer: PermissionAnswer) => void }>();
 
   /**
    * The sessions this host is still driving. Custom HTTP keeps no agent slot,
@@ -316,7 +321,7 @@ export class CustomSessionHost {
     const wait = this.waiting.get(requestId);
     if (!wait) return false;
     this.waiting.delete(requestId);
-    wait(answer);
+    wait.resolve(answer);
     return true;
   }
 
@@ -576,7 +581,7 @@ export class CustomSessionHost {
               vendor: { provider: spawnTarget, name: vendorName, status: "ok" },
             });
             const answer = await new Promise<PermissionAnswer>((resolve) => {
-              this.waiting.set(requestId, resolve);
+              this.waiting.set(requestId, { sessionId: input.sessionId, resolve });
             });
             if (answer === "deny") {
               results.push({
@@ -660,7 +665,7 @@ export class CustomSessionHost {
               elevate: need,
             });
             const answer = await new Promise<PermissionAnswer>((resolve) => {
-              this.waiting.set(requestId, resolve);
+              this.waiting.set(requestId, { sessionId: input.sessionId, resolve });
             });
             if (answer === "deny") {
               results.push({
@@ -746,7 +751,7 @@ export class CustomSessionHost {
               elevate: blocked,
             });
             answer = await new Promise<PermissionAnswer>((resolve) => {
-              this.waiting.set(requestId, resolve);
+              this.waiting.set(requestId, { sessionId: input.sessionId, resolve });
             });
             if (answer !== "deny") {
               if (blocked.mode) mode = blocked.mode;
@@ -765,7 +770,7 @@ export class CustomSessionHost {
               path: detail.path,
             });
             answer = await new Promise<PermissionAnswer>((resolve) => {
-              this.waiting.set(requestId, resolve);
+              this.waiting.set(requestId, { sessionId: input.sessionId, resolve });
             });
           }
           if (answer === "deny") {
@@ -877,8 +882,9 @@ export class CustomSessionHost {
   cancel(sessionId: string): void {
     this.aborts.get(sessionId)?.abort();
     for (const [id, wait] of this.waiting) {
-      wait("deny");
+      if (wait.sessionId !== sessionId) continue;
       this.waiting.delete(id);
+      wait.resolve("deny");
     }
   }
 }

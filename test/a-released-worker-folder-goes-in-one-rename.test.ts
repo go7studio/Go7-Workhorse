@@ -68,7 +68,7 @@ test("a released folder waits beside the worker folders, and what a quit cut sho
 
   assert.deepEqual(pruned.removed, ["sess_gone"]);
   assert.ok(!fs.existsSync(wt));
-  assert.equal(path.dirname(trash), path.dirname(fs.realpathSync(managed)), "the same folder, so the move is one rename");
+  assert.equal(path.dirname(trash), path.dirname(fs.realpathSync.native(managed)), "the same folder, so the move is one rename");
   assert.ok(!git(repo, ["worktree", "list"]).includes("sess_gone"));
   assert.ok(!git(repo, ["worktree", "list", "--porcelain"]).includes("prunable"), "no registration is left pointing at nothing");
   await emptyWorktreeTrash(managed);

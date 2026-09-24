@@ -2436,7 +2436,8 @@ test("chat markdown turns status dumps into facts and renders inline marks", () 
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "SessionPane.tsx"), "utf8"), /nearby=\{nearby\}/);
   assert.match(readFileSync(path.join(ROOT, "src", "lib", "turns.ts"), "utf8"), /recentTranscriptText/);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "FileOpen.tsx"), "utf8"), /harvestFilePath/);
-  assert.match(readFileSync(path.join(ROOT, "electron", "main.ts"), "utf8"), /setWindowOpenHandler/);
+  assert.match(readFileSync(path.join(ROOT, "electron", "main.ts"), "utf8"), /guardNavigation\(contents/);
+  assert.match(readFileSync(path.join(ROOT, "electron", "ipc-sender.ts"), "utf8"), /setWindowOpenHandler/);
   assert.match(readFileSync(path.join(ROOT, "electron", "main.ts"), "utf8"), /shell\.openExternal/);
   assert.match(readFileSync(path.join(ROOT, "electron", "preload.ts"), "utf8"), /shell:open/);
   const picture = parseInline("![A moonlit workhorse](https://imagine.x.ai/out.png)");

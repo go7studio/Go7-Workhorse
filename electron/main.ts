@@ -10,7 +10,7 @@ import { resolveClaudeModel } from "./claude-launch";
 import { CursorSessionHost, type CursorPromptInput } from "./cursor-host";
 import { CustomSessionHost, type CustomPromptInput } from "./custom-host";
 import { probeMcpServer } from "./mcp-tool-bridge";
-import { guardIpcSender } from "./ipc-sender";
+import { guardIpcSender, guardNavigation, isDeskPage } from "./ipc-sender";
 import { detectGrokLogin } from "./grok-login";
 import { detectCodexLogin } from "./codex-login";
 import { archiveWorkhorseWorkerThreads, detectCodexRuntime, listCodexNativeThreads } from "./codex-app-server";
@@ -895,11 +895,17 @@ function runHousekeeping(sessions: readonly unknown[]) {
   }
 }
 
+/** The desk's own page on disk. The only file: URL a desk window may show or be trusted from. */
+const DESK_INDEX_FILE = path.join(__dirname, "../dist/index.html");
+
 function isDeskAppUrl(url: string): boolean {
-  const dev = process.env.VITE_DEV_SERVER_URL?.replace(/\/$/, "");
-  if (dev && (url === dev || url.startsWith(`${dev}/`))) return true;
-  return url.startsWith("file:");
+  return isDeskPage(url, process.env.VITE_DEV_SERVER_URL, DESK_INDEX_FILE);
 }
+
+// Every window, the Workshop breakout included, and any added later.
+app.on("web-contents-created", (_event, contents) => {
+  guardNavigation(contents, isDeskAppUrl, (url) => void shell.openExternal(url));
+});
 
 /*
  * The one window that holds the desk's state. The Workshop breakout loads the
@@ -949,17 +955,6 @@ function createWindow() {
   });
 
   win.setMenu(null);
-  win.webContents.setWindowOpenHandler(({ url }) => {
-    const external = safeExternalUrl(url);
-    if (external) void shell.openExternal(external);
-    return { action: "deny" };
-  });
-  win.webContents.on("will-navigate", (event, url) => {
-    if (isDeskAppUrl(url)) return;
-    event.preventDefault();
-    const external = safeExternalUrl(url);
-    if (external) void shell.openExternal(external);
-  });
   win.once("ready-to-show", () => {
     win.show();
   });
@@ -983,7 +978,7 @@ function createWindow() {
   if (process.env.VITE_DEV_SERVER_URL) {
     win.loadURL(process.env.VITE_DEV_SERVER_URL);
   } else {
-    win.loadFile(path.join(__dirname, "../dist/index.html"));
+    win.loadFile(DESK_INDEX_FILE);
   }
   return win;
 }
@@ -1031,7 +1026,7 @@ app.whenReady().then(async () => {
   // is a channel written next month. It sat below attachLearningIpc once, and
   // the eleven learning channels, registered from their own module, answered
   // any frame at all while the test that guards the order read only main.ts.
-  guardIpcSender(ipcMain, process.env.VITE_DEV_SERVER_URL);
+  guardIpcSender(ipcMain, process.env.VITE_DEV_SERVER_URL, DESK_INDEX_FILE);
   app.on("child-process-gone", (_event, details) => {
     mainLog.record(
       "child-process-gone",
@@ -1200,7 +1195,7 @@ app.whenReady().then(async () => {
       return createWorkshopBreakoutWindow({
         preload: path.join(__dirname, "preload.mjs"),
         deskUrl: process.env.VITE_DEV_SERVER_URL ?? null,
-        deskFile: path.join(__dirname, "../dist/index.html"),
+        deskFile: DESK_INDEX_FILE,
         icon: appIconPath(),
         dark,
         theme: liveTheme,

@@ -1,4 +1,5 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import readline from "node:readline";
@@ -66,8 +67,19 @@ function safeName(value: string): string {
   return value.trim().replace(/[^a-zA-Z0-9_]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 48) || "tool";
 }
 
+/**
+ * OpenAI-compatible hosts refuse a function name over 64 characters, and one
+ * long name fails the whole request, not only that tool. A longer name keeps
+ * its start and ends in a hash of the full server and tool, so it is the same
+ * on every request and two long names that share a start stay apart.
+ */
+export const MCP_TOOL_NAME_MAX = 64;
+
 export function mcpExposedToolName(server: string, tool: string): string {
-  return `mcp__${safeName(server)}__${safeName(tool)}`.slice(0, 120);
+  const full = `mcp__${safeName(server)}__${safeName(tool)}`;
+  if (full.length <= MCP_TOOL_NAME_MAX) return full;
+  const hash = createHash("sha256").update(`${server}\u0000${tool}`).digest("hex").slice(0, 8);
+  return `${full.slice(0, MCP_TOOL_NAME_MAX - hash.length - 1)}_${hash}`;
 }
 
 export function mcpToolDefinition(server: string, tool: McpListedTool): CustomHttpTool {
@@ -209,7 +221,10 @@ export class McpToolBridge {
           const definition = mcpToolDefinition(config.name, tool);
           let exposed = definition.name;
           let suffix = 2;
-          while (this.routes.has(exposed)) exposed = `${definition.name}_${suffix++}`;
+          while (this.routes.has(exposed)) {
+            const tail = `_${suffix++}`;
+            exposed = `${definition.name.slice(0, MCP_TOOL_NAME_MAX - tail.length)}${tail}`;
+          }
           definitions.push({ ...definition, name: exposed });
           this.routes.set(exposed, { client, server: config.name, tool: tool.name });
         }

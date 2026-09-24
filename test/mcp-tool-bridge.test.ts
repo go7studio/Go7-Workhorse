@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { buildAnthropicBody, buildOpenAiBody } from "../electron/custom-http";
 import { CustomSessionHost, MCP_ARGUMENTS_PREVIEW_CHARS, mcpArgumentsPreview } from "../electron/custom-host";
-import { McpToolBridge, mcpExposedToolName, mcpNeedsWindowsShell, mcpSpawnEnvironment, mcpToolDefinition, probeMcpServer } from "../electron/mcp-tool-bridge";
+import { MCP_TOOL_NAME_MAX, McpToolBridge, mcpExposedToolName, mcpNeedsWindowsShell, mcpSpawnEnvironment, mcpToolDefinition, probeMcpServer } from "../electron/mcp-tool-bridge";
 import { mergeMcpServers } from "../electron/grok-launch";
 import { mcpServersForSession, mcpToolAllowed } from "../src/lib/mcp-servers";
 import { normalizeMcpServers } from "../src/lib/settings";
@@ -280,4 +280,33 @@ test("an MCP permission card shows the call's arguments beside an unchanged deta
   const long = mcpArgumentsPreview({ text: "x".repeat(2_000) }) ?? "";
   assert.equal(long.length, MCP_ARGUMENTS_PREVIEW_CHARS);
   assert.ok(long.endsWith("…"));
+});
+
+/**
+ * Exposed names ran to 120 characters. OpenAI-compatible hosts refuse a
+ * function name over 64, and one long name failed every request in the chat.
+ */
+test("an exposed MCP tool name fits 64 characters and is the same on every request", async () => {
+  const valid = /^[a-zA-Z0-9_-]{1,64}$/;
+  assert.equal(MCP_TOOL_NAME_MAX, 64);
+  assert.equal(mcpExposedToolName("github", "create_issue"), "mcp__github__create_issue");
+  const server = "company-internal-knowledge-base-and-wiki";
+  const long = mcpExposedToolName(server, "search_documents_by_modified_date_range");
+  assert.match(long, valid);
+  assert.equal(long, mcpExposedToolName(server, "search_documents_by_modified_date_range"));
+  assert.notEqual(long, mcpExposedToolName(server, "search_documents_by_modified_date_range_v2"));
+
+  // Two servers that share a long name still get distinct names within the cap.
+  const bridge = new McpToolBridge([
+    { name: "a".repeat(60), command: process.execPath, args: ["-e", FAKE_MCP] },
+    { name: "a".repeat(60), command: process.execPath, args: ["-e", FAKE_MCP] },
+  ]);
+  try {
+    const names = (await bridge.tools()).map((tool) => tool.name);
+    assert.equal(names.length, 4);
+    assert.equal(new Set(names).size, 4);
+    for (const name of names) assert.match(name, valid);
+  } finally {
+    bridge.dispose();
+  }
 });

@@ -1159,8 +1159,11 @@ export function formatPlanReset(iso?: string, now = Date.now()): string {
   if (Number.isNaN(date.getTime())) return "";
   const delta = date.getTime() - now;
   if (delta > 0 && delta < 12 * 60 * 60 * 1000) {
-    const hours = Math.floor(delta / 3_600_000);
-    const minutes = Math.max(0, Math.round((delta % 3_600_000) / 60_000));
+    // Round the whole span to minutes before splitting it. Rounding only the
+    // remainder read 1 h 59 m 45 s as "1 hr 60 min".
+    const total = Math.round(delta / 60_000);
+    const hours = Math.floor(total / 60);
+    const minutes = total % 60;
     if (hours <= 0) return `Resets in ${minutes} min`;
     return `Resets in ${hours} hr${minutes ? ` ${minutes} min` : ""}`;
   }
@@ -1877,12 +1880,15 @@ export function deskPulseLines(input: {
 }
 
 export function formatTokens(value: number): string {
-  if (value < 1000) return String(Math.round(value));
-  if (value < 10_000) return `${(value / 1000).toFixed(1)}k`;
-  if (value < 1_000_000) return `${Math.round(value / 1000)}k`;
+  // Each unit is picked by the number it will print, not the raw value, so a
+  // count just under a boundary moves up a unit instead of printing "1000k"
+  // (999,600) or "1000.0M".
+  if (Math.round(value) < 1000) return String(Math.round(value));
+  if (value < 9_950) return `${(value / 1000).toFixed(1)}k`;
+  if (Math.round(value / 1000) < 1000) return `${Math.round(value / 1000)}k`;
   // A desk that has run for a year read 1657.5M, which is a number nobody can
   // hold. A billion gets its own letter.
-  if (value < 1_000_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
+  if (Number((value / 1_000_000).toFixed(1)) < 1000) return `${(value / 1_000_000).toFixed(1)}M`;
   return `${(value / 1_000_000_000).toFixed(2)}B`;
 }
 

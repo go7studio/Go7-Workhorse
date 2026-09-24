@@ -23,6 +23,8 @@ function validCwd(cwd: string): boolean {
 export class TerminalHost {
   private slots = new Map<string, TerminalSlot>();
 
+  constructor(private readonly spawnShell: typeof spawn = spawn) {}
+
   start(sessionId: string, cwd: string, emit: (event: TerminalEvent) => void): { ok: boolean; message?: string } {
     const id = sessionId.trim();
     if (!id) return { ok: false, message: "Terminal needs a chat." };
@@ -35,7 +37,7 @@ export class TerminalHost {
     const command = windows ? process.env.ComSpec?.trim() || "C:\\Windows\\System32\\cmd.exe" : process.env.SHELL?.trim() || "/bin/sh";
     const args = windows ? ["/d", "/q", "/k"] : ["-i"];
     try {
-      const child = spawn(command, args, {
+      const child = this.spawnShell(command, args, {
         cwd,
         // The same environment every vendor launch gets: the person's normal
         // login and PATH, without the desk's own bridge token, state paths or
@@ -57,7 +59,11 @@ export class TerminalHost {
       child.stderr.on("data", output);
       child.once("error", (error) => output(`${error.message}${os.EOL}`));
       child.once("exit", (code) => {
-        if (this.slots.get(id)?.child === child) this.slots.delete(id);
+        // A restart in another folder stops this shell and starts the next one
+        // under the same chat id. This exit landed a second and a half later,
+        // and the pane said "Shell exited." over the shell that was running.
+        if (this.slots.get(id)?.child !== child) return;
+        this.slots.delete(id);
         emit({ type: "exit", sessionId: id, code });
       });
       return { ok: true };

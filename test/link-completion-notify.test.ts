@@ -9,6 +9,7 @@ import { settledWorkers, workerJustSettled, isTerminalRunStatus } from "../src/l
 import { WORKER_TERMINAL_NOTIFICATION, createFramedSender, unannounced, workerTerminalNotification } from "../src/lib/link-notify";
 import { watchWorkerCompletions } from "../electron/link-watch";
 import { normalizeSession } from "../src/lib/session";
+import { persistDelayMs } from "../src/lib/desk-persist";
 import type { WorkerRunRow } from "../src/lib/worker-settled";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -236,7 +237,8 @@ test("a settled worker skips the persist debounce, and cannot lose it", () => {
   // busy debounce is 2s of a harness sitting blind.
   const store = read("src/lib/store.tsx");
   assert.match(store, /if \(workerJustSettled\(previous\?\.sessions, state\.sessions\)\) settledPending\.current = true/);
-  assert.match(store, /\}, settledPending\.current \? 0 : busy \? 2_000 : 400\)/);
+  assert.match(store, /\}, persistDelayMs\(\{ settled: settledPending\.current, busy, dirtySince, now \}\)\)/);
+  assert.equal(persistDelayMs({ settled: true, busy: true, dirtySince: 0, now: 0 }), 0, "a settled worker writes at once");
 
   // Latched rather than recomputed. Every state change clears the pending
   // timer and re-enters; recomputing against the newer previous would read

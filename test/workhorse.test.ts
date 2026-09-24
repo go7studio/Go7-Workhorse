@@ -7626,7 +7626,8 @@ test("unsent composer text and images survive normalizeSession", () => {
   assert.match(store, /if \(!commit\) return;/);
   assert.match(store, /settleSessionGoals/);
   assert.match(store, /if \(!settled\.changed\) return current;/);
-  assert.match(store, /busy \? 2_000 : 400/);
+  assert.match(store, /persistDelayMs\(\{ settled: settledPending\.current, busy, dirtySince, now \}\)/);
+  assert.match(readFileSync(path.join(ROOT, "src", "lib", "desk-persist.ts"), "utf8"), /input\.busy \? 2_000 : 400/);
   assert.match(composer, /setComposerDraft\(sessionId, value, images\)/);
   assert.match(composer, /setComposerDraft\(sessionId, valueRef\.current, imagesRef\.current, true\)/);
 });

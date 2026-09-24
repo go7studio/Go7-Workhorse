@@ -64,7 +64,7 @@ import {
 } from "./chats";
 import { settledWorkers, workerJustSettled } from "./worker-settled";
 import { foldersToCount, leftInFolderNote, workerLabel } from "./worker-folders";
-import { deskPersistBodyEqual } from "./desk-persist";
+import { deskPersistBodyEqual, persistDelayMs } from "./desk-persist";
 import { restoredPanel } from "./restored-panel";
 import { mergeTranscriptRows, normalizeRetentionDays, transcriptFetchPlan, transcriptStillOnDisk } from "./transcript-sidecar";
 import { autoTitleForSend, firstUserText, suggestedTitleForSession, titleAcceptsVendor, titleFromIntent } from "./titles";
@@ -1270,6 +1270,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const settledPending = useRef(false);
   const lateAckPending = useRef<Map<string, string>>(new Map());
   const persistBody = useRef<AppState | null>(null);
+  /** When the oldest change not yet written was made; null once a save goes out. */
+  const persistDirtySince = useRef<number | null>(null);
   /** Chats whose sidecar this desk has already asked for. One ask per chat per launch, hit or miss. */
   const transcriptAsked = useRef<Set<string>>(new Set());
   const draftPersistTimer = useRef<number | null>(null);
@@ -1588,8 +1590,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     // age, so the latch staying up for a state change or two costs nothing.
     if (settledPending.current) refreshPlansForRouting(plansRef.current);
     if (settledPending.current) noteFoldersLeft(foldersToCount(settledWorkers(previous?.sessions, state.sessions), state.sessions));
+    const now = Date.now();
+    const dirtySince = persistDirtySince.current ?? now;
+    persistDirtySince.current = dirtySince;
     persistTimer.current = window.setTimeout(() => {
       settledPending.current = false;
+      persistDirtySince.current = null;
       const saved = listedChats(applyComposerDrafts(state.sessions, composerDraftsRef.current));
       void window.workhorse
         ?.saveState({
@@ -1621,7 +1627,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           }
         })
         .catch(() => undefined);
-    }, settledPending.current ? 0 : busy ? 2_000 : 400);
+    }, persistDelayMs({ settled: settledPending.current, busy, dirtySince, now }));
   }, [ready, state]);
 
   /*

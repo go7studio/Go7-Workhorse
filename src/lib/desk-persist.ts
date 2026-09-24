@@ -91,3 +91,20 @@ export function deskPersistBodyEqual(left: AppState, right: AppState): boolean {
   }
   return true;
 }
+
+/** The longest a changed desk waits for its save while changes keep coming. */
+export const PERSIST_MAX_WAIT_MS = 10_000;
+
+/**
+ * How long to wait before saving this change. Each change re-arms the timer,
+ * so a desk that never stopped changing — a stream committing once a frame —
+ * pushed its save back for as long as the stream ran: nothing reached disk
+ * until two quiet seconds, and a crash in the middle lost the whole run. The
+ * wait still gathers a burst into one write, but it now ends at most
+ * PERSIST_MAX_WAIT_MS after the oldest change that has not been written.
+ */
+export function persistDelayMs(input: { settled: boolean; busy: boolean; dirtySince: number; now: number }): number {
+  if (input.settled) return 0;
+  const debounce = input.busy ? 2_000 : 400;
+  return Math.max(0, Math.min(debounce, input.dirtySince + PERSIST_MAX_WAIT_MS - input.now));
+}

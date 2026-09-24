@@ -22,7 +22,9 @@ import {
   customToolPolicy,
   executeCustomTool,
   groupFanOutToolUses,
+  headWithoutSplit,
   limitCustomToolResult,
+  tailWithoutSplit,
   toolDetail,
   type CustomToolResult,
   type CustomToolUse,
@@ -228,15 +230,15 @@ function transcriptChars(messages: CustomChatMessage[]): number {
 function checkpointLine(message: CustomChatMessage): string {
   if (message.toolUses?.length) {
     return message.toolUses
-      .map((tool) => `Called ${tool.name} with ${JSON.stringify(ordered(tool.input)).slice(0, 600)}`)
+      .map((tool) => `Called ${tool.name} with ${headWithoutSplit(JSON.stringify(ordered(tool.input)), 600)}`)
       .join("\n");
   }
   if (message.toolResults?.length) {
     return message.toolResults
-      .map((result) => `${result.isError ? "Failed" : "Result from"} ${result.name}: ${result.content.slice(0, 900)}`)
+      .map((result) => `${result.isError ? "Failed" : "Result from"} ${result.name}: ${headWithoutSplit(result.content, 900)}`)
       .join("\n");
   }
-  return message.text.trim().slice(0, 900);
+  return headWithoutSplit(message.text.trim(), 900);
 }
 
 export function compactCustomTurnTranscript(
@@ -247,7 +249,7 @@ export function compactCustomTurnTranscript(
   if (transcriptChars(messages) <= maxChars || messages.length <= baseMessageCount + 8) return messages;
   const recentStart = Math.max(baseMessageCount, messages.length - 8);
   const older = messages.slice(baseMessageCount, recentStart);
-  const summary = older.map(checkpointLine).filter(Boolean).join("\n").slice(-24_000);
+  const summary = tailWithoutSplit(older.map(checkpointLine).filter(Boolean).join("\n"), 24_000);
   const checkpoint = `Workhorse continuation checkpoint. Older tool transcript was compacted to protect the model context. Preserve this progress and continue the original task:\n${summary}`;
   const base = messages.slice(0, baseMessageCount);
   const lastBase = base.at(-1);

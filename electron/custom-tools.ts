@@ -29,6 +29,35 @@ export type CustomToolResult = {
 
 export const MAX_CUSTOM_TOOL_RESULT_CHARS = 64_000;
 
+/*
+ * A cut measured in UTF-16 units can land between the two halves of an emoji
+ * and leave one half behind. JSON carries it as a lone \ud83c escape, and a
+ * host that requires well-formed text rejects the whole request — then every
+ * later request in the turn, since the transcript still holds it.
+ */
+function highSurrogate(code: number): boolean {
+  return code >= 0xd800 && code <= 0xdbff;
+}
+
+function lowSurrogate(code: number): boolean {
+  return code >= 0xdc00 && code <= 0xdfff;
+}
+
+/** At most `max` units from the start, never ending on half a character. */
+export function headWithoutSplit(text: string, max: number): string {
+  if (max <= 0) return "";
+  if (text.length <= max) return text;
+  return text.slice(0, highSurrogate(text.charCodeAt(max - 1)) ? max - 1 : max);
+}
+
+/** At most `max` units from the end, never starting on half a character. */
+export function tailWithoutSplit(text: string, max: number): string {
+  if (max <= 0) return "";
+  if (text.length <= max) return text;
+  const start = text.length - max;
+  return text.slice(lowSurrogate(text.charCodeAt(start)) ? start + 1 : start);
+}
+
 export function limitCustomToolResult(
   result: CustomToolResult,
   maxChars = MAX_CUSTOM_TOOL_RESULT_CHARS,
@@ -40,7 +69,7 @@ export function limitCustomToolResult(
   const tail = available - head;
   return {
     ...result,
-    content: `${result.content.slice(0, head)}${marker}${tail > 0 ? result.content.slice(-tail) : ""}`,
+    content: `${headWithoutSplit(result.content, head)}${marker}${tailWithoutSplit(result.content, tail)}`,
   };
 }
 
@@ -727,7 +756,7 @@ export async function executeCustomTool(
       const filePath = resolveWorkspacePath(typeof use.input.path === "string" ? use.input.path : "", cwd, folders, sandbox);
       const limit = typeof use.input.limit === "number" && use.input.limit > 0 ? Math.round(use.input.limit) : 80_000;
       const text = fs.readFileSync(filePath, "utf8");
-      return { id: use.id, name, content: text.length > limit ? `${text.slice(0, limit)}\n…` : text };
+      return { id: use.id, name, content: text.length > limit ? `${headWithoutSplit(text, limit)}\n…` : text };
     }
     if (name === "write_file") {
       const filePath = resolveWorkspacePath(typeof use.input.path === "string" ? use.input.path : "", cwd, folders, sandbox);
@@ -769,8 +798,13 @@ export async function executeCustomTool(
         const collect = (chunk: Buffer | string) => {
           if (out.length >= RUN_COMMAND_MAX_OUTPUT) return;
           out += String(chunk);
-          if (out.length > RUN_COMMAND_MAX_OUTPUT) out = out.slice(0, RUN_COMMAND_MAX_OUTPUT);
+          if (out.length > RUN_COMMAND_MAX_OUTPUT) out = headWithoutSplit(out, RUN_COMMAND_MAX_OUTPUT);
         };
+        // Decoded per stream, so a character split across two pipe reads is
+        // joined again. String(chunk) decoded each read alone and turned the
+        // halves of an é or a € into replacement marks.
+        child.stdout?.setEncoding("utf8");
+        child.stderr?.setEncoding("utf8");
         child.stdout?.on("data", collect);
         child.stderr?.on("data", collect);
         function stop() {

@@ -17,6 +17,7 @@ import {
   parseCustomUsage,
   sanitizeCustomReply,
   streamCustomHttp,
+  type CustomChatMessage,
 } from "../electron/custom-http";
 
 test("OpenAI-compatible tool calls wait for all streamed argument fragments", async () => {
@@ -2829,4 +2830,57 @@ test("a key the host quotes back is redacted on the probe and in a stream error"
       return true;
     },
   );
+});
+
+const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+
+/**
+ * Cuts measured in UTF-16 units landed between the halves of an emoji. The
+ * lone half travels as a `\ud83c` escape, and a host that requires well-formed
+ * text rejects the request — and every later one in the turn, because the
+ * transcript still holds it.
+ */
+test("custom tool text is cut between characters, never inside one", async () => {
+  const party = "🎉".repeat(40_000);
+  for (const max of [64_000, 1_001, 1_002, 333]) {
+    const limited = limitCustomToolResult({ id: "t", name: "read_file", content: party }, max).content;
+    assert.ok(!LONE_SURROGATE.test(limited), `limit ${max} split a character`);
+    assert.ok(limited.length <= max);
+  }
+
+  const tmp = mkdtempSync(path.join(os.tmpdir(), "wh-surrogate-"));
+  writeFileSync(path.join(tmp, "party.txt"), party);
+  const read = await executeCustomTool(
+    { id: "r", name: "read_file", input: { path: "party.txt", limit: 101 } },
+    { cwd: tmp, sandbox: "workspace" },
+  );
+  assert.ok(!LONE_SURROGATE.test(read.content), "read_file's limit split a character");
+
+  const compacted = compactCustomTurnTranscript(
+    [
+      { role: "user", text: "go" },
+      ...Array.from({ length: 12 }, (_, index): CustomChatMessage[] => [
+        { role: "assistant", text: "", toolUses: [{ id: `c${index}`, name: "read_file", input: { path: "🎉".repeat(400) } }] },
+        { role: "user", text: "", toolResults: [{ id: `c${index}`, name: "read_file", content: `x${"🎉".repeat(2_000)}` }] },
+      ]).flat(),
+    ],
+    1,
+    10_000,
+  );
+  assert.ok(!LONE_SURROGATE.test(compacted[0]?.text ?? ""), "the compaction checkpoint split a character");
+});
+
+/**
+ * run_command decoded each pipe read on its own, so a character whose bytes
+ * arrived in two reads came back as replacement marks.
+ */
+test("run_command output keeps a character whose bytes arrive in two reads", async () => {
+  const tmp = mkdtempSync(path.join(os.tmpdir(), "wh-utf8-"));
+  const script = "process.stdout.write(Buffer.from([226,130]));setTimeout(()=>process.stdout.write(Buffer.from([172])),150)";
+  const result = await executeCustomTool(
+    { id: "c", name: "run_command", input: { command: `"${process.execPath}" -e "${script}"` } },
+    { cwd: tmp, sandbox: "workspace", mode: "always-approve" },
+  );
+  assert.equal(result.isError, undefined, result.content);
+  assert.equal(result.content, "€");
 });

@@ -7,6 +7,7 @@ import {
 } from "./plan";
 import { addLineupRow, finishedAssignmentSpawnError, lineupIsTerminal, maybeEnqueueLineupJoin } from "./lineup";
 import { formatAuditorPrompt, nextWorkerName, workerTaskTitle } from "./subagents";
+import { isGrokBotModel, isGrokBotName } from "./custom-http-identity";
 import type { PlanEvidence, PlanRun, ProviderId, Session, UsageEvent } from "./types";
 
 export type AuditorCatalogRow = {
@@ -14,6 +15,7 @@ export type AuditorCatalogRow = {
   canCall: boolean;
   id?: string;
   model?: string;
+  name?: string;
   kind?: "vendor" | "custom";
 };
 
@@ -33,6 +35,10 @@ export function pickAuditorVendor(
   );
   for (const row of catalog) {
     if (!row.canCall) continue;
+    // The Grok Bot slot may call, analyze and dispatch, but the desk never
+    // hands it a worker seat, and an auditor is one. On a desk with only Grok
+    // and Grok Bot connected, the first unused callable row was the bot.
+    if (row.provider === "custom" && (isGrokBotModel(row.model ?? "") || isGrokBotName(row.name ?? ""))) continue;
     const customBotId = row.kind === "custom" && row.id?.startsWith("bot:") ? row.id.slice(4) : undefined;
     const key = `${row.provider}:${customBotId ?? ""}`;
     if (used.has(key)) continue;

@@ -117,6 +117,24 @@ test("pickAuditorVendor skips builder vendors and spent rows", () => {
   assert.equal(pickAuditorVendor([{ provider: "codex" }], [{ provider: "codex", canCall: true }]), null);
 });
 
+test("the auditor seat never goes to Grok Bot, by model or by name", () => {
+  // A desk with Grok and the Grok Bot preset connected: the builders ran on
+  // Grok, so the first unused callable row was the bot, and the auditor — a
+  // worker seat AGENTS.md keeps off grok-bot — was handed to it.
+  const grokBot = { provider: "custom" as const, canCall: true, kind: "custom" as const, id: "bot:bot_gb", model: "grok-bot", name: "Grok Bot" };
+  assert.equal(pickAuditorVendor([{ provider: "grok" }], [{ provider: "grok", canCall: true }, grokBot]), null);
+  assert.equal(
+    pickAuditorVendor([{ provider: "grok" }], [{ ...grokBot, model: "grok-bot-2" }]),
+    null,
+    "a Grok Bot slot serving another model id is still the bot",
+  );
+  // Any other custom bot can still audit.
+  assert.deepEqual(
+    pickAuditorVendor([{ provider: "grok" }], [grokBot, { ...grokBot, id: "bot:bot_kimi", model: "kimi-k3", name: "Kimi" }]),
+    { provider: "custom", model: "kimi-k3", customBotId: "bot_kimi" },
+  );
+});
+
 test("builder wave join spawns a sibling auditor on a different vendor; the parent still joins", () => {
   let plan = parseMarkdownPlan({ markdown: "### Task 1: Add\nNamed test gate: `npm test`\n", now: 1, id: "plan_1" });
   plan = planOf(startPlanRun(planOf(approvePlanRun(plan, 2)), 3));

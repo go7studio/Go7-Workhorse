@@ -102,7 +102,10 @@ export async function ensureManagedWorktree(
 ): Promise<EnsureWorktreeResult> {
   const folder = path.join(path.resolve(managedRoot), safeSegment(input.sessionId));
   const key = process.platform === "win32" ? folder.toLowerCase() : folder;
-  const ask = (folderAsks.get(key) ?? Promise.resolve(null)).then(() => ensureManagedWorktreeNow(input, managedRoot));
+  // Waits on the ask before it however that one ended: a throw there must not
+  // fail this ask without it ever running.
+  const before = folderAsks.get(key)?.catch(() => null) ?? Promise.resolve(null);
+  const ask = before.then(() => ensureManagedWorktreeNow(input, managedRoot));
   folderAsks.set(key, ask);
   try {
     return await ask;

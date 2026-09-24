@@ -409,34 +409,6 @@ function owningRepo(target: string): string | null {
 }
 
 /**
- * Caches a project rebuilds from itself. `__pycache__` is bytecode for the `.py`
- * beside it; the rest are tool caches keyed on files already in the tree. None
- * of them can be the only copy of anything.
- */
-const REBUILDABLE_CACHES = new Set([
-  "__pycache__",
-  ".pytest_cache",
-  ".mypy_cache",
-  ".ruff_cache",
-  ".gradle",
-  ".turbo",
-  ".parcel-cache",
-]);
-
-/**
- * Installed dependencies — restorable, but only when the manifest that restores
- * them is still in the tree. A `node_modules` next to no `package.json` is not a
- * dependency tree any more; it is just a folder full of somebody's files.
- */
-const PYTHON_MANIFESTS = ["pyproject.toml", "requirements.txt", "Pipfile"];
-const REBUILDABLE_FROM_MANIFEST: Array<{ segment: string; manifests: string[] }> = [
-  { segment: "node_modules", manifests: ["package.json"] },
-  { segment: ".venv", manifests: PYTHON_MANIFESTS },
-  { segment: "venv", manifests: PYTHON_MANIFESTS },
-  { segment: "Pods", manifests: ["Podfile"] },
-];
-
-/**
  * What Godot writes into its `.godot` folder, by name and shape. The editor
  * rebuilds all of it from the project on the next open. Names are not enough:
  * a person can drop a file into `editor/` or `imported/`, so every file is
@@ -557,17 +529,6 @@ function tsBuildInfoRebuilds(target: string, listed: string): boolean {
   }
 }
 
-function rebuildable(target: string, listed: string): boolean {
-  const segments = listed.split("/").filter(Boolean);
-  if (segments.some((segment) => REBUILDABLE_CACHES.has(segment))) return true;
-  if (godotRebuilds(target, listed) || tsBuildInfoRebuilds(target, listed)) return true;
-  return REBUILDABLE_FROM_MANIFEST.some(
-    (rule) =>
-      segments.includes(rule.segment) &&
-      rule.manifests.some((manifest) => fs.existsSync(path.join(target, manifest))),
-  );
-}
-
 /**
  * Ignored files `git worktree remove` would delete without saying so.
  *
@@ -579,24 +540,22 @@ function rebuildable(target: string, listed: string): boolean {
  *
  * There is no exact rule for "the project would regenerate this". A `dist/` can
  * hold the only build of something; a Blender autosave can be the only surviving
- * version of an afternoon. So the rule is narrow and stated: dependency
- * directories restorable from a manifest still present in the tree, and caches
- * derived from files in the tree, are ignorable. Everything else stops the
- * removal, `dist/` and `build/` included. That keeps more trees than a perfect
- * rule would, and disk is cheaper than a lost afternoon.
+ * version of an afternoon. A folder's name shows nothing either: a file dropped
+ * into `node_modules` or `__pycache__` is as much the only copy as any other,
+ * and a clean, pushed tree used to lose it to a name rule. So only what
+ * `provenRebuildable` shows to be a cache by its contents is ignorable, in every
+ * folder, saved or not. Everything else stops the removal, installed packages,
+ * `dist/` and `build/` included. That keeps more trees than a perfect rule
+ * would, and disk is cheaper than a lost afternoon.
  *
  * `--directory` collapses a wholly-ignored folder to one entry, so a
  * `node_modules` costs one line and not a hundred thousand.
  */
-function ignoredWorkAtRisk(target: string): { paths: string[]; loose: string[]; unknown: boolean } {
+function ignoredWorkAtRisk(target: string): { paths: string[]; unknown: boolean } {
   const listed = gitSync(["-C", target, "ls-files", "--others", "--ignored", "--exclude-standard", "--directory"]);
-  if (!listed.ok) return { paths: [], loose: [], unknown: true };
+  if (!listed.ok) return { paths: [], unknown: true };
   const rows = listed.out.split("\n").map((row) => row.trim()).filter(Boolean);
-  return {
-    paths: rows.filter((row) => !rebuildable(target, row)),
-    loose: rows.filter((row) => !provenRebuildable(target, row)),
-    unknown: false,
-  };
+  return { paths: rows.filter((row) => !provenRebuildable(target, row)), unknown: false };
 }
 
 /** `<module>.<interpreter tag>[.opt-N].pyc`: the only names Python writes into `__pycache__`. */
@@ -660,9 +619,8 @@ function pycacheOnly(target: string, listed: string): boolean {
  * Ignored content shown to be rebuildable by what is in it, not by its name:
  * a link (deleting one deletes nothing it points at), Godot's editor cache and
  * TypeScript's build record read against the shapes those tools write, and a
- * `__pycache__` of bytecode only. The name rules above are the sweep's old
- * bar for folders that were saved anyway. A folder the rescue lets go of was
- * kept before, so it has to clear this one.
+ * `__pycache__` of bytecode only. Every folder the sweep lets go of clears
+ * this bar, whether its work was saved already or the rescue saved it.
  */
 function provenRebuildable(target: string, listed: string): boolean {
   const segments = listed.split("/").filter(Boolean);
@@ -1830,8 +1788,9 @@ function dropManagedWorktree(
       return { dropped: false, reason: "git could not say what it holds, so nothing can vouch for its contents" };
     }
     // Ignored files first. Git would delete them with the folder and no commit
-    // can hold them, so a tree carrying work of that kind stays whatever else
-    // is true, and no rescue ref is written for a tree that is not going.
+    // can hold them, so a tree carrying anything not shown to be a cache stays
+    // whatever else is true, and no rescue ref is written for a tree that is
+    // not going.
     const ignored = ignoredWorkAtRisk(target);
     if (ignored.unknown) {
       return { dropped: false, reason: "git could not list what it ignores there, so nothing can vouch for its contents" };
@@ -1839,7 +1798,7 @@ function dropManagedWorktree(
     if (ignored.paths.length > 0) {
       return {
         dropped: false,
-        reason: `git would delete ignored files it holds (${namedSample(ignored.paths)}) — open it, move anything you need, then remove it yourself`,
+        reason: `git would delete ignored files it holds (${namedSample(ignored.paths)}), and nothing shows they are only a cache; open it, move anything you need, then remove it yourself`,
       };
     }
     // Saved elsewhere already: clean, and either a remote branch holds HEAD or
@@ -1857,16 +1816,6 @@ function dropManagedWorktree(
     // repository first, proven exact, or keep the folder.
     let rescued: string | undefined;
     if (!saved || options.resumable) {
-      // The rescue lets go of folders the sweep used to keep, so nothing may go
-      // with them that is not shown to be a cache. A folder's name shows
-      // nothing: a file dropped into `__pycache__` or `node_modules` is as
-      // much the only copy as any other.
-      if (ignored.loose.length > 0) {
-        return {
-          dropped: false,
-          reason: `git would delete ignored files it holds (${namedSample(ignored.loose)}), and nothing shows they are only a cache`,
-        };
-      }
       const rescue = rescueFolder(target, {
         sessionName: options.sessionName,
         managedRoot: options.managedRoot,
@@ -1883,7 +1832,7 @@ function dropManagedWorktree(
       // The walk does not enter what git ignores, so that is read again too:
       // a file dropped into a cache folder since the first look keeps the folder.
       const ignoredNow = ignoredWorkAtRisk(target);
-      if (ignoredNow.unknown || ignoredNow.paths.length > 0 || ignoredNow.loose.length > 0) {
+      if (ignoredNow.unknown || ignoredNow.paths.length > 0) {
         return { dropped: false, reason: "a file changed while it was being saved, so the folder stays" };
       }
       rescued = rescue.ref;

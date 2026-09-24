@@ -9,7 +9,7 @@ import {
   folderLeftBehind,
   pruneOrphanWorktrees,
 } from "../electron/worktree-host";
-import { durable, git, repoWithWorktree } from "./worktree-fixtures";
+import { durable, git, pycBytes, repoWithWorktree } from "./worktree-fixtures";
 import { sweepStaleUserData } from "../electron/user-data-hygiene";
 
 test("sweepStaleUserData drops leftover update installers and oversized Chromium caches", () => {
@@ -328,23 +328,55 @@ test("pruneOrphanWorktrees keeps a worktree holding ignored files git would dele
   fs.rmSync(root, { recursive: true, force: true });
 });
 
-test("pruneOrphanWorktrees still drops a tree whose only ignored output is restorable", () => {
-  // The reason this is not simply "refuse on any ignored file": a `node_modules`
-  // beside the `package.json` that rebuilds it is not anyone's work, and keeping
-  // every tree that ever ran an install defeats the sweep.
-  const { root, managed, wt } = repoWithWorktree("restorable", {
-    ".gitignore": "node_modules/\n__pycache__/\n",
+test("pruneOrphanWorktrees keeps a saved tree when only a folder's name says its files are a cache", () => {
+  // Clean and pushed says nothing about what git ignores: no commit or remote
+  // holds it. A file dropped into `node_modules`, `__pycache__` or `.turbo` is
+  // as much the only copy as any other, and the name rule these folders once
+  // passed deleted it with the tree.
+  const { root, managed, wt } = repoWithWorktree("cache-names-saved", {
+    ".gitignore": "node_modules/\n__pycache__/\n.turbo/\n",
     "package.json": JSON.stringify({ name: "app", version: "1.0.0" }),
   });
   fs.mkdirSync(path.join(wt, "node_modules", "left-pad"), { recursive: true });
-  fs.writeFileSync(path.join(wt, "node_modules", "left-pad", "index.js"), "module.exports = 1;");
+  fs.writeFileSync(path.join(wt, "node_modules", "left-pad", "index.js"), "// a fix made in place and nowhere else\n");
   fs.mkdirSync(path.join(wt, "__pycache__"));
-  fs.writeFileSync(path.join(wt, "__pycache__", "mod.pyc"), "bytecode");
+  fs.writeFileSync(path.join(wt, "__pycache__", "notes.txt"), "ONLY-PYC-BYTES");
+  fs.mkdirSync(path.join(wt, ".turbo"));
+  fs.writeFileSync(path.join(wt, ".turbo", "notes.txt"), "ONLY-TURBO-BYTES");
+  assert.equal(git(wt, ["status", "--porcelain"]), "", "the tree must read clean, or this test proves nothing");
 
   const pruned = pruneOrphanWorktrees(managed, []);
 
-  assert.deepEqual(pruned.removed, ["sess_gone"], "installed dependencies are not a reason to keep a tree forever");
+  assert.deepEqual(pruned.removed, []);
+  assert.match(pruned.kept[0].reason, /nothing shows they are only a cache/);
+  assert.equal(fs.readFileSync(path.join(wt, "node_modules", "left-pad", "index.js"), "utf8"), "// a fix made in place and nowhere else\n");
+  assert.equal(fs.readFileSync(path.join(wt, "__pycache__", "notes.txt"), "utf8"), "ONLY-PYC-BYTES");
+  assert.equal(fs.readFileSync(path.join(wt, ".turbo", "notes.txt"), "utf8"), "ONLY-TURBO-BYTES");
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test("pruneOrphanWorktrees still drops a saved tree whose ignored output is shown to be a cache", () => {
+  // Refusing on any ignored file would keep every tree that ever ran a test.
+  // Bytecode that reads as bytecode goes, and so does a link to packages kept
+  // elsewhere, since deleting a link deletes nothing it points at.
+  const { root, managed, wt } = repoWithWorktree("proven-cache", {
+    ".gitignore": "node_modules\n__pycache__/\n",
+    "package.json": JSON.stringify({ name: "app", version: "1.0.0" }),
+    "tool.py": "print(1)\n",
+  });
+  fs.mkdirSync(path.join(wt, "__pycache__"));
+  fs.writeFileSync(path.join(wt, "__pycache__", "tool.cpython-312.pyc"), pycBytes());
+  const shared = path.join(root, "shared-node-modules");
+  fs.mkdirSync(shared);
+  fs.writeFileSync(path.join(shared, "kept.js"), "outside the folder\n");
+  // Windows makes links only with a privilege, so there the bytecode stands alone.
+  if (process.platform !== "win32") fs.symlinkSync(shared, path.join(wt, "node_modules"));
+
+  const pruned = pruneOrphanWorktrees(managed, []);
+
+  assert.deepEqual(pruned.removed, ["sess_gone"]);
   assert.ok(!fs.existsSync(wt));
+  assert.equal(fs.readFileSync(path.join(shared, "kept.js"), "utf8"), "outside the folder\n", "what the link pointed at is untouched");
   fs.rmSync(root, { recursive: true, force: true });
 });
 

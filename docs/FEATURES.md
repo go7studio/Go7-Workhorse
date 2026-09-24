@@ -282,8 +282,10 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
   its staged changes staged. Only a rescue the desk wrote down is ever
   restored. A folder git cannot save whole (a large file, a nested repository,
   a submodule, ignored files nothing shows are a cache) stays, named with the
-  reason, and Settings → Profile lists what the last sweep kept. Godot's editor
-  cache and TypeScript's build record count as rebuildable.
+  reason, and Settings → Profile lists what the last sweep kept. Only links,
+  Godot's editor cache, TypeScript's build record and Python bytecode count as
+  a cache, each read by what it holds. A folder's name counts for nothing, so
+  an installed `node_modules` keeps the folder.
 - A worker that ends with uncommitted files in its own folder says so in the
   chat that sent it. A folder made in the last hour is never swept.
 - If the parent does the work itself, the run records that it took over.

@@ -207,9 +207,9 @@ function GalleryGrid({ items }: { items: GalleryItem[] }) {
   if (items.length === 0) {
     return <p className="row-meta">No outputs yet.</p>;
   }
-  const openPath = (path: string | undefined) => {
+  const openPath = (path: string | undefined, kind: GalleryItem["kind"]) => {
     if (!path) return;
-    void window.workhorse?.deskOpenLocalPath?.(path);
+    void window.workhorse?.deskOpenLocalPath?.(path, kind);
   };
   const revealPath = (path: string | undefined) => {
     if (!path) return;
@@ -229,7 +229,7 @@ function GalleryGrid({ items }: { items: GalleryItem[] }) {
           </div>
           {item.path ? (
             <div className="workshop-gallery-actions">
-              <button className="tiny" type="button" onClick={() => openPath(item.path)}>Open</button>
+              <button className="tiny" type="button" onClick={() => openPath(item.path, item.kind)}>Open</button>
               <button className="tiny" type="button" onClick={() => revealPath(item.path)}>Reveal</button>
               <button className="tiny" type="button" onClick={() => copyPath(item.path)}>Copy</button>
             </div>

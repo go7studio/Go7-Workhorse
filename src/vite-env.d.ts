@@ -371,7 +371,7 @@ type WorkhorseBridge = {
   workshopRevealCollector?: (input: { id: string }) => Promise<boolean>;
   workshopOpenBreakout?: () => Promise<boolean>;
   workshopCloseBreakout?: () => Promise<boolean>;
-  deskOpenLocalPath?: (path: string) => Promise<boolean>;
+  deskOpenLocalPath?: (path: string, kind?: "image" | "video") => Promise<boolean>;
   deskRevealLocalPath?: (path: string) => Promise<boolean>;
   localMediaCreate?: (input: {
     hostId: string;

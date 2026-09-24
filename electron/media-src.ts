@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { attachmentMime, imageMime } from "../src/lib/images";
 import { mdImageInitialSrc, mediaUrlContext, mediaUrlToPath, pathToMediaUrl } from "../src/lib/media-display";
 
 export type MediaSrcOpts = {
@@ -233,10 +234,28 @@ export function resolveMediaProtocolFile(url: string, io?: MediaSrcIo): string |
   return null;
 }
 
+type EntryStat = { isFile(): boolean; isDirectory(): boolean; isSymbolicLink?(): boolean };
+
 export type LocalPathIo = {
-  statSync?: (file: string) => { isFile(): boolean; isDirectory(): boolean };
+  statSync?: (file: string) => EntryStat;
+  lstatSync?: (file: string) => EntryStat;
   path?: MediaPathApi;
 };
+
+function localEntry(input: unknown, io: LocalPathIo): { resolved: string; file: boolean } | null {
+  const p = io.path ?? path;
+  if (typeof input !== "string" || !input || input.length > 4096 || input.includes("\0")) return null;
+  if (isNetworkPath(input) || !p.isAbsolute(input)) return null;
+  const resolved = p.resolve(input);
+  if (isNetworkPath(resolved)) return null;
+  try {
+    const stat = (io.statSync ?? fs.statSync)(resolved);
+    if (!stat.isFile() && !stat.isDirectory()) return null;
+    return { resolved, file: stat.isFile() };
+  } catch {
+    return null;
+  }
+}
 
 /**
  * An existing local file or folder by absolute path, or null.
@@ -246,16 +265,30 @@ export type LocalPathIo = {
  * stat'ed on the spot, and on Windows that stat alone signs in to the host.
  */
 export function safeLocalPath(input: unknown, io: LocalPathIo = {}): string | null {
+  return localEntry(input, io)?.resolved ?? null;
+}
+
+/**
+ * A gallery row's path when Open may hand it to the operating system, or null.
+ *
+ * The row says image or video, but its path is whatever the pack's feed wrote,
+ * and Open ran shell.openPath on any path that existed — so a row labelled
+ * render.png could launch an .app, an .exe or a .command. Only a plain file
+ * whose extension is a picture or a video of the kind the row claims is
+ * opened. Anything else local can still be revealed in its folder.
+ */
+export function openableMediaPath(input: unknown, kind: unknown, io: LocalPathIo = {}): string | null {
+  if (kind !== "image" && kind !== "video") return null;
+  const entry = localEntry(input, io);
+  if (!entry?.file) return null;
   const p = io.path ?? path;
-  if (typeof input !== "string" || !input || input.length > 4096 || input.includes("\0")) return null;
-  if (isNetworkPath(input) || !p.isAbsolute(input)) return null;
-  const resolved = p.resolve(input);
-  if (isNetworkPath(resolved)) return null;
   try {
-    const stat = (io.statSync ?? fs.statSync)(resolved);
-    if (!stat.isFile() && !stat.isDirectory()) return null;
-    return resolved;
+    // A link named shot.png opens whatever it points at.
+    if ((io.lstatSync ?? fs.lstatSync)(entry.resolved).isSymbolicLink?.()) return null;
   } catch {
     return null;
   }
+  const name = p.basename(entry.resolved);
+  const matches = kind === "image" ? Boolean(imageMime({ name })) : attachmentMime({ name }, "video").startsWith("video/");
+  return matches ? entry.resolved : null;
 }

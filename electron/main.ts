@@ -41,7 +41,7 @@ import { existingPeerReply } from "../src/lib/session-bridge";
 import { listDropFiles } from "./drop-files";
 import { attachDialogProperties, attachDialogTitle, windowsNeedsAttachChoice } from "./attach-pick";
 
-import { displaySrcForHref, resolveMediaProtocolFile, safeLocalPath } from "./media-src";
+import { displaySrcForHref, openableMediaPath, resolveMediaProtocolFile, safeLocalPath } from "./media-src";
 import { findSourceFile, listGitChanges, readEditStatsAsync, readFileDiff, readGitHead, readSourceText, recordFileInstance } from "./project-diff";
 import { TerminalHost, type TerminalEvent } from "./terminal-host";
 import {
@@ -1966,9 +1966,16 @@ app.whenReady().then(async () => {
   });
 
   // safeLocalPath (media-src) refuses a path on another machine before any stat.
-  ipcMain.handle("desk:open-local-path", async (_event, input: unknown) => {
-    const target = safeLocalPath(input);
-    if (!target) return false;
+  // Open hands a file to whatever the OS runs for it, and the path came from a
+  // pack's feed: only a picture or video of the row's kind is opened. Anything
+  // else local is shown in its folder instead.
+  ipcMain.handle("desk:open-local-path", async (_event, input: unknown, kind: unknown) => {
+    const target = openableMediaPath(input, kind);
+    if (!target) {
+      const local = safeLocalPath(input);
+      if (local) shell.showItemInFolder(local);
+      return false;
+    }
     const err = await shell.openPath(target);
     return !err;
   });

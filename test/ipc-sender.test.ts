@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import { guardIpcSender, senderIsTrusted, UNTRUSTED_SENDER } from "../electron/ipc-sender";
+import { attachLearningIpc } from "../electron/learning-ipc";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -64,4 +65,45 @@ test("the guard is installed before the first channel is registered", () => {
   assert.ok(guard > 0, "the guard is not installed at all");
   assert.ok(firstHandler > 0);
   assert.ok(guard < firstHandler, "a channel is registered before the guard wraps handle");
+});
+
+test("a module that registers its own channels is registered after the guard too", () => {
+  // attachLearningIpc(ipcMain, …) registered eleven channels above the guard,
+  // and the literal `ipcMain.handle(` search above could not see them: they
+  // are written in learning-ipc.ts. Every call that hands ipcMain to another
+  // module has to come after the guard, and so does every module that holds it.
+  const main = readFileSync(path.join(ROOT, "electron", "main.ts"), "utf8");
+  const guard = main.indexOf("guardIpcSender(ipcMain");
+  const handedOn = [...main.matchAll(/\b(\w+)\(ipcMain\b/g)].filter((match) => match[1] !== "guardIpcSender");
+  assert.ok(
+    handedOn.some((match) => match[1] === "attachLearningIpc"),
+    "the learning channels are the registrar this test exists for",
+  );
+  for (const match of handedOn) {
+    assert.ok(guard < (match.index ?? -1), `${match[1]}(ipcMain, …) registers channels before the guard`);
+  }
+
+  // A module that imported ipcMain itself would register at import time, before
+  // the ready handler ever ran. Only main.ts may take it from electron.
+  const electronDir = path.join(ROOT, "electron");
+  for (const name of readdirSync(electronDir).filter((file) => file.endsWith(".ts") && file !== "main.ts")) {
+    const source = readFileSync(path.join(electronDir, name), "utf8");
+    assert.doesNotMatch(source, /import\s*\{[^}]*\bipcMain\b[^}]*\}\s*from\s*"electron"/, `${name} takes ipcMain from electron`);
+  }
+});
+
+test("the learning channels refuse a foreign frame once they sit behind the guard", () => {
+  type Listener = (event: { senderFrame?: { url?: string } | null }, ...args: unknown[]) => unknown;
+  const registered = new Map<string, Listener>();
+  const ipc = {
+    handle(channel: string, listener: Listener) {
+      registered.set(channel, listener);
+    },
+  };
+  guardIpcSender(ipc, undefined);
+  const service = { purge: () => "purged" } as unknown as Parameters<typeof attachLearningIpc>[1];
+  attachLearningIpc(ipc as unknown as Parameters<typeof attachLearningIpc>[0], service, () => undefined);
+  const purge = registered.get("learning:purge");
+  assert.ok(purge);
+  assert.throws(() => purge({ senderFrame: { url: "https://evil.example/" } }), /learning:purge/);
 });

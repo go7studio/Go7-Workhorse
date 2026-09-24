@@ -1006,6 +1006,11 @@ app.whenReady().then(async () => {
   debugStartup(`ready primary=${isPrimaryInstance}`);
   mainLog.record("ready", `primary=${isPrimaryInstance} uptime_ms=${Math.round(process.uptime() * 1000)}`);
   if (!isPrimaryInstance) return;
+  // Before any channel is registered, so every one of them is covered — and so
+  // is a channel written next month. It sat below attachLearningIpc once, and
+  // the eleven learning channels, registered from their own module, answered
+  // any frame at all while the test that guards the order read only main.ts.
+  guardIpcSender(ipcMain, process.env.VITE_DEV_SERVER_URL);
   app.on("child-process-gone", (_event, details) => {
     mainLog.record(
       "child-process-gone",
@@ -1270,10 +1275,6 @@ app.whenReady().then(async () => {
     if (!result.ok) console.warn("Grok Bot shim failed to start. Desk POSTs to 127.0.0.1:8787 still fail closed.");
     else debugStartup(`Grok Bot shim ${result.mode}`);
   }).catch((error) => console.warn("Grok Bot shim", error));
-
-  // Before any channel is registered, so every one of them is covered — and so
-  // is a channel written next month.
-  guardIpcSender(ipcMain, process.env.VITE_DEV_SERVER_URL);
 
   // Grok Bot answers that outlive the shim's wait land here later. Deliver each
   // one into the chat that asked; the renderer confirms, then the files go.

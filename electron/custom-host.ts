@@ -17,6 +17,8 @@ import type { GrokPromptResult } from "./grok-agent";
 import type { GrokEventSink } from "./grok-host";
 import { CUSTOM_NOT_CONFIGURED, streamCustomHttp, type CustomChatMessage, type CustomHttpConfig, type CustomHttpUsage } from "./custom-http";
 import {
+  customToolNotOffered,
+  customToolOffered,
   customToolPolicy,
   executeCustomTool,
   groupFanOutToolUses,
@@ -569,6 +571,21 @@ export class CustomSessionHost {
             status: "running",
             detail: detail.detail,
           });
+          // A role runs only what its catalog offered — MCP tools included, and
+          // before any card, so nobody is asked to approve a call that must
+          // not run for this seat.
+          if (!customToolOffered(use.name, role)) {
+            results.push({ id: use.id, name: use.name, content: customToolNotOffered(use.name, role), isError: true });
+            emit({
+              type: "tool",
+              sessionId: input.sessionId,
+              toolCallId: use.id,
+              title: use.name,
+              status: "failed",
+              detail: "not offered to this role",
+            });
+            continue;
+          }
           const spawnTarget =
             use.name === "workhorse_request_vendor"
               ? parseProviderId(String(use.input.vendor ?? use.input.provider ?? use.input.name ?? ""))

@@ -6,7 +6,6 @@ import { groupSpawnOptions, stopProcessGroup, trackProcessGroup } from "./proces
 import { permissionPolicyAnswer, looksLikeWriteTool, autoAllowPermission, type PermissionAnswer } from "../src/lib/permissions";
 import {
   deskRoleOf,
-  isWorkerOmittedTool,
   toolsForDeskRole,
   workerOmittedToolError,
   type DeskRole,
@@ -373,6 +372,21 @@ const DESK_TOOLS: { name: string; description: string; input_schema: Record<stri
   },
 ];
 
+/**
+ * Whether this role's catalog carried the tool. The catalog is the offer, and a
+ * name from outside it is refused rather than run: only a worker's omissions
+ * used to be checked, so an auditor or helper that guessed `write_file`, or
+ * named an MCP tool it was never shown, had the call executed anyway.
+ */
+export function customToolOffered(name: string, role: DeskRole): boolean {
+  return toolsForDeskRole([{ name }], role).length > 0;
+}
+
+export function customToolNotOffered(name: string, role: DeskRole): string {
+  if (role === "worker") return workerOmittedToolError(name);
+  return `This ${role} was not offered ${name}. Use only the tools listed for this turn.`;
+}
+
 export function isFanOutDeskTool(name: string): boolean {
   const key = normalizeCustomToolName(name);
   return key === "workhorse_spawn_agent";
@@ -674,8 +688,8 @@ export async function executeCustomTool(
   const sandbox = policy.sandbox ?? "off";
   const role = policy.role ?? deskRoleOf({ parentId: policy.parentId, hidden: policy.hidden });
   try {
-    if (role === "worker" && isWorkerOmittedTool(name)) {
-      return { id: use.id, name, content: workerOmittedToolError(name), isError: true };
+    if (!customToolOffered(name, role)) {
+      return { id: use.id, name, content: customToolNotOffered(name, role), isError: true };
     }
     if (name === "workhorse_list_tools") {
       return {

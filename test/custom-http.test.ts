@@ -2730,3 +2730,59 @@ test("Stop on one custom chat leaves another chat's permission card open", async
   assert.equal((await b).stopReason, "end_turn");
   assert.deepEqual(ran, ["chat-b"]);
 });
+
+/**
+ * The auditor and helper catalogs carry desk reads only, but the executor
+ * checked only a worker's omissions. An auditor that guessed `write_file` had
+ * the write run. Which tools a role is offered is unchanged here; a name from
+ * outside the offer is refused.
+ */
+test("a custom tool the role was not offered is refused, not run", async () => {
+  const tmp = mkdtempSync(path.join(os.tmpdir(), "wh-role-offer-"));
+  for (const role of ["auditor", "helper"] as const) {
+    const refused = await executeCustomTool(
+      { id: `w-${role}`, name: "write_file", input: { path: `${role}.txt`, content: "x" } },
+      { cwd: tmp, sandbox: "off", mode: "always-approve", role },
+    );
+    assert.equal(refused.isError, true, `${role}: ${refused.content}`);
+    assert.match(refused.content, new RegExp(`${role} was not offered write_file`));
+    assert.equal(existsSync(path.join(tmp, `${role}.txt`)), false, `an ${role} wrote a file it was never offered`);
+  }
+  // A worker's catalog keeps the workspace tools, and so does the desk's.
+  for (const role of ["worker", "orchestrator"] as const) {
+    const wrote = await executeCustomTool(
+      { id: `w-${role}`, name: "write_file", input: { path: `${role}.txt`, content: "x" } },
+      { cwd: tmp, sandbox: "off", mode: "always-approve", role },
+    );
+    assert.equal(wrote.isError, undefined, `${role}: ${wrote.content}`);
+  }
+  // The worker's own refusal still reads as it did.
+  const vendor = await executeCustomTool(
+    { id: "v", name: "workhorse_request_vendor", input: { vendor: "codex" } },
+    { cwd: tmp, sandbox: "off", mode: "always-approve", role: "worker" },
+  );
+  assert.equal(vendor.isError, true);
+  assert.doesNotMatch(vendor.content, /was not offered/);
+
+  // The host refuses before any card, so nobody approves a call that cannot run.
+  let executed = 0;
+  const cards: string[] = [];
+  const host = new CustomSessionHost(
+    async (_config, request) => {
+      if (request.messages.some((message) => message.toolResults?.length)) return { text: "done" };
+      return { text: "", toolUses: [{ id: "w", name: "write_file", input: { path: "x.txt", content: "x" } }] };
+    },
+    {
+      executeTool: async (use) => {
+        executed += 1;
+        return { id: use.id, name: use.name, content: "Wrote" };
+      },
+    },
+  );
+  const reply = await host.prompt({ ...customTurn("s-helper-offer", "ask"), parentId: "orch", hidden: true, role: "helper" }, (event) => {
+    if (event.type === "permission") cards.push(event.requestId);
+  });
+  assert.equal(reply.stopReason, "end_turn");
+  assert.equal(executed, 0);
+  assert.deepEqual(cards, []);
+});

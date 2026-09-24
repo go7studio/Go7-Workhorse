@@ -207,3 +207,37 @@ test("custom model host completes an allowlisted MCP tool round end to end", asy
   assert.equal(result.text, "MCP_HOST_OK");
   assert.ok(events.some((event) => event.title === "mcp__memory__search_graph" && event.status === "completed"));
 });
+
+test("custom model host refuses an MCP tool a helper was never offered", async () => {
+  let round = 0;
+  let refusal: { content?: string; isError?: boolean } | undefined;
+  const host = new CustomSessionHost(async (_config, input) => {
+    round += 1;
+    if (round === 1) {
+      // The request this helper sends does not offer the tool; the name is guessed.
+      const offered = buildOpenAiBody({ model: "local-qwen", messages: input.messages, tools: input.tools, role: input.role }).tools as { function: { name: string } }[];
+      assert.equal(offered.some((tool) => tool.function.name === "mcp__memory__search_graph"), false);
+      return { text: "", toolUses: [{ id: "mcp-guess", name: "mcp__memory__search_graph", input: {} }] };
+    }
+    refusal = input.messages.at(-1)?.toolResults?.[0];
+    return { text: "done", stopReason: "end_turn" };
+  });
+  await host.prompt({
+    sessionId: "mcp-helper-refused",
+    parentId: "orch",
+    hidden: true,
+    role: "helper",
+    text: "Use the graph tool.",
+    model: "local-qwen",
+    effort: "high",
+    cwd: process.cwd(),
+    mode: "always-approve",
+    sandbox: "workspace",
+    mcpServers: [{ name: "memory", command: process.execPath, args: ["-e", FAKE_MCP], includeTools: ["search_graph"] }],
+    config: { baseUrl: "http://127.0.0.1:1/v1", apiKey: "unused", model: "local-qwen", api: "openai-completions" },
+  }, () => undefined);
+  assert.equal(round, 2);
+  assert.equal(refusal?.isError, true);
+  assert.notEqual(refusal?.content, "ok", "the MCP server ran a tool the helper was never offered");
+  assert.match(refusal?.content ?? "", /helper was not offered/);
+});

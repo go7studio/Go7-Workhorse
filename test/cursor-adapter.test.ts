@@ -1,7 +1,7 @@
 import { deskCss } from "./desk-css";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -31,6 +31,7 @@ import {
   fetchCursorPlanUsage,
   parseCursorPlanUsage,
   readCursorAuthToken,
+  readCursorStateAccessToken,
 } from "../electron/cursor-plan";
 import { cursorExtensionResult, extractToolEvent } from "../electron/grok-agent";
 import { CURSOR_SESSION_RULES, WORKHORSE_SESSION_RULES } from "../src/lib/workhorse-rules";
@@ -704,6 +705,31 @@ test("readCursorAuthToken prefers env then injected Cursor state db", () => {
     readCursorAuthToken({ homedir: dir, env: {}, platform: "darwin", readFile: () => { throw new Error("no json"); } }),
     "jwt-from-state",
   );
+});
+
+test("a locked Cursor state db is copied into a private folder, and the folder goes after", () => {
+  // The copy carries the Cursor login, and copyFileSync keeps the source's mode.
+  // It used to sit under a guessable name in the shared temp folder, which on
+  // Linux any local user can read.
+  const copies: string[] = [];
+  const source = path.join("cursor", "state.vscdb");
+  const token = readCursorStateAccessToken(
+    source,
+    (src, dest) => {
+      copies.push(dest);
+      writeFileSync(dest, src);
+    },
+    (target) => {
+      if (target === source) throw new Error("database is locked");
+      const folder = path.dirname(target);
+      assert.notEqual(path.resolve(folder), path.resolve(os.tmpdir()), "the copy sat in the shared temp folder");
+      if (process.platform !== "win32") assert.equal(statSync(folder).mode & 0o777, 0o700);
+      return "jwt-from-copy";
+    },
+  );
+  assert.equal(token, "jwt-from-copy");
+  assert.equal(copies.length, 2, "the db and its wal");
+  assert.equal(existsSync(path.dirname(copies[0])), false, "the private folder was left behind");
 });
 
 test("fetchCursorPlanUsage reads official JSON when a token is present", async () => {

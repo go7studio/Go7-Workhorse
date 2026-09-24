@@ -782,6 +782,96 @@ const SED_SUBSTITUTION = /^\d*(?:,\d*)?s(.)(?:\\.|(?!\1)[^\\])*\1(?:\\.|(?!\1)[^
 const SED_PRINT = /^(?:\d+(?:,\d+)?|\$|\/(?:\\.|[^/\\])*\/)?[pdq=lnN]$/;
 
 /**
+ * Whether a long option is `name` or an abbreviation of it. GNU getopt takes
+ * any unambiguous prefix, so `sed --in-pl` is `--in-place` and `sort --out=x`
+ * is `--output=x`. `min` is the shortest prefix that is still unambiguous for
+ * that program; anything shorter is refused by the program itself.
+ */
+function longOptionIs(token: string, name: string, min: number): boolean {
+  const flag = token.includes("=") ? token.slice(0, token.indexOf("=")) : token;
+  return flag.length >= min && name.startsWith(flag);
+}
+
+/**
+ * Every script a sed call will run, or null when one of them cannot be read
+ * from here. Only the first positional used to be judged, so a second `-e`
+ * rode through unread: `sed -e p -e 'e touch x'` ran a command, and
+ * `sed -n p --expression='w out'` wrote a file, both answered "once" on a
+ * read-only seat. With any `-e` the positionals are input files; without one
+ * the first positional is the script.
+ */
+function sedScripts(args: string[]): string[] | null {
+  const scripts: string[] = [];
+  const positional: string[] = [];
+  for (let index = 0; index < args.length; index += 1) {
+    const token = dequote(args[index] ?? "");
+    if (token === "--") {
+      positional.push(...args.slice(index + 1).map((arg) => dequote(arg)));
+      break;
+    }
+    if (token.startsWith("--")) {
+      // `-i` edits in place and `-f` runs a script file this side cannot read.
+      if (longOptionIs(token, "--in-place", 3) || longOptionIs(token, "--file", 4)) return null;
+      if (longOptionIs(token, "--expression", 3)) {
+        const joined = token.includes("=") ? token.slice(token.indexOf("=") + 1) : undefined;
+        const script = joined ?? (index + 1 < args.length ? dequote(args[++index] ?? "") : undefined);
+        if (script === undefined) return null;
+        scripts.push(script);
+      } else if (longOptionIs(token, "--line-length", 3)) {
+        if (!token.includes("=")) index += 1;
+      }
+      continue;
+    }
+    if (token.length > 1 && token.startsWith("-")) {
+      // Short flags cluster, and `-i` takes its suffix attached: `-ni` is
+      // `-n -i`, and `-in` is `-i` with the suffix "n". Either edits in place.
+      for (let at = 1; at < token.length; at += 1) {
+        const flag = token[at];
+        if (flag === "i" || flag === "f") return null;
+        if (flag === "e" || flag === "l") {
+          const rest = token.slice(at + 1);
+          const value = rest || (index + 1 < args.length ? dequote(args[++index] ?? "") : undefined);
+          if (value === undefined) return null;
+          if (flag === "e") scripts.push(value);
+          break;
+        }
+      }
+      continue;
+    }
+    positional.push(token);
+  }
+  if (scripts.length === 0) {
+    if (positional.length === 0) return null;
+    scripts.push(positional[0] ?? "");
+  }
+  return scripts;
+}
+
+/**
+ * The program an awk call runs, or null when a flag it carries could run or
+ * write something else. Only `-F` is allowed: gawk's other flags load a source
+ * file (`-f`, `-i`), a shared-object extension (`-l`), a second program
+ * (`-e`), or write a file of their own (`-p`, `-o`, `-d`). The first
+ * positional used to be taken as the program, so `awk -F , 'BEGIN{system("rm
+ * x")}'` judged the "," and ran the rest, and `awk -e 'BEGIN{}' -e '…'` hid the
+ * second program behind a harmless first one.
+ */
+function awkProgram(args: string[]): string | null {
+  for (let index = 0; index < args.length; index += 1) {
+    const token = dequote(args[index] ?? "");
+    if (token === "--") return index + 1 < args.length ? dequote(args[index + 1] ?? "") : null;
+    if (token === "-F" || token === "--field-separator") {
+      index += 1;
+      continue;
+    }
+    if (token.startsWith("-F") || token.startsWith("--field-separator=")) continue;
+    if (token.length > 1 && token.startsWith("-")) return null;
+    return token;
+  }
+  return null;
+}
+
+/**
  * sed and awk are the two programs on the read-only list that take a program
  * of their own, and both can break out of it: awk through `system()`, a pipe
  * to a command, or `print > "file"`; sed through the `e` command, a `w` write,
@@ -791,24 +881,55 @@ const SED_PRINT = /^(?:\d+(?:,\d+)?|\$|\/(?:\\.|[^/\\])*\/)?[pdq=lnN]$/;
  * never reaches here.
  */
 function interpreterScriptReads(program: string, args: string[]): boolean {
-  if (args.some((arg) => /^-i/.test(arg) || arg === "--in-place")) return false;
-  const scripts = args.filter((arg) => !arg.startsWith("-"));
   if (program === "sed") {
-    // -e and -f take the script as their own argument; -f names a file this
-    // side cannot read, so it is never a search.
-    if (args.some((arg) => /^(?:-f|--file)/.test(arg))) return false;
-    if (scripts.length === 0) return false;
-    const script = dequote(scripts[0] ?? "");
-    return script
-      .split(/[;\n]/)
-      .every((piece) => {
-        const text = piece.trim();
-        return text.length > 0 && (SED_SUBSTITUTION.test(text) || SED_PRINT.test(text));
-      });
+    const scripts = sedScripts(args);
+    if (!scripts) return false;
+    return scripts.every((script) =>
+      script
+        .split(/[;\n]/)
+        .every((piece) => {
+          const text = piece.trim();
+          return text.length > 0 && (SED_SUBSTITUTION.test(text) || SED_PRINT.test(text));
+        }),
+    );
   }
-  if (args.some((arg) => /^(?:-f|--file|--source|-v)/.test(arg))) return false;
-  const program_text = scripts[0] ?? "";
-  return !/system|exec|ENVIRON|getline|close\s*\(|[|>]/.test(program_text);
+  const program_text = awkProgram(args);
+  if (program_text === null) return false;
+  // `@include` and `@load` pull in a file or a library the same way -f and -l do.
+  return !/system|exec|ENVIRON|getline|close\s*\(|[|>]|@(?:include|load)/.test(program_text);
+}
+
+/**
+ * ripgrep flags that run another program. `--pre` runs a command on every file
+ * it searches, `--search-zip` (`-z`) runs a decompressor, and `--hostname-bin`
+ * runs a binary to learn the hostname. `rg --pre 'sh -c …' x .` read as a
+ * search and answered "once" on a read-only seat.
+ */
+function ripgrepRuns(args: string[]): boolean {
+  return args.some((arg) => {
+    const token = dequote(arg);
+    if (token.startsWith("--")) {
+      const flag = token.includes("=") ? token.slice(0, token.indexOf("=")) : token;
+      return flag === "--pre" || flag === "--search-zip" || flag === "--hostname-bin";
+    }
+    // A short cluster: `-z`, `-nz`. rg reads no prefix of a long flag.
+    return token.length > 1 && token.startsWith("-") && token.slice(1).includes("z");
+  });
+}
+
+/**
+ * sort writes through `-o`, in every shape the flag takes: `-o out`, `-oout`,
+ * and inside a cluster, `-uo out`. `--compress-program` runs a program. Only
+ * the bare `-o` and `--output` were refused before.
+ */
+function sortWrites(args: string[]): boolean {
+  return args.some((arg) => {
+    const token = dequote(arg);
+    if (token.startsWith("--")) {
+      return longOptionIs(token, "--output", 3) || longOptionIs(token, "--compress-program", 4);
+    }
+    return token.length > 1 && token.startsWith("-") && token.slice(1).includes("o");
+  });
 }
 
 /** Programs on the list that still hold a way to write, and the flag that does it. */
@@ -817,9 +938,10 @@ function stageWrites(program: string, args: string[]): boolean {
     return !interpreterScriptReads(program === "sed" ? "sed" : "awk", args);
   }
   if (program === "find") {
-    return args.some((arg) => /^-(?:delete|exec|execdir|ok|okdir|fprint|fprintf|fls)$/.test(arg));
+    return args.some((arg) => /^-(?:delete|exec|execdir|ok|okdir|fprint|fprint0|fprintf|fls)$/.test(arg));
   }
-  if (program === "sort") return args.some((arg) => arg === "-o" || arg.startsWith("--output"));
+  if (program === "sort") return sortWrites(args);
+  if (program === "rg" || program === "ripgrep") return ripgrepRuns(args);
   // `uniq in out` writes its second file.
   if (program === "uniq") return positionals(args).length > 1;
   // `env FOO=1 rm x` runs rm, so env only reads when it names no program.

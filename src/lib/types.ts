@@ -700,6 +700,12 @@ export type PermissionRequest = {
     provider: ProviderId;
     name: string;
     status: "day_bank" | "spent" | "disabled" | "ok";
+    /**
+     * The watch key Allow grants: `bot:<id>` for a custom bot, the lane for
+     * Cursor, the provider otherwise. It is the row that was asked for, not
+     * the chat that asked, so it rides on the card.
+     */
+    key?: string;
   };
 };
 

@@ -407,6 +407,7 @@ import {
   evaluateWatchHold,
   vendorCallBlocked,
   vendorDeclinedForBot,
+  vendorCardPermitKey,
   vendorGrantedForChat,
   vendorOverrideNeeded,
   spawnIsNoGo,
@@ -2409,7 +2410,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const peer = elevatePeerReply.current.get(id);
     elevatePeerReply.current.delete(id);
     const allowVendor = Boolean(vendorAsk && answer !== "deny" && session);
-    const vendorKey = vendorAsk ? (vendorAsk.provider === "custom" ? `bot:${session?.customBotId ?? ""}` : vendorAsk.provider) : "";
+    const vendorKey = vendorCardPermitKey(vendorAsk);
     if (allowVendor && vendorAsk?.status !== "disabled" && vendorKey && session) {
       const today = dayKey();
       const nextPermits = {
@@ -5034,7 +5035,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 await replyAsk({ error: `${row?.reason || "That vendor is not attached."} Do not wait.` });
                 return;
               }
-              const vendorKey = row.id.startsWith("bot:") ? row.id : row.provider;
+              // The row id is the watch key the hold reads: a bot's own id, and a
+              // Cursor lane rather than "cursor".
+              const vendorKey = row.id;
               const sameVendor =
                 from.provider === row.provider &&
                 (row.provider !== "custom" || row.id === `bot:${from.customBotId ?? ""}`);
@@ -5070,7 +5073,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                       ? `${row.name} will run inside this conversation.`
                       : row.reason || `${row.name} is not callable right now.`,
                   kind: "vendor",
-                  vendor: { provider: row.provider, name: row.name, status: vendorStatus },
+                  vendor: { provider: row.provider, name: row.name, status: vendorStatus, key: vendorKey },
                 }),
                 sessions: current.sessions.map((item) =>
                   item.id === from.id ? { ...item, status: "needs-input" } : item,
@@ -6134,7 +6137,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               customBotId: spec.customBotId,
               name: spec.title,
             });
-            const vendorKey = spec.customBotId ? `bot:${spec.customBotId}` : spec.provider;
+            const vendorKey = watchKeyForSession(spec);
             const sameVendor =
               spec.provider === parent.provider && spec.customBotId === parent.customBotId;
             const granted = vendorGrantedForChat(latest.watchPermits, vendorKey, parent.id);
@@ -6866,7 +6869,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                   tool: "workhorse_request_vendor",
                   detail: row.reason || `${row.name} will answer from another sidebar chat.`,
                   kind: "vendor",
-                  vendor: { provider: row.provider, name: row.name, status: "day_bank" },
+                  vendor: { provider: row.provider, name: row.name, status: "day_bank", key: row.id },
                 }),
                 sessions: current.sessions.map((item) =>
                   item.id === from.id ? { ...item, status: "needs-input" } : item,
@@ -7596,7 +7599,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             (eventVendor.provider === "codex" || eventVendor.provider === "claude" || eventVendor.provider === "custom"
               ? eventVendor.provider
               : "grok");
-          const vendorKey = row?.id.startsWith("bot:") ? row.id : vendorProvider;
+          const vendorKey = row?.id ?? vendorProvider;
           if (vendorGrantedForChat(stateRef.current.watchPermits, vendorKey, owner.id) || !vendorOverrideNeeded(row)) {
             if (provider === "custom") void window.workhorse?.customAnswerPermission?.(event.requestId, "once");
             return;
@@ -7613,7 +7616,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                   ? `${vendorName} will run inside this conversation.`
                   : row?.reason || `${vendorName} is not callable right now.`,
               kind: "vendor",
-              vendor: { provider: vendorProvider, name: vendorName, status: vendorStatus },
+              vendor: { provider: vendorProvider, name: vendorName, status: vendorStatus, key: vendorKey },
             }),
             sessions: current.sessions.map((session) =>
               session.id === event.sessionId ? { ...session, status: "needs-input" } : session,

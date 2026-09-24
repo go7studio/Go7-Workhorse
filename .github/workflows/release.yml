@@ -162,7 +162,15 @@ jobs:
           if [ "$RUNNER_OS" = "Windows" ] && [ -z "$CSC_LINK" ]; then
             echo "::warning::Windows installer is unsigned — no WIN_CSC_LINK. Users will see an unknown-publisher prompt, and a fork's installer looks identical to this one."
           fi
-          npm run ${{ matrix.script }}
+          # A certificate that is present but expired, revoked, or not matched
+          # by CSC_NAME is only a warning to electron-builder: it skips signing,
+          # afterSign and notarization, and still writes the dmg. A release has
+          # to stop there instead.
+          force=""
+          if [ "$RUNNER_OS" = "macOS" ] && [ "$WORKHORSE_RELEASE_BUILD" = "1" ]; then
+            force="-c.forceCodeSigning=true"
+          fi
+          npm run ${{ matrix.script }} -- $force
 
       - name: Packaged learning smoke
         run: node scripts/learning-packaged-smoke.mjs
@@ -171,9 +179,12 @@ jobs:
       # volatile credentials. Installed over production that looks exactly like
       # total data loss. v0.6.9 shipped that way, so the artifact is checked
       # here rather than trusting the flag that produced it.
+      # On macOS a publishing run also reads the signature: Developer ID, the
+      # team below, and a stapled notarization ticket.
       - name: Refuse a development-stamped release
         env:
           WORKHORSE_RELEASE_BUILD: ${{ (github.event_name == 'workflow_dispatch' || needs.detect-release.outputs.cut == 'true') && '1' || '0' }}
+          WORKHORSE_APPLE_TEAM_ID: ${{ runner.os == 'macOS' && secrets.MAC_APPLE_TEAM_ID || '' }}
         run: node scripts/assert-release-channel.mjs
 
       # Held here rather than sent straight to the release, so a machine that

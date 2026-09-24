@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
@@ -153,4 +155,85 @@ test("a manual run from main publishes an unreleased version, and nothing else",
   assert.equal(typed.cut, false, "a hand-typed version is still refused");
   assert.equal(typed.byHand, true);
   assert.equal(releaseDecision({ version: "0.6.56", previousVersion: "0.6.56", alreadyReleased: false, manual: false }).cut, false, "without the manual flag the old rule holds");
+});
+
+/*
+ * The gate only guarded its body with `import.meta.url === file://argv[1]`.
+ * On a Windows runner that reads file:///D:/a/... against D:\a\..., so every
+ * Windows release ran the step, printed nothing and passed. A space in the
+ * path does the same on any platform, which is how this test proves it on all
+ * three: the scripts run from a folder with a space in its name.
+ */
+test("the release gate runs its checks wherever it is checked out", () => {
+  const dir = path.join(mkdtempSync(path.join(os.tmpdir(), "wh gate ")), "scripts with space");
+  mkdirSync(dir, { recursive: true });
+  for (const name of ["assert-release-channel.mjs", "after-sign.cjs", "after-pack.cjs"]) {
+    copyFileSync(path.join(ROOT, "scripts", name), path.join(dir, name));
+  }
+  const cwd = path.dirname(dir);
+  const run = () =>
+    spawnSync(process.execPath, [path.join(dir, "assert-release-channel.mjs")], {
+      cwd,
+      encoding: "utf8",
+      env: { ...process.env, WORKHORSE_RELEASE_BUILD: "1" },
+      timeout: 30_000,
+    });
+  const empty = run();
+  const said = `${empty.stdout}${empty.stderr}`;
+  assert.notEqual(said.trim(), "", "the gate ran nothing and said nothing");
+  if (process.platform !== "darwin" && process.platform !== "win32") {
+    assert.match(said, /nothing to check on this platform/);
+    assert.equal(empty.status, 0);
+    return;
+  }
+  assert.match(said, /no packaged marker found/);
+  assert.equal(empty.status, 1, "a publishing run with nothing packaged must fail");
+  // And a development marker where the packager puts it is refused.
+  const marker =
+    process.platform === "win32"
+      ? path.join(cwd, "release", "win-unpacked", "resources", "workhorse-build.json")
+      : path.join(cwd, "release", "mac-arm64", "Go7 Workhorse.app", "Contents", "Resources", "workhorse-build.json");
+  mkdirSync(path.dirname(marker), { recursive: true });
+  writeFileSync(marker, '{"channel":"development"}\n');
+  const stamped = run();
+  assert.equal(stamped.status, 1, `${stamped.stdout}${stamped.stderr}`);
+  assert.match(stamped.stdout, /FAIL .*channel=development/);
+});
+
+/*
+ * electron-builder treats a Developer ID certificate it cannot use (expired,
+ * revoked, a CSC_NAME that matches nothing) as a warning: it skips signing,
+ * afterSign and notarization and still writes the dmg. The gate reads the
+ * signature the artifact actually carries.
+ */
+test("a publishing mac build must carry a verified, notarized Developer ID signature", async () => {
+  const { macSignatureProblem } = await import("../scripts/assert-release-channel.mjs");
+  const developerId = [
+    "Executable=/x/Go7 Workhorse.app/Contents/MacOS/Go7 Workhorse",
+    "Authority=Developer ID Application: Example Studio LLC (TEAM123456)",
+    "Authority=Developer ID Certification Authority",
+    "Authority=Apple Root CA",
+    "TeamIdentifier=TEAM123456",
+  ].join("\n");
+  const good = { verifyStatus: 0, display: developerId, stapleStatus: 0, teamId: "TEAM123456" };
+  assert.equal(macSignatureProblem(good), null);
+  assert.equal(macSignatureProblem({ ...good, teamId: "" }), null, "no team to compare is not a failure");
+  assert.match(
+    macSignatureProblem({ ...good, verifyStatus: 1, verifyOutput: "a sealed resource is missing or invalid" }),
+    /codesign --verify failed: a sealed resource/,
+  );
+  assert.match(macSignatureProblem({ ...good, display: "Signature=adhoc\nTeamIdentifier=not set" }), /ad-hoc/);
+  assert.match(
+    macSignatureProblem({ ...good, display: "Authority=Apple Development: someone (ABC)\nTeamIdentifier=TEAM123456" }),
+    /Apple Development/,
+  );
+  assert.match(macSignatureProblem({ ...good, teamId: "OTHERTEAM1" }), /team TEAM123456, not OTHERTEAM1/);
+  assert.match(macSignatureProblem({ ...good, stapleStatus: 65 }), /no notarization ticket/);
+
+  const workflow = readFileSync(path.join(ROOT, ".github", "workflows", "release.yml"), "utf8");
+  const build = workflow.slice(workflow.indexOf("- name: Build installer"), workflow.indexOf("- name: Packaged learning smoke"));
+  assert.match(build, /-c\.forceCodeSigning=true/, "a mac release must fail when it cannot sign");
+  assert.match(build, /npm run \$\{\{ matrix\.script \}\} -- \$force/);
+  const gate = workflow.slice(workflow.indexOf("- name: Refuse a development-stamped release"), workflow.indexOf("- name: Keep the installer"));
+  assert.match(gate, /WORKHORSE_APPLE_TEAM_ID: .*secrets\.MAC_APPLE_TEAM_ID/);
 });

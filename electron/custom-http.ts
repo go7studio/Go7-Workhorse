@@ -771,7 +771,7 @@ export async function streamCustomHttp(
     payload: Record<string, unknown>,
     attempt = 0,
   ): Promise<{ text: string; thought?: string; usage?: CustomHttpUsage; toolUses?: CustomToolUse[]; stopReason?: string }> => {
-    const response = await fetchImpl(url, {
+    const response = await fetchWithinOrigin(fetchImpl, url, {
       method: "POST",
       headers,
       body: JSON.stringify(payload),
@@ -953,6 +953,46 @@ export async function streamCustomHttp(
   }
 }
 
+const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
+const MAX_SAME_ORIGIN_REDIRECTS = 5;
+
+/**
+ * Follow a redirect only within the origin the person configured.
+ *
+ * Every request here carries the key twice, as Authorization and as
+ * x-api-key. On a redirect to another host fetch drops Authorization and
+ * forwards x-api-key, so a 307 from the configured endpoint handed the key to
+ * whatever host it named. Redirects are followed here instead: within the
+ * origin as fetch would, and one that leaves it fails naming where it went,
+ * without sending anything there.
+ */
+export async function fetchWithinOrigin(fetchImpl: typeof fetch, url: string, init: RequestInit): Promise<Response> {
+  let current = new URL(url);
+  let request: RequestInit = { ...init, redirect: "manual" };
+  for (let hop = 0; ; hop += 1) {
+    const response = await fetchImpl(current.toString(), request);
+    const location = response.headers.get("location");
+    if (!REDIRECT_STATUSES.has(response.status) || !location) return response;
+    await response.body?.cancel().catch(() => undefined);
+    const next = new URL(location, current);
+    if (next.origin !== current.origin) {
+      throw new Error(
+        `Custom model endpoint redirected to ${next.origin}, so the API key was not sent there. If that host is right, use it as the base URL.`,
+      );
+    }
+    if (hop >= MAX_SAME_ORIGIN_REDIRECTS) throw new Error("Custom model endpoint redirected too many times.");
+    const method = (request.method ?? "GET").toUpperCase();
+    // What fetch itself does: 303, and 301 or 302 after a POST, repeat as GET.
+    if ((response.status === 303 && method !== "HEAD") || ((response.status === 301 || response.status === 302) && method === "POST")) {
+      const headers = new Headers(request.headers);
+      headers.delete("content-type");
+      const { body: _body, ...rest } = request;
+      request = { ...rest, method: "GET", headers };
+    }
+    current = next;
+  }
+}
+
 /**
  * How long to sit out a busy host before trying again. Three waits, about
  * twenty-three seconds in total: long enough for a slice ahead of you to
@@ -1012,7 +1052,7 @@ async function fetchListedContext(
   fetchImpl: typeof fetch,
 ): Promise<number | undefined> {
   try {
-    const response = await fetchImpl(modelsUrl(baseUrl), {
+    const response = await fetchWithinOrigin(fetchImpl, modelsUrl(baseUrl), {
       method: "GET",
       headers: {
         accept: "application/json",
@@ -1107,7 +1147,7 @@ export async function testCustomModel(
   };
   const startedAt = clock();
   try {
-    const response = await fetchImpl(url, { method: "POST", headers, body: JSON.stringify(body) });
+    const response = await fetchWithinOrigin(fetchImpl, url, { method: "POST", headers, body: JSON.stringify(body) });
     const text = await response.text();
     const latencyMs = Math.max(0, Math.round(clock() - startedAt));
     if (!response.ok) {
@@ -1189,7 +1229,7 @@ export async function probeCustomHttp(
             stream: false,
             messages: [{ role: "user", content: "Reply with the single word pong." }],
           };
-    const response = await fetchImpl(url, { method: "POST", headers, body: JSON.stringify(body) });
+    const response = await fetchWithinOrigin(fetchImpl, url, { method: "POST", headers, body: JSON.stringify(body) });
     const text = await response.text();
     if (!response.ok) {
       // The probe is how a key is first tried, so a host that repeats the key

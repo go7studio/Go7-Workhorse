@@ -1,3 +1,4 @@
+import http from "node:http";
 import https from "node:https";
 import { customHttpIdentityHeaders } from "../src/lib/custom-http-identity";
 
@@ -65,8 +66,11 @@ export async function fetchCustomModels(input: {
     }
     // Electron's Chromium fetch can strip User-Agent, and these hosts 429 or
     // empty the body when it does. Same workaround as the quota reader.
+    // The URL may be http — a box on this machine, the Grok Bot shim — and
+    // https.get throws on that, which the catch below turned into "no models".
+    const transport = new URL(url).protocol === "http:" ? http : https;
     const json = await new Promise<unknown>((resolve, reject) => {
-      const request = https.get(url, { headers }, (response) => {
+      const request = transport.get(url, { headers }, (response) => {
         const chunks: Buffer[] = [];
         response.on("data", (chunk) => chunks.push(chunk as Buffer));
         response.on("end", () => {

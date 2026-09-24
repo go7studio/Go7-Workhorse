@@ -119,6 +119,10 @@
       {
         "from": "workshop/workshop-catalog.schema.json",
         "to": "workshop/workshop-catalog.schema.json"
+      },
+      {
+        "from": "skills",
+        "to": "skills"
       }
     ],
     "win": {

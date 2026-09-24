@@ -26,12 +26,21 @@ import type {
   SkillOrigin,
 } from "../src/lib/types";
 
-export function resolveShippedWorkhorseSkills(): string | undefined {
+export function resolveShippedWorkhorseSkills(
+  resourcesPath = (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath,
+): string | undefined {
   const env = process.env.WORKHORSE_SKILLS?.trim();
   if (env && fs.existsSync(path.join(env, "desk", "SKILL.md"))) return env;
   if (env && fs.existsSync(env)) return env;
   const fromHere = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "skills");
   if (fs.existsSync(path.join(fromHere, "desk", "SKILL.md"))) return fromHere;
+  // An installed desk has no skills/ beside dist-electron: electron-builder
+  // copies it to Resources (extraResources). Without this every install
+  // seeded nothing, and the skills the docs say ship with the desk never did.
+  if (resourcesPath) {
+    const packaged = path.join(resourcesPath, "skills");
+    if (fs.existsSync(path.join(packaged, "desk", "SKILL.md"))) return packaged;
+  }
   const fromCwd = path.join(process.cwd(), "skills");
   if (fs.existsSync(path.join(fromCwd, "desk", "SKILL.md"))) return fromCwd;
   return undefined;
@@ -127,12 +136,17 @@ export function exportVendorBundle(input: {
       projectFolders: input.projectFolders,
       homes,
     });
-    const names = new Map<string, number>();
+    const taken = new Set<string>();
     for (const skill of catalog) {
-      const used = names.get(`${skill.origin}:${skill.name}`) ?? 0;
-      names.set(`${skill.origin}:${skill.name}`, used + 1);
-      const folder = used === 0 ? skill.name : `${skill.name}-${used + 1}`;
-      const dest = provider === "custom" ? path.join(bundle, "skills", skill.origin, folder) : path.join(bundle, "skills", folder);
+      // The name is the skill's own frontmatter, and a linked repo writes
+      // that. Used raw, `name: ../../../Library/LaunchAgents` copied the
+      // skill's files there. It gets the same folder rule as push and import.
+      const base = safeFolder(skill.name);
+      const parent = provider === "custom" ? path.join(bundle, "skills", skill.origin) : path.join(bundle, "skills");
+      let folder = base;
+      for (let copy = 2; taken.has(path.join(parent, folder)); copy += 1) folder = `${base}-${copy}`;
+      const dest = path.join(parent, folder);
+      taken.add(dest);
       copyDir(skill.dir, dest);
       skills += 1;
     }
@@ -301,9 +315,12 @@ function copyDir(from: string, to: string): void {
   fs.mkdirSync(to, { recursive: true });
   for (const entry of fs.readdirSync(from, { withFileTypes: true })) {
     if (entry.name === "node_modules" || entry.name === ".git") continue;
+    // A link is not the skill's own content. copyFileSync follows it, so a
+    // skill folder holding `key -> ~/.ssh/id_rsa` put the key in the bundle.
+    if (entry.isSymbolicLink()) continue;
     const src = path.join(from, entry.name);
     const dest = path.join(to, entry.name);
     if (entry.isDirectory()) copyDir(src, dest);
-    else fs.copyFileSync(src, dest);
+    else if (entry.isFile()) fs.copyFileSync(src, dest);
   }
 }

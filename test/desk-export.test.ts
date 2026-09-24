@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
-import { exportVendorBundle, importSkillFromPath, listDeskSkills, pushSkillToVendor, readDeskSkill, seedWorkhorseSkills } from "../electron/desk-export-host";
+import { exportVendorBundle, importSkillFromPath, listDeskSkills, pushSkillToVendor, readDeskSkill, resolveShippedWorkhorseSkills, seedWorkhorseSkills } from "../electron/desk-export-host";
 import { chatExportFiles, defaultExportRoot, sessionToMarkdown, slugTitle } from "../src/lib/desk-export";
 import { commandsForSession } from "../src/lib/commands";
 import { catalogSkills, filterDeskSkills, findDeskSkill, parseSkillFrontmatter, resolveRequestedSkills, sameDeskSkills, skillBodyFromMarkdown, skillHomes } from "../src/lib/skills-catalog";
@@ -298,6 +298,76 @@ test("chat export never gives two chats the same file", () => {
     "projects/walk-test/notes-2-2.md",
     "projects/walk-test/notes-3.md",
   ]);
+});
+
+test("a skill's own name never places its files outside the export", () => {
+  const home = mkdtempSync(path.join(os.tmpdir(), "wh-home-"));
+  // Deep enough that the escape below, were it to work again, still lands in
+  // this test's own temp folder rather than the machine's.
+  const root = mkdtempSync(path.join(os.tmpdir(), "wh-escape-"));
+  const dest = path.join(root, "a", "b", "c");
+  mkdirSync(dest, { recursive: true });
+  const repo = mkdtempSync(path.join(os.tmpdir(), "wh-repo-"));
+  // A cloned repo names its skill after a folder it wants written to.
+  const evil = path.join(repo, ".claude", "skills", "evil");
+  writeSkill(evil, "../../../../escaped", "Looks harmless");
+  writeFileSync(path.join(evil, "payload.plist"), "<plist/>", "utf8");
+  writeSkill(path.join(repo, ".claude", "skills", "twin"), "..", "Only dots");
+  const result = exportVendorBundle({ provider: "claude", dest, kind: "skills", homedir: home, projectFolders: [repo] });
+  assert.equal(result.ok, true);
+  assert.equal(result.skills, 2);
+  const bundle = path.join(dest, "workhorse-claude");
+  const written = (dir: string): string[] =>
+    readdirSync(dir, { withFileTypes: true }).flatMap((entry) =>
+      entry.isDirectory() ? written(path.join(dir, entry.name)) : [path.join(dir, entry.name)]);
+  const files = written(root);
+  assert.ok(files.length >= 3, files.join(", "));
+  for (const file of files) {
+    assert.ok(!path.relative(bundle, file).startsWith(".."), `${file} is outside ${bundle}`);
+  }
+  assert.ok(files.some((file) => file.endsWith("payload.plist")));
+  assert.equal(existsSync(path.join(root, "a", "escaped")), false);
+});
+
+test("an exported skill carries its own files, never what its links point at", (t) => {
+  const home = mkdtempSync(path.join(os.tmpdir(), "wh-home-"));
+  const dest = mkdtempSync(path.join(os.tmpdir(), "wh-dest-"));
+  const secret = path.join(home, "id_rsa");
+  writeFileSync(secret, "PRIVATE", "utf8");
+  const skill = path.join(home, ".grok", "skills", "pdf");
+  writeSkill(skill, "pdf", "Make PDFs");
+  try {
+    symlinkSync(secret, path.join(skill, "key"));
+  } catch {
+    t.skip("this machine does not let a test make symlinks");
+    return;
+  }
+  const result = exportVendorBundle({ provider: "grok", dest, kind: "skills", homedir: home });
+  assert.equal(result.ok, true);
+  const out = path.join(dest, "workhorse-grok", "skills", "pdf");
+  assert.equal(existsSync(path.join(out, "SKILL.md")), true);
+  assert.equal(existsSync(path.join(out, "key")), false);
+});
+
+test("an installed desk ships the skills it seeds", () => {
+  // electron-builder only packs build.files into the asar, and skills/ is not
+  // one of them, so the installed desk looks for them in Resources.
+  const pkg = JSON.parse(readFileSync(path.join(ROOT, "package.json"), "utf8")) as {
+    build: { files: string[]; extraResources: { from: string; to: string }[] };
+  };
+  assert.ok(pkg.build.extraResources.some((row) => row.from === "skills" && row.to === "skills"));
+  const resources = mkdtempSync(path.join(os.tmpdir(), "wh-resources-"));
+  writeSkill(path.join(resources, "skills", "desk"), "desk", "The desk");
+  const saved = process.env.WORKHORSE_SKILLS;
+  delete process.env.WORKHORSE_SKILLS;
+  try {
+    // From a source tree the repo's own skills/ still wins.
+    assert.equal(resolveShippedWorkhorseSkills(resources), path.join(ROOT, "skills"));
+  } finally {
+    if (saved !== undefined) process.env.WORKHORSE_SKILLS = saved;
+  }
+  const smoke = readFileSync(path.join(ROOT, "scripts", "learning-packaged-smoke.mjs"), "utf8");
+  assert.match(smoke, /Missing shipped skill/);
 });
 
 test("mass send writes vendor skills and chats without auth files", () => {

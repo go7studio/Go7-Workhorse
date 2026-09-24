@@ -353,6 +353,39 @@ test("Cursor discovery finds the official Windows CLI folder, never Cursor.exe",
   );
 });
 
+test("building a Cursor launch never runs the Cursor CLI to ask about the login", () => {
+  // The launch spec is built for every Cursor prompt, twice for a new runtime.
+  // It used to run the whole login detection, and with it `cursor-agent about`
+  // under spawnSync: each Cursor prompt froze the desk's main process — every
+  // other chat's stream and every IPC reply — for as long as that took, up to 8s.
+  const asked: string[] = [];
+  const spec = buildCursorLaunchSpec({
+    model: "composer-2.5",
+    effort: "medium",
+    cwd: "/proj",
+    mode: "ask",
+    detect: {
+      env: { PATH: "/bin" },
+      platform: "linux",
+      homedir: "/no-home",
+      pathDirs: ["/bin"],
+      extraDirs: [],
+      existsSync: (file) => file === "/bin/cursor-agent",
+      probeAuth: (file) => {
+        asked.push(`about ${file}`);
+        return true;
+      },
+      probeBinary: (file) => {
+        asked.push(`--help ${file}`);
+        return true;
+      },
+    },
+  });
+  assert.equal(spec.command, "/bin/cursor-agent");
+  assert.deepEqual(spec.argv, ["--model", "composer-2.5", "acp"]);
+  assert.deepEqual(asked, []);
+});
+
 test("reading the Cursor model list spawns the same node+script a launch does", () => {
   const local = "C:\\Users\\desk\\AppData\\Local";
   const node = `${local}\\cursor-agent\\versions\\2026.08.11-e8db854\\node.exe`;

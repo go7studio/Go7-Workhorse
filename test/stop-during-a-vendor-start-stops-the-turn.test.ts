@@ -116,7 +116,8 @@ test("Codex and Cursor hold the same gate as Grok and Claude", () => {
   // checked by source here; the gate is the same four lines in each host.
   const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
   for (const file of ["codex-host.ts", "cursor-host.ts"]) {
-    const source = readFileSync(path.join(root, "electron", file), "utf8");
+    // Windows checks the source out with CRLF; the patterns below span lines.
+    const source = readFileSync(path.join(root, "electron", file), "utf8").replace(/\r\n/g, "\n");
     assert.match(source, /if \(this\.starting\.has\(sessionId\)\) this\.stoppedWhileStarting\.add\(sessionId\);/, file);
     assert.match(source, /this\.starting\.add\(input\.sessionId\);\n\s+try \{\n\s+const started = await agent\.start\(/, file);
     assert.match(source, /finally \{\n\s+this\.starting\.delete\(input\.sessionId\);/, file);

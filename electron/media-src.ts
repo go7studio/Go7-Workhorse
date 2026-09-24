@@ -71,7 +71,31 @@ function listGrokSessionNames(root: string): string[] {
   return names;
 }
 
-export function grokSessionDirs(opts: MediaSrcOpts = {}, p: MediaPathApi = path): string[] {
+/**
+ * The most candidates one picture may cost. Every one is a stat on the main
+ * process, and a picture that is not there — a reply naming a file it has not
+ * written yet — is the common case, not the rare one.
+ */
+export const MEDIA_CANDIDATE_LIMIT = 96;
+
+/** How long the protocol remembers that a picture was not there. */
+export const MEDIA_MISS_TTL_MS = 10_000;
+const MEDIA_MISS_LIMIT = 512;
+const mediaMisses = new Map<string, number>();
+
+function existsQuietly(exists: (file: string) => boolean, file: string): boolean {
+  try {
+    return exists(file);
+  } catch {
+    return false;
+  }
+}
+
+export function grokSessionDirs(
+  opts: MediaSrcOpts = {},
+  p: MediaPathApi = path,
+  exists: (file: string) => boolean = (file) => fs.existsSync(file),
+): string[] {
   const home = opts.home ?? os.homedir();
   const root = grokSessionsRoot(home, p);
   const id = opts.vendorSessionId?.trim();
@@ -79,9 +103,19 @@ export function grokSessionDirs(opts: MediaSrcOpts = {}, p: MediaPathApi = path)
   const add = (value?: string) => {
     if (value && !dirs.includes(value)) dirs.push(value);
   };
-  if (id && opts.cwd) add(p.join(root, encodeCwd(opts.cwd, p), id));
+  const own = id && opts.cwd ? p.join(root, encodeCwd(opts.cwd, p), id) : "";
+  if (own) add(own);
   if (id) {
-    for (const name of listGrokSessionNames(root)) add(p.join(root, name, id));
+    // The session's own folder first. Only when it is missing is every cwd
+    // folder asked for the id — one stat each — and only a folder that holds
+    // it is searched. Guessing eight names under every one of three hundred
+    // folders was 2,441 stats for a single missing picture.
+    if (!own || !existsQuietly(exists, own)) {
+      for (const name of listGrokSessionNames(root)) {
+        const dir = p.join(root, name, id);
+        if (existsQuietly(exists, dir)) add(dir);
+      }
+    }
     add(p.join(home, ".codex", "generated_images", id));
     add(p.join(home, ".codex", "sessions"));
   }
@@ -91,7 +125,12 @@ export function grokSessionDirs(opts: MediaSrcOpts = {}, p: MediaPathApi = path)
   return dirs;
 }
 
-export function mediaFileCandidates(href: string, opts: MediaSrcOpts = {}, p: MediaPathApi = path): string[] {
+export function mediaFileCandidates(
+  href: string,
+  opts: MediaSrcOpts = {},
+  p: MediaPathApi = path,
+  exists: (file: string) => boolean = (file) => fs.existsSync(file),
+): string[] {
   const raw = String(href ?? "").trim();
   if (!raw || /^data:|^https?:/i.test(raw) || /^#|about:blank|javascript:/i.test(raw)) return [];
   const file = windowsAbs(raw);
@@ -113,13 +152,14 @@ export function mediaFileCandidates(href: string, opts: MediaSrcOpts = {}, p: Me
   // The href is not the only way onto a share: the cwd and session id ride in
   // the media URL too, and a reply can write that URL out whole.
   const add = (value: string) => {
+    if (out.length >= MEDIA_CANDIDATE_LIMIT) return;
     if (value && !isNetworkPath(value) && !out.includes(value)) out.push(value);
   };
   if (p.isAbsolute(file)) add(file);
   if (opts.cwd) {
     for (const extra of trailingJoins(opts.cwd, file, p)) add(extra);
   }
-  for (const root of grokSessionDirs(opts, p)) {
+  for (const root of grokSessionDirs(opts, p, exists)) {
     for (const name of names) add(p.resolve(root, name));
   }
   return out;
@@ -128,12 +168,17 @@ export function mediaFileCandidates(href: string, opts: MediaSrcOpts = {}, p: Me
 export type MediaSrcIo = {
   existsSync?: (file: string) => boolean;
   path?: MediaPathApi;
+  /** The protocol's memory of pictures that were not there, by URL. */
+  misses?: Map<string, number>;
+  now?: () => number;
+  /** Whose home the protocol searches; the person's own when absent. */
+  home?: string;
 };
 
 /** First existing candidate. Does not read file bytes or walk session trees. */
 export function resolveDisplayFile(href: string, opts: MediaSrcOpts = {}, io?: MediaSrcIo): string | null {
   const exists = io?.existsSync ?? ((file: string) => fs.existsSync(file));
-  for (const candidate of mediaFileCandidates(href, opts, io?.path)) {
+  for (const candidate of mediaFileCandidates(href, opts, io?.path, exists)) {
     try {
       if (exists(candidate)) return candidate;
     } catch {
@@ -159,6 +204,12 @@ export function resolveMediaProtocolFile(url: string, io?: MediaSrcIo): string |
   const context = mediaUrlContext(url);
   const exists = io?.existsSync ?? ((file: string) => fs.existsSync(file));
   const p = io?.path ?? path;
+  // The same missing picture is asked for again on every paint of its chat.
+  // A caller that brings its own existsSync brings its own memory, or none.
+  const misses = io?.misses ?? (io?.existsSync ? null : mediaMisses);
+  const now = (io?.now ?? Date.now)();
+  const missedAt = misses?.get(url);
+  if (missedAt !== undefined && now - missedAt < MEDIA_MISS_TTL_MS) return null;
   if (dest && !isNetworkPath(dest)) {
     try {
       if (p.isAbsolute(dest) && exists(dest)) return dest;
@@ -166,7 +217,20 @@ export function resolveMediaProtocolFile(url: string, io?: MediaSrcIo): string |
       // try candidates
     }
   }
-  return resolveDisplayFile(dest ?? "", { cwd: context.cwd, vendorSessionId: context.vendorSessionId }, io);
+  const found = resolveDisplayFile(
+    dest ?? "",
+    { cwd: context.cwd, vendorSessionId: context.vendorSessionId, ...(io?.home ? { home: io.home } : {}) },
+    io,
+  );
+  if (found) {
+    misses?.delete(url);
+    return found;
+  }
+  if (misses) {
+    if (misses.size >= MEDIA_MISS_LIMIT) misses.clear();
+    misses.set(url, now);
+  }
+  return null;
 }
 
 export type LocalPathIo = {

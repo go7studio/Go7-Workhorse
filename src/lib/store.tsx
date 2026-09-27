@@ -7678,7 +7678,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                       ? appendLiveTool(session.ledger, {
                           callId: event.toolCallId,
                           name: event.title,
-                          arguments: event.detail,
+                          // A finished tool event carries a result preview, not its input.
+                          // Do not record that preview as if it were call arguments.
                           result: event.detail,
                         })
                       : session.ledger,

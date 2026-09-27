@@ -138,6 +138,21 @@ test("store writes the live turn log and does not share it across chats", () => 
   const store = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
   assert.match(store, /appendOpenTurnUser\(/);
   assert.match(store, /appendLiveTool\(/);
+  assert.doesNotMatch(store, /arguments: event\.detail/);
   assert.match(store, /applyVendorTurnIdle\(/);
   assert.match(store, /recordLiveCompact\(/);
+});
+
+test("a finished tool preview is not fabricated into call arguments", () => {
+  const open = appendOpenTurnUser(undefined, { id: "u1", text: "check", at: 10 });
+  const ledger = appendLiveTool(open, {
+    callId: "c1",
+    name: "jev_evaluate",
+    result: '{"answers":{"contradiction":{"noul":0.16}}}',
+    at: 11,
+  });
+  const call = ledger.events.find((event) => event.type === "tool/call");
+  const result = ledger.events.find((event) => event.type === "tool/result");
+  assert.equal(call?.arguments, "");
+  assert.equal(result?.text, '{"answers":{"contradiction":{"noul":0.16}}}');
 });

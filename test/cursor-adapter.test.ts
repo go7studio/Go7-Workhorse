@@ -225,6 +225,7 @@ test("buildCursorLaunchSpec never spawns grok or Cursor.app", () => {
   // Finder-launched app left its tools unable to find git, node or ripgrep.
   assert.equal(cursorSpawnArgs(other).env.PATH, withDeskToolEnv({ ...process.env }).PATH);
   assert.ok(spec.sessionParams.mcpServers.some((item) => item.name === "figma"));
+  assert.deepEqual(spec.sessionParams.mcpServers.find((item) => item.name === "figma")?.env, []);
   assert.notEqual(spec.command.toLowerCase(), "grok");
   assert.doesNotMatch(spec.command, /Cursor\.app/i);
   const legacyAuto = buildCursorLaunchSpec({

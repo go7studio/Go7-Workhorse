@@ -7007,10 +7007,10 @@ test("shipped launch spec maps sandbox and plan without yolo", () => {
     mcpServers: [{ name: "github", command: "npx", args: ["-y", "mcp-github"] }],
   });
   assert.deepEqual(mcp.sessionParams.mcpServers, [
-    { type: "stdio", name: "github", command: "npx", args: ["-y", "mcp-github"] },
+    { type: "stdio", name: "github", command: "npx", args: ["-y", "mcp-github"], env: [] },
   ]);
   assert.deepEqual(mergeMcpServers([{ name: "a", command: "x", args: [] }], null), [
-    { type: "stdio", name: "a", command: "x", args: [] },
+    { type: "stdio", name: "a", command: "x", args: [], env: [] },
   ]);
 });
 

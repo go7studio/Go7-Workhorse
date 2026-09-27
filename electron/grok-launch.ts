@@ -229,7 +229,9 @@ export function mergeMcpServers(user: McpServerConfig[] | undefined, extra: Grok
       name,
       command,
       args: Array.isArray(item.args) ? item.args.map(String) : [],
-      ...(toAcpMcpEnv(item.env) ? { env: toAcpMcpEnv(item.env) } : {}),
+      // ACP requires the env array even when a server has no variables.
+      // Cursor rejects an omitted env as "Internal error" during session/new.
+      env: toAcpMcpEnv(item.env) ?? [],
     });
   }
   if (extra && !servers.some((item) => item.name === extra.name)) servers.push(extra);

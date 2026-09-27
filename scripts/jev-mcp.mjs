@@ -1,14 +1,18 @@
 #!/usr/bin/env node
 // First-party, narrow MCP bridge for TypeSafe Jev. The model never receives the API key.
 import { execFileSync } from "node:child_process";
+import { createHash, randomUUID } from "node:crypto";
+import fs from "node:fs";
 import path from "node:path";
 import readline from "node:readline";
+import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 
 const API_URL = "https://api.typesafe.ai/v1/systemone";
 const MODEL = "jev-latest";
 const MAX_BODY_BYTES = 32_000;
 const MAX_QUESTIONS = 12;
+const MAX_BUDGET_BYTES = 1_000_000;
 const TOOL = {
   name: "jev_evaluate",
   description: "Ask TypeSafe Jev to evaluate non-sensitive text or structured state with bounded yes/no, choice, or score questions. Sends the supplied state and questions to TypeSafe AI. Use for classification, routing, and checks, not open-ended generation or final authorization.",
@@ -104,18 +108,106 @@ export function parseCallLimit(value) {
   return limit;
 }
 
-export function boundedEvaluator(maxCalls, evaluateImpl = evaluate) {
+function budgetRows(file, maxCalls) {
+  let stat;
+  try {
+    stat = fs.lstatSync(file);
+  } catch (error) {
+    if (error?.code === "ENOENT") return [];
+    throw error;
+  }
+  if (!stat.isFile() || stat.isSymbolicLink() || stat.size > MAX_BUDGET_BYTES) {
+    throw new Error("Jev budget ledger is not a regular bounded file");
+  }
+  const raw = fs.readFileSync(file, "utf8");
+  if (!raw.endsWith("\n")) throw new Error("Jev budget ledger is incomplete");
+  const rows = raw.slice(0, -1).split("\n").map((line) => JSON.parse(line));
+  if (rows[0]?.type !== "budget" || rows[0]?.version !== 1 || rows[0]?.maxCalls !== maxCalls) {
+    throw new Error("Jev budget ledger does not match this call limit");
+  }
+  const seen = new Set();
+  for (const row of rows.slice(1)) {
+    if (row?.type !== "attempt" || typeof row.id !== "string" || seen.has(row.id)) {
+      throw new Error("Jev budget ledger contains an invalid attempt");
+    }
+    seen.add(row.id);
+  }
+  return rows;
+}
+
+function appendBudget(file, records) {
+  const fd = fs.openSync(file, fs.constants.O_CREAT | fs.constants.O_WRONLY | fs.constants.O_APPEND, 0o600);
+  try {
+    const bytes = Buffer.from(records.map((record) => `${JSON.stringify(record)}\n`).join(""));
+    for (let offset = 0; offset < bytes.length;) {
+      const written = fs.writeSync(fd, bytes, offset, bytes.length - offset);
+      if (written < 1) throw new Error("Jev budget ledger write made no progress");
+      offset += written;
+    }
+    fs.fsyncSync(fd);
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+export async function reserveDurableAttempt(file, maxCalls, body) {
+  if (!path.isAbsolute(file) || !Number.isSafeInteger(maxCalls) || maxCalls < 1) {
+    throw new Error("A durable Jev budget needs an absolute file path and positive call limit");
+  }
+  const lock = `${file}.lock`;
+  let locked = false;
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    try {
+      fs.mkdirSync(lock, { mode: 0o700 });
+      locked = true;
+      break;
+    } catch (error) {
+      if (error?.code !== "EEXIST") throw error;
+      if (attempt === 19) throw new Error("Jev budget ledger is locked; no call was sent");
+      await delay(50);
+    }
+  }
+  if (!locked) throw new Error("Jev budget ledger is locked; no call was sent");
+  try {
+    const rows = budgetRows(file, maxCalls);
+    const used = Math.max(0, rows.length - 1);
+    if (used >= maxCalls) throw new Error(`Jev call budget exhausted (${used}/${maxCalls})`);
+    const id = randomUUID();
+    const requestSha256 = createHash("sha256").update(JSON.stringify(body)).digest("hex");
+    appendBudget(file, [
+      ...(rows.length ? [] : [{ type: "budget", version: 1, maxCalls }]),
+      { type: "attempt", id, requestSha256, at: new Date().toISOString() },
+    ]);
+    return { id, requestSha256 };
+  } finally {
+    fs.rmdirSync(lock);
+  }
+}
+
+export function boundedEvaluator(maxCalls, evaluateImpl = evaluate, { budgetFile } = {}) {
+  if (budgetFile !== undefined && (!path.isAbsolute(budgetFile) || !Number.isSafeInteger(maxCalls) || maxCalls < 1)) {
+    throw new Error("JEV_MCP_BUDGET_FILE needs an absolute path and JEV_MCP_MAX_CALLS");
+  }
   let attempts = 0;
   return async (input) => {
     // Malformed requests never reach TypeSafe and do not spend the call budget.
-    validatedRequest(input);
+    const body = validatedRequest(input);
     if (maxCalls > 0 && attempts >= maxCalls) {
       throw new Error(`Jev call budget exhausted (${attempts}/${maxCalls})`);
     }
+    const reservation = budgetFile !== undefined ? await reserveDurableAttempt(budgetFile, maxCalls, body) : null;
     // Reserve before the network request: a failed or ambiguous response may
     // still have reached TypeSafe, so it cannot authorize another attempt.
     attempts += 1;
-    return evaluateImpl(input);
+    try {
+      const result = await evaluateImpl(input);
+      return reservation
+        ? { ...result, bridgeRequestId: reservation.id, requestSha256: reservation.requestSha256 }
+        : result;
+    } catch (error) {
+      if (!reservation) throw error;
+      throw new Error(`Jev bridge request ${reservation.id}: ${error instanceof Error ? error.message : "call failed"}`);
+    }
   };
 }
 
@@ -150,7 +242,9 @@ export async function handle(message, evaluateWithBudget, sendMessage = send) {
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
-  const evaluateWithBudget = boundedEvaluator(parseCallLimit(process.env.JEV_MCP_MAX_CALLS));
+  const evaluateWithBudget = boundedEvaluator(parseCallLimit(process.env.JEV_MCP_MAX_CALLS), evaluate, {
+    budgetFile: process.env.JEV_MCP_BUDGET_FILE,
+  });
   const lines = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
   for await (const line of lines) {
     try { await handle(JSON.parse(line), evaluateWithBudget); } catch { /* Never write protocol noise to stdout. */ }

@@ -31,6 +31,17 @@ This is a per-process guard, not a durable mission-wide budget: a new process
 starts a new allowance. Leave the variable unset for ordinary use. Do not
 entrust a multi-turn or multi-worker spending ceiling to a model's own count.
 
+For a budget shared across turns or workers, also set `JEV_MCP_BUDGET_FILE`
+to a new absolute file path in an existing private directory. Every server
+process using that same file and call limit reserves against one append-only
+allowance **before** sending a request. The ledger contains a bridge request
+ID, request hash, and timestamp, not the state, answers, or API key; successful
+tool responses include the bridge ID and hash for reconciliation. A lost
+response still consumes an attempt. A locked, damaged, or mismatched ledger
+refuses calls; it never resets itself. Use a new path for a new approved wave.
+During a bounded run, expose only this configured Jev server to the worker;
+another Jev tool connection would bypass its allowance.
+
 Example tool input:
 
 ```json

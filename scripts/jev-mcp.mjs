@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 // First-party, narrow MCP bridge for TypeSafe Jev. The model never receives the API key.
 import { execFileSync } from "node:child_process";
+import path from "node:path";
 import readline from "node:readline";
+import { fileURLToPath } from "node:url";
 
 const API_URL = "https://api.typesafe.ai/v1/systemone";
 const MODEL = "jev-latest";
@@ -147,7 +149,7 @@ export async function handle(message, evaluateWithBudget, sendMessage = send) {
   }
 }
 
-if (process.argv[1] && new URL(import.meta.url).pathname === process.argv[1]) {
+if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
   const evaluateWithBudget = boundedEvaluator(parseCallLimit(process.env.JEV_MCP_MAX_CALLS));
   const lines = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
   for await (const line of lines) {

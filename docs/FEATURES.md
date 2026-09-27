@@ -574,6 +574,11 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
   each to selected runtimes, and picks the tools exposed to custom HTTP models.
 - Those calls use the same approval and result path as built-in tools.
   Environment values go to the OS-encrypted credential store.
+- **Jev MCP bridge** (`scripts/jev-mcp.mjs`) is an optional, first-party,
+  one-tool server for TypeSafe's direct System One API. Selected runtimes can
+  ask `jev_evaluate` bounded typed questions; the key stays outside model
+  context. It is a tool, not a chat bot or a replacement for the separate
+  mission Judge route above. See [JEV.md](JEV.md) for setup and limits.
 - **Custom bots** a pasted URL and key become a first-class bot with its own
   name and colour.
 - A bot you switch off leaves the LLM grid and sits under it with Enable and

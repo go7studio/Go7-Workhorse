@@ -23,6 +23,14 @@ TypeSafe's per-call input/output token usage.
    as a tool allowlist; the runtime allowlist is still important. Save, then
    use Test to confirm `jev_evaluate` is discovered.
 
+For a bounded experiment, set `JEV_MCP_MAX_CALLS` to a positive integer in
+that server's Environment. The bridge refuses additional calls after that
+many valid attempts in the **current server process**, including attempts
+whose response failed or was lost. Invalid inputs do not use the allowance.
+This is a per-process guard, not a durable mission-wide budget: a new process
+starts a new allowance. Leave the variable unset for ordinary use. Do not
+entrust a multi-turn or multi-worker spending ceiling to a model's own count.
+
 Example tool input:
 
 ```json

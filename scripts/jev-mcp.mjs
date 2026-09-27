@@ -94,39 +94,63 @@ export async function evaluate(input, { fetchImpl = fetch, readKey = apiKey } = 
   return { model: result.model, answers: result.answers, usage: result.usage };
 }
 
+export function parseCallLimit(value) {
+  if (value === undefined || value === "") return 0;
+  if (!/^[1-9][0-9]*$/.test(value)) throw new Error("JEV_MCP_MAX_CALLS must be a positive integer");
+  const limit = Number(value);
+  if (!Number.isSafeInteger(limit)) throw new Error("JEV_MCP_MAX_CALLS is too large");
+  return limit;
+}
+
+export function boundedEvaluator(maxCalls, evaluateImpl = evaluate) {
+  let attempts = 0;
+  return async (input) => {
+    // Malformed requests never reach TypeSafe and do not spend the call budget.
+    validatedRequest(input);
+    if (maxCalls > 0 && attempts >= maxCalls) {
+      throw new Error(`Jev call budget exhausted (${attempts}/${maxCalls})`);
+    }
+    // Reserve before the network request: a failed or ambiguous response may
+    // still have reached TypeSafe, so it cannot authorize another attempt.
+    attempts += 1;
+    return evaluateImpl(input);
+  };
+}
+
 function send(message) {
   process.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", ...message })}\n`);
 }
 
-async function handle(message) {
+export async function handle(message, evaluateWithBudget, sendMessage = send) {
   if (!object(message) || message.jsonrpc !== "2.0" || message.id === undefined) return;
   const id = message.id;
   try {
     if (message.method === "initialize") {
-      send({ id, result: { protocolVersion: "2025-03-26", capabilities: { tools: {} }, serverInfo: { name: "go7-jev", version: "1.0.0" } } });
+      sendMessage({ id, result: { protocolVersion: "2025-03-26", capabilities: { tools: {} }, serverInfo: { name: "go7-jev", version: "1.0.0" } } });
     } else if (message.method === "ping") {
-      send({ id, result: {} });
+      sendMessage({ id, result: {} });
     } else if (message.method === "tools/list") {
-      send({ id, result: { tools: [TOOL] } });
+      sendMessage({ id, result: { tools: [TOOL] } });
     } else if (message.method === "tools/call") {
       if (message.params?.name !== TOOL.name) throw new Error("unknown Jev tool");
       try {
-        const result = await evaluate(message.params.arguments);
-        send({ id, result: { content: [{ type: "text", text: JSON.stringify(result) }] } });
+        const result = await evaluateWithBudget(message.params.arguments);
+        sendMessage({ id, result: { content: [{ type: "text", text: JSON.stringify(result) }] } });
       } catch (error) {
-        send({ id, result: { content: [{ type: "text", text: error instanceof Error ? error.message : "Jev call failed" }], isError: true } });
+        sendMessage({ id, result: { content: [{ type: "text", text: error instanceof Error ? error.message : "Jev call failed" }], isError: true } });
       }
     } else {
-      send({ id, error: { code: -32601, message: "Method not found" } });
+      sendMessage({ id, error: { code: -32601, message: "Method not found" } });
     }
   } catch (error) {
-    send({ id, error: { code: -32602, message: error instanceof Error ? error.message : "Invalid request" } });
+    sendMessage({ id, error: { code: -32602, message: error instanceof Error ? error.message : "Invalid request" } });
   }
 }
 
 if (process.argv[1] && new URL(import.meta.url).pathname === process.argv[1]) {
+  const evaluateWithBudget = boundedEvaluator(parseCallLimit(process.env.JEV_MCP_MAX_CALLS));
   const lines = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
   for await (const line of lines) {
-    try { await handle(JSON.parse(line)); } catch { /* Never write protocol noise to stdout. */ }
+    try { await handle(JSON.parse(line), evaluateWithBudget); } catch { /* Never write protocol noise to stdout. */ }
   }
 }

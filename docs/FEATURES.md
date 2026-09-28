@@ -577,8 +577,10 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
 - **Jev MCP bridge** (`scripts/jev-mcp.mjs`) is an optional, first-party,
   one-tool server for TypeSafe's direct System One API. Selected runtimes can
   ask `jev_evaluate` bounded typed questions; the key stays outside model
-  context. Optional settings cap valid call attempts per server process or
-  across processes sharing a private budget file, including failed requests.
+  context. A successful call returns a bridge ID and validated-request hash
+  even without a call cap. Optional settings cap valid attempts per server
+  process or across processes sharing a private budget file, including failed
+  requests.
   It is a tool, not a chat bot or a replacement for the separate mission Judge
   route above. See
   [JEV.md](JEV.md) for setup and limits.

@@ -5,8 +5,9 @@ TypeSafe Jev is a structured evaluator, not a chat model. The first-party
 you choose in Workhorse Settings → Skills. It sends `state` and named `questions`
 to TypeSafe's direct `POST /v1/systemone` endpoint using `jev-latest`. It does
 not expose the credential to a model, give Jev filesystem or shell access, or
-let a caller choose another URL or model. The response includes answers and
-TypeSafe's per-call input/output token usage.
+let a caller choose another URL or model. The response includes answers,
+TypeSafe's per-call input/output token usage, a bridge request ID, and a
+SHA-256 of the validated request. Those receipt fields need no call ceiling.
 
 ## Set up
 
@@ -35,9 +36,12 @@ For a budget shared across turns or workers, also set `JEV_MCP_BUDGET_FILE`
 to a new absolute file path in an existing private directory. Every server
 process using that same file and call limit reserves against one append-only
 allowance **before** sending a request. The ledger contains a bridge request
-ID, request hash, and timestamp, not the state, answers, or API key; successful
-tool responses include the bridge ID and hash for reconciliation. A lost
-response still consumes an attempt. A locked, damaged, or mismatched ledger
+ID, request hash, and timestamp, not the state, answers, or API key. Successful
+tool responses carry the same bridge ID and hash with or without this optional
+budget. Without a budget file, the Jev server returns the receipt but does
+not durably journal it. A lost response consumes an attempt only when a call
+limit is configured. A locked,
+damaged, or mismatched ledger
 refuses calls; it never resets itself. Use a new path for a new approved wave.
 During a bounded run, expose only this configured Jev server to the worker;
 another Jev tool connection would bypass its allowance.

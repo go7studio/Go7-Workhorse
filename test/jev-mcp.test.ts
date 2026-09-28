@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -63,6 +64,22 @@ test("Jev MCP call limit rejects excess and never refunds an ambiguous attempt",
   await bounded(request);
   await assert.rejects(bounded(request), /Jev call budget exhausted \(2\/2\)/);
   assert.equal(attempts, 2);
+});
+
+test("Jev returns distinct request receipts without a configured call ceiling", async () => {
+  const input = { state: "public copy", questions: { yes: { type: "noul", instructions: "Does it agree?" } } };
+  const body = validatedRequest(input);
+  const expectedHash = createHash("sha256").update(JSON.stringify(body)).digest("hex");
+  let calls = 0;
+  const evaluateUncapped = boundedEvaluator(0, async () => {
+    calls += 1;
+    return { model: "jev-test", answers: { yes: { type: "noul", noul: 0.8 } }, usage: { input_tokens: 1, output_tokens: 1 } };
+  });
+  const results = await Promise.all(Array.from({ length: 3 }, () => evaluateUncapped(input)));
+  assert.equal(calls, 3);
+  assert.equal(new Set(results.map((result) => result.bridgeRequestId)).size, 3);
+  assert.ok(results.every((result) => result.requestSha256 === expectedHash));
+  assert.deepEqual(Object.keys(results[0]), ["bridgeRequestId", "requestSha256", "model", "answers", "usage"]);
 });
 
 test("Jev MCP protocol refuses a second valid call after its process cap", async () => {
@@ -164,7 +181,7 @@ test("Jev MCP bridge shares one durable budget across server restarts", async (t
   try {
     assert.deepEqual((await first.tools()).map((tool) => tool.name), ["mcp__jev__jev_evaluate"]);
     const result = await first.call({ id: "first", name: "mcp__jev__jev_evaluate", input });
-    assert.equal(result.isError, undefined);
+    assert.equal(result.isError, undefined, result.content);
     assert.match(result.content, /bridgeRequestId/);
   } finally {
     first.dispose();
@@ -193,6 +210,31 @@ test("Workhorse can discover Jev as one scoped MCP tool", async () => {
     const invalid = await bridge.call({ id: "invalid", name: "mcp__jev__jev_evaluate", input: { state: "x", questions: {} } });
     assert.equal(invalid.isError, true);
     assert.match(invalid.content, /provide 1-12 questions/);
+  } finally {
+    bridge.dispose();
+  }
+});
+
+test("uncapped Jev MCP response includes a receipt through the Workhorse bridge", async () => {
+  const bridge = new McpToolBridge([{
+    name: "jev",
+    command: process.execPath,
+    args: [script],
+    includeTools: ["jev_evaluate"],
+    env: {
+      TYPESAFE_API_KEY: "test-only-key",
+      NODE_OPTIONS: `--import=${new URL("./jev-fake-fetch.mjs", import.meta.url).href}`,
+    },
+  }]);
+  try {
+    assert.deepEqual((await bridge.tools()).map((tool) => tool.name), ["mcp__jev__jev_evaluate"]);
+    const input = { state: "public copy", questions: { yes: { type: "noul", instructions: "Does it agree?" } } };
+    const result = await bridge.call({ id: "uncapped", name: "mcp__jev__jev_evaluate", input });
+    assert.equal(result.isError, undefined, result.content);
+    const receipt = JSON.parse(result.content);
+    assert.match(receipt.bridgeRequestId, /^[0-9a-f-]{36}$/);
+    assert.equal(receipt.requestSha256, createHash("sha256").update(JSON.stringify(validatedRequest(input))).digest("hex"));
+    assert.equal(receipt.answers.yes.noul, 0.8);
   } finally {
     bridge.dispose();
   }

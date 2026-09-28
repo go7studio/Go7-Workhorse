@@ -195,17 +195,21 @@ export function boundedEvaluator(maxCalls, evaluateImpl = evaluate, { budgetFile
     if (maxCalls > 0 && attempts >= maxCalls) {
       throw new Error(`Jev call budget exhausted (${attempts}/${maxCalls})`);
     }
-    const reservation = budgetFile !== undefined ? await reserveDurableAttempt(budgetFile, maxCalls, body) : null;
+    const reservation = budgetFile !== undefined
+      ? await reserveDurableAttempt(budgetFile, maxCalls, body)
+      : {
+          id: randomUUID(),
+          requestSha256: createHash("sha256").update(JSON.stringify(body)).digest("hex"),
+        };
     // Reserve before the network request: a failed or ambiguous response may
     // still have reached TypeSafe, so it cannot authorize another attempt.
     attempts += 1;
     try {
       const result = await evaluateImpl(input);
-      return reservation
-        ? { ...result, bridgeRequestId: reservation.id, requestSha256: reservation.requestSha256 }
-        : result;
+      // Put the receipt first so a privacy-bounded tool preview still carries
+      // an identity even when the complete answer is not retained by the desk.
+      return { bridgeRequestId: reservation.id, requestSha256: reservation.requestSha256, ...result };
     } catch (error) {
-      if (!reservation) throw error;
       throw new Error(`Jev bridge request ${reservation.id}: ${error instanceof Error ? error.message : "call failed"}`);
     }
   };

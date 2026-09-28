@@ -156,3 +156,41 @@ test("a finished tool preview is not fabricated into call arguments", () => {
   assert.equal(call?.arguments, "");
   assert.equal(result?.text, '{"answers":{"contradiction":{"noul":0.16}}}');
 });
+
+test("a tool result outside an open turn is retained without claiming another turn", () => {
+  let ledger = appendOpenTurnUser(undefined, { id: "u1", text: "first request", at: 10 });
+  ledger = closeOpenTurn(ledger, { assistant: { id: "a1", text: "done" }, at: 11 });
+  ledger = appendLiveTool(ledger, {
+    callId: "jev-2",
+    name: "mcp__jev__jev_evaluate",
+    result: '{"bridgeRequestId":"receipt-2"}',
+    at: 12,
+  });
+  const toolEvents = ledger.events.filter((event) => event.callId === "jev-2");
+  assert.deepEqual(toolEvents.map((event) => event.type), ["tool/call", "tool/result"]);
+  assert.ok(toolEvents.every((event) => event.turn === undefined && event.step === undefined && event.reason === "unattributed"));
+  const normalizedTool = normalizeLedger(ledger)?.events.find((event) => event.type === "tool/result" && event.callId === "jev-2");
+  assert.equal(normalizedTool?.reason, "unattributed");
+  assert.equal(normalizedTool?.turn, undefined);
+  assert.match(projectMessagesFromLedger(ledger).find((row) => row.toolCallId === "jev-2")?.text ?? "", /Unattributed.*receipt-2/s);
+  assert.deepEqual(deriveModelHistory(ledger).map((row) => row.id), ["u1", "a1"]);
+  assert.equal(appendLiveTool(ledger, {
+    callId: "jev-2",
+    name: "mcp__jev__jev_evaluate",
+    result: '{"bridgeRequestId":"receipt-2"}',
+    at: 13,
+  }), ledger);
+  ledger = appendOpenTurnUser(ledger, { id: "u2", text: "next request", at: 13 });
+  assert.equal(ledger.events.find((event) => event.type === "user/message" && event.id === "u2")?.turn, 2);
+});
+
+test("a repeated tool completion just after turn close is not reassigned", () => {
+  let ledger = appendOpenTurnUser(undefined, { id: "u1", text: "request", at: 10 });
+  ledger = appendLiveTool(ledger, { callId: "call-1", name: "jev_evaluate", result: "first", at: 11 });
+  ledger = closeOpenTurn(ledger, { assistant: { id: "a1", text: "done" }, at: 12 });
+  assert.equal(appendLiveTool(ledger, { callId: "call-1", name: "jev_evaluate", result: "first", at: 13 }), ledger);
+  const changed = appendLiveTool(ledger, { callId: "call-1", name: "jev_evaluate", result: "revised", at: 13 });
+  assert.equal(changed.events.filter((event) => event.type === "tool/result" && event.callId === "call-1").length, 2);
+  const separate = appendLiveTool(ledger, { callId: "call-2", name: "jev_evaluate", result: "first", at: 13 });
+  assert.equal(separate.events.filter((event) => event.type === "tool/result").length, 2);
+});

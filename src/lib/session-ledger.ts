@@ -102,7 +102,7 @@ export function projectMessagesFromLedger(ledger: SessionLedger | undefined): Ch
         kind: "tool",
         toolCallId: event.callId,
         toolStatus: "completed",
-        text: `${call?.name ?? "tool"} · completed\n${event.text ?? ""}`.trim(),
+        text: `${event.reason === "unattributed" ? "Unattributed · " : ""}${call?.name ?? "tool"} · completed\n${event.text ?? ""}`.trim(),
         createdAt: event.at,
       });
       continue;
@@ -222,26 +222,40 @@ export function appendOpenTurnUser(
   return appendLedgerEvent(next, { type: "step/start", turn, step: 1 }, at);
 }
 
-/** Live stream: a finished tool call on the open turn. */
+/** Live stream: retain a finished tool result even when its turn is unknown. */
 export function appendLiveTool(
   ledger: SessionLedger | undefined,
   input: { callId: string; name: string; arguments?: string; result?: string; at?: number },
 ): SessionLedger {
-  if (!isTurnOpen(ledger)) return ledger ?? emptyLedger();
-  const turn = currentTurnNumber(ledger);
+  const scoped = isTurnOpen(ledger);
+  const tail = ledger?.events.slice(-5) ?? [];
+  let recentResultIndex = -1;
+  for (let index = tail.length - 1; index >= 0; index -= 1) {
+    if (tail[index]?.type === "tool/result") {
+      recentResultIndex = index;
+      break;
+    }
+  }
+  const previousCall = tail[recentResultIndex - 1];
+  const previousResult = tail[recentResultIndex];
+  const onlyTurnClosureAfterResult = tail.slice(recentResultIndex + 1).every((event) =>
+    event.type === "assistant/message" || event.type === "step/end" || event.type === "turn/end");
+  if (!scoped && ledger && onlyTurnClosureAfterResult &&
+    previousCall?.type === "tool/call" && previousResult?.type === "tool/result" &&
+    previousCall.callId === input.callId && previousResult.callId === input.callId &&
+    previousCall.name === input.name && previousResult.text === (input.result ?? "")) return ledger;
+  const scope = scoped ? { turn: currentTurnNumber(ledger), step: 1 } : { reason: "unattributed" };
   const at = input.at ?? Date.now();
   let next = appendLedgerEvent(ledger, {
     type: "tool/call",
-    turn,
-    step: 1,
+    ...scope,
     callId: input.callId,
     name: input.name,
     arguments: input.arguments ?? "",
   }, at);
   return appendLedgerEvent(next, {
     type: "tool/result",
-    turn,
-    step: 1,
+    ...scope,
     callId: input.callId,
     text: input.result ?? "",
   }, at);

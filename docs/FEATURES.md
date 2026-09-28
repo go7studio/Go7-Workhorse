@@ -407,6 +407,9 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
 - **Fresh workers** a spawn carrying only a bounded handoff (`seed: fresh`).
 - **Turn log** a chat rebuilds model history from its own turn and step log, per
   chat, never shared across vendors.
+- A finished tool result that arrives with no open turn stays in that chat's
+  log as unattributed evidence. It is not assigned to the previous turn or
+  replayed as model history.
 - **Harness tasks** OpenClaw and Hermes work joins the lineup before the CLI
   finishes. Stop reaches the process; a restart marks uncertain work unknown.
 - **Routing** a chat keeps the model you picked until you set **Auto**, which

@@ -10272,6 +10272,32 @@ test("desk builds one named join prompt and syncs idle children", () => {
     folder,
     mission: true,
   }), strictJsonBrief);
+  const freshJsonBrief = vendorTextForSpawn({
+    fromTitle: "Article review",
+    text: "Read only the attached page.\n\n- Reply with only valid JSON containing pages and candidates.",
+    folder,
+    seed: "fresh",
+  });
+  assert.match(freshJsonBrief, /SEED: fresh/);
+  assert.match(freshJsonBrief, /Return only the handoff's exact structured output/);
+  assert.doesNotMatch(freshJsonBrief, /Return the report as plain text|FINDING: critical/);
+  const descriptiveJsonBrief = vendorTextForSpawn({
+    fromTitle: "Article review",
+    text: "Confirm the endpoint returns JSON only; report any review findings.",
+    folder,
+  });
+  assert.match(descriptiveJsonBrief, /FINDING: critical/);
+  assert.match(vendorTextForSpawn({
+    fromTitle: "Article review",
+    text: "Return only XML with the findings.",
+    folder,
+  }), /Return only TASK's exact structured output/);
+  assert.match(vendorTextForSpawn({
+    fromTitle: "Article review",
+    text: "Return only JSON with the findings.",
+    folder,
+    debug: true,
+  }), /BASELINE, REPRODUCTION, CAUSE, CHANGE, VERIFICATION, HEAD, and STATUS/);
   assert.match(missionBrief, /FINDING: critical/);
   const loopBrief = formatWorkerPrompt({
     fromTitle: "Walt",

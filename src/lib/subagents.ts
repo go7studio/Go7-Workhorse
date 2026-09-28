@@ -1562,7 +1562,16 @@ export function parseWorkerHandoff(raw: unknown): WorkerHandoff | undefined {
   };
 }
 
-export function formatFreshHandoffPrompt(handoff: WorkerHandoff): string {
+function requestsStrictStructuredOutput(task: string): boolean {
+  return task.split(/\r?\n/).some((line) =>
+    /^\s*(?:[-*]\s*)?(?:please\s+)?(?:return|reply|respond|output|write|emit)(?:\s+with)?\s+only\s+(?:(?:a|an|the|raw|valid)\s+)*(?:json|csv|xml|yaml)\b/i.test(line) ||
+    /^\s*(?:json|csv|xml|yaml)\s+only\s*[.!]?\s*$/i.test(line),
+  );
+}
+
+export function formatFreshHandoffPrompt(handoff: WorkerHandoff, strictStructuredOutput = requestsStrictStructuredOutput(
+  [handoff.summary, handoff.nextSteps ?? ""].join("\n"),
+)): string {
   const lines = [
     "ROLE: worker",
     "SEED: fresh",
@@ -1574,12 +1583,17 @@ export function formatFreshHandoffPrompt(handoff: WorkerHandoff): string {
   if (handoff.evidence) lines.push(`evidence: ${handoff.evidence}`);
   if (handoff.nextSteps) lines.push(`next: ${handoff.nextSteps}`);
   if (handoff.blocker) lines.push(`blocker: ${handoff.blocker}`);
-  lines.push("", "Do this slice only. Quote real files. Return the report as plain text.");
-  lines.push("When you have review findings, append one fixed four-line receipt per finding:");
-  lines.push("FINDING: critical|high|medium|low");
-  lines.push("TITLE: <short finding>");
-  lines.push("FILE: <repo-relative path:line>");
-  lines.push("EVIDENCE: <one-line concrete evidence>");
+  lines.push("", "Do this slice only. Quote real files.");
+  if (strictStructuredOutput) {
+    lines.push("Return only the handoff's exact structured output. Do not add markdown fences, finding receipts, or explanations outside its schema.");
+  } else {
+    lines.push("Return the report as plain text.");
+    lines.push("When you have review findings, append one fixed four-line receipt per finding:");
+    lines.push("FINDING: critical|high|medium|low");
+    lines.push("TITLE: <short finding>");
+    lines.push("FILE: <repo-relative path:line>");
+    lines.push("EVIDENCE: <one-line concrete evidence>");
+  }
   return lines.join("\n");
 }
 
@@ -1621,7 +1635,9 @@ export function vendorTextForSpawn(
     const handoff =
       input.handoff ??
       (input.text.trim() ? { status: "ok", summary: input.text.trim() } : undefined);
-    if (handoff) return formatFreshHandoffPrompt(handoff);
+    if (handoff) return formatFreshHandoffPrompt(handoff, !input.debug && !input.missionIteration && requestsStrictStructuredOutput(
+      [handoff.summary, handoff.nextSteps ?? ""].join("\n"),
+    ));
   }
   return formatWorkerPrompt(input);
 }
@@ -1686,9 +1702,7 @@ export function formatWorkerPrompt(input: WorkerBriefInput): string {
   const task = stripSpawnPreamble(input.text) || input.text.trim();
   // A strict data slice must not receive the ordinary prose/receipt suffix:
   // it makes JSON-only worker answers unparseable even when the model obeys TASK.
-  const strictStructuredOutput = !input.debug && !input.missionIteration &&
-    (/(?:^|[.!?]\s+|\n)\s*(?:please\s+)?(?:return|reply|respond|output)\s+only\s+(?:(?:a|an|the)\s+)?(?:valid\s+)?(?:json|csv|xml|yaml)\b/im.test(task) ||
-      /\b(?:json|csv|xml|yaml)\s+only\b/i.test(task));
+  const strictStructuredOutput = !input.debug && !input.missionIteration && requestsStrictStructuredOutput(task);
   const lines = [
     input.mission ? "ROLE: mission coordinator" : "ROLE: worker",
     `ORCHESTRATOR: ${input.fromTitle.trim() || "another agent"}`,

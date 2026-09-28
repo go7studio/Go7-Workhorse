@@ -10255,6 +10255,24 @@ test("desk builds one named join prompt and syncs idle children", () => {
   assert.match(missionBrief, /task coupling, risk, skills, and useful concurrency/);
   assert.match(missionBrief, /Do not fan out for appearance/);
   assert.match(missionBrief, /Workhorse attaches the actual model and effort/);
+  const strictJsonBrief = formatWorkerPrompt({
+    fromTitle: "Article review",
+    text: "Read only the attached page.\n\nReturn only a JSON object with pages and candidates.",
+    folder,
+    mission: true,
+  });
+  assert.match(strictJsonBrief, /ROLE: mission coordinator/);
+  assert.match(strictJsonBrief, /Return only TASK's exact structured output/);
+  assert.doesNotMatch(strictJsonBrief, /Explain the strategy and report every worker used/);
+  assert.doesNotMatch(strictJsonBrief, /Return the report as plain text/);
+  assert.doesNotMatch(strictJsonBrief, /FINDING: critical/);
+  assert.equal(vendorTextForSpawn({
+    fromTitle: "Article review",
+    text: "Read only the attached page.\n\nReturn only a JSON object with pages and candidates.",
+    folder,
+    mission: true,
+  }), strictJsonBrief);
+  assert.match(missionBrief, /FINDING: critical/);
   const loopBrief = formatWorkerPrompt({
     fromTitle: "Walt",
     text: "Finish the unmet checks.",

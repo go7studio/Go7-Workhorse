@@ -1684,6 +1684,11 @@ export function formatWorkerPrompt(input: WorkerBriefInput): string {
   const slice = input.slice?.trim();
   const vendor = input.vendor?.trim();
   const task = stripSpawnPreamble(input.text) || input.text.trim();
+  // A strict data slice must not receive the ordinary prose/receipt suffix:
+  // it makes JSON-only worker answers unparseable even when the model obeys TASK.
+  const strictStructuredOutput = !input.debug && !input.missionIteration &&
+    (/(?:^|[.!?]\s+|\n)\s*(?:please\s+)?(?:return|reply|respond|output)\s+only\s+(?:(?:a|an|the)\s+)?(?:valid\s+)?(?:json|csv|xml|yaml)\b/im.test(task) ||
+      /\b(?:json|csv|xml|yaml)\s+only\b/i.test(task));
   const lines = [
     input.mission ? "ROLE: mission coordinator" : "ROLE: worker",
     `ORCHESTRATOR: ${input.fromTitle.trim() || "another agent"}`,
@@ -1701,7 +1706,7 @@ export function formatWorkerPrompt(input: WorkerBriefInput): string {
     lines.push("Choose a focused or split execution strategy from task coupling, risk, skills, and useful concurrency.");
     lines.push("Focused is valid when one worker can safely own the coupled change; split is valid when an independent slice adds value.");
     lines.push("If split, dispatch one bounded helper before the main work. Do not fan out for appearance.");
-    lines.push("Explain the strategy and report every worker used. Workhorse attaches the actual model and effort to the result.");
+    if (!strictStructuredOutput) lines.push("Explain the strategy and report every worker used. Workhorse attaches the actual model and effort to the result.");
   }
   if (input.missionIteration) {
     lines.push(`ADAPTIVE LOOP: Pass ${input.missionIteration.iteration} of ${input.missionIteration.maxIterations}`);
@@ -1724,12 +1729,16 @@ export function formatWorkerPrompt(input: WorkerBriefInput): string {
   if (input.skills?.length) lines.push("Read every listed SKILL.md fully before acting.");
   lines.push("For one independent check, you may spawn one quick-route helper with at most 5,000 tokens, then await it. That helper cannot spawn again.");
   lines.push("Do not list bots or request another vendor. Do not ask the user. Do not review any other tree.");
-  lines.push("Return the report as plain text.");
-  lines.push("When you have review findings, append one fixed four-line receipt per finding so the desk can carry it without paraphrase:");
-  lines.push("FINDING: critical|high|medium|low");
-  lines.push("TITLE: <short finding>");
-  lines.push("FILE: <repo-relative path:line>");
-  lines.push("EVIDENCE: <one-line concrete evidence>");
+  if (strictStructuredOutput) {
+    lines.push("Return only TASK's exact structured output. Do not add strategy prose, markdown fences, finding receipts, or explanations outside its schema.");
+  } else {
+    lines.push("Return the report as plain text.");
+    lines.push("When you have review findings, append one fixed four-line receipt per finding so the desk can carry it without paraphrase:");
+    lines.push("FINDING: critical|high|medium|low");
+    lines.push("TITLE: <short finding>");
+    lines.push("FILE: <repo-relative path:line>");
+    lines.push("EVIDENCE: <one-line concrete evidence>");
+  }
   lines.push("");
   lines.push("TASK:");
   lines.push(task);

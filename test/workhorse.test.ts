@@ -10292,12 +10292,23 @@ test("desk builds one named join prompt and syncs idle children", () => {
     text: "Return only XML with the findings.",
     folder,
   }), /Return only TASK's exact structured output/);
-  assert.match(vendorTextForSpawn({
+  const debugJsonBrief = vendorTextForSpawn({
     fromTitle: "Article review",
     text: "Return only JSON with the findings.",
     folder,
     debug: true,
-  }), /BASELINE, REPRODUCTION, CAUSE, CHANGE, VERIFICATION, HEAD, and STATUS/);
+  });
+  assert.match(debugJsonBrief, /BASELINE, REPRODUCTION, CAUSE, CHANGE, VERIFICATION, HEAD, and STATUS/);
+  assert.match(debugJsonBrief, /FINDING: critical/);
+  const freshDebugJsonBrief = vendorTextForSpawn({
+    fromTitle: "Article review",
+    text: "Return only JSON with the findings.",
+    folder,
+    seed: "fresh",
+    debug: true,
+  });
+  assert.match(freshDebugJsonBrief, /Return the report as plain text/);
+  assert.match(freshDebugJsonBrief, /FINDING: critical/);
   assert.match(missionBrief, /FINDING: critical/);
   const loopBrief = formatWorkerPrompt({
     fromTitle: "Walt",
@@ -10318,6 +10329,24 @@ test("desk builds one named join prompt and syncs idle children", () => {
   assert.match(loopBrief, /ADAPTIVE LOOP: Pass 2 of 3/);
   assert.match(loopBrief, /Required follow-up belongs to the parent mission loop/);
   assert.match(loopBrief, /helper stops or leaves work incomplete, report continue/);
+  const strictLoopBrief = vendorTextForSpawn({
+    fromTitle: "Walt",
+    text: "Return only JSON with the findings.",
+    folder,
+    mission: true,
+    missionIteration: {
+      id: "mission_1",
+      mode: "adaptive",
+      objective: "Ship verified fixes",
+      acceptanceCriteria: ["Tests pass"],
+      iteration: 2,
+      maxIterations: 3,
+      previousWorkerIds: ["worker_1"],
+      phase: "review",
+    },
+  });
+  assert.match(strictLoopBrief, /Mission status: complete, continue, or blocked/);
+  assert.match(strictLoopBrief, /FINDING: critical/);
   assert.equal(looksLikePermissionQuestion("what sandbox do you have?"), true);
   assert.equal(
     looksLikePermissionQuestion("Permission / Sandbox are workspace facts on this turn."),

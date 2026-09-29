@@ -158,8 +158,8 @@ type WorkhorseBridge = {
   onTerminalEvent?: (handler: (event: import("../electron/terminal-host").TerminalEvent) => void) => () => void;
   loadState: () => Promise<Record<string, unknown>>;
   liveRunIds: () => Promise<string[]>;
-  /** `written: true` only when this exact snapshot was written and the write landed; superseded, refused, or failed saves answer false. */
-  saveState: (state: Record<string, unknown>) => Promise<{ written: boolean } | void>;
+  /** `written: true` only when this exact snapshot was written and the write landed; superseded, refused, or failed saves answer false. `reset` means the main process had no desk to fold a partial save onto, so the next save must carry every chat. */
+  saveState: (state: Record<string, unknown>) => Promise<{ written: boolean; reset?: boolean } | void>;
   /** One routing:decision line in main.log. Optional, like every other bridge method. */
   recordRoutingDecision?: (detail: string) => Promise<void>;
   /** Optional, like every other bridge method: an older shell simply shows the prose. */

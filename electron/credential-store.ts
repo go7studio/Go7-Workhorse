@@ -147,7 +147,14 @@ function record(value: unknown): LooseRecord | null {
 }
 
 function cloneState<T>(value: T): T {
-  return structuredClone(value);
+  // Settings is the only subtree these callers mutate. Cloning the chats as
+  // well walked every transcript on the main process — about 1.4 seconds
+  // each time a live desk saved — and nothing in this file reads a message.
+  if (!value || typeof value !== "object" || Array.isArray(value)) return structuredClone(value);
+  const source = value as Record<string, unknown>;
+  const next = { ...source };
+  if (source.settings && typeof source.settings === "object") next.settings = structuredClone(source.settings);
+  return next as T;
 }
 
 function secureRow(row: LooseRecord, vault: CredentialStore, fallbackId: string): void {

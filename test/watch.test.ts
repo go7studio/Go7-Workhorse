@@ -413,7 +413,8 @@ test("Watch settings and send hold are wired through the desk", () => {
   assert.match(pane, /leftoverUnknownMark/);
   assert.match(pane, /title=\{missing\?\.title\}/);
   assert.doesNotMatch(pane, /allowedPercent \/ 100/);
-  assert.match(pane, /Skip spent bots/);
+  assert.doesNotMatch(pane, /Skip spent bots/);
+  assert.doesNotMatch(pane, /blockSpentSpawns/);
   assert.match(pane, /aria-pressed/);
   assert.doesNotMatch(pane, /setWatchDayBank/);
   assert.doesNotMatch(pane, /aria-label="Day bank"/);
@@ -602,11 +603,10 @@ test("deskCallCatalog marks spent and Watch-held vendors as not callable", () =>
   assert.doesNotMatch(formatDeskRoster(rows), /turned off in Settings/);
   assert.equal(mini?.kind, "custom");
   assert.equal(mini?.name, "MiniMax");
-  // Spent-but-callable is now only reachable with the guard deliberately off.
   const unlocked = deskCallCatalog({
-    settings: { ...settings, watch: { ...DEFAULT_WATCH, lockDaily: false, blockSpentSpawns: false } },
+    settings: { ...settings, watch: { ...DEFAULT_WATCH, lockDaily: false } },
     usage: [],
-    plans: { grok: plan(0, { resetsAt: reset }) },
+    plans: { grok: plan(80, { resetsAt: reset }) },
     permits: {},
     now,
   });
@@ -1327,13 +1327,12 @@ test("a bot with no leftover is not a spawn target, daily bank or not", () => {
   // A healthy vendor is untouched, so the orchestrator still has somewhere to go.
   assert.equal(guarded.find((row) => row.id === "claude")?.canCall, true);
 
-  // The escape hatch: overage or prepaid credit may still be worth spending.
-  const allowed = spent({ ...DEFAULT_WATCH, lockDaily: false, blockSpentSpawns: false });
-  assert.equal(allowed.find((row) => row.id === "grok")?.canCall, true);
-
-  // Older saves predate the flag and still get the guard.
-  assert.equal(normalizeWatch({ lockDaily: false }).blockSpentSpawns, true);
-  assert.equal(normalizeWatch({ blockSpentSpawns: false }).blockSpentSpawns, false);
+  // A saved "allow spent bots" flag is not a setting anymore. It is dropped,
+  // and a bot with no leftover stays off the spawn list.
+  const legacy = { ...DEFAULT_WATCH, lockDaily: false, blockSpentSpawns: false } as Settings["watch"];
+  const savedOff = spent(legacy);
+  assert.equal(savedOff.find((row) => row.id === "grok")?.canCall, false);
+  assert.equal("blockSpentSpawns" in normalizeWatch({ blockSpentSpawns: false }), false);
   assert.equal(normalizeWatch({ spentPercent: 5 }).spentPercent, 5);
 
   // The threshold is adjustable: at 5%, a vendor on 4% left is already out.

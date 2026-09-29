@@ -117,8 +117,6 @@ export function normalizeWatch(raw: unknown): WatchSettings {
     dailyLimitPercent: DAY_SHARE_PERCENT,
     lockDaily: record.lockDaily === true,
     desktopNotify: record.desktopNotify !== false,
-    // Older saves predate the flag and should still get the guard.
-    blockSpentSpawns: record.blockSpentSpawns !== false,
     spentPercent: Number.isFinite(spent) ? Math.min(50, Math.max(0, spent)) : DEFAULT_SPENT_PERCENT,
     ...(lockKeys ? { lockKeys } : {}),
   };
@@ -734,8 +732,6 @@ function deskCallRow(input: {
   overPercent?: number;
   resetsAt?: string;
   holding: boolean;
-  /** Treat no-leftover as un-callable even when the daily bank is not holding. */
-  blockSpent: boolean;
   spentPercent: number;
   burstBlock?: ReturnType<typeof burstWindowBlocksCall>;
 }): DeskCallRow {
@@ -758,11 +754,7 @@ function deskCallRow(input: {
     code = "cannot_start";
     canCall = false;
     reason = input.launchBlocker?.trim() || `${input.name} cannot start on this desk.`;
-  } else if (
-    (input.blockSpent || input.holding) &&
-    input.leftover != null &&
-    input.leftover <= (input.blockSpent ? input.spentPercent : 0.5)
-  ) {
+  } else if (input.leftover != null && input.leftover <= input.spentPercent) {
     // Running out is the vendor's own fact. Gating it on the daily bank let a
     // 0% vendor list as callable, so an orchestrator obeying "spawn only a
     // canCall row" picked it and the worker died at the CLI.
@@ -817,7 +809,6 @@ export function deskCallCatalog(input: {
 }): DeskCallRow[] {
   const statuses = watchVendorStatuses(input);
   const catalogWatch = input.settings.watch ?? DEFAULT_WATCH;
-  const blockSpent = catalogWatch.blockSpentSpawns !== false;
   const spentPercent = Number.isFinite(catalogWatch.spentPercent)
     ? (catalogWatch.spentPercent as number)
     : DEFAULT_SPENT_PERCENT;
@@ -853,7 +844,6 @@ export function deskCallCatalog(input: {
           overPercent: composer?.overPercent,
           resetsAt: composer?.resetsAt,
           holding: Boolean(composer?.holding),
-          blockSpent,
           spentPercent,
           burstBlock: burstWindowBlocksCall(planForKey("cursor:cursor-models"), spentPercent),
         }),
@@ -877,7 +867,6 @@ export function deskCallCatalog(input: {
           overPercent: api?.overPercent,
           resetsAt: api?.resetsAt,
           holding: Boolean(api?.holding),
-          blockSpent,
           spentPercent,
           burstBlock: burstWindowBlocksCall(planForKey("cursor:other-models"), spentPercent),
         }),
@@ -904,7 +893,6 @@ export function deskCallCatalog(input: {
         overPercent: status?.overPercent,
         resetsAt: status?.resetsAt,
         holding: Boolean(status?.holding),
-        blockSpent,
         spentPercent,
         burstBlock: burstWindowBlocksCall(planForKey(id), spentPercent),
       }),
@@ -934,7 +922,6 @@ export function deskCallCatalog(input: {
         overPercent: status?.overPercent,
         resetsAt: status?.resetsAt,
         holding: Boolean(status?.holding),
-        blockSpent,
         spentPercent,
         burstBlock: burstWindowBlocksCall(planForKey(`bot:${bot.id}`), spentPercent),
       }),

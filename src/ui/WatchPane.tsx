@@ -67,24 +67,6 @@ export function WatchPane() {
             />
           </div>
         </div>
-        <div className="watch-option link-block">
-          <div className="watch-option-head">
-            <strong>Skip spent bots</strong>
-            <button
-              className={`switch${watch.blockSpentSpawns !== false ? " on" : ""}`}
-              type="button"
-              role="switch"
-              aria-checked={watch.blockSpentSpawns !== false}
-              aria-label="Skip spent bots when spawning"
-              onClick={() => store.updateWatch({ blockSpentSpawns: watch.blockSpentSpawns === false })}
-            />
-          </div>
-          <p className="watch-copy">
-            {watch.blockSpentSpawns !== false
-              ? "Workers never start on a bot with no leftover."
-              : "Workers may start on a spent bot — for overage or prepaid credit."}
-          </p>
-        </div>
       </div>
 
       {statuses.length === 0 ? (

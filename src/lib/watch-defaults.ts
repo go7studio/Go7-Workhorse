@@ -10,6 +10,5 @@ export const DEFAULT_WATCH: WatchSettings = {
   dailyLimitPercent: DAY_SHARE_PERCENT,
   lockDaily: false,
   desktopNotify: true,
-  blockSpentSpawns: true,
   spentPercent: DEFAULT_SPENT_PERCENT,
 };

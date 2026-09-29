@@ -597,7 +597,6 @@ const WATCH_FIELDS = [
   "lockDaily",
   "desktopNotify",
   "lockKeys",
-  "blockSpentSpawns",
   "spentPercent",
 ] as const;
 

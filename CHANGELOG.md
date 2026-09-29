@@ -8,6 +8,31 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.7.2](https://github.com/go7studio/Go7-Workhorse/compare/v0.7.1...v0.7.2) (2026-09-29)
+
+
+### Features
+
+* add bounded TypeSafe Jev MCP tool bridge ([bf729a8](https://github.com/go7studio/Go7-Workhorse/commit/bf729a828fa7d2eb2519dd7507d9de376efeda2d))
+
+
+### Bug Fixes
+
+* always skip spent bots when spawning workers ([7d2293c](https://github.com/go7studio/Go7-Workhorse/commit/7d2293ca8a93cb438d07b9011658bbd99a7f0548))
+* cap Jev MCP calls for bounded runs ([64446a6](https://github.com/go7studio/Go7-Workhorse/commit/64446a68c5ec3ce49e0b317ef52f876b1892247f))
+* cover fresh strict-output workers and narrow detection ([c3d46eb](https://github.com/go7studio/Go7-Workhorse/commit/c3d46ebb8761ea1c8517c89a0311a61a24e13cdd))
+* drag the window from the Workshop header ([8c67a2a](https://github.com/go7studio/Go7-Workhorse/commit/8c67a2a919e38ea0672c412a0af31145e968b30c))
+* let a live orchestrator replace cancelled workers in the same turn ([9b1c551](https://github.com/go7studio/Go7-Workhorse/commit/9b1c551cd90912b94135a8351212bc73d1eb9bb9))
+* mount the Workshop rail only on a chat ([5362a18](https://github.com/go7studio/Go7-Workhorse/commit/5362a18955ba492df416820968512d21c92dfa3c))
+* respect strict worker output schemas ([3babace](https://github.com/go7studio/Go7-Workhorse/commit/3babace18a1800bf0f3267248fa910cbaee1cdc3))
+* retain unattributed tool results without duplicate rows ([d216c3f](https://github.com/go7studio/Go7-Workhorse/commit/d216c3fc01f8665b685510e6a20236fdee05d77d))
+* return uncapped Jev bridge receipts ([f582a7b](https://github.com/go7studio/Go7-Workhorse/commit/f582a7bc39d2015709a3dca21410152afe9e72a6))
+* share Jev call budget across MCP restarts ([1cb7ed2](https://github.com/go7studio/Go7-Workhorse/commit/1cb7ed2d917aa5c978677877eb27535091875e13))
+* skip spent bots, Workshop drag and rail, cancel-then-continue, hot save ([1e6883a](https://github.com/go7studio/Go7-Workhorse/commit/1e6883a8ffe6e24c4a43d15428910042be1ace13))
+* start Jev MCP bridge on Windows paths ([4a885b3](https://github.com/go7studio/Go7-Workhorse/commit/4a885b37b039022641ceaebc1bdae39ea2ffbfda))
+* stop a hot save from cloning every chat while one is running ([da21eb6](https://github.com/go7studio/Go7-Workhorse/commit/da21eb6a204e3b7735ead031cabed425e0bc5165))
+* stop labeling tool results as call arguments ([f400945](https://github.com/go7studio/Go7-Workhorse/commit/f400945d0f5811d1ec29ac1f754c65b69a7e83bf))
+
 ## [0.7.1](https://github.com/go7studio/Go7-Workhorse/compare/v0.7.0...v0.7.1) (2026-09-24)
 
 

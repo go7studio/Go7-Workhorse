@@ -13,14 +13,15 @@
   flex-direction: column;
   border-left: 1px solid var(--line);
   background: var(--bg-sidebar);
-  -webkit-app-region: no-drag;
   transition: width 160ms var(--ease);
 }
 
 .workshop-rail.is-collapsed { width: 76px; }
 .workshop-rail.is-expanded { width: 296px; }
 
-/* Head: the word, the feed age, the way out. */
+/* Head: the word, the feed age, the way out.
+   The desk window has no frame, so this bar is what a pointer drag moves.
+   Buttons stay clickable; the rest of the rail does not drag the window. */
 .workshop-rail-head {
   display: flex;
   align-items: center;
@@ -29,6 +30,27 @@
   padding: 8px 8px 6px 12px;
   border-bottom: 1px solid var(--line);
   flex-shrink: 0;
+  -webkit-app-region: drag;
+  user-select: none;
+}
+
+/* The word and the feed age are the elements under the pointer. Drag has to
+   be on them: a drag region does not come through from a parent, and a
+   no-drag ancestor would block it. */
+.workshop-rail-head .section-label,
+.workshop-rail-head .workshop-chip {
+  -webkit-app-region: drag;
+}
+
+.workshop-rail-head button,
+.workshop-rail-head a {
+  -webkit-app-region: no-drag;
+}
+
+.workshop-rail-body,
+.workshop-rail-foot,
+.workshop-rail-strip {
+  -webkit-app-region: no-drag;
 }
 
 .workshop-rail-head .section-label {
@@ -511,7 +533,27 @@
 .workshop-chip-mute { color: var(--text-tertiary); }
 
 /* Shared with the breakout window. */
-.workshop-breakout { padding: 24px 28px 40px; overflow: auto; height: 100%; }
+.workshop-breakout { padding: 0 28px 40px; overflow: auto; height: 100%; }
+
+/* Title bar of the detached window. The window has no frame, so this bar moves it. */
+.workshop-breakout .link-head {
+  -webkit-app-region: drag;
+  user-select: none;
+  margin: 0 -28px 16px;
+  padding: 12px 16px 12px 28px;
+  min-height: 48px;
+  border-bottom: 1px solid var(--line);
+}
+
+.workshop-breakout .link-head strong,
+.workshop-breakout .link-head .row-meta {
+  -webkit-app-region: drag;
+}
+
+.workshop-breakout .link-head button,
+.workshop-breakout .link-head a {
+  -webkit-app-region: no-drag;
+}
 .workshop-card { border-top: 1px solid var(--line); padding: 12px 0 16px; }
 .workshop-meter { display: grid; grid-template-columns: 7.5rem 1fr auto; gap: 10px; align-items: center; font-size: var(--text-13); padding: 4px 0; }
 .workshop-track { height: 1px; background: var(--line); }

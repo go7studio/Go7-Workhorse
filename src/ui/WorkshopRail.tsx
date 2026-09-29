@@ -4,6 +4,7 @@ import { feedAge, feedTone, primaryStatus, useWorkshopLive } from "./workshop-li
 import { Chip, Module, PaintWidget, PackCards } from "./workshop-paint";
 import { MediaCreatePanel, packOffersCreate } from "./MediaCreatePanel";
 import { WorkshopBlock } from "./WorkshopBlock";
+import { windowDragProps } from "./window-drag";
 
 /** Rail view state is local to this window. It is never journaled with the desk. */
 const VIEW_KEY = "workhorse.workshop-rail";
@@ -195,7 +196,7 @@ export function WorkshopRail() {
     return (
       <>
         <aside className="workshop-rail is-collapsed" aria-label="Workshop rail">
-          <div className="workshop-rail-head">
+          <div className="workshop-rail-head" {...windowDragProps()}>
             <button
               className="tiny workshop-rail-head-expand"
               type="button"
@@ -233,7 +234,7 @@ export function WorkshopRail() {
   return (
     <>
       <aside className="workshop-rail is-expanded" aria-label="Workshop rail">
-        <div className="workshop-rail-head">
+        <div className="workshop-rail-head" {...windowDragProps()}>
           <span className="section-label">Workshop</span>
           <div className="workshop-rail-head-side">
             <Chip tone={tone} title={status?.asOf ?? status?.reason}>

@@ -371,6 +371,10 @@ type WorkhorseBridge = {
   workshopRevealCollector?: (input: { id: string }) => Promise<boolean>;
   workshopOpenBreakout?: () => Promise<boolean>;
   workshopCloseBreakout?: () => Promise<boolean>;
+  /** Move this window from a header drag. screenX/screenY are the pointer. */
+  beginWindowDrag?: (point: { screenX: number; screenY: number }) => void;
+  moveWindowDrag?: (point: { screenX: number; screenY: number }) => void;
+  endWindowDrag?: () => void;
   deskOpenLocalPath?: (path: string, kind?: "image" | "video") => Promise<boolean>;
   deskRevealLocalPath?: (path: string) => Promise<boolean>;
   localMediaCreate?: (input: {

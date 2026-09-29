@@ -2014,6 +2014,34 @@ app.whenReady().then(async () => {
     shell.showItemInFolder(target);
     return true;
   });
+  const windowDrag = new Map<number, { offsetX: number; offsetY: number }>();
+  const dragPoint = (raw: unknown): { screenX: number; screenY: number } | null => {
+    if (!raw || typeof raw !== "object") return null;
+    const screenX = (raw as { screenX?: unknown }).screenX;
+    const screenY = (raw as { screenY?: unknown }).screenY;
+    if (typeof screenX !== "number" || typeof screenY !== "number") return null;
+    if (!Number.isFinite(screenX) || !Number.isFinite(screenY)) return null;
+    return { screenX, screenY };
+  };
+  ipcMain.on("window:drag-start", (event, raw: unknown) => {
+    const point = dragPoint(raw);
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (!point || !win || win.isDestroyed()) return;
+    const [x, y] = win.getPosition();
+    windowDrag.set(win.id, { offsetX: point.screenX - x, offsetY: point.screenY - y });
+  });
+  ipcMain.on("window:drag-move", (event, raw: unknown) => {
+    const point = dragPoint(raw);
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (!point || !win || win.isDestroyed()) return;
+    const drag = windowDrag.get(win.id);
+    if (!drag) return;
+    win.setPosition(Math.round(point.screenX - drag.offsetX), Math.round(point.screenY - drag.offsetY));
+  });
+  ipcMain.on("window:drag-end", (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (win) windowDrag.delete(win.id);
+  });
   ipcMain.handle("workshop:open-breakout", () => {
     const ok = workshopHost.openBreakout();
     broadcastWorkshopChanged();

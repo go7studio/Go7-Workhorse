@@ -40,6 +40,25 @@ test("the breakout takes the desk's theme from its URL", () => {
   assert.match(read("src/ui/WorkshopBreakout.tsx"), /dataset\.theme = resolvedTheme\(theme/);
 });
 
+test("the Workshop header drag is not under a no-drag ancestor", () => {
+  const css = read("src/styles/workshop.css");
+  const railRule = css.slice(css.indexOf(".workshop-rail {"), css.indexOf(".workshop-rail.is-collapsed"));
+  assert.doesNotMatch(railRule, /no-drag/, "the column must not set no-drag over the header");
+  assert.match(
+    css,
+    /\.workshop-rail-head \.section-label,\s*\.workshop-rail-head \.workshop-chip \{\s*-webkit-app-region:\s*drag/,
+    "the word and the feed age are the drag region",
+  );
+  assert.match(css, /\.workshop-rail-body,\s*\.workshop-rail-foot,\s*\.workshop-rail-strip \{\s*-webkit-app-region:\s*no-drag/);
+  assert.doesNotMatch(css, /\.workshop-breakout \.link-head \.actions \{\s*-webkit-app-region:\s*no-drag/);
+  const rail = read("src/ui/WorkshopRail.tsx");
+  assert.match(rail, /windowDragProps\(\)/);
+  assert.match(rail, />\s*Detach\s*</);
+  assert.match(rail, /workshop-rail-manage/);
+  assert.match(read("src/ui/WorkshopBreakout.tsx"), /windowDragProps\(\)/);
+  assert.match(read("electron/main.ts"), /window:drag-move/);
+});
+
 test("desk traffic goes to the desk window, not the first or every window", () => {
   const main = read("electron/main.ts");
   assert.match(main, /let deskWindow: BrowserWindow \| null = null;/);

@@ -1360,10 +1360,10 @@ dbe752fa7f4f  .bot-model-more:hover
 0cadb8ff3a1d  .bot-models .setup-models button[disabled]
 d6f7f9ea4789  .subagent-resume
 a34b3fb3f3d9  .subagent-resume:hover
-a3977c19aa1a  .workshop-rail
+4f237d5b4bee  .workshop-rail
 834e2a7ba250  .workshop-rail.is-collapsed
 7b1afda7c325  .workshop-rail.is-expanded
-fa8212891bc8  .workshop-rail-head
+28540252436f  .workshop-rail-head
 2b9aa835ab68  .workshop-rail-head .section-label
 52454228ca93  .workshop-rail-head-side
 662614235010  .workshop-rail-toggle, .workshop-fold
@@ -1442,7 +1442,7 @@ c858f4c6e1af  .workshop-chip
 219d9c73a0d0  .workshop-chip-ok
 38577ccb6de8  .workshop-chip-warn
 2564c4b8b13c  .workshop-chip-mute
-44a793e4f000  .workshop-breakout
+3b0cefebbb23  .workshop-breakout
 0826b80ec30e  .workshop-card
 3f10b0bc13ef  .workshop-meter
 2e2f744a9926  .workshop-track

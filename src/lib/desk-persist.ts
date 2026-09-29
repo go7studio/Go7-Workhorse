@@ -108,3 +108,34 @@ export function persistDelayMs(input: { settled: boolean; busy: boolean; dirtySi
   const debounce = input.busy ? 2_000 : 400;
   return Math.max(0, Math.min(debounce, input.dirtySince + PERSIST_MAX_WAIT_MS - input.now));
 }
+
+type DeskSession = AppState["sessions"][number];
+
+/**
+ * What the renderer sends when the save timer fires.
+ *
+ * The first save of a run carries every listed chat, so the main process has
+ * a complete desk. After that, while any chat is running or waiting, only the
+ * chats whose object moved go across. The main process still holds the rest
+ * from the previous save; shipping them again is a structured clone of every
+ * transcript on that process, and that clone is what froze the window for
+ * about 1.4 seconds every ten seconds while several chats streamed.
+ */
+export function hotSavePayload(input: {
+  state: AppState;
+  sessions: readonly DeskSession[];
+  activeSessionId: string | null;
+  sent: ReadonlyMap<string, DeskSession>;
+  busy: boolean;
+}): { body: Record<string, unknown>; sent: Map<string, DeskSession>; hot: boolean } {
+  const sent = new Map(input.sessions.map((session) => [session.id, session]));
+  const hot = input.busy && input.sent.size > 0;
+  const changed = hot ? input.sessions.filter((session) => input.sent.get(session.id) !== session) : input.sessions;
+  const body: Record<string, unknown> = {
+    ...(input.state as unknown as Record<string, unknown>),
+    sessions: changed,
+    activeSessionId: input.activeSessionId,
+  };
+  if (hot) body.sessionOrder = input.sessions.map((session) => session.id);
+  return { body, sent, hot };
+}

@@ -152,6 +152,11 @@ export type WriteStateOptions = {
   // fsync; the flush before the backup copy costs ~7 ms against a ~34 ms copy. The growth
   // trigger (>= 4 MB since the last flush) lives in main.ts beside the save cadence.
   fsync?: boolean;
+  /**
+   * Bytes already prepared by the caller. When this is set, the write does not
+   * clone or stringify the desk again — that second pass was the multi-chat hang.
+   */
+  text?: string;
 };
 
 export async function writeVersionedStateAsync(
@@ -160,12 +165,22 @@ export async function writeVersionedStateAsync(
   protect: (state: PersistableState) => PersistableState,
   options: WriteStateOptions = {},
 ): Promise<PersistableState> {
-  const migrated = migrateState(state);
-  const protectedState = migrateState(protect(migrated));
-  // Serialize before the first await: everything that can hold the loop —
-  // clones above, stringify here — happens on the caller's tagged stretch,
-  // and what follows is genuinely off-thread.
-  const text = JSON.stringify(protectedState);
+  // A caller that already built the bytes — the hot save, which serialises
+  // only the chats that moved — must not have this function walk the desk
+  // again. `protect` stays the path for every other caller.
+  let protectedState: PersistableState;
+  let text: string;
+  if (typeof options.text === "string") {
+    protectedState = state;
+    text = options.text;
+  } else {
+    const migrated = migrateState(state);
+    protectedState = migrateState(protect(migrated));
+    // Serialize before the first await: everything that can hold the loop —
+    // clones above, stringify here — happens on the caller's tagged stretch,
+    // and what follows is genuinely off-thread.
+    text = JSON.stringify(protectedState);
+  }
   if (options.rotateBackups !== false) await rotateFileBackupsAsync(file);
   await atomicWriteTextAsync(file, text, undefined, { fsync: options.fsync ?? options.rotateBackups !== false });
   return protectedState;

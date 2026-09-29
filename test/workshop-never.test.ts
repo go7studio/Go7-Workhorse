@@ -145,7 +145,7 @@ test("Settings shows the exact URLs at confirm time, flushes settings, and never
   const themeIdx = app.indexOf("dataset.theme = resolvedTheme");
   const workshopIdx = app.indexOf("if (isWorkshopSurface())");
   assert.ok(themeIdx >= 0 && workshopIdx > themeIdx, "theme must apply before workshop early return");
-  assert.match(app, /<WorkshopRail \/>/);
+  assert.match(app, /\{surface === "session" && <WorkshopRail \/>/);
   const method = read("workshop/METHOD.md");
   assert.match(method, /Does not/);
   assert.match(method, /workshop:install-repo/);

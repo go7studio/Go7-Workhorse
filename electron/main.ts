@@ -87,8 +87,9 @@ import {
 } from "./process-registry";
 import { clearPerfCause, setPerfCause, stallThresholdMs, startPerfHeartbeat } from "./perf-heartbeat";
 import { offloadStateTranscripts, readTranscriptSidecar, repairRetiredSidecars, transcriptSidecarPath } from "./transcript-store";
+import { createHotDeskMemory, mergeDeskSave, prepareDeskSaveText, type HotDeskMemory } from "./hot-desk-save";
 import { applyComposerDrafts, type ComposerDraftSnap } from "../src/lib/chats";
-import { createSaveQueue, dueByInterval, readComposerDraftFile, readStringMapFile, readVersionedState, sameJsonValue, STATE_BACKUP_INTERVAL_MS, STATE_FSYNC_INTERVAL_MS, syncFileInPlace, worktreeKeepSet,
+import { createSaveQueue, dueByInterval, migrateState, readComposerDraftFile, readStringMapFile, readVersionedState, sameJsonValue, STATE_BACKUP_INTERVAL_MS, STATE_FSYNC_INTERVAL_MS, syncFileInPlace, worktreeKeepSet,
   worktreeResumableSet, worktreePruneDecision, writeComposerDraftFile, writeStringMapFile, writeVersionedState, writeVersionedStateAsync } from "./state-persistence";
 import { createDebouncedWrite, setAsideNewerState } from "./state-persistence";
 import { boundInstances } from "../src/lib/file-instances";
@@ -660,6 +661,10 @@ let lastStateFsyncAt = 0;
  * after a newer one, and a burst of saves cannot pile whole desks up in memory
  * (see `createSaveQueue`). The handler returns without holding the IPC.
  */
+/** The desk the last save folded onto. Idle chats stay these objects, so a later hot tick does not clone them. */
+let residentDesk: Persistable | null = null;
+const hotDeskMemory: HotDeskMemory = createHotDeskMemory();
+
 const stateSaves = createSaveQueue<Persistable>((state) => writeState(state), {
   // An empty snapshot never takes a richer one's place in the queue, for the
   // reason writeState refuses to put one on disk over a richer file.
@@ -750,16 +755,27 @@ async function writeState(state: Persistable): Promise<boolean> {
     const dueForFlush = dueByInterval(lastStateFsyncAt, now, STATE_FSYNC_INTERVAL_MS);
     const grew = sizeBefore - stateBytesAtLastFsync >= STATE_FSYNC_GROWTH_BYTES;
     const fsync = rotateBackups || dueForFlush || grew;
-    const pending = writeVersionedStateAsync(
-      file,
-      state,
-      (snapshot) =>
-        offloadStateTranscripts(
-          offloadStateAttachments(protectStateCredentialsForSave(snapshot, credentialStore()), app.getPath("userData")),
-          app.getPath("userData"),
-        ),
-      { rotateBackups, fsync },
-    );
+    const userData = app.getPath("userData");
+    const prepared = prepareDeskSaveText(migrateState(state), hotDeskMemory, {
+      protectSecrets: (snapshot) => protectStateCredentialsForSave(snapshot, credentialStore()),
+      offloadFull: (snapshot) => offloadStateTranscripts(offloadStateAttachments(snapshot, userData), userData),
+      offloadOne: (session, snapshot) => {
+        const wrapped = offloadStateTranscripts(
+          offloadStateAttachments({ sessions: [session], settings: snapshot.settings }, userData),
+          userData,
+        );
+        return Array.isArray(wrapped.sessions) ? wrapped.sessions[0] ?? session : session;
+      },
+    });
+    // The idle chats in this object are the ones the next hot tick will skip.
+    // A newer save can only arrive after the await below, so this assignment
+    // cannot clobber a fold that already happened.
+    if (residentDesk === state) residentDesk = prepared.state;
+    const pending = writeVersionedStateAsync(file, prepared.state, (snapshot) => snapshot, {
+      rotateBackups,
+      fsync,
+      text: prepared.text,
+    });
     queueMicrotask(clearPerfCause);
     await pending;
     // The tail is save work too — the bookmark walk and jobEngine.sync run on
@@ -1794,6 +1810,13 @@ app.whenReady().then(async () => {
       return { written: false };
     }
     if (!state || typeof state !== "object") return { written: false };
+    const merged = mergeDeskSave(residentDesk, state);
+    // A partial list with no desk under it would replace the file with the
+    // chats that happened to be streaming. The renderer clears its memory of
+    // what it sent and ships the whole desk next.
+    if (merged.refuse) return { written: false, reset: true };
+    state = merged.state;
+    residentDesk = state;
     const saved = (state as { sessions?: unknown }).sessions;
     if ("settings" in state) {
       const nextSettings = normalizeSettings((state as { settings?: unknown }).settings);
@@ -1990,6 +2013,34 @@ app.whenReady().then(async () => {
     if (!target) return false;
     shell.showItemInFolder(target);
     return true;
+  });
+  const windowDrag = new Map<number, { offsetX: number; offsetY: number }>();
+  const dragPoint = (raw: unknown): { screenX: number; screenY: number } | null => {
+    if (!raw || typeof raw !== "object") return null;
+    const screenX = (raw as { screenX?: unknown }).screenX;
+    const screenY = (raw as { screenY?: unknown }).screenY;
+    if (typeof screenX !== "number" || typeof screenY !== "number") return null;
+    if (!Number.isFinite(screenX) || !Number.isFinite(screenY)) return null;
+    return { screenX, screenY };
+  };
+  ipcMain.on("window:drag-start", (event, raw: unknown) => {
+    const point = dragPoint(raw);
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (!point || !win || win.isDestroyed()) return;
+    const [x, y] = win.getPosition();
+    windowDrag.set(win.id, { offsetX: point.screenX - x, offsetY: point.screenY - y });
+  });
+  ipcMain.on("window:drag-move", (event, raw: unknown) => {
+    const point = dragPoint(raw);
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (!point || !win || win.isDestroyed()) return;
+    const drag = windowDrag.get(win.id);
+    if (!drag) return;
+    win.setPosition(Math.round(point.screenX - drag.offsetX), Math.round(point.screenY - drag.offsetY));
+  });
+  ipcMain.on("window:drag-end", (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (win) windowDrag.delete(win.id);
   });
   ipcMain.handle("workshop:open-breakout", () => {
     const ok = workshopHost.openBreakout();

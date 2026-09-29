@@ -24,6 +24,9 @@ export function createWorkshopBreakoutWindow(input: {
     icon: input.icon,
     title: "Workshop",
     show: false,
+    movable: true,
+    frame: false,
+    titleBarStyle: "hidden",
     autoHideMenuBar: true,
     webPreferences: {
       preload: input.preload,

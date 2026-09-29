@@ -4,6 +4,7 @@ import { workshopSurfaceTheme } from "../lib/workshop-pack";
 import { Chip, PaintCard } from "./workshop-paint";
 import { MediaCreatePanel, packOffersCreate } from "./MediaCreatePanel";
 import { feedAge, feedTone, primaryStatus, useWorkshopLive } from "./workshop-live";
+import { windowDragProps } from "./window-drag";
 
 /**
  * Optional detach of the rail: the same packs, the same cards, two columns wide.
@@ -29,7 +30,7 @@ export function WorkshopBreakout() {
 
   return (
     <section className="workshop-breakout settings">
-      <div className="link-head">
+      <div className="link-head" {...windowDragProps()}>
         <div>
           <strong>Workshop{on[0] ? " · " + on.map((pack) => pack.name).join(" · ") : ""}</strong>
           <p className="row-meta">Separate add-on · read-only · detached from the desk rail</p>

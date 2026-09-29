@@ -64,7 +64,7 @@ import {
 } from "./chats";
 import { isTerminalRunStatus, settledWorkers, workerJustSettled } from "./worker-settled";
 import { foldersToCount, leftInFolderNote, workerLabel } from "./worker-folders";
-import { deskPersistBodyEqual, persistDelayMs } from "./desk-persist";
+import { deskPersistBodyEqual, hotSavePayload, persistDelayMs } from "./desk-persist";
 import { restoredPanel } from "./restored-panel";
 import { mergeTranscriptRows, normalizeRetentionDays, transcriptFetchPlan, transcriptStillOnDisk } from "./transcript-sidecar";
 import { autoTitleForSend, firstUserText, suggestedTitleForSession, titleAcceptsVendor, titleFromIntent } from "./titles";
@@ -1308,6 +1308,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const persistBody = useRef<AppState | null>(null);
   /** When the oldest change not yet written was made; null once a save goes out. */
   const persistDirtySince = useRef<number | null>(null);
+  /** Object identity of each listed chat in the last payload that left this window. */
+  const persistSentRefs = useRef(new Map<string, AppState["sessions"][number]>());
   /** Chats whose sidecar this desk has already asked for. One ask per chat per launch, hit or miss. */
   const transcriptAsked = useRef<Set<string>>(new Set());
   const draftPersistTimer = useRef<number | null>(null);
@@ -1635,16 +1637,24 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       settledPending.current = false;
       persistDirtySince.current = null;
       const saved = listedChats(applyComposerDrafts(state.sessions, composerDraftsRef.current));
+      const activeSessionId =
+        state.activeSessionId && saved.some((session) => session.id === state.activeSessionId)
+          ? state.activeSessionId
+          : null;
+      // While chats are running, send the ones that moved. The main process
+      // already holds the rest; shipping them again clones every transcript.
+      const payload = hotSavePayload({
+        state,
+        sessions: saved,
+        activeSessionId,
+        sent: persistSentRefs.current,
+        busy,
+      });
+      persistSentRefs.current = payload.sent;
       void window.workhorse
-        ?.saveState({
-          ...state,
-          sessions: saved,
-          activeSessionId:
-            state.activeSessionId && saved.some((session) => session.id === state.activeSessionId)
-              ? state.activeSessionId
-              : null,
-        })
+        ?.saveState(payload.body)
         .then((outcome) => {
+          if (outcome?.reset) persistSentRefs.current = new Map();
           if (!lateAckPending.current.size) return;
           // Only a save that landed may acknowledge. Main coalesces saves under
           // load, refuses an empty snapshot over a richer file, and swallows a

@@ -248,7 +248,7 @@ test("saves flush on rotation, on growth, and never on size alone", () => {
   // Growth stays a reason in its own right, which is what this line pins.
   assert.match(main, /const fsync = rotateBackups \|\| dueForFlush \|\| grew/);
   assert.match(main, /const dueForFlush = dueByInterval\(lastStateFsyncAt, now, STATE_FSYNC_INTERVAL_MS\)/);
-  assert.match(main, /\{ rotateBackups, fsync \}/, "the write has to be told, not just the variable set");
+  assert.match(main, /\{\s*rotateBackups,\s*fsync\b/, "the write has to be told, not just the variable set");
   assert.match(main, /stateBytesAtLastFsync = stateFileSize\(file\)/, "or growth is measured from the wrong mark");
 });
 

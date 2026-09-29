@@ -14,6 +14,11 @@ export function finishedAssignmentSpawnError(parent: Session): string | undefine
   const lineup = parent.lineup;
   const stopped = parent.agentRun?.status === "cancelled";
   if (!stopped && (!lineup || !lineupIsTerminal(lineup))) return undefined;
+  // Cancelled rows can terminalize the wave while the orchestrator is still on
+  // the same turn. The user's ask predates cancel finishedAt, so endedAt alone
+  // would treat replace-the-lineup as a closed assignment. A join marks the
+  // wave notified first; mid-turn cancel-and-replace has not.
+  if (lineupJoinParentIsLive(parent.status) && !lineup?.notifiedAt) return undefined;
   const endedAt = Math.max(
     parent.agentRun?.finishedAt ?? 0,
     lineup?.startedAt ?? 0,

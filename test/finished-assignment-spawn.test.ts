@@ -46,3 +46,51 @@ test("explicit mission continuation survives completion but not cancellation", (
 test("ordinary join instructions stop the checker recursion", () => {
   assert.match(lineupJoinPrompt(parent().lineup), /Do not spawn another worker or checker/);
 });
+
+test("a live orchestrator can cancel Astra workers and spawn replacements in one turn", () => {
+  const session = parent({
+    provider: "codex",
+    model: "gpt-6-astra",
+    status: "running",
+    messages: [
+      {
+        id: "steer",
+        role: "user",
+        text: "Cancel the Astra workers. Continue with Grok 4.7 and Claude Opus 5.5.",
+        createdAt: 1,
+      },
+    ],
+    lineup: {
+      id: "wave",
+      folder: "project",
+      startedAt: 2,
+      rows: [
+        {
+          childId: "w1",
+          title: "Wren · slice",
+          slice: "slice",
+          folder: "project",
+          status: "cancelled",
+          startedAt: 2,
+          finishedAt: 10,
+          vendor: "Codex",
+          model: "GPT-6-Astra",
+        },
+        {
+          childId: "w2",
+          title: "Dexter · slice",
+          slice: "slice",
+          folder: "project",
+          status: "cancelled",
+          startedAt: 2,
+          finishedAt: 10,
+          vendor: "Codex",
+          model: "GPT-6-Astra",
+        },
+      ],
+    },
+  });
+  assert.equal(finishedAssignmentSpawnError(session), undefined);
+  session.lineup!.notifiedAt = 12;
+  assert.match(finishedAssignmentSpawnError(session)!, /new user request/);
+});

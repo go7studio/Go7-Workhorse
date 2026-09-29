@@ -92,7 +92,7 @@ export function App() {
           {surface === "session" && <SessionPane />}
           {surface === "project-home" && <ProjectHome />}
         </main>
-        <WorkshopRail />
+        {surface === "session" && <WorkshopRail />}
       </div>
       <PermissionCard />
       <WatchNotices hidden={surface === "project-home"} />

@@ -366,6 +366,12 @@ test("gallery paints kind chip, label, and path actions", () => {
   assert.match(html, /No local path/);
 });
 
+test("Settings and other non-session surfaces do not mount the desk rail", () => {
+  const app = readFileSync(path.join(ROOT, "src", "App.tsx"), "utf8");
+  assert.match(app, /\{surface === "session" && <WorkshopRail \/>/);
+  assert.doesNotMatch(app, />\s*<WorkshopRail \/>/);
+});
+
 test("empty / all-Off rail is hidden until a pack is On", () => {
   const html = render(createElement(WorkshopRail));
   assert.equal(html, "");

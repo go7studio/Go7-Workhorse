@@ -8,6 +8,14 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.7.3](https://github.com/go7studio/Go7-Workhorse/compare/v0.7.2...v0.7.3) (2026-10-12)
+
+
+### Features
+
+* pick a Grok context window and share a team journal ([335ac8e](https://github.com/go7studio/Go7-Workhorse/commit/335ac8eddcdaae600a29604caf43c95873cf6f66))
+* pick a Grok context window and share a team journal ([f3ab932](https://github.com/go7studio/Go7-Workhorse/commit/f3ab932d3b3eb9d33f27cf2333029d71fb2620e5))
+
 ## [0.7.2](https://github.com/go7studio/Go7-Workhorse/compare/v0.7.1...v0.7.2) (2026-09-29)
 
 

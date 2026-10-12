@@ -128,7 +128,7 @@ export function ContextMeter({
   const pop = useRef<HTMLDivElement>(null);
 
   const windowSize = session
-    ? contextWindowFor(session.provider, session.model, customWindow, session.customBotId)
+    ? contextWindowFor(session.provider, session.model, customWindow, session.customBotId, session.contextWindow)
     : 0;
   const ink = session ? deskInk(session, settings) : undefined;
   const estimate = useMemo(() => {

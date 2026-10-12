@@ -6,7 +6,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { withDeskToolEnv, withoutWorkhorsePrivateEnv } from "./desk-path";
-import { grokSpawnArgs, type GrokLaunchSpec } from "./grok-launch";
+import { grokSpawnArgs, matchContextWindowValue, parseWindowLabel, type GrokLaunchSpec } from "./grok-launch";
 import { titleFromRecord } from "./grok-title";
 import type { PermissionAnswer } from "../src/lib/permissions";
 import { hydrateChatImages } from "./attachment-store";
@@ -1121,6 +1121,10 @@ export class GrokAgent {
    */
   private readonly askTag = `acp-${randomUUID()}`;
   private handlers: GrokAgentHandlers = {};
+  /** Options from the last session/new or session/load, so a warm slot can be told a new window. */
+  private configOptions: unknown;
+  /** Last size this process actually handed the session, so a repeat pick does not ask again. */
+  private appliedContextWindow?: number;
   private closed = false;
   private promptTail: Promise<unknown> = Promise.resolve();
   sessionId = "";
@@ -1134,6 +1138,24 @@ export class GrokAgent {
   /** A host may reuse this slot only while its transport can still take input. */
   get canReuse(): boolean {
     return !this.closed && Boolean(this.child?.stdin.writable);
+  }
+
+  private get isGrok(): boolean {
+    const label = (this.spec.agentLabel ?? "").trim().toLowerCase();
+    return label === "" || label === "grok";
+  }
+
+  /**
+   * Ask a live Grok session for this chat's window without starting a new one.
+   * A size the session does not advertise is left alone.
+   */
+  async preferContextWindow(tokens: number | undefined): Promise<void> {
+    const next = typeof tokens === "number" && Number.isFinite(tokens) && tokens > 0 ? Math.round(tokens) : undefined;
+    if (!next) return;
+    this.spec.contextWindow = next;
+    if (this.appliedContextWindow === next) return;
+    if (!this.sessionId) return;
+    await this.applyAdvertisedContextWindow(this.sessionId, this.configOptions);
   }
 
   async start(options?: { vendorSessionId?: string }): Promise<GrokStartResult> {
@@ -1215,6 +1237,7 @@ export class GrokAgent {
    */
   private async applySessionConfig(sessionId: string, sessionNew: Record<string, unknown>): Promise<void> {
     const raw = sessionNew.configOptions;
+    this.configOptions = raw;
     const isCursor = (this.spec.agentLabel ?? "").trim().toLowerCase() === "cursor";
     const wanted: { id: string; value: string }[] = [];
     const effort = this.spec.effort?.trim();
@@ -1270,6 +1293,39 @@ export class GrokAgent {
         if (unlisted) throw new Error(modelNotOffered(this.spec.agentLabel, want.value));
         /* a preference is not a reason to lose the session */
       }
+    }
+    await this.applyAdvertisedContextWindow(sessionId, raw);
+  }
+
+  /**
+   * Grok lists a context-window option only when the model has more than one
+   * size. Send the choice it already spells, and only that. Claude, Codex,
+   * and Cursor never get this call.
+   */
+  private async applyAdvertisedContextWindow(sessionId: string, raw: unknown): Promise<void> {
+    const tokens = this.spec.contextWindow;
+    if (!this.isGrok || typeof tokens !== "number" || !(tokens > 0) || !Array.isArray(raw)) return;
+    const option = raw.find((item): item is { id?: unknown; currentValue?: unknown; options?: unknown } => {
+      if (!item || typeof item !== "object") return false;
+      const id = (item as { id?: unknown }).id;
+      return typeof id === "string" && /context[_-]?window/i.test(id);
+    });
+    if (!option || typeof option.id !== "string") return;
+    const value = matchContextWindowValue(tokens, option);
+    if (!value) return;
+    const wanted = Math.round(tokens);
+    if (
+      option.currentValue === value ||
+      (typeof option.currentValue === "string" && parseWindowLabel(option.currentValue) === wanted)
+    ) {
+      this.appliedContextWindow = wanted;
+      return;
+    }
+    try {
+      await this.request("session/set_config_option", { sessionId, configId: option.id, value });
+      this.appliedContextWindow = wanted;
+    } catch {
+      /* a preference is not a reason to lose the session */
     }
   }
 

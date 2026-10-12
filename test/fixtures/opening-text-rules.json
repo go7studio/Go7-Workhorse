@@ -349,9 +349,10 @@
     },
     {
       "was": "If the user asks what the preview says, quote this chat’s preview first; list other live chats only if they ask.",
-      "now": "Quote this chat’s preview first and list other chats only if the user asks.",
+      "now": "If the user asks what the preview says, quote this chat’s preview first and list other chats only if the user asks.",
       "keeps": [
-        "Quote this chat’s preview first",
+        "If the user asks what the preview says",
+        "quote this chat’s preview first",
         "list other chats only if the user asks"
       ]
     },

@@ -8,6 +8,8 @@ type GrokPromptBridgeInput = {
   images?: import("./lib/types").ChatImage[];
   model: string;
   effort: import("./lib/types").EffortLevel | null;
+  /** Window this chat picked, when the model offers more than one. */
+  contextWindow?: number;
   mode: import("./lib/types").PermissionMode;
   cwd: string;
   vendorSessionId?: string;
@@ -107,6 +109,19 @@ type WorkhorseBridge = {
     target: "grok" | "codex" | "claude" | "cursor";
   }) => Promise<import("./lib/types").DeskExportResult>;
   pickFile: () => Promise<string | null>;
+  teamPickFolder?: () => Promise<import("./lib/project").PickedFolder | null>;
+  teamDevice?: () => Promise<string>;
+  teamRead?: (
+    folder: string,
+    journalId: string,
+  ) => Promise<{ events: import("./lib/team").TeamEvent[]; presence: import("./lib/team").PresenceBeat[]; error?: string }>;
+  teamAppend?: (
+    folder: string,
+    journalId: string,
+    device: string,
+    events: import("./lib/team").TeamEvent[],
+  ) => Promise<{ written: number; refused: number }>;
+  teamPresence?: (folder: string, journalId: string, beat: import("./lib/team").PresenceBeat) => Promise<boolean>;
   pickAttach?: () => Promise<string[]>;
   pickLocalComputeTokenFile?: () => Promise<string | null>;
   mediaSrc: (href: string, cwd?: string, vendorSessionId?: string) => Promise<string | null>;

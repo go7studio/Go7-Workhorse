@@ -158,8 +158,8 @@ test("the missing-folder answer is something React can redraw on", () => {
   assert.match(store, /missingFolders\.current = next;\s*\n\s*setMissingFolderPaths\(next\);/, "the ref and the state must move together");
   assert.match(store, /if \(live\) applyMissingFolders\(new Set\(gone\)\)/, "the probe's answer must go through it");
   // And the memo has to depend on it, or the new value never leaves the provider.
-  const deps = store.slice(store.indexOf("    }),\n    [\n      state,"));
-  assert.match(deps.slice(0, 600), /\n      missingFolderPaths,\n/);
+  const deps = store.slice(store.indexOf("    }),\n    [\n      team,\n      state,"));
+  assert.match(deps.slice(0, 800), /\n      missingFolderPaths,\n/);
 });
 
 test("Project Home shows a linked folder that is not there", () => {

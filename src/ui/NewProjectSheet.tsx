@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { folderName } from "../lib/id";
 import { useStore } from "../lib/store";
+import { JoinTeamField } from "./TeamBlock";
 
 function pathFromDropped(file: File): string {
   const full = window.workhorse?.pathForFile?.(file)?.trim() ?? "";
@@ -132,6 +133,7 @@ export function NewProjectSheet() {
             <span>Choose or drop folders.</span>
           </button>
         </div>
+        <JoinTeamField onJoined={closeSheet} />
         <div className="actions">
           <button className="ghost" type="button" onClick={closeSheet}>
             Cancel

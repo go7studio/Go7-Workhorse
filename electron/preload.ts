@@ -37,6 +37,19 @@ contextBridge.exposeInMainWorld("workhorse", {
     ipcRenderer.invoke("desk:delete-skill", dir) as Promise<import("../src/lib/types").DeskExportResult>,
   pushSkill: (input: { dir: string; name?: string; target: "grok" | "codex" | "claude" | "cursor" }) =>
     ipcRenderer.invoke("desk:push-skill", input) as Promise<import("../src/lib/types").DeskExportResult>,
+  teamPickFolder: () =>
+    ipcRenderer.invoke("team:pick-folder") as Promise<import("../src/lib/project").PickedFolder | null>,
+  teamDevice: () => ipcRenderer.invoke("team:device") as Promise<string>,
+  teamRead: (folder: string, journalId: string) =>
+    ipcRenderer.invoke("team:read", folder, journalId) as Promise<{
+      events: import("../src/lib/team").TeamEvent[];
+      presence: import("../src/lib/team").PresenceBeat[];
+      error?: string;
+    }>,
+  teamAppend: (folder: string, journalId: string, device: string, events: import("../src/lib/team").TeamEvent[]) =>
+    ipcRenderer.invoke("team:append", folder, journalId, device, events) as Promise<{ written: number; refused: number }>,
+  teamPresence: (folder: string, journalId: string, beat: import("../src/lib/team").PresenceBeat) =>
+    ipcRenderer.invoke("team:presence", folder, journalId, beat) as Promise<boolean>,
   pickFile: () => ipcRenderer.invoke("file:pick") as Promise<string | null>,
   pickAttach: () => ipcRenderer.invoke("attach:pick") as Promise<string[]>,
   pickLocalComputeTokenFile: () => ipcRenderer.invoke("localCompute:pickTokenFile") as Promise<string | null>,

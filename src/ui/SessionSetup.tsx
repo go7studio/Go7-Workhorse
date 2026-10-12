@@ -4,7 +4,7 @@ import { customBotEnabled, customBotModels } from "../lib/custom-bots";
 import { makerLabel, modelChipLabel, parseModelId } from "../lib/model-groups";
 import { cursorFamilyId } from "../lib/cursor-catalog";
 import { cursorWatchLane, type CursorWatchKey } from "../lib/cursor-lane";
-import { contextWindowFor, defaultModel, effortLabel, effortStopAt, effortStopPos, effortsFor, formatWindow, modelName, modelsForPicker, withEffort } from "../lib/models";
+import { contextWindowFor, contextWindowsFor, defaultModel, effortLabel, effortStopAt, effortStopPos, effortsFor, formatWindow, modelName, modelsForPicker, withEffort } from "../lib/models";
 import { hasAttachedLlm, vendorEnabled, vendorLabel, vendorTint } from "../lib/settings";
 import { sessionEnvironmentKind } from "../lib/session-environment";
 import { useActiveSession, useStore } from "../lib/store";
@@ -48,6 +48,7 @@ export function SessionSetup({ onClose }: { onClose: () => void }) {
     setMode,
     setSandbox,
     setSessionEffort,
+    setSessionContextWindow,
     setSessionEnvironment,
     setSessionModel,
     setSessionRoutingMode,
@@ -150,6 +151,14 @@ export function SessionSetup({ onClose }: { onClose: () => void }) {
   const routeLabel = session.routingMode === "auto"
     ? `Auto${session.routingDecision?.reason ? ` · ${session.routingDecision.reason}` : ""}`
     : "";
+  const contextSizes = contextWindowsFor(session.provider, session.model);
+  const selectedWindow = contextWindowFor(
+    session.provider,
+    session.model,
+    undefined,
+    session.customBotId,
+    session.contextWindow,
+  );
 
   return (
     <div
@@ -182,7 +191,7 @@ export function SessionSetup({ onClose }: { onClose: () => void }) {
           <div>
             <strong>Model</strong>
           </div>
-          <span className="setup-current">{routeLabel ? `${routeLabel} · ` : ""}{formatWindow(contextWindowFor(session.provider, session.model, undefined, session.customBotId))} context</span>
+          <span className="setup-current">{routeLabel ? `${routeLabel} · ` : ""}{formatWindow(selectedWindow)} context</span>
         </div>
 
         <div className="setup-subgroup">
@@ -289,7 +298,7 @@ export function SessionSetup({ onClose }: { onClose: () => void }) {
                     onClick={() => setSessionModel(session.provider, model.id)}
                   >
                     <strong>{modelName(session.provider, model.id)}</strong>
-                    <span>{formatWindow(model.contextWindow)}</span>
+                    <span>{formatWindow(on ? selectedWindow : model.contextWindow)}</span>
                   </button>
                 );
               })}
@@ -426,6 +435,30 @@ export function SessionSetup({ onClose }: { onClose: () => void }) {
               ))}
             </div>
           </div>
+            </section>
+          )}
+          {contextSizes.length > 1 && (
+            <section className="setup-card setup-context-card">
+              <div className="setup-heading compact">
+                <div>
+                  <strong>Context</strong>
+                </div>
+                <span className="setup-current">{formatWindow(selectedWindow)}</span>
+              </div>
+              <div className="setup-effort setup-context" role="listbox" aria-label="Context window">
+                {contextSizes.map((size) => (
+                  <button
+                    key={size}
+                    type="button"
+                    className={size === selectedWindow ? "on" : undefined}
+                    aria-selected={size === selectedWindow}
+                    onClick={() => setSessionContextWindow(size)}
+                  >
+                    {formatWindow(size)}
+                  </button>
+                ))}
+              </div>
+              <p className="row-meta">How much this chat can hold.</p>
             </section>
           )}
         </div>

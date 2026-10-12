@@ -88,6 +88,8 @@ import {
 import { clearPerfCause, setPerfCause, stallThresholdMs, startPerfHeartbeat } from "./perf-heartbeat";
 import { offloadStateTranscripts, readTranscriptSidecar, repairRetiredSidecars, transcriptSidecarPath } from "./transcript-store";
 import { createHotDeskMemory, mergeDeskSave, prepareDeskSaveText, type HotDeskMemory } from "./hot-desk-save";
+import { appendTeamEvents, readTeamJournal, readTeamPresence, teamDeviceId, writeTeamPresence } from "./team-journal";
+import { uid } from "../src/lib/id";
 import { applyComposerDrafts, type ComposerDraftSnap } from "../src/lib/chats";
 import { createSaveQueue, dueByInterval, migrateState, readComposerDraftFile, readStringMapFile, readVersionedState, sameJsonValue, STATE_BACKUP_INTERVAL_MS, STATE_FSYNC_INTERVAL_MS, syncFileInPlace, worktreeKeepSet,
   worktreeResumableSet, worktreePruneDecision, writeComposerDraftFile, writeStringMapFile, writeVersionedState, writeVersionedStateAsync } from "./state-persistence";
@@ -1478,6 +1480,31 @@ app.whenReady().then(async () => {
   ipcMain.handle("folder:pick", () => pickLinkedFolder("Link a folder", "Link"));
 
   ipcMain.handle("folder:pick-export", () => pickLinkedFolder("Send here", "Send", ["createDirectory"]));
+
+  ipcMain.handle("team:pick-folder", () => pickLinkedFolder("Shared team folder", "Use", ["createDirectory"]));
+  ipcMain.handle("team:device", () => teamDeviceId(app.getPath("userData"), () => uid("dev")));
+  ipcMain.handle("team:read", (_event, folder: unknown, journalId: unknown) => {
+    if (typeof folder !== "string" || typeof journalId !== "string") return { events: [], presence: [] };
+    try {
+      return { events: readTeamJournal(folder, journalId), presence: readTeamPresence(folder, journalId) };
+    } catch (error) {
+      return { events: [], presence: [], error: error instanceof Error ? error.message : String(error) };
+    }
+  });
+  ipcMain.handle("team:append", (_event, folder: unknown, journalId: unknown, device: unknown, events: unknown) => {
+    if (typeof folder !== "string" || typeof journalId !== "string" || typeof device !== "string" || !Array.isArray(events)) {
+      return { written: 0, refused: 0 };
+    }
+    return appendTeamEvents(folder, journalId, device, events);
+  });
+  ipcMain.handle("team:presence", (_event, folder: unknown, journalId: unknown, beat: unknown) => {
+    if (typeof folder !== "string" || typeof journalId !== "string") return false;
+    try {
+      return writeTeamPresence(folder, journalId, beat as import("../src/lib/team").PresenceBeat);
+    } catch {
+      return false;
+    }
+  });
 
   ipcMain.handle("desk:list-skills", (_event, projectFolders: unknown) => {
     const folders = Array.isArray(projectFolders)

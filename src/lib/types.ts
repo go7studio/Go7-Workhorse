@@ -106,6 +106,8 @@ export type Project = {
   archivedAt?: number | null;
   folders: LinkedFolder[];
   references: LinkedReference[];
+  /** This desk's link to the project's team journal. Missing on a project that is not shared. */
+  team?: import("./team").TeamLink;
 };
 
 export type ChatMessageKind = "tool" | "compact" | "thought" | "peer" | "subagent";
@@ -151,6 +153,10 @@ export type ChatMessage = {
   peerFromSessionId?: string;
   correlationId?: string;
   memoryIds?: string[];
+  /** Team seat handle of the person who typed this prompt. */
+  seat?: string;
+  /** Attachments whose bytes stayed on the teammate's desk that added them. */
+  teamAttachments?: import("./team").HeldAttachment[];
 };
 
 export type CommandSource = "workhorse" | "grok" | "codex" | "claude" | "skill";
@@ -589,6 +595,11 @@ export type Session = {
   model: string;
   customBotId?: string;
   effort: EffortLevel | null;
+  /**
+   * Window this chat picked, when the model offers more than one.
+   * Missing means the model's own default. A number the model does not offer is ignored.
+   */
+  contextWindow?: number;
   /** Claude Code's Fast mode. Applied as a session config option. */
   fastMode?: boolean;
   /** Claude Code main-thread agent persona, or null for the standard one. */
@@ -690,6 +701,8 @@ export type Session = {
    * removes them. Missing means none are on here.
    */
   workshopPacks?: string[];
+  /** Set on a chat that arrived from a teammate's desk: where it started and where it runs. */
+  team?: import("./team").SessionTeamOrigin;
 };
 
 export type PermissionRequest = {

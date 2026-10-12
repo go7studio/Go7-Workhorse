@@ -11,6 +11,7 @@ import {
   type CompactRowInput,
   type ToolRowInput,
 } from "./grok-events";
+import { LINEUP_FINISHED_NOTICE } from "./lineup";
 import { peelPlanningPreamble, stripOutputFromThought } from "./markdown";
 import { isSessionIntro } from "./session";
 import { describePeerTool, prettyToolTitle } from "./tool-labels";
@@ -78,6 +79,71 @@ export function deskNoticeAsTool(message: ChatMessage): ChatMessage {
   };
 }
 
+/** A wave banner. It is not a chat reply, and it does not end the one in progress. */
+function isLineupStatusMessage(message: ChatMessage): boolean {
+  if (message.role !== "system" || message.kind) return false;
+  const text = message.text.trim();
+  return text === LINEUP_FINISHED_NOTICE || /^(?:\d+ of \d+ workers finished|No worker finished) · /.test(text);
+}
+
+function toolStillOpen(message: ChatMessage): boolean {
+  if (message.kind !== "tool" && message.kind !== "subagent") return false;
+  const status = message.toolStatus || splitToolLine(message.text).status;
+  return !toolIsFinished(status);
+}
+
+/**
+ * The joined answer often arrives as a thought after "All workers finished.",
+ * including when the last Calling failed. That banner is a status line. It
+ * stays in the transcript and must not take the place of the reply. The chat
+ * body reads only assistant text, so the closing thought in that span becomes
+ * the assistant reply. A span that already has prose is left alone, and a
+ * tool that is still running is left alone.
+ */
+export function commitClosingThought(messages: ChatMessage[]): ChatMessage[] {
+  let next = messages;
+  for (let i = 0; i < next.length; i += 1) {
+    const message = next[i];
+    if (!message || !isLineupStatusMessage(message)) continue;
+    let end = next.length;
+    for (let j = i + 1; j < next.length; j += 1) {
+      const later = next[j];
+      if (later?.role === "user" || (later && isLineupStatusMessage(later))) {
+        end = j;
+        break;
+      }
+    }
+    const promoted = promoteReplyAfterStatus(next, i + 1, end);
+    if (promoted !== next) next = promoted;
+  }
+  return next;
+}
+
+function promoteReplyAfterStatus(messages: ChatMessage[], start: number, end: number): ChatMessage[] {
+  let assistantProse = false;
+  let lastWork = -1;
+  let sawTool = false;
+  let openTool = false;
+  for (let i = start; i < end; i += 1) {
+    const message = messages[i];
+    if (!message) continue;
+    if (message.role === "assistant" && !message.kind && message.text.trim()) assistantProse = true;
+    const kind = message.kind;
+    if (kind === "tool" || kind === "subagent") {
+      sawTool = true;
+      if (toolStillOpen(message)) openTool = true;
+    }
+    if (kind === "thought" || kind === "tool" || kind === "compact" || kind === "subagent") lastWork = i;
+  }
+  if (assistantProse || openTool || !sawTool || lastWork < 0) return messages;
+  const last = messages[lastWork];
+  if (last?.kind !== "thought") return messages;
+  const text = collapseThoughtDisplay(last.text ?? "").trim();
+  if (!text) return messages;
+  const reply: ChatMessage = { id: last.id, role: "assistant", text, createdAt: last.createdAt };
+  return messages.map((message, index) => (index === lastWork ? reply : message));
+}
+
 function mergeAssistantMessage(current: ChatMessage | null, message: ChatMessage): ChatMessage {
   if (!current) return message;
   if (message.text.trim() && !current.text.trim()) return { ...current, ...message, id: current.id };
@@ -100,6 +166,7 @@ function pushStep(
 }
 
 export function groupTranscript(messages: ChatMessage[]): TranscriptBlock[] {
+  const source = commitClosingThought(messages);
   const blocks: TranscriptBlock[] = [];
   let tools: ChatMessage[] = [];
   let compacts: ChatMessage[] = [];
@@ -128,7 +195,7 @@ export function groupTranscript(messages: ChatMessage[]): TranscriptBlock[] {
     assistant = null;
   };
 
-  for (const message of messages) {
+  for (const message of source) {
     if (message.role === "user") {
       flush();
       blocks.push({ type: "user", message });

@@ -27,6 +27,7 @@ import { sameSessionPaneDesk, selectSessionPaneDesk } from "../lib/store-select"
 import { Composer } from "./Composer";
 import { GoalBar } from "./GoalBar";
 import { CrewTray } from "./CrewTray";
+import { ChatPresence } from "./TeamBlock";
 import { WatchBanners } from "./WatchNotices";
 import { VendorTasksStrip } from "./VendorTasksStrip";
 import { ChatSpend } from "./ChatSpend";
@@ -658,6 +659,7 @@ export function SessionPane() {
       ) : null}
       <div className="session-notices">
         <VendorTasksStrip tasks={session.vendorTasks} />
+        <ChatPresence session={session} />
         <CrewTray key={session.id} />
         <GoalBar />
         <WatchBanners onSwitchModel={openSetup} setupOpen={setupOpen} />

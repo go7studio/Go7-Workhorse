@@ -13,6 +13,11 @@ export type ModelInfo = {
   name: string;
   effort: boolean;
   contextWindow: number;
+  /**
+   * Sizes this model can run at, when it offers more than one.
+   * `contextWindow` stays the size a new chat uses until someone picks.
+   */
+  contextWindows?: number[];
   reasoningLevels?: ReasoningLevel[];
   /** Other vendor ids that are this same family (effort/fast spellings). */
   aliases?: string[];
@@ -92,9 +97,9 @@ export const CODEX_EFFORTS: ReasoningLevel[] = [
 /** Last-resort list when a vendor cache is missing. Live lists overlay this. */
 export const MODEL_CATALOG: Record<ProviderId, ModelInfo[]> = {
   grok: [
-    { id: "grok-4.7", name: "Grok 4.7", effort: true, contextWindow: 500_000 },
-    { id: "grok-4.6", name: "Grok 4.6", effort: true, contextWindow: 500_000 },
-    { id: "grok-4.5", name: "Grok 4.5", effort: true, contextWindow: 500_000 },
+    { id: "grok-4.7", name: "Grok 4.7", effort: true, contextWindow: 500_000, contextWindows: [256_000, 500_000] },
+    { id: "grok-4.6", name: "Grok 4.6", effort: true, contextWindow: 500_000, contextWindows: [256_000, 500_000] },
+    { id: "grok-4.5", name: "Grok 4.5", effort: true, contextWindow: 500_000, contextWindows: [256_000, 500_000] },
   ],
   claude: [
     { id: "claude-fable-5", name: "Fable 5", effort: true, contextWindow: 1_000_000 },
@@ -621,11 +626,22 @@ function liveCustomWindow(modelId: string, customBotId?: string): number | undef
   return windows.size === 1 ? rows[0]!.contextWindow : undefined;
 }
 
+/** Sizes a chat can switch between. Empty when the model offers only one. */
+export function contextWindowsFor(provider: ProviderId, modelId: string): number[] {
+  const raw = findModel(provider, modelId)?.contextWindows;
+  if (!raw || raw.length < 2) return [];
+  const unique = [
+    ...new Set(raw.filter((value) => Number.isFinite(value) && value > 0).map((value) => Math.round(value))),
+  ].sort((left, right) => left - right);
+  return unique.length > 1 ? unique : [];
+}
+
 export function contextWindowFor(
   provider: ProviderId,
   modelId: string,
   customWindow?: number,
   customBotId?: string,
+  picked?: number,
 ): number {
   if (provider === "custom") {
     // What this slot's own host said, if it said anything. That answer outranks
@@ -647,8 +663,13 @@ export function contextWindowFor(
     const reported = customWindow && customWindow > 0 ? customWindow : 0;
     return Math.max(known, reported) || 128_000;
   }
-  if (provider === "claude") return advertisedClaudeWindow(modelId, findModel(provider, modelId)?.contextWindow);
-  return findModel(provider, modelId)?.contextWindow ?? 128_000;
+  const base =
+    provider === "claude"
+      ? advertisedClaudeWindow(modelId, findModel(provider, modelId)?.contextWindow)
+      : findModel(provider, modelId)?.contextWindow ?? 128_000;
+  const choice = typeof picked === "number" && Number.isFinite(picked) ? Math.round(picked) : 0;
+  if (choice > 0 && contextWindowsFor(provider, modelId).includes(choice)) return choice;
+  return base;
 }
 
 /**

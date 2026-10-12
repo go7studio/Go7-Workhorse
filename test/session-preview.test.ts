@@ -6,6 +6,12 @@ import { buildDeskContext } from "../src/lib/context-preface";
 test("collapsePreviewLabel strips a leading run of Preview:", () => {
   assert.equal(collapsePreviewLabel("Preview: Preview: hello"), "hello");
   assert.equal(collapsePreviewLabel("  preview:  task done  "), "task done");
+  assert.equal(
+    collapsePreviewLabel(
+      'The preview is: "The preview is: "The preview is: "The preview is: ship the kill bar',
+    ),
+    "ship the kill bar",
+  );
 });
 
 test("a second preview computation does not lengthen a snippet that already starts with Preview: Preview:", () => {

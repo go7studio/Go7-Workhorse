@@ -791,6 +791,14 @@
   font-size: var(--text-11);
 }
 
+.session-setup .setup-context {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.setup-context-card .row-meta {
+  margin: 8px 0 0;
+}
+
 .session-setup .setup-split {
   gap: 12px;
 }

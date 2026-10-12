@@ -1,4 +1,5 @@
 import { folderName, uid } from "./id";
+import { normalizeTeamLink } from "./team";
 import type { LinkedFolder, LinkedReference, Project, ReferenceKind } from "./types";
 
 export type CreateWorkhorseProjectInput = {
@@ -241,6 +242,10 @@ export function normalizeProject(raw: unknown): Project | null {
     folders,
     references,
     archivedAt: typeof record.archivedAt === "number" ? record.archivedAt : undefined,
+    ...(() => {
+      const team = normalizeTeamLink(record.team);
+      return team ? { team } : {};
+    })(),
   };
 }
 

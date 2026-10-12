@@ -15,6 +15,7 @@ import { useActiveProject, useStore, volatileFolderPath } from "../lib/store";
 import { EditedList } from "./EditedList";
 import { FileViewer } from "./FileViewer";
 import { SplitHandle } from "./SplitHandle";
+import { TeamBlock } from "./TeamBlock";
 
 export function ProjectHome() {
   const project = useActiveProject();
@@ -214,6 +215,8 @@ export function ProjectHome() {
             </ul>
           )}
         </div>
+
+        <TeamBlock project={project} />
 
         <div className="link-block">
           <div className="link-head">

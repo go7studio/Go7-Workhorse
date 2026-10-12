@@ -18,6 +18,7 @@ import { normalizeCrewModes } from "./workhorse-rules";
 import { normalizeSpawnAllowlist } from "./spawn-allowlist";
 import { folderFromPath } from "./project";
 import { normalizeWorkshopPackIds } from "./workshop-pack";
+import { normalizeHeldAttachments, normalizeSessionTeam } from "./team";
 import type { ChatMessage, CustomBot, EffortLevel, LinkedFolder, MissionCaps, PermissionMode, ProviderId, SandboxProfile, Session } from "./types";
 
 export type BrainStamp = {
@@ -275,6 +276,9 @@ export function normalizeSession(raw: unknown, liveRunIds?: ReadonlySet<string>)
     customBotId:
       typeof record.customBotId === "string" && record.customBotId.trim() ? record.customBotId.trim() : undefined,
     effort: withEffort(provider, model, record.effort ?? "medium"),
+    ...(typeof record.contextWindow === "number" && Number.isFinite(record.contextWindow) && record.contextWindow > 0
+      ? { contextWindow: Math.round(record.contextWindow) }
+      : {}),
     title: typeof record.title === "string" ? record.title : "New chat",
     titleLocked: record.titleLocked === true,
     mode,
@@ -372,6 +376,10 @@ export function normalizeSession(raw: unknown, liveRunIds?: ReadonlySet<string>)
     spawnAllowlist: normalizeSpawnAllowlist((record as { spawnAllowlist?: unknown }).spawnAllowlist),
     missionCaps: normalizeMissionCaps((record as { missionCaps?: unknown }).missionCaps),
     workshopPacks: normalizeWorkshopPackIds((record as { workshopPacks?: unknown }).workshopPacks),
+    ...(() => {
+      const team = normalizeSessionTeam((record as { team?: unknown }).team);
+      return team ? { team } : {};
+    })(),
   };
 }
 
@@ -434,6 +442,11 @@ export function normalizeMessage(raw: unknown): ChatMessage | null {
       typeof record.peerFromSessionId === "string" && record.peerFromSessionId.trim() ? record.peerFromSessionId.trim() : undefined,
     correlationId:
       typeof record.correlationId === "string" && record.correlationId.trim() ? record.correlationId.trim() : undefined,
+    ...(role === "user" && typeof record.seat === "string" && record.seat.trim() ? { seat: record.seat.trim().slice(0, 40) } : {}),
+    ...(() => {
+      const held = normalizeHeldAttachments(record.teamAttachments);
+      return held ? { teamAttachments: held } : {};
+    })(),
     text:
       kind === "tool"
         ? collapseToolText(

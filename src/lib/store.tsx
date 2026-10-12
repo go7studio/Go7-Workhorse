@@ -118,6 +118,7 @@ import {
   DEFAULT_CHOICE,
   applyVendorCatalog,
   contextWindowFor,
+  contextWindowsFor,
   defaultModel,
   findChoice,
   modelName,
@@ -461,6 +462,7 @@ import { applyWorkhorseToggle, isConcreteTheme, isTheme, nextTheme } from "./the
 import { effectiveLearningMode, learningCaptures, normalizeLearning } from "./learning-policy";
 import { normalizeLocalComputeSettings } from "./local-compute";
 import { normalizeWorkshopPackIds, normalizeWorkshopSettings, type WorkshopSettings } from "./workshop-pack";
+import { useTeamDesk, type TeamDeskApi } from "./team-desk";
 import { agentTurnEvidence, learningEvidenceId } from "./learning-agent-evidence";
 import { settleSessionGoals } from "./learning-goal";
 import { BACKFILL_SUMMARY_CHARS, backfillEventId } from "./learning-backfill";
@@ -558,6 +560,7 @@ export type Store = AppState & {
   /** Re-read the desk catalog. A custom host's freshly read model list lands here. */
   refreshVendorModels: () => void;
   setSessionEffort: (effort: EffortLevel) => void;
+  setSessionContextWindow: (tokens: number) => void;
   setSessionEnvironment: (kind: "local" | "worktree") => Promise<{ ok: boolean; message: string }>;
   selectSession: (id: string) => void;
   setComposerDraft: (id: string, text: string, images?: import("./types").ChatImage[], commit?: boolean) => void;
@@ -690,6 +693,8 @@ export type Store = AppState & {
   appUpdateError: string | null;
   checkAppUpdate: (opts?: { reveal?: boolean }) => Promise<AppUpdateCheckResult>;
   applyAppUpdate: (version?: string) => Promise<void>;
+  /** People sharing a project across desks through its journal. Not the crew tray. */
+  team: TeamDeskApi;
 };
 
 type SendOptions = {
@@ -1155,13 +1160,21 @@ function stopDeletedWorkerSessions(before: Session[], after: Session[]) {
 
 function occupancyForSession(
   session:
-    | { provider: ProviderId; model: string; customBotId?: string; messages?: Parameters<typeof estimateMessageTokens>[0] }
+    | {
+        provider: ProviderId;
+        model: string;
+        customBotId?: string;
+        contextWindow?: number;
+        messages?: Parameters<typeof estimateMessageTokens>[0];
+      }
     | undefined,
   draft: UsageDraft,
   seen?: number,
 ): number | undefined {
   if (typeof seen === "number" && seen > 0) return seen;
-  const window = session ? contextWindowFor(session.provider, session.model, undefined, session.customBotId) : 0;
+  const window = session
+    ? contextWindowFor(session.provider, session.model, undefined, session.customBotId, session.contextWindow)
+    : 0;
   if (draft.source === "estimate") {
     const occupying = session?.messages ? estimateMessageTokens(session.messages).tokens : 0;
     return occupancyFromUsage(
@@ -1414,6 +1427,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     [],
   );
   stateRef.current = state;
+  const team = useTeamDesk({ ready, stateRef, setState });
+  const teamRef = useRef(team);
+  teamRef.current = team;
   pathLeasesRef.current = state.leases ?? [];
   plansRef.current = { grok: grokPlan, codex: codexPlan, claude: claudePlan, cursor: cursorPlan, custom: customPlans };
   meterHealthRef.current = customMeterHealth;
@@ -2063,6 +2079,22 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  const setSessionContextWindow = useCallback((tokens: number) => {
+    setState((current) => {
+      const session = current.sessions.find((item) => item.id === current.activeSessionId);
+      if (!session) return current;
+      const pick = Math.round(tokens);
+      if (!contextWindowsFor(session.provider, session.model).includes(pick)) return current;
+      if (session.contextWindow === pick) return current;
+      return {
+        ...current,
+        sessions: current.sessions.map((item) =>
+          item.id === session.id ? { ...item, contextWindow: pick } : item,
+        ),
+      };
+    });
+  }, []);
+
   const setSessionEnvironment = useCallback(async (kind: "local" | "worktree") => {
     const snapshot = stateRef.current;
     const session = snapshot.sessions.find((item) => item.id === snapshot.activeSessionId);
@@ -2447,6 +2479,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const answerPermission = useCallback((id: string, answer: "once" | "session" | "deny") => {
     const pending = stateRef.current.pending.find((item) => item.id === id);
     const session = stateRef.current.sessions.find((item) => item.id === pending?.sessionId);
+    if (pending) teamRef.current.noteAnswer(pending, answer);
     const vendorAsk = pending?.kind === "vendor" ? pending.vendor : undefined;
     const vendorAnswer = pending?.kind === "elevate" && answer !== "deny" ? "once" : answer;
     if (session?.provider === "codex") void window.workhorse?.codexAnswerPermission?.(id, vendorAnswer);
@@ -2581,6 +2614,18 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     if (!text && images.length === 0) return;
 
     const targetSessionId = options?.sessionId ?? stateRef.current.activeSessionId;
+    const teamStop = targetSessionId ? teamRef.current.sendStop(targetSessionId) : null;
+    if (teamStop && targetSessionId) {
+      setState((current) => ({
+        ...current,
+        sessions: current.sessions.map((session) =>
+          session.id === targetSessionId
+            ? { ...session, messages: [...session.messages, { id: uid("msg"), role: "system" as const, text: teamStop, createdAt: Date.now() }] }
+            : session,
+        ),
+      }));
+      return false;
+    }
     const liveSession = stateRef.current.sessions.find((item) => item.id === targetSessionId);
     const palette = liveSession ? commandsForSession(liveSession, deskSkillsRef.current) : [];
     const match = originalText.startsWith("/") ? matchCommand(originalText, palette) : undefined;
@@ -2893,7 +2938,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               const outcome = applyCompactOutcome({
                 leftoverPercent: 0,
                 contextUsed: item.contextUsed,
-                windowSize: contextWindowFor(item.provider, item.model, undefined, item.customBotId),
+                windowSize: contextWindowFor(item.provider, item.model, undefined, item.customBotId, item.contextWindow),
                 omittedMessages: checkpoint.omittedMessages,
                 keptMessages: Math.max(0, visible.length - checkpoint.omittedMessages),
                 summaryChars: checkpoint.summary.length,
@@ -2945,6 +2990,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             vendorSessionId: vendorSessionForSend(session),
             sandbox: session.sandbox,
             mcpServers: mcpServersForSession(stateRef.current.settings.mcpServers, session),
+            contextWindow: session.contextWindow,
           });
           setState((latest) => ({
             ...latest,
@@ -3398,6 +3444,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           crewModes: session.crewModes,
           spawnNames: spawnAllowlistNames(session.spawnAllowlist, stateRef.current.settings),
           mcpServers: mcpServersForSession(stateRef.current.settings.mcpServers, session),
+          contextWindow: session.contextWindow,
           preface: withPortableHistory(buildSessionPreface({
             sessionId: session.id,
             cwd,
@@ -4065,6 +4112,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           vendorSessionId: source.vendorSessionId,
           sandbox: source.sandbox,
           mcpServers: mcpServersForSession(current.settings.mcpServers, source),
+          contextWindow: source.contextWindow,
         })
         .then((result) => {
           if (!result?.vendorSessionId) return;
@@ -4356,6 +4404,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             parentId: session.parentId,
             hidden: session.hidden,
             role,
+            contextWindow: session.contextWindow,
             crewModes: session.crewModes,
             spawnNames: spawnAllowlistNames(session.spawnAllowlist, snapshot.settings),
             restartRuntime,
@@ -8196,7 +8245,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         }
         const occupancy = occupancyFromUsage(
           incoming,
-          liveSession ? contextWindowFor(liveSession.provider, liveSession.model, undefined, liveSession.customBotId) : 0,
+          liveSession
+            ? contextWindowFor(
+                liveSession.provider,
+                liveSession.model,
+                undefined,
+                liveSession.customBotId,
+                liveSession.contextWindow,
+              )
+            : 0,
         );
         if (occupancy !== undefined) {
           grokContextSeen.current[event.sessionId] = occupancy;
@@ -9573,6 +9630,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, [state.watchPermits, state.watchDayMarks, watchStatuses]);
 
   const cancelRun = useCallback((sessionId?: string) => {
+    const asked = sessionId ?? stateRef.current.activeSessionId;
+    if (asked && !teamRef.current.canStop(asked)) return;
     setState((current) => {
       const id = sessionId ?? current.activeSessionId;
       const targets = id ? new Set([id, ...descendantSessionIds(current.sessions, id)]) : new Set<string>();
@@ -9706,6 +9765,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       probeCustomBot,
       refreshVendorModels,
       setSessionEffort,
+      setSessionContextWindow,
       setSessionEnvironment,
       selectSession,
       setComposerDraft,
@@ -9818,8 +9878,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       appUpdateError,
       checkAppUpdate,
       applyAppUpdate,
+      team,
     }),
     [
+      team,
       state,
       ready,
       catalogRev,
@@ -9856,6 +9918,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       probeCustomBot,
       refreshVendorModels,
       setSessionEffort,
+      setSessionContextWindow,
       setSessionEnvironment,
       selectSession,
       setComposerDraft,

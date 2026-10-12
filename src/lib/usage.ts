@@ -441,11 +441,11 @@ export function applyUsageContext(sessions: Session[], usage: UsageEvent[]): Ses
   return sessions.map((session) => {
     const event = latest.get(session.id);
     if (!event) {
-      const window = contextWindowFor(session.provider, session.model, undefined, session.customBotId);
+      const window = contextWindowFor(session.provider, session.model, undefined, session.customBotId, session.contextWindow);
       if (window > 0 && session.contextUsed > window) return { ...session, contextUsed: 0 };
       return session;
     }
-    const window = contextWindowFor(session.provider, session.model, undefined, session.customBotId);
+    const window = contextWindowFor(session.provider, session.model, undefined, session.customBotId, session.contextWindow);
     const occupancy = occupancyFromUsage(
       {
         contextUsed:

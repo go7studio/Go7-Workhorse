@@ -162,6 +162,18 @@ test("every keep-note is quoted out of the new sentence", () => {
   assert.deepEqual(padded, [], `keep-notes padded with sub-spans or scraps:\n${padded.join("\n")}`);
 });
 
+test("quoting the preview keeps its condition", () => {
+  // A standing order to quote the preview first made every reply start with
+  // the last reply. Cursor then stopped the nest as an agent loop.
+  for (const core of [WORKHORSE_SESSION_RULES, CURSOR_SESSION_RULES]) {
+    assert.match(
+      core,
+      /If the user asks what the preview says, quote this chat’s preview first and list other chats only if the user asks\./,
+    );
+    assert.doesNotMatch(core, /\. Quote this chat’s preview first/);
+  }
+});
+
 test("the loose-chat delete keeps its condition", () => {
   // The one this whole fixture exists for. A standing order to call
   // scope=loose, rather than a rule about what to do when the user asks for

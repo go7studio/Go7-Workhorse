@@ -164,6 +164,19 @@ function numberOr(value: unknown, fallback: number): number {
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : fallback;
 }
 
+/** More than one positive size, or nothing. One size is just `contextWindow`. */
+function contextWindowsFrom(raw: unknown): number[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const unique = [
+    ...new Set(
+      raw
+        .map((item) => (typeof item === "number" && Number.isFinite(item) && item > 0 ? Math.round(item) : 0))
+        .filter((item) => item > 0),
+    ),
+  ].sort((left, right) => left - right);
+  return unique.length > 1 ? unique : undefined;
+}
+
 function parseReasoningLevels(raw: unknown): ReasoningLevel[] | undefined {
   if (!Array.isArray(raw)) return undefined;
   const levels: ReasoningLevel[] = [];
@@ -266,12 +279,14 @@ export function parseGrokModelsCache(raw: string): ModelInfo[] {
       ? "Grok 4.7"
       : String(info.name ?? info.display_name ?? info.system_prompt_label ?? id).trim() || id;
     const effort = info.supports_reasoning_effort !== false;
+    const contextWindows = contextWindowsFrom(info.context_windows);
     seen.add(id);
     models.push({
       id,
       name,
       effort,
       contextWindow: numberOr(info.context_window, 500_000),
+      ...(contextWindows ? { contextWindows } : {}),
     });
   }
   return models;
@@ -367,11 +382,13 @@ function deskCatalogRows(raw: unknown): ModelInfo[] | undefined {
     const item = row as Partial<ModelInfo>;
     if (typeof item.id !== "string" || !item.id.trim() || typeof item.name !== "string") continue;
     if (typeof item.contextWindow !== "number" || !Number.isFinite(item.contextWindow) || item.contextWindow <= 0) continue;
+    const contextWindows = contextWindowsFrom(item.contextWindows);
     rows.push({
       id: item.id,
       name: item.name,
       effort: item.effort !== false,
       contextWindow: item.contextWindow,
+      ...(contextWindows ? { contextWindows } : {}),
       ...(Array.isArray(item.reasoningLevels) ? { reasoningLevels: parseReasoningLevels(item.reasoningLevels.map((level) => ({ effort: level?.id, description: level?.hint }))) ?? [] } : {}),
       ...(Array.isArray(item.aliases) ? { aliases: item.aliases.filter((alias): alias is string => typeof alias === "string") } : {}),
     });

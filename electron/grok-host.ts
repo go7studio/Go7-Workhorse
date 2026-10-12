@@ -14,6 +14,8 @@ export type GrokSessionOpenInput = {
   projectId?: string;
   model: string;
   effort: EffortLevel | null;
+  /** Window this chat picked. Kept off the launch key so the native session stays. */
+  contextWindow?: number;
   fastMode?: boolean;
   agentName?: string | null;
   mode: PermissionMode;
@@ -358,7 +360,10 @@ export class GrokSessionHost {
       nextKey: key,
       restartRuntime: input.restartRuntime,
     });
-    if (action === "reuse" && slot) return;
+    if (action === "reuse" && slot) {
+      await slot.agent.preferContextWindow(input.contextWindow);
+      return;
+    }
     slot?.agent.dispose();
     const spec = buildGrokLaunchSpec({
       sessionId: input.sessionId,
@@ -369,6 +374,7 @@ export class GrokSessionHost {
       mode: input.mode,
       sandbox: input.sandbox,
       mcpServers: input.mcpServers,
+      contextWindow: input.contextWindow,
     });
     const agent = new GrokAgent(spec, this.spawn);
     this.starting.add(input.sessionId);

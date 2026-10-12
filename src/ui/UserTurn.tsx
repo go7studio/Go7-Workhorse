@@ -110,6 +110,17 @@ export const UserTurn = memo(function UserTurn({ message, readOnly = false }: { 
         <TimeStamp at={message.createdAt} />
         <div className="say">
           {peer ? <span className="peer-from">From {peer.fromTitle}</span> : null}
+          {!peer && message.seat ? <span className="peer-from">@{message.seat}</span> : null}
+          {message.teamAttachments?.length ? (
+            <div className="say-images">
+              {message.teamAttachments.map((file) => (
+                <span key={file.id} className="say-file" title={file.name}>
+                  {file.name}
+                  <em>on @{file.on}'s desk</em>
+                </span>
+              ))}
+            </div>
+          ) : null}
           {message.images && message.images.length > 0 && (
             <div className="say-images">
               {groupAttachments(message.images).map((group) =>

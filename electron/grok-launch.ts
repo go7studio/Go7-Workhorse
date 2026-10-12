@@ -25,6 +25,12 @@ export type GrokLaunchInput = {
   mcpServers?: McpServerConfig[];
   /** Which rules the CLI is launched with. A worker gets worker rules. */
   role?: DeskRole;
+  /**
+   * Window this chat picked. Not an argv flag: grok has none.
+   * It rides on the launch spec so a new session can ask for it, and it stays
+   * out of the launch key so a change does not drop the native transcript.
+   */
+  contextWindow?: number;
 };
 
 export type GrokMcpEnvVar = { name: string; value: string };
@@ -166,6 +172,8 @@ export type GrokLaunchSpec = {
   agentName?: string | null;
   /** The model is on no list the desk holds; the vendor must accept it or the session fails. */
   unlistedModel?: boolean;
+  /** Grok window this chat picked, in tokens. Omitted when the chat left the default. */
+  contextWindow?: number;
   alwaysApprove: boolean;
   sandbox: SandboxProfile;
   initializeParams: {
@@ -186,6 +194,32 @@ const DEFAULT_EFFORT = "medium";
 export function resolveGrokModel(model: string | null | undefined): string {
   const trimmed = model?.trim();
   return trimmed || DEFAULT_MODEL;
+}
+
+/** "500k", "500000", and "0.5m" are the same size. Anything else is not a size. */
+export function parseWindowLabel(raw: string): number | undefined {
+  const match = /^(\d+(?:\.\d+)?)([km])?$/.exec(raw.trim().toLowerCase().replace(/,/g, "").replace(/\s+/g, ""));
+  if (!match) return undefined;
+  const value = Number(match[1]);
+  if (!Number.isFinite(value) || value <= 0) return undefined;
+  const scale = match[2] === "m" ? 1_000_000 : match[2] === "k" ? 1_000 : 1;
+  return Math.round(value * scale);
+}
+
+/**
+ * The option value that means `tokens`. An open list gets the decimal count.
+ * A listed set gets the choice whose label is that count, such as "500k".
+ */
+export function matchContextWindowValue(tokens: number, option: { options?: unknown }): string | undefined {
+  const wanted = Math.round(tokens);
+  if (!Number.isFinite(wanted) || wanted <= 0) return undefined;
+  const allowed = Array.isArray(option.options)
+    ? option.options
+        .map((choice) => (choice && typeof choice === "object" ? (choice as { value?: unknown }).value : choice))
+        .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+    : [];
+  if (allowed.length === 0) return String(wanted);
+  return allowed.find((value) => parseWindowLabel(value) === wanted);
 }
 
 export function resolveGrokEffort(effort: EffortLevel | string | null | undefined): string {
@@ -258,6 +292,10 @@ export function buildGrokLaunchSpec(input: GrokLaunchInput): GrokLaunchSpec {
   else if (input.mode === "plan") meta.planMode = true;
   const builtIn = workhorseMcpServer(input.sessionId);
   const mcpServers = mergeMcpServers(input.mcpServers, builtIn);
+  const contextWindow =
+    typeof input.contextWindow === "number" && Number.isFinite(input.contextWindow) && input.contextWindow > 0
+      ? Math.round(input.contextWindow)
+      : undefined;
 
   return {
     command: "grok",
@@ -265,6 +303,7 @@ export function buildGrokLaunchSpec(input: GrokLaunchInput): GrokLaunchSpec {
     cwd: input.cwd,
     model,
     effort,
+    ...(contextWindow ? { contextWindow } : {}),
     alwaysApprove,
     sandbox,
     initializeParams: {

@@ -59,13 +59,19 @@ function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" ? (value as Record<string, unknown>) : {};
 }
 
-/** Models echo desk guidance as "Preview: …"; strip a leading run so preview never feeds that back. */
-const PREVIEW_LABEL_RUN = /^(?:Preview\s*:\s*)+/i;
+/**
+ * Models echo desk guidance as "Preview:" or "The preview is:".
+ * A standing order to quote the preview first made each reply the next preview,
+ * and Cursor stopped the nest as an agent loop. Strip a leading run so the
+ * snippet that goes back into the desk is the text under the label.
+ */
+const PREVIEW_ECHO =
+  /^(?:["“”']\s*)?(?:the\s+)?preview\s+is\s*:\s*(?:["“”']\s*)?|^preview\s*:\s*/i;
 
 export function collapsePreviewLabel(text: string): string {
   let value = text.replace(/\s+/g, " ").trim();
-  while (PREVIEW_LABEL_RUN.test(value)) {
-    value = value.replace(PREVIEW_LABEL_RUN, "").trim();
+  for (let guard = 0; guard < 24 && PREVIEW_ECHO.test(value); guard += 1) {
+    value = value.replace(PREVIEW_ECHO, "").trim();
   }
   return value;
 }

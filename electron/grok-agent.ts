@@ -6,7 +6,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { withDeskToolEnv, withoutWorkhorsePrivateEnv } from "./desk-path";
-import { grokSpawnArgs, matchContextWindowValue, parseWindowLabel, type GrokLaunchSpec } from "./grok-launch";
+import { grokSpawnArgs, largestAdvertisedWindow, matchContextWindowValue, parseWindowLabel, type GrokLaunchSpec } from "./grok-launch";
 import { titleFromRecord } from "./grok-title";
 import type { PermissionAnswer } from "../src/lib/permissions";
 import { hydrateChatImages } from "./attachment-store";
@@ -1151,9 +1151,12 @@ export class GrokAgent {
    */
   async preferContextWindow(tokens: number | undefined): Promise<void> {
     const next = typeof tokens === "number" && Number.isFinite(tokens) && tokens > 0 ? Math.round(tokens) : undefined;
-    if (!next) return;
-    this.spec.contextWindow = next;
-    if (this.appliedContextWindow === next) return;
+    if (next) {
+      this.spec.contextWindow = next;
+      if (this.appliedContextWindow === next) return;
+    } else if (this.spec.contextWindow || this.appliedContextWindow) {
+      return;
+    }
     if (!this.sessionId) return;
     await this.applyAdvertisedContextWindow(this.sessionId, this.configOptions);
   }
@@ -1299,18 +1302,22 @@ export class GrokAgent {
 
   /**
    * Grok lists a context-window option only when the model has more than one
-   * size. Send the choice it already spells, and only that. Claude, Codex,
-   * and Cursor never get this call.
+   * size. Send the choice it already spells, and only that. A chat that has
+   * not picked gets the largest advertised size. Claude, Codex, and Cursor
+   * never get this call.
    */
   private async applyAdvertisedContextWindow(sessionId: string, raw: unknown): Promise<void> {
-    const tokens = this.spec.contextWindow;
-    if (!this.isGrok || typeof tokens !== "number" || !(tokens > 0) || !Array.isArray(raw)) return;
+    if (!this.isGrok || !Array.isArray(raw)) return;
+    const explicit = this.spec.contextWindow;
+    const picked = typeof explicit === "number" && explicit > 0 ? Math.round(explicit) : undefined;
     const option = raw.find((item): item is { id?: unknown; currentValue?: unknown; options?: unknown } => {
       if (!item || typeof item !== "object") return false;
       const id = (item as { id?: unknown }).id;
       return typeof id === "string" && /context[_-]?window/i.test(id);
     });
     if (!option || typeof option.id !== "string") return;
+    const tokens = picked ?? largestAdvertisedWindow(option);
+    if (typeof tokens !== "number" || !(tokens > 0)) return;
     const value = matchContextWindowValue(tokens, option);
     if (!value) return;
     const wanted = Math.round(tokens);

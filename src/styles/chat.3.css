@@ -433,13 +433,13 @@
   --setup-paper: color-mix(in srgb, var(--bg-solid) 96%, var(--setup-vendor) 4%);
   --setup-paper-on: color-mix(in srgb, var(--bg-solid) 91%, var(--setup-vendor) 9%);
   right: clamp(14px, 2.2cqi, 26px);
-  bottom: clamp(108px, 14cqh, 122px);
+  bottom: clamp(100px, 13cqh, 112px);
   width: min(720px, calc(100% - 32px));
-  max-height: calc(100% - 108px);
-  padding: 0 0 10px;
+  max-height: calc(100% - 100px);
+  padding: 0;
   gap: 0;
   font-size: var(--text-13);
-  background: color-mix(in srgb, var(--bg-solid) 98%, var(--setup-vendor) 2%);
+  background: color-mix(in srgb, var(--bg-solid) 94%, var(--setup-vendor) 6%);
   border-color: color-mix(in srgb, var(--setup-vendor) 22%, var(--line));
   border-radius: var(--radius-14);
   box-shadow: 0 24px 70px rgba(0, 0, 0, 0.2), 0 3px 12px rgba(0, 0, 0, 0.08);
@@ -469,10 +469,10 @@
 
 .session-setup .setup-intro {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding: 18px 20px 14px;
+  padding: 10px 16px 8px;
   border-bottom: 1px solid color-mix(in srgb, var(--line) 82%, transparent);
 }
 
@@ -518,8 +518,8 @@
 }
 
 .setup-card {
-  margin: 10px 12px 0;
-  padding: 13px 14px;
+  margin: 8px 12px 0;
+  padding: 8px 12px;
   border: 1px solid color-mix(in srgb, var(--line) 88%, transparent);
   border-radius: var(--radius-14);
   background: color-mix(in srgb, var(--bg-solid) 94%, var(--setup-vendor) 6%);
@@ -529,9 +529,19 @@
 .setup-top-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.28fr) minmax(246px, 0.9fr);
-  align-items: start;
-  gap: 10px;
-  margin: 10px 12px 0;
+  align-items: stretch;
+  gap: 8px;
+  margin: 8px 12px 0;
+}
+
+.setup-model-card {
+  display: flex;
+  flex-direction: column;
+}
+
+.setup-model-card .setup-subgroup:last-child {
+  margin-top: auto;
+  padding-top: 8px;
 }
 
 .setup-top-grid .setup-card {
@@ -541,8 +551,26 @@
 .setup-compact-stack {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
   min-width: 0;
+}
+
+.setup-top-grid .setup-effort button {
+  min-height: 30px;
+  padding: 4px 8px;
+}
+
+.setup-top-grid .setup-vendors {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.setup-access-card {
+  margin: 8px 0 0;
+  padding: 10px 24px 12px;
+  border: none;
+  border-top: 1px solid color-mix(in srgb, var(--line) 88%, transparent);
+  border-radius: 0 0 var(--radius-14) var(--radius-14);
+  box-shadow: none;
 }
 
 .setup-top-grid .setup-models {
@@ -554,7 +582,7 @@
 }
 
 .setup-top-grid .setup-environments button {
-  padding-block: 8px;
+  padding-block: 6px;
 }
 
 .setup-top-grid .setup-environment-icon {
@@ -566,10 +594,10 @@
 
 .setup-heading {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 11px;
+  margin-bottom: 6px;
 }
 
 .setup-lede {
@@ -580,7 +608,7 @@
 }
 
 .setup-heading.compact {
-  margin-bottom: 9px;
+  margin-bottom: 6px;
 }
 
 .setup-heading > div > strong,
@@ -613,11 +641,11 @@
 }
 
 .setup-subgroup + .setup-subgroup {
-  margin-top: 10px;
+  margin-top: 8px;
 }
 
 .setup-subgroup .section-label {
-  margin: 0 0 5px;
+  margin: 0 0 4px;
   color: var(--setup-faint);
   font-size: var(--text-11);
   font-weight: 680;
@@ -796,7 +824,7 @@
 }
 
 .setup-context-card .row-meta {
-  margin: 8px 0 0;
+  margin: 4px 0 0;
 }
 
 .session-setup .setup-split {
@@ -809,16 +837,16 @@
 
 .session-setup .setup-grid {
   gap: 6px;
-  margin-top: 7px;
+  margin-top: 4px;
 }
 
 .session-setup .setup-grid button {
   flex-direction: row;
-  align-items: flex-start;
+  align-items: center;
   gap: 7px;
   min-width: 0;
-  min-height: 61px;
-  padding: 8px;
+  min-height: 34px;
+  padding: 4px 8px;
   border-radius: var(--radius-10);
   background: color-mix(in srgb, var(--bg-solid) 96%, var(--setup-paper) 4%);
 }

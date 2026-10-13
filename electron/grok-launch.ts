@@ -172,7 +172,7 @@ export type GrokLaunchSpec = {
   agentName?: string | null;
   /** The model is on no list the desk holds; the vendor must accept it or the session fails. */
   unlistedModel?: boolean;
-  /** Grok window this chat picked, in tokens. Omitted when the chat left the default. */
+  /** Grok window this chat picked, in tokens. Omitted when the chat left the default, which is the largest size the session advertises. */
   contextWindow?: number;
   alwaysApprove: boolean;
   sandbox: SandboxProfile;
@@ -204,6 +204,19 @@ export function parseWindowLabel(raw: string): number | undefined {
   if (!Number.isFinite(value) || value <= 0) return undefined;
   const scale = match[2] === "m" ? 1_000_000 : match[2] === "k" ? 1_000 : 1;
   return Math.round(value * scale);
+}
+
+/** The high ceiling among advertised labels, such as "500k" over "256000". */
+export function largestAdvertisedWindow(option: { options?: unknown }): number | undefined {
+  if (!Array.isArray(option.options)) return undefined;
+  let best = 0;
+  for (const choice of option.options) {
+    const raw = choice && typeof choice === "object" ? (choice as { value?: unknown }).value : choice;
+    if (typeof raw !== "string") continue;
+    const size = parseWindowLabel(raw);
+    if (size && size > best) best = size;
+  }
+  return best > 0 ? best : undefined;
 }
 
 /**

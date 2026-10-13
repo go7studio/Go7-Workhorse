@@ -569,7 +569,7 @@
   padding: 10px 24px 12px;
   border: none;
   border-top: 1px solid color-mix(in srgb, var(--line) 88%, transparent);
-  border-radius: 0 0 calc(var(--radius-14) - 1px) calc(var(--radius-14) - 1px);
+  border-radius: 0 0 var(--radius-14) var(--radius-14);
   box-shadow: none;
 }
 

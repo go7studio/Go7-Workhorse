@@ -1152,32 +1152,32 @@ a44e027fcc91  .setup-grid
 632029ad4051  .setup-grid button.on
 965d3440ee3c  .setup-grid button strong
 c4d4621f4ee4  .setup-grid button span
-20ba889551e9  .session-setup
+699ad4257392  .session-setup
 8f838ef8a425  .session-setup .setup-tide
 c308c0890ebb  .session-setup .setup-tide-water
 6e22c58a7a6a  .session-setup .setup-tide-wave, .session-setup .setup-tide-glint
-c2234f930696  .session-setup .setup-intro
+431f854df9e2  .session-setup .setup-intro
 9c0219674eaf  .setup-kicker
 6faf7678b979  .session-setup .setup-intro strong
 2bc62b0b0591  .session-setup .setup-intro p
 dd5cac286925  .setup-close
 36f733f0b739  .setup-close:hover
-60bf12949478  .setup-card
-050ec61e6544  .setup-top-grid
+e1b52dd02f10  .setup-card
+4a1e40a91fd3  .setup-top-grid
 02419cffd4a2  .setup-top-grid .setup-card
-0964e8afbfb7  .setup-compact-stack
+b6197dfbae4b  .setup-compact-stack
 147ef4dafc32  .setup-top-grid .setup-models
 abc76c3a394f  .setup-top-grid .setup-environments
-0fd4623bd7bf  .setup-top-grid .setup-environments button
+907a2f0ebe3c  .setup-top-grid .setup-environments button
 fe92127798bb  .setup-top-grid .setup-environment-icon
-aac3aa91efa5  .setup-heading
+e4593cc87851  .setup-heading
 b95ff9a432ca  .setup-lede
-a222347bfd2a  .setup-heading.compact
+f3c131ddce19  .setup-heading.compact
 f1bc0c968db0  .setup-heading > div > strong, .setup-choice-title > strong
 91bdaf070f04  .setup-heading > div > span, .setup-choice-title > span
 965e8fbf19bc  .setup-current
-3b6fad0b298d  .setup-subgroup + .setup-subgroup
-0648164e4b74  .setup-subgroup .section-label
+5313025c2edb  .setup-subgroup + .setup-subgroup
+507a7964b740  .setup-subgroup .section-label
 9f3fc412521a  .session-setup .setup-note
 0d1381dfdb69  .session-setup .setup-effort
 6c06aa2d122d  .session-setup .setup-effort button
@@ -1204,8 +1204,8 @@ e7a29b03311f  .setup-reasoning-card .setup-slider-marks
 6e3a4714ba19  .setup-reasoning-card .setup-slider-marks button
 58cf3fe563b8  .session-setup .setup-split
 6e3a4714ba19  .setup-choice-title > span
-047cabb72a27  .session-setup .setup-grid
-356c8abe3313  .session-setup .setup-grid button
+5d28bce17e66  .session-setup .setup-grid
+7117f3f3081e  .session-setup .setup-grid button
 2bd713151971  .session-setup .setup-grid button.on
 ee58559ea5d0  .session-setup .setup-grid button .setup-choice-icon
 3b74447a702f  .session-setup .setup-grid button .setup-choice-copy

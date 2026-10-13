@@ -177,6 +177,16 @@ function contextWindowsFrom(raw: unknown): number[] | undefined {
   return unique.length > 1 ? unique : undefined;
 }
 
+/**
+ * The size a chat starts on. A model that lists several sizes starts on the
+ * high ceiling (500k when that is the larger one), not the smaller scalar the
+ * vendor happens to call current.
+ */
+function defaultContextWindow(scalar: number, windows: number[] | undefined): number {
+  if (!windows || windows.length < 2) return scalar;
+  return Math.max(scalar, ...windows);
+}
+
 function parseReasoningLevels(raw: unknown): ReasoningLevel[] | undefined {
   if (!Array.isArray(raw)) return undefined;
   const levels: ReasoningLevel[] = [];
@@ -280,12 +290,13 @@ export function parseGrokModelsCache(raw: string): ModelInfo[] {
       : String(info.name ?? info.display_name ?? info.system_prompt_label ?? id).trim() || id;
     const effort = info.supports_reasoning_effort !== false;
     const contextWindows = contextWindowsFrom(info.context_windows);
+    const scalar = numberOr(info.context_window, contextWindows ? 0 : 500_000);
     seen.add(id);
     models.push({
       id,
       name,
       effort,
-      contextWindow: numberOr(info.context_window, 500_000),
+      contextWindow: defaultContextWindow(scalar, contextWindows),
       ...(contextWindows ? { contextWindows } : {}),
     });
   }
@@ -387,7 +398,7 @@ function deskCatalogRows(raw: unknown): ModelInfo[] | undefined {
       id: item.id,
       name: item.name,
       effort: item.effort !== false,
-      contextWindow: item.contextWindow,
+      contextWindow: defaultContextWindow(item.contextWindow, contextWindows),
       ...(contextWindows ? { contextWindows } : {}),
       ...(Array.isArray(item.reasoningLevels) ? { reasoningLevels: parseReasoningLevels(item.reasoningLevels.map((level) => ({ effort: level?.id, description: level?.hint }))) ?? [] } : {}),
       ...(Array.isArray(item.aliases) ? { aliases: item.aliases.filter((alias): alias is string => typeof alias === "string") } : {}),

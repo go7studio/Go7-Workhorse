@@ -8,6 +8,15 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.7.4](https://github.com/go7studio/Go7-Workhorse/compare/v0.7.3...v0.7.4) (2026-10-13)
+
+
+### Bug Fixes
+
+* keep Chat settings corners on the radius scale ([e4c3ed7](https://github.com/go7studio/Go7-Workhorse/commit/e4c3ed7de575dda6052cc0f3d246278e1cc313bf))
+* start Grok chats on the 500k window and fit Chat settings ([6343e53](https://github.com/go7studio/Go7-Workhorse/commit/6343e53edb3040149c8f2eb7cfff869ba69d90e1))
+* start Grok chats on the 500k window and fit Chat settings ([20b99cc](https://github.com/go7studio/Go7-Workhorse/commit/20b99cc84ca7881bb7f1933ce073b56bb96512c9))
+
 ## [0.7.3](https://github.com/go7studio/Go7-Workhorse/compare/v0.7.2...v0.7.3) (2026-10-12)
 
 

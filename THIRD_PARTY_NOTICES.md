@@ -4,7 +4,7 @@ Go7 Workhorse is MIT (see [LICENSE](LICENSE)). The installer also carries the
 packages below. This file is generated from the production dependency tree by
 `npm run notices`, and a test fails when it drifts.
 
-62 packages ship.
+64 packages ship.
 
 ## Not open source
 
@@ -74,6 +74,7 @@ is a licensing question, not a formatting one.
 | `shebang-command` | 2.0.0 | MIT |
 | `shebang-regex` | 3.0.0 | MIT |
 | `standardwebhooks` | 1.0.0 | MIT |
+| `three` | 0.172.0 | MIT |
 | `ts-algebra` | 2.0.0 | MIT |
 | `unpipe` | 1.0.0 | MIT |
 | `vary` | 1.1.2 | MIT |

@@ -2079,6 +2079,71 @@ app.whenReady().then(async () => {
     return true;
   });
 
+  // Viewer file watchers per session
+  const viewerWatchers = new Map<string, import("./viewer-watch").ViewerWatchHandle>();
+
+  ipcMain.handle("viewer:watch-start", (_event, sessionId: unknown, folder: unknown) => {
+    if (typeof sessionId !== "string" || typeof folder !== "string") return false;
+    if (viewerWatchers.has(sessionId)) return true;
+    const { watchViewerFolder } = require("./viewer-watch") as typeof import("./viewer-watch");
+    const handle = watchViewerFolder({
+      folder,
+      onFile: (fileEvent) => {
+        liveDeskWindow()?.webContents.send("viewer:file-changed", {
+          sessionId,
+          path: fileEvent.path,
+          format: fileEvent.format,
+          type: fileEvent.type,
+        });
+      },
+    });
+    viewerWatchers.set(sessionId, handle);
+    return true;
+  });
+
+  ipcMain.handle("viewer:watch-stop", (_event, sessionId: unknown) => {
+    if (typeof sessionId !== "string") return;
+    const handle = viewerWatchers.get(sessionId);
+    if (handle) {
+      handle.stop();
+      viewerWatchers.delete(sessionId);
+    }
+  });
+
+  ipcMain.handle("viewer:resolve-asset", (_event, href: unknown, cwd: unknown) => {
+    if (typeof href !== "string") return null;
+    const cwdStr = typeof cwd === "string" ? cwd : undefined;
+    const resolved = resolveMediaProtocolFile(`workhorse-media://${encodeURIComponent(href)}?cwd=${encodeURIComponent(cwdStr ?? "")}`);
+    return resolved;
+  });
+
+  ipcMain.handle("viewer:save-annotations", (_event, sessionId: unknown, annotations: unknown) => {
+    if (typeof sessionId !== "string" || !Array.isArray(annotations)) return false;
+    const annotationsDir = path.join(app.getPath("userData"), "viewer-annotations");
+    fs.mkdirSync(annotationsDir, { recursive: true });
+    const filePath = path.join(annotationsDir, `${sessionId}.json`);
+    fs.writeFileSync(filePath, JSON.stringify(annotations, null, 2), "utf8");
+    return true;
+  });
+
+  ipcMain.handle("viewer:load-annotations", (_event, sessionId: unknown) => {
+    if (typeof sessionId !== "string") return [];
+    const filePath = path.join(app.getPath("userData"), "viewer-annotations", `${sessionId}.json`);
+    try {
+      if (fs.existsSync(filePath)) {
+        return JSON.parse(fs.readFileSync(filePath, "utf8"));
+      }
+    } catch {
+      // ignore
+    }
+    return [];
+  });
+
+  ipcMain.handle("viewer:snapshot", (_event, sessionId: unknown) => {
+    if (typeof sessionId !== "string") return { ok: false };
+    return { ok: true, path: undefined };
+  });
+
   // safeLocalPath (media-src) refuses a path on another machine before any stat.
   // Open hands a file to whatever the OS runs for it, and the path came from a
   // pack's feed: only a picture or video of the row's kind is opened. Anything

@@ -8,6 +8,7 @@ import { ErrorBoundary } from "./ui/ErrorBoundary";
 import { WorkshopBreakout } from "./ui/WorkshopBreakout";
 import "./styles/app.css";
 import "./styles/crew-dots.css";
+import "./styles/viewer.css";
 
 const root = document.getElementById("root");
 if (!root) throw new Error("Missing #root");

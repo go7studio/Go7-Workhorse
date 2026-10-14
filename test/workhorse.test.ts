@@ -2955,6 +2955,9 @@ test("session bridge lists, finds, and reads chats for peer tools", async () => 
   assert.deepEqual(names, [
     // First, so a harness reads the contract before anything else.
     "workhorse_capabilities",
+    "workhorse_viewer_load",
+    "workhorse_viewer_annotations",
+    "workhorse_viewer_snapshot",
     "workhorse_delegate",
     "workhorse_continue_mission",
     "workhorse_list_chats",

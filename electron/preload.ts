@@ -319,4 +319,21 @@ contextBridge.exposeInMainWorld("workhorse", {
       ipcRenderer.removeListener("scores:updated", listener);
     };
   },
+  viewerWatchStart: (sessionId: string, folder: string) =>
+    ipcRenderer.invoke("viewer:watch-start", sessionId, folder) as Promise<boolean>,
+  viewerWatchStop: (sessionId: string) =>
+    ipcRenderer.invoke("viewer:watch-stop", sessionId) as Promise<void>,
+  viewerResolveAsset: (href: string, cwd?: string) =>
+    ipcRenderer.invoke("viewer:resolve-asset", href, cwd) as Promise<string | null>,
+  viewerSaveAnnotations: (sessionId: string, annotations: unknown[]) =>
+    ipcRenderer.invoke("viewer:save-annotations", sessionId, annotations) as Promise<boolean>,
+  viewerLoadAnnotations: (sessionId: string) =>
+    ipcRenderer.invoke("viewer:load-annotations", sessionId) as Promise<unknown[]>,
+  viewerSnapshot: (sessionId: string) =>
+    ipcRenderer.invoke("viewer:snapshot", sessionId) as Promise<{ ok: boolean; path?: string }>,
+  onViewerFileChanged: (handler: (event: { sessionId: string; path: string; format: string; type: string }) => void) => {
+    const listener = (_event: IpcRendererEvent, payload: { sessionId: string; path: string; format: string; type: string }) => handler(payload);
+    ipcRenderer.on("viewer:file-changed", listener);
+    return () => ipcRenderer.removeListener("viewer:file-changed", listener);
+  },
 });

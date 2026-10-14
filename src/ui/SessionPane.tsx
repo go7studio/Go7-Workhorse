@@ -46,7 +46,9 @@ import { UserTurn } from "./UserTurn";
 import { WorkPopout } from "./WorkPopout";
 import { TerminalPane } from "./TerminalPane";
 import { WorkshopPanel } from "./WorkshopPanel";
+import { ViewerPanel } from "./ViewerPanel";
 import { pinNoticesDock } from "../lib/session-dock";
+import type { ViewerAsset, Annotation } from "../lib/viewer";
 import {
   countTurnsAboveViewport,
   createPinScheduler,
@@ -184,6 +186,14 @@ export function SessionPane() {
   const [workshopOut, setWorkshopOut] = useState(false);
   const workshopToggle = useRef<HTMLButtonElement>(null);
   const [workshopWidth, setWorkshopWidth] = useState(() => WORKSHOP_PANE.fallback);
+  const [viewerOpen, setViewerOpen] = useState(false);
+  const [viewerAsset, setViewerAsset] = useState<ViewerAsset | null>(null);
+  const [viewerAnnotations, setViewerAnnotations] = useState<Annotation[]>([]);
+
+  const openViewer = useCallback((asset: ViewerAsset) => {
+    setViewerAsset(asset);
+    setViewerOpen(true);
+  }, []);
   const [hiddenByChat, setHiddenByChat] = useState<Record<string, string[]>>({});
   const [stats, setStats] = useState<Record<string, { added: number; deleted: number }>>({});
   const fetchedStats = useRef<Record<string, string>>({});
@@ -230,6 +240,23 @@ export function SessionPane() {
     return mergeEdits(projectEdits([session], roots), extraEdits);
   }, [session?.id, writesKey, roots, extraEdits, editsIdle]);
   const sessionId = session?.id ?? "";
+
+  useEffect(() => {
+    const off = window.workhorse?.onViewerFileChanged?.(async (event) => {
+      if (event.sessionId !== sessionId) return;
+      const fmt = event.format as ViewerAsset["format"];
+      if (!["glb", "gltf", "png", "jpg"].includes(fmt)) return;
+      const resolvedUri = (await window.workhorse?.viewerResolveAsset?.(event.path)) ?? event.path;
+      openViewer({
+        uri: resolvedUri,
+        format: fmt,
+        loadedAt: Date.now(),
+        path: event.path,
+      });
+    });
+    return () => off?.();
+  }, [sessionId, openViewer]);
+
   const transcriptMessages = useMemo(
     () => (session ? omitQueuedUserMessages(session.messages, session.queue) : []),
     [session?.messages, session?.queue],
@@ -722,6 +749,17 @@ export function SessionPane() {
             sessionId={session.id}
             enabledIds={session.workshopPacks ?? EMPTY_WORKSHOP_PACKS}
             onClose={closeWorkshopPane}
+          />
+        </aside>
+      ) : null}
+      {viewerOpen && viewerAsset ? (
+        <aside className="session-viewer" aria-label="3D Viewer">
+          <ViewerPanel
+            sessionId={session.id}
+            asset={viewerAsset}
+            annotations={viewerAnnotations}
+            onAnnotation={(ann) => setViewerAnnotations((prev) => [...prev, ann])}
+            onClose={() => setViewerOpen(false)}
           />
         </aside>
       ) : null}

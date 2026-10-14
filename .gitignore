@@ -26,3 +26,5 @@ credentials.json
 
 # A desk attachment store is user data, never repo content.
 attachments/
+# Viewer test artifacts
+.workhorse/

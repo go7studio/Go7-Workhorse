@@ -252,7 +252,7 @@ test("native agy DONE deltas finish the text streamed into the transcript", asyn
     const result = await pending;
     const streamed = events.filter((event) => event.type === "chunk").map((event) => event.type === "chunk" ? event.text : "").join("");
     assert.equal(streamed, "AGY_HOST_OK\n");
-    assert.equal(streamed.trim(), result.text);
+    assert.equal(streamed, result.text);
   } finally {
     host.disposeAll();
   }
@@ -267,7 +267,7 @@ test("native conversation resume bills current model calls, not the cumulative c
     await new Promise((resolve) => setImmediate(resolve));
     child.stdout.emit("data", readFileSync(new URL("./fixtures/agy/resumed-turn.jsonl", import.meta.url), "utf8"));
     const result = await pending;
-    assert.equal(result.text, "AGY_NATIVE_RESUME_OK");
+    assert.equal(result.text, "AGY_NATIVE_RESUME_OK\n");
     const usage = events.filter((event) => event.type === "usage");
     assert.equal(usage.length, 1);
     assert.equal(usage[0]?.type === "usage" && usage[0].inputTokens, 12825);

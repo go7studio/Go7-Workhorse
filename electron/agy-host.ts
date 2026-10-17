@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
+import { StringDecoder } from "node:string_decoder";
 import { composeVendorPrompt } from "../src/lib/context-preface";
 import { deltaAgyUsage, type AgyTokenTotals } from "../src/lib/agy-usage";
 import { parseAgyStreamLine } from "../src/lib/agy-stream";
@@ -56,6 +57,7 @@ type Slot = {
   announced: boolean;
   usage?: AgyTokenTotals;
   buffer: string;
+  decoder: StringDecoder;
   stderr: string;
   dead: boolean;
   disposeMcp?: () => void;
@@ -236,6 +238,7 @@ export class AgySessionHost {
       conversationId: input.vendorSessionId?.trim() || undefined,
       announced: false,
       buffer: "",
+      decoder: new StringDecoder("utf8"),
       stderr: "",
       dead: false,
       disposeMcp: overlay?.dispose,
@@ -302,7 +305,7 @@ export class AgySessionHost {
   private onStdout(sessionId: string, chunk: Buffer | string): void {
     const slot = this.slots.get(sessionId);
     if (!slot) return;
-    slot.buffer += typeof chunk === "string" ? chunk : chunk.toString("utf8");
+    slot.buffer += typeof chunk === "string" ? chunk : slot.decoder.write(chunk);
     const lines = slot.buffer.split(/\r?\n/);
     slot.buffer = lines.pop() ?? "";
     for (const line of lines) this.onLine(slot, line);
@@ -334,7 +337,7 @@ export class AgySessionHost {
       // Native agy sends the remaining delta on DONE, not a snapshot of
       // earlier ACTIVE chunks. The last word can arrive only on that event.
       turn.text += event.delta;
-      turn.emit({ type: "chunk", sessionId: turn.sessionId, text: event.delta });
+      turn.emit({ type: "chunk", sessionId: turn.sessionId, text: event.delta, textMode: "delta" });
       return;
     }
     if (event.kind === "tool") {
@@ -352,8 +355,8 @@ export class AgySessionHost {
     }
     if (event.kind !== "result") return;
     const notice = permissionNotice(slot.stderr) || turn.permissionDenial;
-    const response = event.response.trim() || turn.text.trim();
-    const text = notice && !response.includes(notice) ? `${response}${response ? "\n\n" : ""}${notice}`.trim() : response;
+    const response = event.response.trim() ? event.response : turn.text;
+    const text = notice && !response.includes(notice) ? `${response}${response ? "\n\n" : ""}${notice}` : response;
     const nativeTurnUsage = turn.usageByStep.size > 0
       ? [...turn.usageByStep.values()].reduce((sum, usage) => ({
           input: sum.input + usage.input,

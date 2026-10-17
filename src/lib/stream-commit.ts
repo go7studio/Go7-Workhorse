@@ -8,6 +8,11 @@ import { isDeskAssistantNotice } from "./vendor-bridge";
 
 export type { FrameClock };
 
+/** Native deltas are verbatim; other adapters retain their replay handling. */
+export function mergeStreamChunk(left: string, right: string, textMode?: "delta"): string {
+  return textMode === "delta" ? left + right : mergeStreamedText(left, right);
+}
+
 /**
  * One desk commit per frame for streamed tokens. Chunks and thoughts land in
  * the per-session queues; `request` schedules at most one flush. `flushNow`
@@ -48,6 +53,7 @@ export function createStreamCommitScheduler(
 export type StreamQueueDrain = {
   sessions: Session[];
   chunkQueue: Record<string, string>;
+  chunkTextModes: Record<string, "delta" | undefined>;
   thoughtQueue: Record<string, string>;
   changed: boolean;
 };
@@ -59,14 +65,16 @@ export type StreamQueueDrain = {
 export function applyStreamQueues(input: {
   sessions: Session[];
   chunkQueue: Record<string, string>;
+  chunkTextModes?: Record<string, "delta" | undefined>;
   thoughtQueue: Record<string, string>;
   assistantIdFor: (sessionId: string, session: Session) => string | undefined;
 }): StreamQueueDrain {
   const chunkQueue = { ...input.chunkQueue };
+  const chunkTextModes = { ...input.chunkTextModes };
   const thoughtQueue = { ...input.thoughtQueue };
   const sessionIds = new Set([...Object.keys(chunkQueue), ...Object.keys(thoughtQueue)]);
   if (sessionIds.size === 0) {
-    return { sessions: input.sessions, chunkQueue, thoughtQueue, changed: false };
+    return { sessions: input.sessions, chunkQueue, chunkTextModes, thoughtQueue, changed: false };
   }
 
   let changed = false;
@@ -81,11 +89,13 @@ export function applyStreamQueues(input: {
     const chunk = chunkQueue[session.id];
     if (chunk) {
       delete chunkQueue[session.id];
+      const textMode = chunkTextModes[session.id];
+      delete chunkTextModes[session.id];
       messages = messages.map((message) =>
         message.id === assistantId
           ? {
               ...message,
-              text: isDeskAssistantNotice(message.text) ? chunk : mergeStreamedText(message.text, chunk),
+              text: textMode !== "delta" && isDeskAssistantNotice(message.text) ? chunk : mergeStreamChunk(message.text, chunk, textMode),
             }
           : message,
       );
@@ -102,5 +112,5 @@ export function applyStreamQueues(input: {
     return { ...session, messages };
   });
 
-  return { sessions, chunkQueue, thoughtQueue, changed };
+  return { sessions, chunkQueue, chunkTextModes, thoughtQueue, changed };
 }

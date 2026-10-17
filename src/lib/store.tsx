@@ -136,8 +136,7 @@ import {
   parseEffortFromText,
   withEffort,
 } from "./models";
-import { mergeStreamedText } from "./markdown";
-import { applyStreamQueues, createStreamCommitScheduler } from "./stream-commit";
+import { applyStreamQueues, createStreamCommitScheduler, mergeStreamChunk } from "./stream-commit";
 import { APP_VERSION } from "./app-info";
 import type { AppUpdateCheckResult, AppUpdateOffer } from "./app-update";
 import type { GrokBotWakeInput, GrokBotWakeStatus } from "./grok-bot-wake";
@@ -1390,6 +1389,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   /** Live vendor turn started, React has not committed `running` yet. */
   const liveTurnPending = useRef(new Set<string>());
   const grokChunkQueue = useRef<Record<string, string>>({});
+  const grokChunkTextModes = useRef<Record<string, "delta" | undefined>>({});
   const grokThoughtQueue = useRef<Record<string, string>>({});
   const grokUsagePending = useRef<Record<string, UsageDraft[]>>({});
   const grokContextSeen = useRef<Record<string, number>>({});
@@ -3526,6 +3526,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       setState((latest) => {
         const queued = grokChunkQueue.current[session.id] ?? "";
         delete grokChunkQueue.current[session.id];
+        delete grokChunkTextModes.current[session.id];
         const thoughtQueued = grokThoughtQueue.current[session.id] ?? "";
         delete grokThoughtQueue.current[session.id];
         const live = latest.sessions.find((item) => item.id === session.id);
@@ -3772,7 +3773,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           }
           if (options?.replaceUserId) vendorSessionId = undefined;
           const result = await window.workhorse.geminiPrompt({ ...promptInput, vendorSessionId });
-          const reply = typeof result?.text === "string" ? result.text.trim() : "";
+          const reply = typeof result?.text === "string" ? result.text : "";
           vendorSessionId =
             typeof result?.vendorSessionId === "string" && result.vendorSessionId
               ? result.vendorSessionId
@@ -3786,7 +3787,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                     vendorSessionId,
                     messages: item.messages.map((entry) =>
                       entry.id === assistantId
-                        ? { ...entry, text: keepStreamedAssistantText({ reply, existingText: entry.text }) }
+                        ? { ...entry, text: keepStreamedAssistantText({ reply, existingText: entry.text, authoritativeReply: result?.stopReason === "end_turn", preserveWhitespace: true }) }
                         : entry,
                     ),
                   }
@@ -7698,12 +7699,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         const drained = applyStreamQueues({
           sessions: current.sessions,
           chunkQueue: grokChunkQueue.current,
+          chunkTextModes: grokChunkTextModes.current,
           thoughtQueue: grokThoughtQueue.current,
           assistantIdFor: (sessionId, session) =>
             grokAssistantId.current[sessionId] ??
             [...session.messages].reverse().find((message) => message.role === "assistant")?.id,
         });
         grokChunkQueue.current = drained.chunkQueue;
+        grokChunkTextModes.current = drained.chunkTextModes;
         grokThoughtQueue.current = drained.thoughtQueue;
         return drained.changed ? { ...current, sessions: drained.sessions } : current;
       });
@@ -7814,10 +7817,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       // turn-end never race a pending rAF.
       if (event.type === "chunk") {
         if (!event.text) return;
-        grokChunkQueue.current[event.sessionId] = mergeStreamedText(
+        grokChunkQueue.current[event.sessionId] = mergeStreamChunk(
           grokChunkQueue.current[event.sessionId] ?? "",
           event.text,
+          event.textMode,
         );
+        grokChunkTextModes.current[event.sessionId] = event.textMode;
         noteTrailingTurnActivity(event.sessionId);
         streamCommits.request();
         return;
@@ -8557,6 +8562,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         setState((current) => {
           const queued = grokChunkQueue.current[event.sessionId] ?? "";
           delete grokChunkQueue.current[event.sessionId];
+          delete grokChunkTextModes.current[event.sessionId];
           const assistantId = grokAssistantId.current[event.sessionId];
           const liveRun = current.sessions.find((session) => session.id === event.sessionId)?.agentRun;
           const holdForHandoff =
@@ -8574,7 +8580,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                       const worked = turnWorkedAfterAssistant(session.messages, assistantId);
                       return session.messages.map((message) => {
                         if (message.id !== assistantId) return message;
-                        const text = (message.text ?? "").trim() || queued.trim();
+                        const body = message.text ?? "";
+                        const text = session.provider === "gemini"
+                          ? (body.trim() ? body : queued)
+                          : body.trim() || queued.trim();
                         return {
                           ...message,
                           text: assistantHasVisibleReply(text)

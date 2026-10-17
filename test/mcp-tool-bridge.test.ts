@@ -4,8 +4,9 @@ import { buildAnthropicBody, buildOpenAiBody } from "../electron/custom-http";
 import { CustomSessionHost, MCP_ARGUMENTS_PREVIEW_CHARS, mcpArgumentsPreview } from "../electron/custom-host";
 import { MCP_TOOL_NAME_MAX, McpToolBridge, mcpExposedToolName, mcpNeedsWindowsShell, mcpSpawnEnvironment, mcpToolDefinition, probeMcpServer } from "../electron/mcp-tool-bridge";
 import { mergeMcpServers } from "../electron/grok-launch";
-import { mcpServersForSession, mcpToolAllowed } from "../src/lib/mcp-servers";
-import { normalizeMcpServers } from "../src/lib/settings";
+import { mcpRuntimeChoices, mcpServersForSession, mcpToolAllowed } from "../src/lib/mcp-servers";
+import { normalizeMcpServers, normalizeSettings } from "../src/lib/settings";
+import { PROVIDERS } from "../src/lib/providers";
 import type { McpServerConfig } from "../src/lib/types";
 
 const FAKE_MCP = String.raw`
@@ -83,6 +84,37 @@ test("MCP runtime policy preserves legacy access and isolates a selected local b
   assert.deepEqual(mcpServersForSession(servers, { provider: "codex" }).map((server) => server.name), ["legacy"]);
 });
 
+test("a Gemini-only MCP scope survives settings save and reload without widening access", () => {
+  const selected = mcpRuntimeChoices().find(runtime => runtime.label === "Gemini");
+  assert.ok(selected, "the per-runtime editor offers Gemini");
+  const saved = normalizeSettings({ mcpServers: [
+    { name: "gemini-tools", command: "fixture-mcp", args: [], runtimeIds: [selected.id] },
+  ] });
+  const reloaded = normalizeSettings(JSON.parse(JSON.stringify(saved)));
+  assert.deepEqual(reloaded.mcpServers[0]?.runtimeIds, ["gemini"]);
+  assert.deepEqual(mcpServersForSession(reloaded.mcpServers, { provider: "gemini" }).map(server => server.name), ["gemini-tools"]);
+  for (const provider of PROVIDERS.filter(provider => provider.id !== "gemini")) {
+    assert.deepEqual(mcpServersForSession(reloaded.mcpServers, { provider: provider.id }), [], provider.id);
+  }
+});
+
+test("the MCP editor offers every stock runtime and keeps custom HTTP and individual bot scopes", () => {
+  const choices = mcpRuntimeChoices([{ id: "spark", name: "Spark" }, { id: "unnamed", name: "  " }]);
+  assert.deepEqual(choices.map(runtime => runtime.id), [...PROVIDERS.map(provider => provider.id), "custom:spark", "custom:unnamed"]);
+  assert.equal(choices.find(runtime => runtime.id === "custom")?.label, "Custom HTTP");
+  assert.equal(choices.find(runtime => runtime.id === "custom:spark")?.label, "Spark");
+  assert.equal(choices.find(runtime => runtime.id === "custom:unnamed")?.label, "Untitled bot");
+});
+
+test("every stock runtime keeps its MCP scope through JSON persistence", () => {
+  for (const provider of PROVIDERS) {
+    const saved = normalizeMcpServers([{ name: "tools", command: "fixture-mcp", args: [], runtimeIds: [provider.id] }]);
+    const reloaded = normalizeMcpServers(JSON.parse(JSON.stringify(saved)));
+    assert.deepEqual(reloaded[0]?.runtimeIds, [provider.id]);
+    assert.equal(mcpServersForSession(reloaded, { provider: provider.id }).length, 1, provider.id);
+  }
+});
+
 test("restricted MCP servers fail closed for ACP vendors that cannot enforce tool subsets", () => {
   const restricted: McpServerConfig = {
     name: "memory",
@@ -92,6 +124,7 @@ test("restricted MCP servers fail closed for ACP vendors that cannot enforce too
     includeTools: ["search_graph"],
   };
   assert.deepEqual(mcpServersForSession([restricted], { provider: "grok" }), []);
+  assert.deepEqual(mcpServersForSession([{ ...restricted, runtimeIds: ["gemini"] }], { provider: "gemini" }), []);
   assert.deepEqual(mcpServersForSession([restricted], { provider: "custom", customBotId: "spark" }), [restricted]);
   assert.deepEqual(mergeMcpServers([restricted], null), []);
   assert.deepEqual(mergeMcpServers([{ ...restricted, includeTools: undefined, enabled: false }], null), []);

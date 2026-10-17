@@ -194,6 +194,7 @@ import {
   activeRouteLoad,
   candidatesNamedBy,
   chooseRoutingDecision,
+  retiredAutoModelError,
   describeRoutingMiss,
   inferRoutingTier,
   inferTaskDomain,
@@ -3160,7 +3161,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     // A person's chat routes only when that chat is set to Auto. The Settings
     // switch decides how a new chat starts; it does not reach into a chat the
     // person has already set one way or the other.
-    if (shouldRouteSessionTurn({ routingMode: session.routingMode, text: originalText, hideUser })) {
+    if (shouldRouteSessionTurn({ routingMode: session.routingMode, text: originalText, hideUser }) || retiredAutoModelError(session)) {
       // The next turn gets the fresher meters; this one still routes now rather
       // than waiting on a network round trip to pick a model.
       refreshPlansForRouting(plansRef.current);
@@ -3201,6 +3202,34 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         botKnowledge: current.settings.botKnowledge,
         ...(decision ? { selected: decision } : {}),
       });
+      if (!decision && retiredAutoModelError(session)) {
+        const blockedId = session.id;
+        const reason = `${retiredAutoModelError(session)} ${describeRoutingMiss(routeCandidates, routeRequest, current.settings.routing)}`;
+        setState((latest) => {
+          const blocked = latest.sessions.find((item) => item.id === blockedId);
+          let sessions = latest.sessions;
+          let leases = latest.leases;
+          if (blocked?.parentId && (blocked.agentRun?.status === "running" || blocked.agentRun?.status === "interrupted")) {
+            sessions = applyChildIdleSync(sessions, blockedId, "failed", { report: reason, error: reason });
+            sessions = settlePlanAssignment(sessions, blocked.parentId, blockedId, "failed", reason);
+            const admitted = joinAdmit(sessions, blocked.parentId, latest, plansRef.current);
+            sessions = admitted.sessions;
+            queueMicrotask(() => {
+              if (admitted.auditor) sendRef.current(admitted.auditor.brief, { sessionId: admitted.auditor.id, hideUser: true });
+            });
+            leases = releaseSessionLeases(leases ?? [], blockedId);
+            pathLeasesRef.current = leases;
+          }
+          return {
+            ...latest,
+            leases,
+            sessions: sessions.map((item) => item.id === blockedId
+              ? { ...item, messages: [...item.messages, { id: uid("msg"), role: "system" as const, text: reason, createdAt: Date.now() }] }
+              : item),
+          };
+        });
+        return;
+      }
       if (decision) {
         // Auto picks the effort with the model: a quick task at low, a deep
         // one at high. Keeping the person's old effort here left Auto choosing
@@ -4447,6 +4476,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           images: import("./types").ChatImage[] = [],
           restartRuntime = false,
         ) => {
+          const retirementError = retiredAutoModelError(session);
+          if (retirementError) throw new Error(retirementError);
           const snapshot = stateRef.current;
           const runtimeMcpServers = mcpServersForSession(mcpServers, session);
           const hold = evaluateWatchHold({

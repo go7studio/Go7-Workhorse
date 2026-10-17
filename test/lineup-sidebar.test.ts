@@ -187,7 +187,8 @@ test("a routed pick does not become the default for the next new chat", () => {
   // seeded every chat opened after it with Kimi. Only a user's choice
   // (setSessionModel, newChat) may write lastModel.
   const store = read("src/lib/store.tsx");
-  const routed = store.slice(store.indexOf("const decision = chooseRoutingDecision("), store.indexOf("const decision = chooseRoutingDecision(") + 2400);
+  const start = store.indexOf("const decision = chooseRoutingDecision(");
+  const routed = store.slice(start, store.indexOf("if (shouldShadowRouteSessionTurn", start));
   assert.match(routed, /routingMode: "auto", routingDecision: decision/);
   assert.doesNotMatch(routed, /lastModel: presetFrom\(routedSession\)/);
 });

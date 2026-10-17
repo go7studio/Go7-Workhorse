@@ -23,6 +23,7 @@ import {
 import { applyCreateWorkhorseProject, normalizeProject } from "../src/lib/project";
 import { normalizeSettings } from "../src/lib/settings";
 import { applyVendorCatalog, resetVendorCatalog } from "../src/lib/models";
+import { retiredAutoModelError } from "../src/lib/routing";
 import { passGrantedAccess } from "../src/lib/permissions";
 import type { AttachmentKind, ChatImage, CustomLlm, MissionCaps, MissionIteration, Session, SessionEnvironment, UsageEvent, WatchDayMarks, WatchPermits } from "../src/lib/types";
 import {
@@ -2892,6 +2893,10 @@ async function continueMission(args: Record<string, unknown>, from?: string): Pr
           effort: requestedBrain.effort ?? inheritedBrain.effort,
         }
       : inheritedBrain;
+  const inheritedRetirement = retiredAutoModelError(coordinator);
+  if (inheritedRetirement && continuationBrain.model && !requestedBrain?.model) {
+    throw new Error(inheritedRetirement);
+  }
   // The seat this wave actually ran under, handed to the next one. Without it
   // the desk seats pass 2 from the parent chat, so a mission delegated with
   // sandbox: off out of a chat the person tightened stops writing at pass 2.

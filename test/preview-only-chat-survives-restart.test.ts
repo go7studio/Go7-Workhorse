@@ -5,6 +5,7 @@ import path from "node:path";
 import test from "node:test";
 import { dropDrafts, isDraftChat, listedChats, openDraft, retainChatPreview, sidebarKeepsChat } from "../src/lib/chats";
 import { hotSavePayload } from "../src/lib/desk-persist";
+import { sameSidebarSession, buildSidebarChatIndex } from "../src/lib/sidebar-index";
 import { normalizeSession } from "../src/lib/session";
 import { selectSessionPaneDesk, sameSessionPaneDesk } from "../src/lib/store-select";
 import type { Store } from "../src/lib/store";
@@ -28,6 +29,8 @@ test("explicit preview use retains a genuinely empty chat without inventing a pr
   assert.equal(retained[0].previewUsed, true);
   assert.equal(chat.previewUsed, undefined, "retention does not mutate a prior state snapshot");
   assert.equal(isDraftChat(retained[0]), false);
+  assert.equal(sameSidebarSession(chat, retained[0]), false, "retention refreshes the sidebar index");
+  assert.equal(buildSidebarChatIndex(retained).liveByProject.get(null)?.[0].id, chat.id);
   assert.deepEqual(listedChats(retained).map((row) => row.id), [chat.id]);
   assert.deepEqual(dropDrafts(retained).map((row) => row.id), [chat.id]);
   assert.equal(sidebarKeepsChat(retained[0], { projectId: null, archived: false }), true);

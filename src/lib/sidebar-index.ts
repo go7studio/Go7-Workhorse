@@ -132,6 +132,7 @@ export function sameSidebarSession(left: Session, right: Session): boolean {
     left.routingMode === right.routingMode &&
     left.status === right.status &&
     left.composerDraft === right.composerDraft &&
+    left.previewUsed === right.previewUsed &&
     left.composerImages === right.composerImages &&
     left.agentRun?.status === right.agentRun?.status &&
     left.agentRun?.mission?.iteration === right.agentRun?.mission?.iteration &&

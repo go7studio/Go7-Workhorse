@@ -45,6 +45,9 @@ import { listDropFiles } from "./drop-files";
 import { attachDialogProperties, attachDialogTitle, windowsNeedsAttachChoice } from "./attach-pick";
 
 import { displaySrcForHref, openableMediaPath, resolveMediaProtocolFile, safeLocalPath } from "./media-src";
+import { watchViewerFolder } from "./viewer-watch";
+import { createViewerHost, viewerSession, resolveViewerWatchFolder } from "./viewer-host";
+import { pathToMediaUrl } from "../src/lib/media-display";
 import { findSourceFile, listGitChanges, readEditStatsAsync, readFileDiff, readGitHead, readSourceText, recordFileInstance } from "./project-diff";
 import { TerminalHost, type TerminalEvent } from "./terminal-host";
 import {
@@ -1252,9 +1255,30 @@ app.whenReady().then(async () => {
   void learningService.recover().catch((error) => console.warn("Learning recover failed", error));
   debugStartup("learning ready");
   const peerBusy = new Set<string>();
+  const readViewerState = () => residentDesk ?? readState();
+  const viewerHost = createViewerHost({
+    userData: app.getPath("userData"),
+    readState: readViewerState,
+    send: (request) => {
+      const win = liveDeskWindow();
+      if (!win || win.isDestroyed() || win.webContents.isDestroyed()) throw new Error("Workhorse window is closed");
+      win.webContents.send("viewer:request", request);
+    },
+    capture: async (rect) => {
+      const win = liveDeskWindow();
+      if (!win || !win.isVisible() || win.isMinimized() || win.webContents.isDestroyed()) throw new Error("Preview window is not visible");
+      const [width, height] = win.getContentSize();
+      if (rect.x + rect.width > width || rect.y + rect.height > height) throw new Error("Preview capture bounds are outside the window");
+      const image = await win.webContents.capturePage(rect);
+      if (image.isEmpty()) throw new Error("Preview capture is empty");
+      return image.toPNG();
+    },
+  });
+  disposeAtQuit("viewer", () => viewerHost.dispose());
   const handlePeerAsk = async (ask: PeerAsk) => {
     const win = liveDeskWindow();
     if (!win || win.webContents.isDestroyed()) return { error: "Workhorse window is closed" };
+    if (ask.action === "viewer") return viewerHost.handle(ask);
     const bots = ask.mode === "bots";
     const spawn = !bots && ask.mode === "spawn";
     if (!bots && !spawn && ask.fromSessionId && ask.fromSessionId === ask.toSessionId) {
@@ -2080,6 +2104,70 @@ app.whenReady().then(async () => {
   ipcMain.handle("workshop:close-breakout", () => {
     workshopHost.closeBreakout();
     return true;
+  });
+
+  // Viewer file watchers per session
+  const viewerWatchers = new Map<string, import("./viewer-watch").ViewerWatchHandle>();
+
+  ipcMain.handle("viewer:watch-start", (_event, sessionId: unknown, folder: unknown) => {
+    if (typeof sessionId !== "string" || typeof folder !== "string" || !folder.trim()) return false;
+    viewerSession(readViewerState(), sessionId);
+    const watchFolder = resolveViewerWatchFolder(readViewerState(), sessionId, folder);
+    const previous = viewerWatchers.get(sessionId);
+    if (previous) {
+      previous.stop();
+      viewerWatchers.delete(sessionId);
+    }
+    const handle = watchViewerFolder({
+      folder: watchFolder,
+      onFile: (fileEvent) => {
+        liveDeskWindow()?.webContents.send("viewer:file-changed", {
+          sessionId,
+          path: fileEvent.path,
+          format: fileEvent.format,
+          type: fileEvent.type,
+          initial: fileEvent.initial,
+          scopeRoot: path.resolve(watchFolder, "..", ".."),
+        });
+      },
+    });
+    viewerWatchers.set(sessionId, handle);
+    return true;
+  });
+
+  ipcMain.handle("viewer:watch-stop", (_event, sessionId: unknown) => {
+    if (typeof sessionId !== "string") return;
+    const handle = viewerWatchers.get(sessionId);
+    if (handle) {
+      handle.stop();
+      viewerWatchers.delete(sessionId);
+    }
+  });
+
+  ipcMain.handle("viewer:resolve-asset", (_event, href: unknown, cwd: unknown) => {
+    if (typeof href !== "string") return null;
+    const cwdStr = typeof cwd === "string" ? cwd : undefined;
+    const resolved = resolveMediaProtocolFile(pathToMediaUrl(href, { cwd: cwdStr }));
+    return resolved ? fs.realpathSync(resolved) : null;
+  });
+
+  ipcMain.handle("viewer:save-annotations", (_event, sessionId: unknown, annotations: unknown) => {
+    viewerSession(readViewerState(), sessionId);
+    return viewerHost.annotations.save(sessionId as string, annotations);
+  });
+
+  ipcMain.handle("viewer:load-annotations", (_event, sessionId: unknown) => {
+    viewerSession(readViewerState(), sessionId);
+    return viewerHost.annotations.load(sessionId as string);
+  });
+
+  ipcMain.handle("viewer:reply-request", (_event, reply: unknown) => viewerHost.reply(reply));
+  ipcMain.handle("viewer:snapshot", async (_event, sessionId: unknown) => {
+    viewerSession(readViewerState(), sessionId);
+    const result = await viewerHost.handle({ action: "viewer", viewerOperation: "snapshot", fromSessionId: sessionId as string,
+      toSessionId: sessionId as string, message: "snapshot", mode: "bots" });
+    if ("error" in result) return { ok: false, error: result.error };
+    return JSON.parse(result.text);
   });
 
   // safeLocalPath (media-src) refuses a path on another machine before any stat.

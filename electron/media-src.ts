@@ -203,6 +203,22 @@ export function displaySrcForHref(href: string, opts: MediaSrcOpts = {}, io?: Me
 export function resolveMediaProtocolFile(url: string, io?: MediaSrcIo): string | null {
   const dest = mediaUrlToPath(url);
   const context = mediaUrlContext(url);
+  // Preview model dependencies name their explicit read root. `cwd` on an
+  // ordinary media URL remains a lookup hint, not a permission boundary.
+  const query = url.includes("?") ? url.slice(url.indexOf("?") + 1).split("#", 1)[0] : "";
+  const parameters = new URLSearchParams(query);
+  if (parameters.has("viewerRoot")) {
+    const root = parameters.get("viewerRoot");
+    if (!dest || !root || isNetworkPath(dest) || isNetworkPath(root) || !path.isAbsolute(dest) || !path.isAbsolute(root)) return null;
+    try {
+      const realRoot = fs.realpathSync(root);
+      const realFile = fs.realpathSync(dest);
+      if (!fs.statSync(realRoot).isDirectory() || !fs.statSync(realFile).isFile()) return null;
+      const relative = path.relative(realRoot, realFile);
+      if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) return null;
+      return realFile;
+    } catch { return null; }
+  }
   const exists = io?.existsSync ?? ((file: string) => fs.existsSync(file));
   const p = io?.path ?? path;
   // The same missing picture is asked for again on every paint of its chat.

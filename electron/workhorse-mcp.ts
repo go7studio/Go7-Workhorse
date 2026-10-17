@@ -408,6 +408,45 @@ const TOOLS = [
     },
   },
   {
+    name: "workhorse_viewer_load",
+    description: "Load a GLB, glTF, image, or file path in the calling chat's visible preview. Files must be in that chat's linked project or worktree. Returns only after the preview loads or reports an error.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        sessionId: { type: "string", description: "Chat session id" },
+        assetPath: { type: "string", description: "Absolute local project path; GLB, glTF, PNG and JPG draw, other files show their path" },
+      },
+      required: ["sessionId", "assetPath"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "workhorse_viewer_annotations",
+    description: "Get pending annotations from the viewer panel. Returns JSON array of annotations with world coordinates and notes.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        sessionId: { type: "string", description: "Chat session id" },
+        clear: { type: "boolean", description: "Clear annotations after reading them" },
+      },
+      required: ["sessionId"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "workhorse_viewer_snapshot",
+    description: "Capture a screenshot of the current viewer state with numbered pins overlaid.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        sessionId: { type: "string", description: "Chat session id" },
+        outputPath: { type: "string", description: "Optional unused PNG name in this chat's userData/viewer-snapshots directory; omitted chooses a safe unique path" },
+      },
+      required: ["sessionId"],
+      additionalProperties: false,
+    },
+  },
+  {
     name: "workhorse_delegate",
     description:
       "New slice only. Workhorse picks the worker. Cannot target a named worker — use workhorse_ask_chat with that row's id. fromSessionId is the parent from list_chats, never the worker. Leave initialBrain unset for full Auto; set it only for the first coordinator. Descendants route independently unless a slice is explicitly assigned. Do not perform the task yourself. If this fails, report the exact Workhorse error before any direct fallback.",
@@ -3988,6 +4027,24 @@ async function callDeskTool(name: string, args: Record<string, unknown>, from?: 
     const skill = typeof args.skill === "string" ? args.skill : typeof args.name === "string" ? args.name : "";
     if (!skill.trim()) throw new Error("skill is required");
     return JSON.stringify(readDeskSkill(skill, projectFoldersFromState()), null, 2);
+  }
+  if (name === "workhorse_viewer_load") {
+    const sessionId = typeof args.sessionId === "string" ? args.sessionId : "";
+    const assetPath = typeof args.assetPath === "string" ? args.assetPath : "";
+    if (!sessionId.trim()) throw new Error("sessionId is required");
+    if (!assetPath.trim()) throw new Error("assetPath is required");
+    return postBridge("/bots", { ...botsAsk({ action: "viewer", viewerOperation: "load", assetPath }, from), toSessionId: sessionId }, { inbox: false });
+  }
+  if (name === "workhorse_viewer_annotations") {
+    const sessionId = typeof args.sessionId === "string" ? args.sessionId : "";
+    if (!sessionId.trim()) throw new Error("sessionId is required");
+    return postBridge("/bots", { ...botsAsk({ action: "viewer", viewerOperation: "annotations", clear: args.clear === true }, from), toSessionId: sessionId }, { inbox: false });
+  }
+  if (name === "workhorse_viewer_snapshot") {
+    const sessionId = typeof args.sessionId === "string" ? args.sessionId : "";
+    if (!sessionId.trim()) throw new Error("sessionId is required");
+    return postBridge("/bots", { ...botsAsk({ action: "viewer", viewerOperation: "snapshot",
+      outputPath: typeof args.outputPath === "string" ? args.outputPath : undefined }, from), toSessionId: sessionId }, { inbox: false });
   }
   throw new Error(`Unknown tool ${name}`);
 }

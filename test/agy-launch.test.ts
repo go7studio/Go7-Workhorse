@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import { agySkipsPermissions, buildAgyLaunchSpec, modelPinsEffort } from "../electron/agy-launch";
 import { detectAgyLogin } from "../electron/agy-login";
@@ -159,6 +160,7 @@ test("a fake agy process returns text and does not bill the cumulative total twi
       (live as FakeChild).killed = true;
     },
     "agy",
+    () => null,
   );
   const events: GrokIpcEvent[] = [];
   const input = {
@@ -185,7 +187,7 @@ test("a fake agy process returns text and does not bill the cumulative total twi
   );
   live.stdout.emit(
     "data",
-    `${JSON.stringify({ event: "step_update", step_update: { step_index: 1, state: "DONE", step_type: "agent_response", text_delta: "Hello there" } })}\n`,
+    `${JSON.stringify({ event: "step_update", step_update: { step_index: 1, state: "DONE", step_type: "agent_response", text_delta: " there" } })}\n`,
   );
   live.stdout.emit(
     "data",
@@ -194,15 +196,15 @@ test("a fake agy process returns text and does not bill the cumulative total twi
       result: {
         conversation_id: "conv-9",
         status: "SUCCESS",
-        response: "Hello",
+        response: "Hello there",
         usage: { input_tokens: 10418, output_tokens: 589, cache_read_tokens: 8113, total_tokens: 11007 },
       },
     })}\n`,
   );
   const done = await first;
-  assert.equal(done.text, "Hello");
+  assert.equal(done.text, "Hello there");
   assert.equal(done.vendorSessionId, "conv-9");
-  assert.equal(events.filter((event) => event.type === "chunk").length, 1);
+  assert.equal(events.filter((event) => event.type === "chunk").length, 2);
   const usage = events.find((event) => event.type === "usage");
   assert.equal(usage?.type, "usage");
   if (usage?.type === "usage") {
@@ -237,6 +239,131 @@ test("a fake agy process returns text and does not bill the cumulative total twi
     assert.fail("second turn did not report usage");
   }
   host.disposeAll();
+});
+
+test("native agy DONE deltas finish the text streamed into the transcript", async () => {
+  const child = new FakeChild();
+  const host = new AgySessionHost(() => child, () => undefined, "agy", () => null);
+  const events: GrokIpcEvent[] = [];
+  try {
+    const pending = host.prompt({ sessionId: "native-tail", model: "gemini-3.8-flash-low", effort: "low", cwd: "/tmp/work", mode: "ask", text: "Reply exactly AGY_HOST_OK" }, (event) => events.push(event));
+    await new Promise((resolve) => setImmediate(resolve));
+    child.stdout.emit("data", readFileSync(new URL("./fixtures/agy/streamed-tail.jsonl", import.meta.url), "utf8"));
+    const result = await pending;
+    const streamed = events.filter((event) => event.type === "chunk").map((event) => event.type === "chunk" ? event.text : "").join("");
+    assert.equal(streamed, "AGY_HOST_OK\n");
+    assert.equal(streamed.trim(), result.text);
+  } finally {
+    host.disposeAll();
+  }
+});
+
+test("native conversation resume bills current model calls, not the cumulative conversation", async () => {
+  const child = new FakeChild();
+  const host = new AgySessionHost(() => child, () => undefined, "agy", () => null);
+  const events: GrokIpcEvent[] = [];
+  try {
+    const pending = host.prompt({ sessionId: "resume", vendorSessionId: "captured-native-resume", model: "gemini-3.8-flash-low", effort: "low", cwd: "/tmp/work", mode: "ask", text: "Recall the token" }, (event) => events.push(event));
+    await new Promise((resolve) => setImmediate(resolve));
+    child.stdout.emit("data", readFileSync(new URL("./fixtures/agy/resumed-turn.jsonl", import.meta.url), "utf8"));
+    const result = await pending;
+    assert.equal(result.text, "AGY_NATIVE_RESUME_OK");
+    const usage = events.filter((event) => event.type === "usage");
+    assert.equal(usage.length, 1);
+    assert.equal(usage[0]?.type === "usage" && usage[0].inputTokens, 12825);
+    assert.equal(usage[0]?.type === "usage" && usage[0].outputTokens, 10);
+  } finally {
+    host.disposeAll();
+  }
+});
+
+test("revised DONE usage replaces the step and counts tool-only model calls with cache reads", async () => {
+  const child = new FakeChild();
+  const host = new AgySessionHost(() => child, () => undefined, "agy", () => null);
+  const events: GrokIpcEvent[] = [];
+  try {
+    const pending = host.prompt({ sessionId: "usage-revision", vendorSessionId: "existing", model: "gemini-3.8-flash-low", effort: "low", cwd: "/tmp/work", mode: "ask", text: "Continue" }, (event) => events.push(event));
+    await new Promise((resolve) => setImmediate(resolve));
+    const lines = [
+      { event: "step_update", step_update: { step_index: 7, state: "DONE", step_type: "agent_response", usage: { input_tokens: 12000, output_tokens: 9, cache_read_tokens: 2000 } } },
+      { event: "step_update", step_update: { step_index: 7, state: "DONE", step_type: "agent_response", usage: { input_tokens: 12825, output_tokens: 10, cache_read_tokens: 2500 } } },
+      { event: "step_update", step_update: { step_index: 7, state: "DONE", step_type: "agent_response", usage: { input_tokens: 12825, output_tokens: 10, cache_read_tokens: 2500 } } },
+      { event: "step_update", step_update: { step_index: 9, state: "DONE", step_type: "agent_response", text_delta: "Done", usage: { input_tokens: 100, output_tokens: 2, cache_read_tokens: 40 } } },
+      { event: "result", result: { status: "SUCCESS", response: "Done", usage: { input_tokens: 99999, output_tokens: 999, cache_read_tokens: 10000 } } },
+    ];
+    child.stdout.emit("data", `${lines.map((line) => JSON.stringify(line)).join("\n")}\n`);
+    await pending;
+    const usage = events.find((event) => event.type === "usage");
+    assert.equal(usage?.type, "usage");
+    if (usage?.type === "usage") {
+      assert.equal(usage.inputTokens, 10385);
+      assert.equal(usage.outputTokens, 12);
+      assert.equal(usage.cacheReadTokens, 2540);
+    }
+  } finally {
+    host.disposeAll();
+  }
+});
+
+test("a resumed CLI without step counts leaves the first turn unknown until a baseline exists", async () => {
+  const child = new FakeChild();
+  const host = new AgySessionHost(() => child, () => undefined, "agy", () => null);
+  const events: GrokIpcEvent[] = [];
+  const input = { sessionId: "legacy-usage", vendorSessionId: "existing", model: "gemini-3.8-flash-low", effort: "low" as const, cwd: "/tmp/work", mode: "ask" as const, text: "Continue" };
+  try {
+    for (const inputTokens of [10000, 12000]) {
+      const pending = host.prompt(input, (event) => events.push(event));
+      await new Promise((resolve) => setImmediate(resolve));
+      child.stdout.emit("data", `${JSON.stringify({ event: "result", result: { status: "SUCCESS", response: "Done", usage: { input_tokens: inputTokens, output_tokens: 10 } } })}\n`);
+      await pending;
+      assert.equal(events.filter((event) => event.type === "usage").length, inputTokens === 10000 ? 0 : 1);
+    }
+    const usage = events.find((event) => event.type === "usage");
+    assert.equal(usage?.type === "usage" && usage.inputTokens, 2000);
+  } finally {
+    host.disposeAll();
+  }
+});
+
+test("a native denied action remains visible when the CLI returns an empty successful result", async () => {
+  const child = new FakeChild();
+  const host = new AgySessionHost(() => child, () => undefined, "agy", () => null);
+  try {
+    const pending = host.prompt({ sessionId: "permission-denied", model: "gemini-3.8-flash-low", effort: "low", cwd: "/tmp/work", mode: "ask", text: "Run pwd" }, () => undefined);
+    await new Promise((resolve) => setImmediate(resolve));
+    child.stdout.emit("data", `${JSON.stringify({ event: "step_update", step_update: { step_index: 2, state: "DONE", step_type: "tool", tool_name: "run_command", tool_info: { error: { message: "permission check failed: user denied permission to run command\nDo not circumvent this denial." } } } })}\n${JSON.stringify({ event: "result", result: { status: "SUCCESS", response: "" } })}\n`);
+    assert.match((await pending).text, /user denied permission/);
+    assert.equal(host.answerPermission("native-request", "allow"), false, "no unsupported native approval protocol is invented");
+  } finally {
+    host.disposeAll();
+  }
+});
+
+test("late events from a cancelled process cannot settle its replacement conversation", async () => {
+  const children: FakeChild[] = [];
+  const host = new AgySessionHost(() => {
+    const child = new FakeChild();
+    children.push(child);
+    return child;
+  }, () => undefined, "agy", () => null);
+  const input = { sessionId: "cancel-resume", model: "gemini-3.8-flash-low", effort: "low" as const, cwd: "/tmp/work", mode: "ask" as const, text: "Continue" };
+  try {
+    const cancelled = host.prompt(input, () => undefined);
+    await new Promise((resolve) => setImmediate(resolve));
+    host.cancel(input.sessionId);
+    assert.equal((await cancelled).stopReason, "cancelled");
+    const resumed = host.prompt({ ...input, vendorSessionId: "native-conversation" }, () => undefined);
+    await new Promise((resolve) => setImmediate(resolve));
+    children[0]!.stdout.emit("data", `${JSON.stringify({ event: "result", result: { status: "ERROR", error: "interrupted" } })}\n`);
+    children[0]!.stderr.emit("data", "permission denied from old process");
+    children[0]!.emit("error", new Error("old process stopped"));
+    children[0]!.emit("exit", 1);
+    children[1]!.stdout.emit("data", `${JSON.stringify({ event: "result", result: { status: "SUCCESS", response: "Resumed" } })}\n`);
+    assert.equal((await resumed).text, "Resumed");
+    assert.deepEqual(host.liveSessionIds(), [input.sessionId]);
+  } finally {
+    host.disposeAll();
+  }
 });
 
 class FakeChild extends EventEmitter implements AgyChild {

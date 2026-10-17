@@ -57,6 +57,15 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
 - Gemini on the desk is the Antigravity CLI. The Gemini API preset stays a
   separate HTTP bot. A new Gemini chat starts on Always allow. Ask, Accept
   edits, and Plan stay available on that chat.
+- Gemini replies keep the final text delta, including a word completed as the
+  native CLI finishes the response.
+- Resuming a Gemini conversation bills the new turn's native model-call counts,
+  without charging its earlier conversation totals again.
+- Gemini's headless CLI cannot ask for interactive approval. A denied action
+  reports its reason in the reply.
+- Gemini receives the MCP tools attached to that chat, including Workhorse
+  Link and optional Blender. Its temporary tool configuration leaves the
+  user's workspace and global CLI configuration unchanged.
 - Client and model are separate: **Grok Build CLI** runs the model ids
   **Grok 4.7**, **Grok 4.6**, and **Grok 4.5**.
 - The CLI's live catalog is authoritative. The desk shows the model, never the
@@ -583,6 +592,23 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
   in the auto-load catalog. Slash commands stay the exact route.
 - **MCP servers** Settings → Skills adds and tests local stdio servers, attaches
   each to selected runtimes, and picks the tools exposed to custom HTTP models.
+- **3D preview** 3D in the chat header opens a preview. Open any file, or
+  leave a GLB, glTF, PNG, or JPG in the project `.workhorse/preview/` folder.
+  Click the preview to drop numbered pins and a note. To chat puts the file
+  path and the pins in the composer. The model picks the tool, which can be
+  a headless server, CAD, or something else. The preview draws GLB, glTF,
+  PNG, and JPG. Other files still send their path. The watch does not start
+  Blender. Pins are saved per chat, survive closing the preview, and keep
+  their numbering when a file reloads. glTF buffers and textures stay within
+  the project. Preview tools wait for the visible file to load and capture
+  an actual PNG of the preview.
+- **Blender** stays off until `/blender on`, or Blender in the chat header and
+  in This chat. The next turn of that chat then receives `blender-mcp`
+  (`uvx blender-mcp`). Cursor and a custom bot such as Grok Bot both receive
+  it. Workhorse does not launch Blender and does not keep it open. `uvx` and
+  Blender have to be installed, and the add-on has to be listening, before
+  that turn can drive Blender. The add-on can run Python inside Blender.
+  `/blender off` removes it from that chat only. The 3D preview keeps working.
 - Those calls use the same approval and result path as built-in tools.
   Environment values go to the OS-encrypted credential store.
 - **Jev MCP bridge** (`scripts/jev-mcp.mjs`) is an optional, first-party,

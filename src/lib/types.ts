@@ -619,6 +619,10 @@ export type Session = {
   securityPolicy?: SessionSecurityPolicy;
   /** Where this chat executes. Missing on older saves means the project's local folder. */
   environment?: SessionEnvironment;
+  /** Optional chat tools such as Blender. Missing means off. The 3D preview does not use this. */
+  presets?: Array<"blender">;
+  /** Explicit preview use makes a chat durable even before its first message. */
+  previewUsed?: true;
   /** Extra folders linked on this chat, besides the project's. */
   folders?: LinkedFolder[];
   vendorSessionId?: string;

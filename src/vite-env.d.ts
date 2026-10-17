@@ -415,6 +415,23 @@ type WorkhorseBridge = {
   /** Check the leaderboard now and download it if it moved. */
   scoresRefresh?: () => Promise<import("./lib/bot-scores").BotScoresView>;
   onScoresUpdated?: (handler: (view: unknown) => void) => () => void;
+  viewerWatchStart?: (
+    sessionId: string,
+    cwd: string,
+  ) => Promise<{ ok: boolean; folder?: string; message?: string }>;
+  viewerWatchStop?: (sessionId: string) => Promise<void>;
+  viewerResolveAsset?: (path: string, cwd?: string) => Promise<string | null>;
+  viewerSaveAnnotations?: (
+    sessionId: string,
+    annotations: unknown[],
+  ) => Promise<boolean>;
+  viewerLoadAnnotations?: (sessionId: string) => Promise<unknown[]>;
+  viewerSnapshot?: (sessionId: string) => Promise<{ ok: boolean; path?: string }>;
+  onViewerRequest?: (handler: (request: import("../electron/viewer-host").ViewerRequest) => void) => () => void;
+  viewerReplyRequest?: (reply: import("../electron/viewer-host").ViewerReply) => Promise<boolean>;
+  onViewerFileChanged?: (
+    handler: (event: { sessionId: string; path: string; format: string; type: string; initial?: boolean; scopeRoot?: string }) => void,
+  ) => () => void;
 };
 
 interface Window {

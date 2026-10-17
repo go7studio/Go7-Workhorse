@@ -117,10 +117,12 @@ export const Composer = memo(function Composer({
   setupOpen,
   onToggleSetup,
   dropRoot,
+  stage,
 }: {
   setupOpen?: boolean;
   onToggleSetup?: () => void;
   dropRoot?: RefObject<HTMLElement | null>;
+  stage?: { id: number; text: string } | null;
 }) {
   const {
     session,
@@ -152,6 +154,7 @@ export const Composer = memo(function Composer({
   const [crewWidth, setCrewWidth] = useState(0);
   const [shownCrew, setShownCrew] = useState<CrewMode[]>([]);
   const field = useRef<HTMLTextAreaElement>(null);
+  const stagedId = useRef<number | null>(null);
   const filePicker = useRef<HTMLInputElement>(null);
   const wrap = useRef<HTMLDivElement>(null);
   const crewInner = useRef<HTMLDivElement>(null);
@@ -218,6 +221,20 @@ export const Composer = memo(function Composer({
     setImages(watchRestore.images ?? []);
     clearWatchRestore();
   }, [watchRestore, clearWatchRestore]);
+
+  useEffect(() => {
+    if (!stage || stagedId.current === stage.id) return;
+    stagedId.current = stage.id;
+    setValue((current) => (current.trim() ? `${current.replace(/\s+$/, "")}\n\n${stage.text}` : stage.text));
+    const el = field.current;
+    el?.focus();
+    queueMicrotask(() => {
+      const node = field.current;
+      if (!node) return;
+      const end = node.value.length;
+      node.setSelectionRange(end, end);
+    });
+  }, [stage]);
 
   useEffect(() => {
     if (!sessionId) return;

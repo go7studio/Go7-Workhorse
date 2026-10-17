@@ -46,7 +46,11 @@ import { UserTurn } from "./UserTurn";
 import { WorkPopout } from "./WorkPopout";
 import { TerminalPane } from "./TerminalPane";
 import { WorkshopPanel } from "./WorkshopPanel";
+import { ViewerPanel } from "./ViewerPanel";
 import { pinNoticesDock } from "../lib/session-dock";
+import { presetOn } from "../lib/environment-presets";
+import { previewAsset, viewerWatchFolder, type ViewerAsset } from "../lib/viewer";
+import { useSessionViewer } from "./useSessionViewer";
 import {
   countTurnsAboveViewport,
   createPinScheduler,
@@ -184,6 +188,13 @@ export function SessionPane() {
   const [workshopOut, setWorkshopOut] = useState(false);
   const workshopToggle = useRef<HTMLButtonElement>(null);
   const [workshopWidth, setWorkshopWidth] = useState(() => WORKSHOP_PANE.fallback);
+  const [chatStage, setChatStage] = useState<{ id: number; text: string } | null>(null);
+  const stageSeq = useRef(0);
+
+  const sendMarksToChat = useCallback((text: string) => {
+    stageSeq.current += 1;
+    setChatStage({ id: stageSeq.current, text });
+  }, []);
   const [hiddenByChat, setHiddenByChat] = useState<Record<string, string[]>>({});
   const [stats, setStats] = useState<Record<string, { added: number; deleted: number }>>({});
   const fetchedStats = useRef<Record<string, string>>({});
@@ -230,6 +241,31 @@ export function SessionPane() {
     return mergeEdits(projectEdits([session], roots), extraEdits);
   }, [session?.id, writesKey, roots, extraEdits, editsIdle]);
   const sessionId = session?.id ?? "";
+  const viewer = useSessionViewer(sessionId, cwd, session?.previewUsed);
+  const { open: viewerOpen, refreshViewer } = viewer;
+  useLayoutEffect(() => { setChatStage(null); }, [sessionId]);
+  const blenderOn = presetOn(session?.presets, "blender");
+  const previewWatch = (viewerOpen || blenderOn) && viewer.ready;
+
+  useEffect(() => {
+    if (!sessionId || !cwd || !previewWatch) return;
+    const folder = viewerWatchFolder(cwd);
+    void window.workhorse?.viewerWatchStart?.(sessionId, folder);
+    return () => {
+      void window.workhorse?.viewerWatchStop?.(sessionId);
+    };
+  }, [sessionId, previewWatch, cwd]);
+
+  useEffect(() => {
+    const off = window.workhorse?.onViewerFileChanged?.((event) => {
+      if (event.sessionId !== sessionId) return;
+      const fmt = event.format as ViewerAsset["format"];
+      if (!["glb", "gltf", "png", "jpg"].includes(fmt)) return;
+      refreshViewer({ ...previewAsset(event.path, fmt), loadedAt: Date.now(), scopeRoot: event.scopeRoot }, event.initial);
+    });
+    return () => off?.();
+  }, [sessionId, cwd, refreshViewer]);
+
   const transcriptMessages = useMemo(
     () => (session ? omitQueuedUserMessages(session.messages, session.queue) : []),
     [session?.messages, session?.queue],
@@ -487,7 +523,7 @@ export function SessionPane() {
     >
     <MediaPaintProvider resetKey={session.id}>
     <section
-      className={`session${open ? " has-file" : ""}${workshopOpen ? " has-workshop" : ""}`}
+      className={`session${open ? " has-file" : ""}${workshopOpen ? " has-workshop" : ""}${viewerOpen ? " has-viewer" : ""}`}
       ref={pane}
       style={
         open || workshopOpen
@@ -543,6 +579,26 @@ export function SessionPane() {
               </button>
             </>
           ) : null}
+          <button
+            className={`tiny${viewerOpen ? " active-kind" : ""}`}
+            type="button"
+            aria-pressed={viewerOpen}
+            onClick={() => {
+              if (viewerOpen) viewer.close();
+              else { desk.retainChatPreview(sessionId); viewer.show(); }
+            }}
+          >
+            3D
+          </button>
+          <button
+            className={`tiny${blenderOn ? " active-kind" : ""}`}
+            type="button"
+            aria-pressed={blenderOn}
+            title="Off leaves Blender closed. On hands it to the next turn only."
+            onClick={() => desk.setChatPreset("blender", !blenderOn)}
+          >
+            Blender
+          </button>
           <button
             ref={workshopToggle}
             className={`tiny${workshopOpen && !workshopOut ? " active-kind" : ""}`}
@@ -670,6 +726,7 @@ export function SessionPane() {
         dropRoot={pane}
         setupOpen={setupOpen}
         onToggleSetup={toggleSetup}
+        stage={chatStage}
       />
       {project && terminalOpen && cwd ? <TerminalPane sessionId={session.id} cwd={cwd} onClose={() => setTerminalOpen(false)} /> : null}
       </div>
@@ -723,6 +780,23 @@ export function SessionPane() {
             enabledIds={session.workshopPacks ?? EMPTY_WORKSHOP_PACKS}
             onClose={closeWorkshopPane}
           />
+        </aside>
+      ) : null}
+      {viewerOpen ? (
+        <aside className="session-viewer" aria-label="3D preview">
+          <ViewerPanel
+            sessionId={session.id}
+            asset={viewer.asset}
+            annotations={viewer.annotations}
+            onAnnotation={viewer.addAnnotation}
+            onSendMarks={sendMarksToChat}
+            onClearMarks={viewer.clearMarks}
+            onOpenFile={() => { desk.retainChatPreview(sessionId); void viewer.openFile(); }}
+            onClose={viewer.close}
+            onStatus={viewer.onStatus}
+            canMark={viewer.ready}
+          />
+          {viewer.error ? <p role="alert">{viewer.error}</p> : null}
         </aside>
       ) : null}
     </section>

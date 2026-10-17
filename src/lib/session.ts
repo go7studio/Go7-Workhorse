@@ -5,6 +5,7 @@ import { normalizeImages } from "./images";
 import { defaultModel, effortLabel, modelName, normalizeModelId, withEffort } from "./models";
 import { isProviderId } from "./providers";
 import { applyGoalIdleAndQueue, grokGoalAfterTurnIdle, normalizeGoal } from "./goal";
+import { normalizePresets } from "./environment-presets";
 import { normalizeSessionEnvironment } from "./session-environment";
 import { normalizePermissionGrants } from "./permission-grants";
 import { normalizeScheduledRuns } from "./schedule";
@@ -289,6 +290,8 @@ export function normalizeSession(raw: unknown, liveRunIds?: ReadonlySet<string>)
     sandbox: normalizeSandbox(record.sandbox),
     securityPolicy: normalizeSessionSecurityPolicy(record.securityPolicy),
     environment: normalizeSessionEnvironment(record.environment),
+    ...(normalizePresets(record.presets) ? { presets: normalizePresets(record.presets) } : {}),
+    ...(record.previewUsed === true ? { previewUsed: true as const } : {}),
     folders: (() => {
       if (!Array.isArray(record.folders)) return undefined;
       const folders: LinkedFolder[] = [];

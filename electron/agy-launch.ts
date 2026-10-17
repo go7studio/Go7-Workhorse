@@ -15,6 +15,7 @@ export type AgyLaunchInput = {
   /** Resume a conversation the CLI already has. Omitted on a process that is still open. */
   conversationId?: string;
   command?: string;
+  mcpOverlay?: string;
 };
 
 export type AgyLaunchSpec = {
@@ -62,6 +63,7 @@ export function buildAgyLaunchSpec(input: AgyLaunchInput): AgyLaunchSpec {
   const conversation = input.conversationId?.trim();
   if (conversation) argv.push("--conversation", conversation);
   argv.push("--add-dir", cwd);
+  if (input.mcpOverlay) argv.push("--add-dir", input.mcpOverlay);
   // `--mode plan` and `--mode accept-edits` do not change permission_mode.
   // Headless agy does not ask in the stream.
   if ((input.sandbox ?? "off") !== "off") argv.push("--sandbox");

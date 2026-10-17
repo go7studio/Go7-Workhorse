@@ -57,6 +57,10 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
 - Gemini on the desk is the Antigravity CLI. The Gemini API preset stays a
   separate HTTP bot. A new Gemini chat starts on Always allow. Ask, Accept
   edits, and Plan stay available on that chat.
+- Gemini receives the chat's selected MCP servers, including Blender and the
+  Workhorse tools, through a private temporary configuration. Credentials stay
+  in process memory; changing the selection restarts that chat's runtime, and
+  ending the runtime removes its configuration without changing the workspace.
 - Client and model are separate: **Grok Build CLI** runs the model ids
   **Grok 4.7**, **Grok 4.6**, and **Grok 4.5**.
 - The CLI's live catalog is authoritative. The desk shows the model, never the

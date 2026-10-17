@@ -234,6 +234,10 @@ test("a publishing mac build must carry a verified, notarized Developer ID signa
   const build = workflow.slice(workflow.indexOf("- name: Build installer"), workflow.indexOf("- name: Packaged learning smoke"));
   assert.match(build, /-c\.forceCodeSigning=true/, "a mac release must fail when it cannot sign");
   assert.match(build, /npm run \$\{\{ matrix\.script \}\} -- \$force/);
+  assert.match(build, /Signed Windows installer required:[^\n]*\n\s*exit 1/);
+  assert.match(build, /Get-AuthenticodeSignature/);
+  assert.match(build, /\$signature\.Status -ne 'Valid'/);
+  assert.match(build, /release\/win-unpacked\/Go7 Workhorse\.exe/);
   const gate = workflow.slice(workflow.indexOf("- name: Refuse a development-stamped release"), workflow.indexOf("- name: Keep the installer"));
   assert.match(gate, /WORKHORSE_APPLE_TEAM_ID: .*secrets\.MAC_APPLE_TEAM_ID/);
 });

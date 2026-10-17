@@ -131,10 +131,7 @@ jobs:
           MAC_APPLE_ID: ${{ runner.os == 'macOS' && secrets.MAC_APPLE_ID || '' }}
           MAC_APP_SPECIFIC_PASSWORD: ${{ runner.os == 'macOS' && secrets.MAC_APP_SPECIFIC_PASSWORD || '' }}
           MAC_APPLE_TEAM_ID: ${{ runner.os == 'macOS' && secrets.MAC_APPLE_TEAM_ID || '' }}
-          # Authenticode, when a certificate exists. Until then the exe ships
-          # unsigned and Windows says "unknown publisher" — and so does a
-          # fork's, which is the whole problem: on Windows there is currently
-          # nothing a user can check to tell our installer from a copy.
+          # Publishing requires Authenticode as well as Developer ID.
           WIN_CSC_LINK: ${{ runner.os == 'Windows' && secrets.WIN_CSC_LINK || '' }}
           WIN_CSC_KEY_PASSWORD: ${{ runner.os == 'Windows' && secrets.WIN_CSC_KEY_PASSWORD || '' }}
         # The Windows leg never sees the certificate: these resolve to '' off
@@ -160,17 +157,33 @@ jobs:
             fi
           done
           if [ "$RUNNER_OS" = "Windows" ] && [ -z "$CSC_LINK" ]; then
-            echo "::warning::Windows installer is unsigned — no WIN_CSC_LINK. Users will see an unknown-publisher prompt, and a fork's installer looks identical to this one."
+            echo "::error::Signed Windows installer required: configure WIN_CSC_LINK and WIN_CSC_KEY_PASSWORD."
+            exit 1
           fi
           # A certificate that is present but expired, revoked, or not matched
           # by CSC_NAME is only a warning to electron-builder: it skips signing,
           # afterSign and notarization, and still writes the dmg. A release has
           # to stop there instead.
           force=""
-          if [ "$RUNNER_OS" = "macOS" ] && [ "$WORKHORSE_RELEASE_BUILD" = "1" ]; then
+          if [ "$WORKHORSE_RELEASE_BUILD" = "1" ]; then
             force="-c.forceCodeSigning=true"
           fi
           npm run ${{ matrix.script }} -- $force
+
+      - name: Verify Windows installer and application signatures
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $installers = @(Get-ChildItem release -Filter '*Workhorse-Setup-*.exe')
+          if ($installers.Count -ne 1) { throw "Expected exactly one Windows installer" }
+          $application = Get-Item 'release/win-unpacked/Go7 Workhorse.exe' -ErrorAction Stop
+          foreach ($file in @($installers) + @($application)) {
+            $signature = Get-AuthenticodeSignature $file.FullName
+            if ($signature.Status -ne 'Valid' -or -not $signature.SignerCertificate) {
+              throw "Invalid Authenticode signature: $($file.Name): $($signature.Status)"
+            }
+            Write-Host "Verified Authenticode: $($file.Name)"
+          }
 
       - name: Packaged learning smoke
         run: node scripts/learning-packaged-smoke.mjs

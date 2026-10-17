@@ -159,6 +159,7 @@ test("a fake agy process returns text and does not bill the cumulative total twi
       (live as FakeChild).killed = true;
     },
     "agy",
+    () => null,
   );
   const events: GrokIpcEvent[] = [];
   const input = {

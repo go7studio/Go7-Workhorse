@@ -196,6 +196,11 @@ try {
   }
   await canvas.click();
   await page.getByText("1 pin").waitFor();
+  await page.locator(".viewer-canvas .viewer-pin-label").filter({ hasText: /^1$/ }).waitFor();
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  const idleFrames = await canvas.getAttribute("data-render-count");
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  if (idleFrames !== await canvas.getAttribute("data-render-count")) throw new Error("the static 3D preview keeps rendering while idle");
   await page.locator(".viewer-note-input").fill("shorten this edge");
   await page.getByRole("button", { name: "To chat" }).click();
   const draft = page.locator("[data-composer-field='true']");

@@ -30,10 +30,14 @@ function pinColor(mark: number): number {
   return PIN_COLORS[(mark - 1) % PIN_COLORS.length];
 }
 
-function PinLabel({ mark, x, y, note }: { mark: number; x: number; y: number; note: string }) {
+function PinLabel({ mark, x, y, note, elementRef }: {
+  mark: number; x?: number; y?: number; note: string;
+  elementRef?: (element: HTMLDivElement | null) => void;
+}) {
   return (
     <div
       className="viewer-pin-label"
+      ref={elementRef}
       style={{
         left: x,
         top: y,
@@ -91,6 +95,10 @@ const ThreeViewer = memo(function ThreeViewer({
   const raycasterRef = useRef(new THREE.Raycaster());
   const mouseRef = useRef(new THREE.Vector2());
   const pointerStart = useRef<[number, number] | null>(null);
+  const annotationsRef = useRef(annotations);
+  annotationsRef.current = annotations;
+  const labelsRef = useRef(new Map<string, HTMLDivElement>());
+  const renderRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -133,13 +141,32 @@ const ThreeViewer = memo(function ThreeViewer({
     dirLight.position.set(5, 10, 7);
     scene.add(dirLight);
 
-    let animationId: number;
-    const animate = () => {
-      animationId = requestAnimationFrame(animate);
-      controls.update();
-      renderer.render(scene, camera);
+    let animationId = 0;
+    let frames = 0;
+    const projected = new THREE.Vector3();
+    const requestRender = () => {
+      if (!animationId) animationId = requestAnimationFrame(animate);
     };
-    animate();
+    const animate = () => {
+      animationId = 0;
+      const changed = controls.update();
+      renderer.render(scene, camera);
+      container.dataset.renderCount = String(++frames);
+      for (const annotation of annotationsRef.current) {
+        const label = labelsRef.current.get(annotation.id);
+        if (!label || !annotation.target) continue;
+        projected.fromArray(annotation.target.worldPoint).project(camera);
+        label.style.display = projected.z < -1 || projected.z > 1 ? "none" : "";
+        label.style.left = `${(projected.x + 1) / 2 * container.clientWidth}px`;
+        label.style.top = `${(1 - projected.y) / 2 * container.clientHeight}px`;
+      }
+      if (changed) requestRender();
+    };
+    renderRef.current = requestRender;
+    controls.addEventListener("change", requestRender);
+    controls.addEventListener("start", requestRender);
+    controls.addEventListener("end", requestRender);
+    requestRender();
 
     const handleResize = () => {
       const w = container.clientWidth;
@@ -148,6 +175,7 @@ const ThreeViewer = memo(function ThreeViewer({
       camera.aspect = w / h;
       camera.updateProjectionMatrix();
       renderer.setSize(w, h);
+      requestRender();
     };
     const resize = new ResizeObserver(handleResize);
     resize.observe(container);
@@ -157,6 +185,10 @@ const ThreeViewer = memo(function ThreeViewer({
       resize.disconnect();
       window.removeEventListener("resize", handleResize);
       cancelAnimationFrame(animationId);
+      renderRef.current = null;
+      controls.removeEventListener("change", requestRender);
+      controls.removeEventListener("start", requestRender);
+      controls.removeEventListener("end", requestRender);
       controls.dispose();
       disposeObject(scene);
       renderer.dispose();
@@ -208,6 +240,7 @@ const ThreeViewer = memo(function ThreeViewer({
         camera.lookAt(center);
         controls.target.copy(center);
         controls.update();
+        renderRef.current?.();
         if (containerRef.current) containerRef.current.dataset.model = "loaded";
         onStatusRef.current?.("loaded");
       },
@@ -251,6 +284,7 @@ const ThreeViewer = memo(function ThreeViewer({
         pinsRef.current.push(pin);
       }
     }
+    renderRef.current?.();
   }, [annotations]);
 
   const handleClick = useCallback(
@@ -306,7 +340,15 @@ const ThreeViewer = memo(function ThreeViewer({
       onPointerDown={(event) => { pointerStart.current = [event.clientX, event.clientY]; }}
       onClick={handleClick}
       style={{ width: "100%", height: "100%", minHeight: 180 }}
-    />
+    >
+      {annotations.filter((annotation) => annotation.target).map((annotation) => (
+        <PinLabel key={annotation.id} mark={annotation.mark} note={annotation.note}
+          elementRef={(element) => {
+            if (element) labelsRef.current.set(annotation.id, element);
+            else labelsRef.current.delete(annotation.id);
+          }} />
+      ))}
+    </div>
   );
 });
 

@@ -22,23 +22,29 @@ export type AgyLoginDetectInput = {
 
 const MISSING = "Antigravity CLI (agy) is not on the desk's PATH";
 
+function pathMod(platform: NodeJS.Platform) {
+  return platform === "win32" ? path.win32 : path.posix;
+}
+
 function candidateBins(input: AgyLoginDetectInput): string[] {
   const env = input.env ?? process.env;
   const home = input.homedir ?? os.homedir();
   const platform = input.platform ?? process.platform;
+  const paths = pathMod(platform);
   const pathKey = Object.keys(env).find((key) => key.toLowerCase() === "path");
   const pathValue = pathKey ? env[pathKey] ?? "" : "";
+  const name = platform === "win32" ? "agy.exe" : "agy";
   const bins: string[] = [];
-  for (const dir of pathValue.split(path.delimiter)) {
+  for (const dir of pathValue.split(paths.delimiter)) {
     const trimmed = dir.trim();
     if (!trimmed) continue;
-    bins.push(path.join(trimmed, platform === "win32" ? "agy.exe" : "agy"));
+    bins.push(paths.join(trimmed, name));
   }
-  bins.push(path.join(home, ".local", "bin", platform === "win32" ? "agy.exe" : "agy"));
+  bins.push(paths.join(home, ".local", "bin", name));
   if (platform === "darwin") bins.push("/opt/homebrew/bin/agy");
   if (platform === "win32") {
     const local = env.LOCALAPPDATA?.trim();
-    if (local) bins.push(path.join(local, "agy", "bin", "agy.exe"));
+    if (local) bins.push(paths.join(local, "agy", "bin", "agy.exe"));
   }
   return bins;
 }

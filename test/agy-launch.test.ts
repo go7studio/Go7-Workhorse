@@ -66,13 +66,14 @@ test("usage meter is a one-shot print, and login follows the parse", async () =>
   assert.equal(AGY_USAGE_ARGS.at(-2), "-p");
   assert.equal(AGY_USAGE_ARGS.at(-1), "/usage");
   assert.equal(AGY_USAGE_ARGS.includes("acp"), false);
-  const missing = await detectAgyLogin({ env: { PATH: "/nowhere" }, homedir: "/nowhere", existsSync: () => false });
+  const missing = await detectAgyLogin({ env: { PATH: "/nowhere" }, homedir: "/nowhere", platform: "linux", existsSync: () => false });
   assert.equal(missing.launchable, false);
   assert.equal(missing.needsAuth, false);
   assert.match(missing.launchBlocker ?? "", /agy/);
   const signedOut = await detectAgyLogin({
     env: { PATH: "/fake" },
     homedir: "/nowhere",
+    platform: "linux",
     existsSync: (file) => file === "/fake/agy",
     probe: () => "",
   });
@@ -97,9 +98,19 @@ test("usage meter is a one-shot print, and login follows the parse", async () =>
   });
   assert.equal(plan?.leftPercent, 100);
   assert.ok(plan?.observedAt);
+  const windows = await detectAgyLogin({
+    env: { PATH: "C:\\Tools" },
+    homedir: "C:\\Users\\me",
+    platform: "win32",
+    existsSync: (file) => file === "C:\\Tools\\agy.exe",
+    probe: () => "",
+  });
+  assert.equal(windows.binary, "C:\\Tools\\agy.exe");
+  assert.equal(windows.launchable, true);
   const signedIn = await detectAgyLogin({
     env: { PATH: "/fake" },
     homedir: "/nowhere",
+    platform: "linux",
     existsSync: (file) => file === "/fake/agy",
     probe: async () =>
       JSON.stringify({

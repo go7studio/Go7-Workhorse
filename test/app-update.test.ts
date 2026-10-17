@@ -399,7 +399,7 @@ test("update check is wired through main, preload, and the sidebar action", () =
   // a fork's exe is indistinguishable from ours until Authenticode exists.
   assert.match(workflow, /WIN_CSC_LINK: \$\{\{ runner\.os == 'Windows'/);
   assert.match(workflow, /MAC_CSC_LINK: \$\{\{ runner\.os == 'macOS'/);
-  assert.match(workflow, /::warning::Windows installer is unsigned/);
+  assert.match(workflow, /::error::Signed Windows installer required/);
   assert.match(publish, /autorelease: tagged/);
   // Moving that label is a pull-request write and labels are an issues API, so
   // the job needs both. 0.2.0 published every installer and then failed on the

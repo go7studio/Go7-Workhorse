@@ -92,9 +92,13 @@ export function assistantHasVisibleReply(text: string | undefined | null): boole
 export function keepStreamedAssistantText(input: {
   reply?: string | null;
   existingText?: string | null;
+  authoritativeReply?: boolean;
+  preserveWhitespace?: boolean;
 }): string {
-  if (assistantHasVisibleReply(input.existingText)) return (input.existingText ?? "").trim();
-  if (assistantHasVisibleReply(input.reply)) return (input.reply ?? "").trim();
+  if (input.authoritativeReply && input.reply?.trim()) return input.reply;
+  const visible = (text: string | null | undefined) => input.preserveWhitespace ? Boolean(text?.trim()) : assistantHasVisibleReply(text);
+  if (visible(input.existingText)) return input.preserveWhitespace ? input.existingText ?? "" : (input.existingText ?? "").trim();
+  if (visible(input.reply)) return input.preserveWhitespace ? input.reply ?? "" : (input.reply ?? "").trim();
   return "";
 }
 

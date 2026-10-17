@@ -52,7 +52,7 @@ export type GrokCompactInput = GrokSessionOpenInput & {
 };
 
 export type GrokIpcEvent =
-  | { type: "chunk"; sessionId: string; text: string }
+  | { type: "chunk"; sessionId: string; text: string; textMode?: "delta" }
   | { type: "thought"; sessionId: string; text: string }
   | { type: "done"; sessionId: string; stopReason?: string }
   | { type: "error"; sessionId: string; message: string }

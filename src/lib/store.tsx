@@ -8586,7 +8586,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                           : body.trim() || queued.trim();
                         return {
                           ...message,
-                          text: assistantHasVisibleReply(text)
+                          text: (session.provider === "gemini" ? Boolean(text.trim()) : assistantHasVisibleReply(text))
                             ? text
                             : turnEndedWithoutProse({
                                 provider: session.provider,

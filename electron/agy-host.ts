@@ -14,6 +14,8 @@ import { agySkipsPermissions, buildAgyLaunchSpec } from "./agy-launch";
 import { resolveAgyBinary } from "./agy-login";
 import { deskToolEnv } from "./desk-path";
 import { groupSpawnOptions } from "./process-registry";
+import { createAgyMcpOverlay } from "./agy-mcp";
+import { workhorseMcpServer } from "./grok-launch";
 
 const STDERR_CAP = 4_096;
 
@@ -56,6 +58,7 @@ type Slot = {
   buffer: string;
   stderr: string;
   dead: boolean;
+  disposeMcp?: () => void;
   turn?: Turn;
 };
 
@@ -100,7 +103,7 @@ function permissionNotice(stderr: string): string {
 }
 
 function launchKey(input: GrokPromptInput): string {
-  return [input.model, input.effort ?? "", input.cwd, input.mode, input.sandbox ?? "off"].join("\0");
+  return [input.model, input.effort ?? "", input.cwd, input.mode, input.sandbox ?? "off", JSON.stringify(input.mcpServers ?? [])].join("\0");
 }
 
 export class AgySessionHost {
@@ -113,6 +116,7 @@ export class AgySessionHost {
     private readonly spawn: AgySpawnFn = defaultSpawn,
     private readonly kill: (child: AgyChild) => void = killAgyChild,
     private readonly binary?: string,
+    private readonly builtInMcp = workhorseMcpServer,
   ) {}
 
   liveSessionIds(): string[] {
@@ -146,6 +150,7 @@ export class AgySessionHost {
     if (!slot || slot.dead) return;
     slot.dead = true;
     this.kill(slot.child);
+    slot.disposeMcp?.();
     this.finishTurn(slot, { text: slot.turn?.text ?? "", stopReason: "cancelled", vendorSessionId: slot.conversationId, opened: slot.opened });
   }
 
@@ -159,6 +164,7 @@ export class AgySessionHost {
       /* already closed */
     }
     this.kill(slot.child);
+    slot.disposeMcp?.();
     this.slots.delete(sessionId);
   }
 
@@ -169,7 +175,8 @@ export class AgySessionHost {
   private async promptUnlocked(input: GrokPromptInput, emit: GrokEventSink): Promise<GrokPromptResult> {
     this.stoppedWhileStarting.delete(input.sessionId);
     const slot = await this.ensure(input, emit);
-    if (this.stoppedWhileStarting.delete(input.sessionId)) {
+    const stopped = this.stoppedWhileStarting.delete(input.sessionId);
+    if (slot.dead || stopped) {
       return stoppedBeforePrompt(input.sessionId, { sessionId: slot.conversationId ?? "", opened: slot.opened }, emit);
     }
     const text = composeVendorPrompt(
@@ -204,16 +211,24 @@ export class AgySessionHost {
     if (existing && !existing.dead && existing.key === key) return existing;
     if (existing) this.dispose(input.sessionId);
     const command = this.binary || resolveAgyBinary() || "agy";
-    const spec = buildAgyLaunchSpec({
-      model: input.model,
-      effort: input.effort,
-      cwd: input.cwd,
-      mode: input.mode,
-      sandbox: input.sandbox,
-      conversationId: input.vendorSessionId,
-      command,
-    });
-    const child = this.spawn(spec.command, spec.argv, { cwd: spec.cwd, env: deskToolEnv() });
+    const overlay = createAgyMcpOverlay(input, this.builtInMcp(input.sessionId));
+    let child: AgyChild;
+    try {
+      const spec = buildAgyLaunchSpec({
+        model: input.model,
+        effort: input.effort,
+        cwd: input.cwd,
+        mode: input.mode,
+        sandbox: input.sandbox,
+        conversationId: input.vendorSessionId,
+        command,
+        mcpOverlay: overlay?.folder,
+      });
+      child = this.spawn(spec.command, spec.argv, { cwd: spec.cwd, env: { ...deskToolEnv(), ...overlay?.env } });
+    } catch (error) {
+      overlay?.dispose();
+      throw error;
+    }
     const slot: Slot = {
       key,
       child,
@@ -223,6 +238,7 @@ export class AgySessionHost {
       buffer: "",
       stderr: "",
       dead: false,
+      disposeMcp: overlay?.dispose,
     };
     this.slots.set(input.sessionId, slot);
     this.starting.add(input.sessionId);
@@ -231,7 +247,7 @@ export class AgySessionHost {
     });
     child.stderr?.on("data", (chunk) => {
       const live = this.slots.get(input.sessionId);
-      if (live !== slot) return;
+      if (live !== slot || live.dead) return;
       const text = typeof chunk === "string" ? chunk : chunk.toString("utf8");
       live.stderr = `${live.stderr}${text}`.slice(-STDERR_CAP);
     });
@@ -239,12 +255,14 @@ export class AgySessionHost {
       const live = this.slots.get(input.sessionId);
       if (live !== slot || live.dead) return;
       live.dead = true;
+      live.disposeMcp?.();
       this.failTurn(live, error.message || "Gemini agent failed to start");
     });
     child.on("exit", () => {
       const live = this.slots.get(input.sessionId);
       if (live !== slot || live.dead) return;
       live.dead = true;
+      live.disposeMcp?.();
       if (!live.turn) return;
       if (live.turn.text && live.turn.settled) return;
       const tail = live.stderr.trim().slice(-400);

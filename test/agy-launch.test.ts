@@ -160,6 +160,7 @@ test("a fake agy process returns text and does not bill the cumulative total twi
       (live as FakeChild).killed = true;
     },
     "agy",
+    () => null,
   );
   const events: GrokIpcEvent[] = [];
   const input = {
@@ -242,7 +243,7 @@ test("a fake agy process returns text and does not bill the cumulative total twi
 
 test("native agy DONE deltas finish the text streamed into the transcript", async () => {
   const child = new FakeChild();
-  const host = new AgySessionHost(() => child, () => undefined, "agy");
+  const host = new AgySessionHost(() => child, () => undefined, "agy", () => null);
   const events: GrokIpcEvent[] = [];
   try {
     const pending = host.prompt({ sessionId: "native-tail", model: "gemini-3.8-flash-low", effort: "low", cwd: "/tmp/work", mode: "ask", text: "Reply exactly AGY_HOST_OK" }, (event) => events.push(event));
@@ -259,7 +260,7 @@ test("native agy DONE deltas finish the text streamed into the transcript", asyn
 
 test("native conversation resume bills current model calls, not the cumulative conversation", async () => {
   const child = new FakeChild();
-  const host = new AgySessionHost(() => child, () => undefined, "agy");
+  const host = new AgySessionHost(() => child, () => undefined, "agy", () => null);
   const events: GrokIpcEvent[] = [];
   try {
     const pending = host.prompt({ sessionId: "resume", vendorSessionId: "captured-native-resume", model: "gemini-3.8-flash-low", effort: "low", cwd: "/tmp/work", mode: "ask", text: "Recall the token" }, (event) => events.push(event));
@@ -278,7 +279,7 @@ test("native conversation resume bills current model calls, not the cumulative c
 
 test("revised DONE usage replaces the step and counts tool-only model calls with cache reads", async () => {
   const child = new FakeChild();
-  const host = new AgySessionHost(() => child, () => undefined, "agy");
+  const host = new AgySessionHost(() => child, () => undefined, "agy", () => null);
   const events: GrokIpcEvent[] = [];
   try {
     const pending = host.prompt({ sessionId: "usage-revision", vendorSessionId: "existing", model: "gemini-3.8-flash-low", effort: "low", cwd: "/tmp/work", mode: "ask", text: "Continue" }, (event) => events.push(event));
@@ -306,7 +307,7 @@ test("revised DONE usage replaces the step and counts tool-only model calls with
 
 test("a resumed CLI without step counts leaves the first turn unknown until a baseline exists", async () => {
   const child = new FakeChild();
-  const host = new AgySessionHost(() => child, () => undefined, "agy");
+  const host = new AgySessionHost(() => child, () => undefined, "agy", () => null);
   const events: GrokIpcEvent[] = [];
   const input = { sessionId: "legacy-usage", vendorSessionId: "existing", model: "gemini-3.8-flash-low", effort: "low" as const, cwd: "/tmp/work", mode: "ask" as const, text: "Continue" };
   try {
@@ -326,7 +327,7 @@ test("a resumed CLI without step counts leaves the first turn unknown until a ba
 
 test("a native denied action remains visible when the CLI returns an empty successful result", async () => {
   const child = new FakeChild();
-  const host = new AgySessionHost(() => child, () => undefined, "agy");
+  const host = new AgySessionHost(() => child, () => undefined, "agy", () => null);
   try {
     const pending = host.prompt({ sessionId: "permission-denied", model: "gemini-3.8-flash-low", effort: "low", cwd: "/tmp/work", mode: "ask", text: "Run pwd" }, () => undefined);
     await new Promise((resolve) => setImmediate(resolve));
@@ -344,7 +345,7 @@ test("late events from a cancelled process cannot settle its replacement convers
     const child = new FakeChild();
     children.push(child);
     return child;
-  }, () => undefined, "agy");
+  }, () => undefined, "agy", () => null);
   const input = { sessionId: "cancel-resume", model: "gemini-3.8-flash-low", effort: "low" as const, cwd: "/tmp/work", mode: "ask" as const, text: "Continue" };
   try {
     const cancelled = host.prompt(input, () => undefined);

@@ -71,6 +71,7 @@ function catalogForSlug(slug: string): ModelDomainRow | null {
     // Each GPT-6 model is its own row. A GPT-6 Luna once read Astra's.
     if (lower.includes("luna")) return LUNA();
     if (lower.includes("terra")) return TERRA();
+    // GPT-6 Sol and GPT-6.1 Sol share this row until a board rates either one.
     if (lower.includes("sol")) return SOL();
     // Astra: first on Code Arena, second on the Agent Arena, and the text
     // boards rate its chat answers far lower. The 90s stay the boards'.

@@ -319,6 +319,7 @@ test("a public score wins, the desk table says it is the desk table, and an unkn
   assert.equal(resolveDomainScore("codex", "gpt-6-luna", "coding", 5).score, 8);
   assert.equal(resolveDomainScore("codex", "gpt-6-astra", "data", 10).score, 90);
   assert.equal(resolveDomainScore("codex", "gpt-6-sol", "data", 10).score, 45);
+  assert.equal(resolveDomainScore("codex", "gpt-6.1-sol", "coding", 10).score, 48, "GPT-6.1 Sol reads Sol's row until a board rates it");
   applyBotScoresFeed(feed({ "text:coding": rows([["claude-opus-5-high", 1500], ["gpt-5.6-sol-xhigh", 1497]]) }));
   const published = resolveDomainScore("codex", "gpt-5.6-sol", "coding", 10);
   assert.equal(published.origin, "public");

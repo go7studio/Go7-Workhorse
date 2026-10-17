@@ -415,7 +415,8 @@ type DraftFields =
   | "agentRun"
   | "transcriptSidecar"
   | "transcriptOffloaded"
-  | "retainedReport";
+  | "retainedReport"
+  | "previewUsed";
 
 /**
  * A chat New chat made that nobody has used yet. New chat reuses the first one
@@ -429,8 +430,16 @@ export function isDraftChat(session: Pick<Session, DraftFields>): boolean {
   if (typeof session.archivedAt === "number") return false;
   if (session.parentId || session.hidden || session.agentRun) return false;
   if (session.transcriptSidecar || session.transcriptOffloaded || session.retainedReport) return false;
+  if (session.previewUsed === true) return false;
   if (hasComposerDraft(session)) return false;
   return !hasUserPrompt(session);
+}
+
+/** Opening a preview is real use; keep its chat without inventing a message or draft. */
+export function retainChatPreview(sessions: Session[], sessionId: string): Session[] {
+  const target = sessions.find((session) => session.id === sessionId);
+  if (!target || target.previewUsed === true || typeof target.archivedAt === "number") return sessions;
+  return sessions.map((session) => session.id === sessionId ? { ...session, previewUsed: true as const } : session);
 }
 
 /**

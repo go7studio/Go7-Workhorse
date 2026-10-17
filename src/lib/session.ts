@@ -291,6 +291,7 @@ export function normalizeSession(raw: unknown, liveRunIds?: ReadonlySet<string>)
     securityPolicy: normalizeSessionSecurityPolicy(record.securityPolicy),
     environment: normalizeSessionEnvironment(record.environment),
     ...(normalizePresets(record.presets) ? { presets: normalizePresets(record.presets) } : {}),
+    ...(record.previewUsed === true ? { previewUsed: true as const } : {}),
     folders: (() => {
       if (!Array.isArray(record.folders)) return undefined;
       const folders: LinkedFolder[] = [];

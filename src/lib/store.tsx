@@ -58,6 +58,7 @@ import {
   isLooseDeleteScope,
   applyRenameDeskChat,
   listedChats,
+  retainChatPreview as retainPreviewChat,
   applyComposerDrafts,
   sameComposerDraft,
   snapComposerDraft,
@@ -552,6 +553,7 @@ export type Store = AppState & {
   deleteProject: (id: string, chats: "keep" | "remove") => void;
   reorderProjects: (fromId: string, toId: string, place: "before" | "after") => void;
   startSession: (projectId?: string | null, provider?: ProviderId) => void;
+  retainChatPreview: (sessionId: string) => void;
   setSessionModel: (provider: ProviderId, model: string, customBotId?: string) => void;
   setSessionRoutingMode: (mode: "auto" | "manual") => void;
   setCrewMode: (modes: CrewMode[] | undefined) => void;
@@ -2014,6 +2016,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         activeSessionId: opened.session.id,
         panel: null,
       };
+    });
+  }, []);
+
+  const retainChatPreview = useCallback((sessionId: string) => {
+    setState((current) => {
+      const sessions = retainPreviewChat(current.sessions, sessionId);
+      return sessions === current.sessions ? current : { ...current, sessions };
     });
   }, []);
 
@@ -9969,6 +9978,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       deleteProject,
       reorderProjects,
       startSession,
+      retainChatPreview,
       setSessionModel,
       setSessionRoutingMode,
       setCrewMode,
@@ -10126,6 +10136,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       deleteProject,
       reorderProjects,
       startSession,
+      retainChatPreview,
       setSessionModel,
       setSessionRoutingMode,
       setCrewMode,

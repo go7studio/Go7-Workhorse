@@ -258,6 +258,7 @@ export type SessionPaneDesk = {
   selectSession: Store["selectSession"];
   folderExists: Store["folderExists"];
   setChatPreset: Store["setChatPreset"];
+  retainChatPreview: Store["retainChatPreview"];
 };
 
 export function selectSessionPaneDesk(store: Store): SessionPaneDesk {
@@ -269,6 +270,7 @@ export function selectSessionPaneDesk(store: Store): SessionPaneDesk {
     selectSession: store.selectSession,
     folderExists: store.folderExists,
     setChatPreset: store.setChatPreset,
+    retainChatPreview: store.retainChatPreview,
   };
 }
 
@@ -286,7 +288,8 @@ export function sameSessionPaneDesk(left: SessionPaneDesk, right: SessionPaneDes
     left.forkFrom === right.forkFrom &&
     left.selectSession === right.selectSession &&
     left.folderExists === right.folderExists &&
-    left.setChatPreset === right.setChatPreset
+    left.setChatPreset === right.setChatPreset &&
+    left.retainChatPreview === right.retainChatPreview
   );
 }
 

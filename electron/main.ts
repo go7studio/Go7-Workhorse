@@ -2126,6 +2126,8 @@ app.whenReady().then(async () => {
           path: fileEvent.path,
           format: fileEvent.format,
           type: fileEvent.type,
+          initial: fileEvent.initial,
+          scopeRoot: path.resolve(watchFolder, "..", ".."),
         });
       },
     });
@@ -2146,7 +2148,7 @@ app.whenReady().then(async () => {
     if (typeof href !== "string") return null;
     const cwdStr = typeof cwd === "string" ? cwd : undefined;
     const resolved = resolveMediaProtocolFile(pathToMediaUrl(href, { cwd: cwdStr }));
-    return resolved;
+    return resolved ? fs.realpathSync(resolved) : null;
   });
 
   ipcMain.handle("viewer:save-annotations", (_event, sessionId: unknown, annotations: unknown) => {

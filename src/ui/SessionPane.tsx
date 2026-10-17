@@ -49,7 +49,8 @@ import { WorkshopPanel } from "./WorkshopPanel";
 import { ViewerPanel } from "./ViewerPanel";
 import { pinNoticesDock } from "../lib/session-dock";
 import { presetOn } from "../lib/environment-presets";
-import { previewAsset, previewFormat, viewerWatchFolder, type ViewerAsset, type Annotation } from "../lib/viewer";
+import { previewAsset, viewerWatchFolder, type ViewerAsset } from "../lib/viewer";
+import { useSessionViewer } from "./useSessionViewer";
 import {
   countTurnsAboveViewport,
   createPinScheduler,
@@ -187,23 +188,9 @@ export function SessionPane() {
   const [workshopOut, setWorkshopOut] = useState(false);
   const workshopToggle = useRef<HTMLButtonElement>(null);
   const [workshopWidth, setWorkshopWidth] = useState(() => WORKSHOP_PANE.fallback);
-  const [viewerOpen, setViewerOpen] = useState(false);
-  const [viewerAsset, setViewerAsset] = useState<ViewerAsset | null>(null);
-  const [viewerAnnotations, setViewerAnnotations] = useState<Annotation[]>([]);
   const [chatStage, setChatStage] = useState<{ id: number; text: string } | null>(null);
   const stageSeq = useRef(0);
 
-  const openViewer = useCallback((asset: ViewerAsset) => {
-    setViewerAsset(asset);
-    setViewerOpen(true);
-  }, []);
-  const openPreviewFile = useCallback(async () => {
-    const picked = window.workhorse ? await window.workhorse.pickFile() : null;
-    if (!picked) return;
-    const format = previewFormat(picked);
-    setViewerAnnotations([]);
-    openViewer({ ...previewAsset(picked, format), loadedAt: Date.now() });
-  }, [openViewer]);
   const sendMarksToChat = useCallback((text: string) => {
     stageSeq.current += 1;
     setChatStage({ id: stageSeq.current, text });
@@ -254,8 +241,11 @@ export function SessionPane() {
     return mergeEdits(projectEdits([session], roots), extraEdits);
   }, [session?.id, writesKey, roots, extraEdits, editsIdle]);
   const sessionId = session?.id ?? "";
+  const viewer = useSessionViewer(sessionId, cwd, session?.previewUsed);
+  const { open: viewerOpen, refreshViewer } = viewer;
+  useLayoutEffect(() => { setChatStage(null); }, [sessionId]);
   const blenderOn = presetOn(session?.presets, "blender");
-  const previewWatch = viewerOpen || blenderOn;
+  const previewWatch = (viewerOpen || blenderOn) && viewer.ready;
 
   useEffect(() => {
     if (!sessionId || !cwd || !previewWatch) return;
@@ -271,10 +261,10 @@ export function SessionPane() {
       if (event.sessionId !== sessionId) return;
       const fmt = event.format as ViewerAsset["format"];
       if (!["glb", "gltf", "png", "jpg"].includes(fmt)) return;
-      openViewer({ ...previewAsset(event.path, fmt), loadedAt: Date.now() });
+      refreshViewer({ ...previewAsset(event.path, fmt), loadedAt: Date.now(), scopeRoot: event.scopeRoot }, event.initial);
     });
     return () => off?.();
-  }, [sessionId, openViewer]);
+  }, [sessionId, cwd, refreshViewer]);
 
   const transcriptMessages = useMemo(
     () => (session ? omitQueuedUserMessages(session.messages, session.queue) : []),
@@ -533,7 +523,7 @@ export function SessionPane() {
     >
     <MediaPaintProvider resetKey={session.id}>
     <section
-      className={`session${open ? " has-file" : ""}${workshopOpen ? " has-workshop" : ""}`}
+      className={`session${open ? " has-file" : ""}${workshopOpen ? " has-workshop" : ""}${viewerOpen ? " has-viewer" : ""}`}
       ref={pane}
       style={
         open || workshopOpen
@@ -593,7 +583,10 @@ export function SessionPane() {
             className={`tiny${viewerOpen ? " active-kind" : ""}`}
             type="button"
             aria-pressed={viewerOpen}
-            onClick={() => setViewerOpen((open) => !open)}
+            onClick={() => {
+              if (viewerOpen) viewer.close();
+              else { desk.retainChatPreview(sessionId); viewer.show(); }
+            }}
           >
             3D
           </button>
@@ -793,14 +786,17 @@ export function SessionPane() {
         <aside className="session-viewer" aria-label="3D preview">
           <ViewerPanel
             sessionId={session.id}
-            asset={viewerAsset}
-            annotations={viewerAnnotations}
-            onAnnotation={(ann) => setViewerAnnotations((prev) => [...prev, ann])}
+            asset={viewer.asset}
+            annotations={viewer.annotations}
+            onAnnotation={viewer.addAnnotation}
             onSendMarks={sendMarksToChat}
-            onClearMarks={() => setViewerAnnotations([])}
-            onOpenFile={() => void openPreviewFile()}
-            onClose={() => setViewerOpen(false)}
+            onClearMarks={viewer.clearMarks}
+            onOpenFile={() => { desk.retainChatPreview(sessionId); void viewer.openFile(); }}
+            onClose={viewer.close}
+            onStatus={viewer.onStatus}
+            canMark={viewer.ready}
           />
+          {viewer.error ? <p role="alert">{viewer.error}</p> : null}
         </aside>
       ) : null}
     </section>

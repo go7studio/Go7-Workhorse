@@ -420,15 +420,17 @@ type WorkhorseBridge = {
     cwd: string,
   ) => Promise<{ ok: boolean; folder?: string; message?: string }>;
   viewerWatchStop?: (sessionId: string) => Promise<void>;
-  viewerResolveAsset?: (path: string) => Promise<string>;
+  viewerResolveAsset?: (path: string, cwd?: string) => Promise<string | null>;
   viewerSaveAnnotations?: (
     sessionId: string,
     annotations: unknown[],
-  ) => Promise<{ ok: boolean; path?: string; message?: string }>;
+  ) => Promise<boolean>;
   viewerLoadAnnotations?: (sessionId: string) => Promise<unknown[]>;
   viewerSnapshot?: (sessionId: string) => Promise<{ ok: boolean; path?: string }>;
+  onViewerRequest?: (handler: (request: import("../electron/viewer-host").ViewerRequest) => void) => () => void;
+  viewerReplyRequest?: (reply: import("../electron/viewer-host").ViewerReply) => Promise<boolean>;
   onViewerFileChanged?: (
-    handler: (event: { sessionId: string; path: string; format: string; type: string }) => void,
+    handler: (event: { sessionId: string; path: string; format: string; type: string; initial?: boolean; scopeRoot?: string }) => void,
   ) => () => void;
 };
 

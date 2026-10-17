@@ -100,6 +100,7 @@ test("load waits for the matching renderer result and propagates errors and time
   try {
     const loading = host.handle(ask("load", { assetPath: f.file }));
     assert.equal(sent.length, 1);
+    assert.equal(sent[0].scopeRoot, fs.realpathSync(f.project));
     assert.equal(host.reply({ ...sent[0], sessionId: "other", ok: true }), false);
     assert.equal(host.reply({ ...sent[0], ok: false, error: "Invalid GLB" }), true);
     assert.deepEqual(await loading, { error: "Invalid GLB" });

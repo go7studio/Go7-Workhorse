@@ -10,6 +10,7 @@ export type ViewerRequest = {
   sessionId: string;
   operation: "load" | "clear" | "sync" | "snapshot";
   assetPath?: string;
+  scopeRoot?: string;
 };
 export type ViewerCapture = { x: number; y: number; width: number; height: number };
 export type ViewerReply = {
@@ -207,7 +208,10 @@ export function createViewerHost(options: {
       reject(new Error("Preview did not finish the request; open this chat's preview and try again"));
     }, timeoutMs);
     waiters.set(id, { sessionId, resolve, timer });
-    try { options.send({ id, sessionId, operation, ...(assetPath ? { assetPath } : {}) }); }
+    try {
+      const scopeRoot = assetPath ? viewerSessionRoots(options.readState(), sessionId).find((root) => contained(root, assetPath)) : undefined;
+      options.send({ id, sessionId, operation, ...(assetPath ? { assetPath, scopeRoot } : {}) });
+    }
     catch (error) { clearTimeout(timer); waiters.delete(id); reject(error); }
   });
   return {

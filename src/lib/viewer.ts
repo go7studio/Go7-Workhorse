@@ -79,6 +79,7 @@ export type Annotation = {
 };
 
 export type ViewerAsset = {
+  scopeRoot?: string;
   uri: string;
   format: "glb" | "gltf" | "png" | "jpg" | "file";
   loadedAt: number;
@@ -167,6 +168,43 @@ export function previewAsset(filePath: string, format: ViewerAsset["format"]): P
     format,
     uri: format === "file" ? filePath : pathToMediaUrl(filePath),
   };
+}
+
+/** Refresh the bytes without changing the stable asset identity stored on a pin. */
+export function viewerRenderUrl(asset: ViewerAsset): string {
+  const directory = asset.path.replace(/\\/g, "/").replace(/\/[^/]*$/, "");
+  return `${asset.uri}${asset.uri.includes("?") ? "&" : "?"}revision=${asset.loadedAt}&viewerRoot=${encodeURIComponent(asset.scopeRoot || directory)}`;
+}
+
+/** glTF dependencies resolve beside the model through the desk's scoped media handler. */
+export function viewerResourceUrl(asset: ViewerAsset, resource: string): string {
+  if (/^(data:|blob:)/i.test(resource) || resource === viewerRenderUrl(asset)) return resource;
+  const resourcePrefix = "workhorse-preview-resource://local/";
+  const dependency = resource.startsWith(resourcePrefix) ? resource.slice(resourcePrefix.length) : null;
+  const url = new URL(resource, asset.uri);
+  if (dependency == null && (url.protocol !== "workhorse-media:" || url.host !== "local")) throw new Error("Preview dependencies must be local files.");
+  if (url.searchParams.has("p")) throw new Error("Preview dependencies must use relative paths.");
+  const modelPath = asset.path.replace(/\\/g, "/");
+  const directory = modelPath.slice(0, modelPath.lastIndexOf("/") + 1);
+  const relative = decodeURIComponent(dependency ?? url.pathname.replace(/^\//, ""));
+  const parts: string[] = [];
+  for (const part of `${directory}${relative}`.split("/")) {
+    if (part === "." || !part) continue;
+    if (part === "..") parts.pop(); else parts.push(part);
+  }
+  const filePath = `${modelPath.startsWith("/") ? "/" : ""}${parts.join("/")}`;
+  const root = (asset.scopeRoot || directory).replace(/\\/g, "/").replace(/\/$/, "");
+  if (filePath !== root && !filePath.startsWith(`${root}/`)) throw new Error("Preview dependency is outside the project.");
+  const scoped = pathToMediaUrl(filePath, { cwd: asset.scopeRoot || directory });
+  return `${scoped}&revision=${asset.loadedAt}&viewerRoot=${encodeURIComponent(root)}`;
+}
+
+export function nextAnnotationMark(annotations: readonly Annotation[], assetUri: string): number {
+  let mark = 0;
+  for (const annotation of annotations) {
+    if (annotation.asset.uri === assetUri && Number.isSafeInteger(annotation.mark)) mark = Math.max(mark, annotation.mark);
+  }
+  return mark + 1;
 }
 
 /** glTF and stills preview in the chat. Anything else is a path the model can open. */

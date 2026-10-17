@@ -16,6 +16,7 @@ export type ViewerWatchHandle = {
 };
 
 export type ViewerFileEvent = {
+  initial?: boolean;
   type: "added" | "changed" | "removed";
   path: string;
   format: "glb" | "gltf" | "png" | "jpg";
@@ -72,7 +73,7 @@ export function watchViewerFolder(input: ViewerWatchInput): ViewerWatchHandle {
   let pending: Promise<void> = Promise.resolve();
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
-  const scan = () => {
+  const scan = (initial = false) => {
     if (stopped) return;
     let entries: string[] = [];
     try {
@@ -105,7 +106,7 @@ export function watchViewerFolder(input: ViewerWatchInput): ViewerWatchHandle {
       if (!prev) {
         const hash = hashFile(filePath, readFileSync);
         known.set(filePath, { hash, mtime });
-        input.onFile({ type: "added", path: filePath, format, hash, mtime });
+        input.onFile({ type: "added", path: filePath, format, hash, mtime, ...(initial ? { initial: true } : {}) });
       } else if (prev.mtime !== mtime) {
         const hash = hashFile(filePath, readFileSync);
         if (hash !== prev.hash) {
@@ -139,7 +140,7 @@ export function watchViewerFolder(input: ViewerWatchInput): ViewerWatchHandle {
     }, debounceMs);
   };
 
-  scan();
+  scan(true);
 
   let watcher: fs.FSWatcher | undefined;
   try {

@@ -12,6 +12,9 @@ import {
   formatMarksForChat,
   previewAsset,
   previewFormat,
+  viewerResourceUrl,
+  viewerRenderUrl,
+  nextAnnotationMark,
   blenderToGltf,
   gltfToBlender,
   type Annotation,
@@ -367,5 +370,35 @@ describe("annotation payload matches prototype schema", () => {
     assert.strictEqual(annotation.target?.faceIndex, 9);
     assert.deepStrictEqual(annotation.target?.worldNormal, [0, 0, 1]);
     assert.deepStrictEqual(annotation.screen?.px, [250, 380]);
+  });
+});
+
+
+describe("preview refresh and local dependencies", () => {
+  const asset = { ...previewAsset("/project/preview/model.gltf", "gltf"), loadedAt: 17, scopeRoot: "/project" };
+  test("reload changes render bytes without changing saved pin identity", () => {
+    assert.notEqual(viewerRenderUrl(asset), viewerRenderUrl({ ...asset, loadedAt: 18 }));
+    assert.equal(asset.uri.includes("revision"), false);
+  });
+  test("glTF resolves buffers and parent textures under its media scope", () => {
+    const buffer = new URL(viewerResourceUrl(asset, "workhorse-preview-resource://local/model.bin"));
+    assert.equal(buffer.searchParams.get("p"), "/project/preview/model.bin");
+    assert.equal(buffer.searchParams.get("cwd"), "/project");
+    assert.equal(buffer.searchParams.get("revision"), "17");
+    const texture = new URL(viewerResourceUrl(asset, "workhorse-preview-resource://local/../textures/blue%20one.png"));
+    assert.equal(texture.searchParams.get("p"), "/project/textures/blue one.png");
+    assert.equal(viewerResourceUrl(asset, "data:application/octet-stream;base64,AA=="), "data:application/octet-stream;base64,AA==");
+    assert.throws(() => viewerResourceUrl(asset, "https://example.com/model.bin"), /local files/);
+    assert.throws(() => viewerResourceUrl(asset, "workhorse-preview-resource://local/../../outside.bin"), /outside the project/);
+    assert.throws(() => viewerResourceUrl(asset, "workhorse-media://local/?p=%2Foutside.bin"), /relative paths/);
+    for (const folder of ["model #2", "100% done"]) {
+      const special = { ...asset, ...previewAsset(`/project/${folder}/model.gltf`, "gltf") };
+      assert.equal(new URL(viewerResourceUrl(special, "workhorse-preview-resource://local/mesh.bin")).searchParams.get("p"), `/project/${folder}/mesh.bin`);
+    }
+  });
+  test("new pins follow the highest persisted mark for this asset", () => {
+    const annotations = [{ mark: 4, asset: { uri: asset.uri } }, { mark: 19, asset: { uri: "other" } }] as Annotation[];
+    assert.equal(nextAnnotationMark(annotations, asset.uri), 5);
+    assert.equal(nextAnnotationMark([], asset.uri), 1);
   });
 });

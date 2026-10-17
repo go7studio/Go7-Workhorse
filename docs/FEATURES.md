@@ -595,7 +595,10 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
   path and the pins in the composer. The model picks the tool, which can be
   a headless server, CAD, or something else. The preview draws GLB, glTF,
   PNG, and JPG. Other files still send their path. The watch does not start
-  Blender.
+  Blender. Pins are saved per chat, survive closing the preview, and keep
+  their numbering when a file reloads. glTF buffers and textures stay within
+  the project. Preview tools wait for the visible file to load and capture
+  an actual PNG of the preview.
 - **Blender** stays off until `/blender on`, or Blender in the chat header and
   in This chat. The next turn of that chat then receives `blender-mcp`
   (`uvx blender-mcp`). Cursor and a custom bot such as Grok Bot both receive

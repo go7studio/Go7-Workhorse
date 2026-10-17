@@ -1,21 +1,12 @@
-import { useCallback, useEffect, useRef, useState, useMemo, memo } from "react";
+import { useCallback, useEffect, useRef, useState, useMemo, useLayoutEffect, memo } from "react";
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
-import type { Annotation, ViewerAsset } from "../lib/viewer";
-import { buildAnnotation, formatMarksForChat } from "../lib/viewer";
+import type { Annotation, AnnotationCamera, ViewerAsset } from "../lib/viewer";
+import { buildAnnotation, formatMarksForChat, nextAnnotationMark, viewerRenderUrl, viewerResourceUrl } from "../lib/viewer";
 import { uid } from "../lib/id";
 
 type ViewerMode = "3d" | "2d";
-
-type PinData = {
-  id: string;
-  mark: number;
-  position: THREE.Vector3;
-  note: string;
-  screenX?: number;
-  screenY?: number;
-};
 
 type ViewerPanelProps = {
   sessionId: string;
@@ -26,7 +17,8 @@ type ViewerPanelProps = {
   onClearMarks: () => void;
   onOpenFile: () => void;
   onClose: () => void;
-  onSnapshot?: () => Promise<string | null>;
+  onStatus?: (status: "loaded" | "error", detail?: string) => void;
+  canMark?: boolean;
 };
 
 const PIN_COLORS = [
@@ -55,6 +47,17 @@ function PinLabel({ mark, x, y, note }: { mark: number; x: number; y: number; no
   );
 }
 
+function disposeObject(object: THREE.Object3D) {
+  object.traverse((child) => {
+    const mesh = child as THREE.Mesh;
+    mesh.geometry?.dispose();
+    for (const material of Array.isArray(mesh.material) ? mesh.material : mesh.material ? [mesh.material] : []) {
+      for (const value of Object.values(material)) if (value instanceof THREE.Texture) value.dispose();
+      material.dispose();
+    }
+  });
+}
+
 const ThreeViewer = memo(function ThreeViewer({
   asset,
   annotations,
@@ -73,6 +76,7 @@ const ThreeViewer = memo(function ThreeViewer({
     distance: number;
     screenX: number;
     screenY: number;
+    camera: AnnotationCamera;
   }) => void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -86,6 +90,7 @@ const ThreeViewer = memo(function ThreeViewer({
   const modelRef = useRef<THREE.Object3D | null>(null);
   const raycasterRef = useRef(new THREE.Raycaster());
   const mouseRef = useRef(new THREE.Vector2());
+  const pointerStart = useRef<[number, number] | null>(null);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -103,10 +108,16 @@ const ThreeViewer = memo(function ThreeViewer({
     camera.lookAt(0, 0.6, 0);
     cameraRef.current = camera;
 
-    const renderer = new THREE.WebGLRenderer({
-      antialias: true,
-      preserveDrawingBuffer: true,
-    });
+    let renderer: THREE.WebGLRenderer;
+    try {
+      renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : "3D rendering is unavailable.";
+      container.dataset.model = "error";
+      container.dataset.modelError = detail;
+      onStatusRef.current?.("error", detail);
+      return;
+    }
     renderer.setSize(width, height);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     container.appendChild(renderer.domElement);
@@ -133,17 +144,26 @@ const ThreeViewer = memo(function ThreeViewer({
     const handleResize = () => {
       const w = container.clientWidth;
       const h = container.clientHeight;
+      if (!w || !h) return;
       camera.aspect = w / h;
       camera.updateProjectionMatrix();
       renderer.setSize(w, h);
     };
+    const resize = new ResizeObserver(handleResize);
+    resize.observe(container);
     window.addEventListener("resize", handleResize);
 
     return () => {
+      resize.disconnect();
       window.removeEventListener("resize", handleResize);
       cancelAnimationFrame(animationId);
       controls.dispose();
+      disposeObject(scene);
       renderer.dispose();
+      sceneRef.current = null;
+      cameraRef.current = null;
+      modelRef.current = null;
+      pinsRef.current = [];
       if (container.contains(renderer.domElement)) {
         container.removeChild(renderer.domElement);
       }
@@ -158,15 +178,24 @@ const ThreeViewer = memo(function ThreeViewer({
 
     if (modelRef.current) {
       scene.remove(modelRef.current);
+      disposeObject(modelRef.current);
       modelRef.current = null;
     }
 
-    const loader = new GLTFLoader();
-    if (containerRef.current) delete containerRef.current.dataset.model;
+    let cancelled = false;
+    const manager = new THREE.LoadingManager();
+    manager.setURLModifier((url) => viewerResourceUrl(asset, url));
+    const loader = new GLTFLoader(manager);
+    loader.setResourcePath("workhorse-preview-resource://local/");
+    if (containerRef.current) {
+      containerRef.current.dataset.model = "loading";
+      delete containerRef.current.dataset.modelError;
+    }
     loader.load(
-      asset.uri,
+      viewerRenderUrl(asset),
       (gltf) => {
         const model = gltf.scene;
+        if (cancelled) { disposeObject(model); return; }
         const box = new THREE.Box3().setFromObject(model);
         const size = box.getSize(new THREE.Vector3());
         const center = box.getCenter(new THREE.Vector3());
@@ -174,7 +203,7 @@ const ThreeViewer = memo(function ThreeViewer({
         scene.add(model);
         modelRef.current = model;
 
-        const dist = maxDim * 1.8;
+        const dist = maxDim * 1.8 / Math.min(1, camera.aspect);
         camera.position.set(center.x + dist, center.y + dist * 0.7, center.z + dist);
         camera.lookAt(center);
         controls.target.copy(center);
@@ -184,6 +213,7 @@ const ThreeViewer = memo(function ThreeViewer({
       },
       undefined,
       (error) => {
+        if (cancelled) return;
         const detail = error instanceof Error ? error.message : "Could not load this file.";
         if (containerRef.current) {
           containerRef.current.dataset.model = "error";
@@ -192,7 +222,8 @@ const ThreeViewer = memo(function ThreeViewer({
         onStatusRef.current?.("error", detail);
       }
     );
-  }, [asset?.uri]);
+    return () => { cancelled = true; };
+  }, [asset.uri, asset.loadedAt]);
 
   useEffect(() => {
     const scene = sceneRef.current;
@@ -200,6 +231,8 @@ const ThreeViewer = memo(function ThreeViewer({
 
     for (const pin of pinsRef.current) {
       scene.remove(pin);
+      pin.geometry.dispose();
+      (pin.material as THREE.Material).dispose();
     }
     pinsRef.current = [];
 
@@ -222,6 +255,9 @@ const ThreeViewer = memo(function ThreeViewer({
 
   const handleClick = useCallback(
     (event: React.MouseEvent<HTMLDivElement>) => {
+      const down = pointerStart.current;
+      pointerStart.current = null;
+      if (down && Math.hypot(event.clientX - down[0], event.clientY - down[1]) > 4) return;
       const container = containerRef.current;
       const camera = cameraRef.current;
       const scene = sceneRef.current;
@@ -249,6 +285,13 @@ const ThreeViewer = memo(function ThreeViewer({
             distance: hit.distance,
             screenX: Math.round(x),
             screenY: Math.round(y),
+            camera: {
+              position: camera.position.toArray() as [number, number, number],
+              quaternion: camera.quaternion.toArray() as [number, number, number, number],
+              fovDeg: camera.fov,
+              viewport: [Math.round(rect.width), Math.round(rect.height)],
+              upAxis: "Y",
+            },
           });
         }
       }
@@ -260,56 +303,60 @@ const ThreeViewer = memo(function ThreeViewer({
     <div
       ref={containerRef}
       className="viewer-canvas"
+      onPointerDown={(event) => { pointerStart.current = [event.clientX, event.clientY]; }}
       onClick={handleClick}
-      style={{ width: "100%", height: "100%", minHeight: 300 }}
+      style={{ width: "100%", height: "100%", minHeight: 180 }}
     />
   );
 });
 
-const ImageViewer = memo(function ImageViewer({
-  asset,
-  annotations,
-  onRaycast,
-}: {
+const ImageViewer = memo(function ImageViewer({ asset, annotations, onRaycast, onStatus }: {
   asset: ViewerAsset;
   annotations: Annotation[];
   onRaycast: (hit: { x: number; y: number; imageWidth: number; imageHeight: number }) => void;
+  onStatus?: (status: "loaded" | "error", detail?: string) => void;
 }) {
+  const containerRef = useRef<HTMLDivElement>(null);
   const imgRef = useRef<HTMLImageElement>(null);
-
-  const handleClick = useCallback(
-    (event: React.MouseEvent<HTMLImageElement>) => {
-      const img = imgRef.current;
-      if (!img) return;
-      const rect = img.getBoundingClientRect();
-      const x = Math.round(((event.clientX - rect.left) / rect.width) * img.naturalWidth);
-      const y = Math.round(((event.clientY - rect.top) / rect.height) * img.naturalHeight);
-      onRaycast({ x, y, imageWidth: img.naturalWidth, imageHeight: img.naturalHeight });
-    },
-    [onRaycast]
-  );
-
+  const [bounds, setBounds] = useState({ x: 0, y: 0, width: 0, height: 0 });
+  const measure = useCallback(() => {
+    const img = imgRef.current;
+    const container = containerRef.current;
+    if (!img || !container) return;
+    const rect = img.getBoundingClientRect();
+    const parent = container.getBoundingClientRect();
+    setBounds({ x: rect.left - parent.left, y: rect.top - parent.top, width: rect.width, height: rect.height });
+  }, []);
+  useLayoutEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(container);
+    measure();
+    return () => observer.disconnect();
+  }, [measure, asset.uri, asset.loadedAt]);
   return (
-    <div className="viewer-image-container">
-      <img
-        ref={imgRef}
-        src={asset.uri}
-        alt="Viewer asset"
-        onClick={handleClick}
-        style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain", cursor: "crosshair" }}
-      />
-      {annotations
-        .filter((ann) => ann.region2d?.px)
-        .map((ann) => {
-          const [px, py] = ann.region2d!.px!;
-          const [iw, ih] = ann.region2d!.imageSize;
+    <div className="viewer-image-container" ref={containerRef}>
+      <img ref={imgRef} src={viewerRenderUrl(asset)} alt="Viewer asset"
+        onLoad={() => { measure(); onStatus?.("loaded"); }}
+        onError={() => onStatus?.("error", "Could not load this image.")}
+        onClick={(event) => {
           const img = imgRef.current;
-          if (!img) return null;
+          if (!img?.naturalWidth || !img.naturalHeight) return;
           const rect = img.getBoundingClientRect();
-          const x = (px / iw) * rect.width;
-          const y = (py / ih) * rect.height;
-          return <PinLabel key={ann.id} mark={ann.mark} x={x} y={y} note={ann.note} />;
-        })}
+          onRaycast({
+            x: Math.round(((event.clientX - rect.left) / rect.width) * img.naturalWidth),
+            y: Math.round(((event.clientY - rect.top) / rect.height) * img.naturalHeight),
+            imageWidth: img.naturalWidth, imageHeight: img.naturalHeight,
+          });
+        }}
+      />
+      {annotations.filter((annotation) => annotation.region2d?.px).map((annotation) => {
+        const [x, y] = annotation.region2d!.px!;
+        const [width, height] = annotation.region2d!.imageSize;
+        return <PinLabel key={annotation.id} mark={annotation.mark}
+          x={bounds.x + x / width * bounds.width} y={bounds.y + y / height * bounds.height} note={annotation.note} />;
+      })}
     </div>
   );
 });
@@ -323,12 +370,15 @@ export function ViewerPanel({
   onClearMarks,
   onOpenFile,
   onClose,
+  onStatus,
+  canMark = true,
 }: ViewerPanelProps) {
   const [note, setNote] = useState("");
   const [modelError, setModelError] = useState("");
-  const [pins, setPins] = useState<PinData[]>([]);
-  const cameraRef = useRef<{ position: THREE.Vector3; quaternion: THREE.Quaternion } | null>(null);
-  const viewportRef = useRef<[number, number]>([800, 600]);
+  const annotationsForViewer = useMemo(
+    () => annotations.filter((annotation) => annotation.asset.uri === asset?.uri),
+    [annotations, asset?.uri],
+  );
 
   const mode: ViewerMode | "file" = useMemo(() => {
     if (!asset || asset.format === "file") return "file";
@@ -336,11 +386,14 @@ export function ViewerPanel({
   }, [asset]);
 
   useEffect(() => {
-    setPins([]);
     setNote("");
+    setModelError("");
   }, [asset?.uri]);
 
-  const nextMark = pins.length + 1;
+  const nextMark = asset ? nextAnnotationMark(annotations, asset.uri) : 1;
+  useEffect(() => {
+    if (asset?.format === "file") onStatus?.("loaded");
+  }, [asset?.path, asset?.loadedAt, onStatus]);
 
   const handle3dRaycast = useCallback(
     (hit: {
@@ -352,8 +405,10 @@ export function ViewerPanel({
       distance: number;
       screenX: number;
       screenY: number;
+      camera: AnnotationCamera;
     }) => {
-      const mark = pins.length + 1;
+      if (!canMark) return;
+      const mark = nextMark;
       const id = uid();
       const objectPath: string[] = [];
       let obj: THREE.Object3D | null = hit.object;
@@ -362,17 +417,6 @@ export function ViewerPanel({
         obj = obj.parent;
       }
 
-      setPins((prev) => [
-        ...prev,
-        {
-          id,
-          mark,
-          position: hit.point,
-          note: note,
-          screenX: hit.screenX,
-          screenY: hit.screenY,
-        },
-      ]);
 
       if (asset) {
         const annotation = buildAnnotation({
@@ -412,46 +456,22 @@ export function ViewerPanel({
             uv: hit.uv ? [parseFloat(hit.uv.x.toFixed(4)), parseFloat(hit.uv.y.toFixed(4))] : null,
             distance: parseFloat(hit.distance.toFixed(4)),
           },
-          camera: {
-            position: cameraRef.current
-              ? [cameraRef.current.position.x, cameraRef.current.position.y, cameraRef.current.position.z]
-              : [2.2, 1.6, 3.2],
-            quaternion: cameraRef.current
-              ? [
-                  cameraRef.current.quaternion.x,
-                  cameraRef.current.quaternion.y,
-                  cameraRef.current.quaternion.z,
-                  cameraRef.current.quaternion.w,
-                ]
-              : [0, 0, 0, 1],
-            fovDeg: 45,
-            viewport: viewportRef.current,
-          },
+          camera: hit.camera,
           screenPx: [hit.screenX, hit.screenY],
         });
         onAnnotation(annotation);
       }
       setNote("");
     },
-    [asset, note, pins.length, sessionId, onAnnotation]
+    [asset, note, nextMark, canMark, sessionId, onAnnotation]
   );
 
   const handle2dRaycast = useCallback(
     (hit: { x: number; y: number; imageWidth: number; imageHeight: number }) => {
-      const mark = pins.length + 1;
+      if (!canMark) return;
+      const mark = nextMark;
       const id = uid();
 
-      setPins((prev) => [
-        ...prev,
-        {
-          id,
-          mark,
-          position: new THREE.Vector3(hit.x, hit.y, 0),
-          note,
-          screenX: hit.x,
-          screenY: hit.y,
-        },
-      ]);
 
       if (asset) {
         const annotation = buildAnnotation({
@@ -480,12 +500,7 @@ export function ViewerPanel({
       }
       setNote("");
     },
-    [asset, note, pins.length, sessionId, onAnnotation]
-  );
-
-  const annotationsForViewer = useMemo(
-    () => annotations.filter((a) => a.asset.uri === asset?.uri),
-    [annotations, asset?.uri]
+    [asset, note, nextMark, canMark, sessionId, onAnnotation]
   );
 
   const sendMarks = () => {
@@ -520,13 +535,14 @@ export function ViewerPanel({
             asset={asset}
             annotations={annotationsForViewer}
             onRaycast={handle3dRaycast}
-            onStatus={(_status, detail) => setModelError(detail ?? "")}
+            onStatus={(status, detail) => { setModelError(detail ?? ""); onStatus?.(status, detail); }}
           />
         ) : asset && mode === "2d" ? (
           <ImageViewer
             asset={asset}
             annotations={annotationsForViewer}
             onRaycast={handle2dRaycast}
+            onStatus={(status, detail) => { setModelError(detail ?? ""); onStatus?.(status, detail); }}
           />
         ) : (
           <div className="viewer-empty">
@@ -538,7 +554,7 @@ export function ViewerPanel({
             </p>
           </div>
         )}
-        {modelError ? <p className="row-meta">{modelError}</p> : null}
+        {modelError ? <p className="viewer-error" role="alert">{modelError}</p> : null}
       </div>
       <div className="viewer-annotation-bar">
         <input
@@ -546,21 +562,21 @@ export function ViewerPanel({
           value={note}
           onChange={(e) => setNote(e.target.value)}
           placeholder={mode === "file" || !asset ? "Note for the chat…" : `Note for pin ${nextMark}…`}
+          aria-label="Note for preview marks"
           className="viewer-note-input"
         />
-        <span className="row-meta">{mode === "3d" || mode === "2d" ? `Click to place pin ${nextMark}` : "Path and note"}</span>
-        <button className="tiny" type="button" disabled={!asset} onClick={sendMarks}>
+        <span className="row-meta">{!canMark ? "Loading marks…" : mode === "3d" || mode === "2d" ? `Click to place pin ${nextMark}` : "Path and note"}</span>
+        <button className="tiny" type="button" disabled={!asset || !canMark} onClick={sendMarks}>
           To chat
         </button>
       </div>
-      {pins.length > 0 && (
+      {annotationsForViewer.length > 0 && (
         <div className="viewer-pins-list">
-          <span className="row-meta">{pins.length} pin{pins.length !== 1 ? "s" : ""}</span>
+          <span className="row-meta">{annotationsForViewer.length} pin{annotationsForViewer.length !== 1 ? "s" : ""}</span>
           <button
             className="tiny"
             type="button"
             onClick={() => {
-              setPins([]);
               onClearMarks();
             }}
           >

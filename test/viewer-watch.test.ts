@@ -78,6 +78,7 @@ describe("watchViewerFolder", () => {
 
     assert.ok(glbEvent, "should detect GLB file");
     assert.strictEqual(glbEvent?.type, "added");
+    assert.strictEqual(glbEvent?.initial, true);
     assert.strictEqual(glbEvent?.format, "glb");
 
     assert.ok(pngEvent, "should detect PNG file");

@@ -58,8 +58,7 @@ if (process.env.WORKHORSE_PREVIEW_SMOKE !== "1") {
   throw new Error("Set WORKHORSE_PREVIEW_SMOKE=1. This opens a window.");
 }
 
-const stamp = Date.now();
-const root = path.join(os.tmpdir(), `wh-preview-smoke-${stamp}`);
+const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "wh-preview-smoke-")));
 const userData = path.join(root, "desk");
 const project = path.join(root, "project");
 const preview = path.join(project, ".workhorse", "preview");
@@ -187,7 +186,8 @@ try {
   await canvas.waitFor({ state: "visible" });
   const loaded = await page.waitForFunction(() => {
     const node = document.querySelector(".viewer-canvas");
-    return node?.getAttribute("data-model") ?? "";
+    const state = node?.getAttribute("data-model");
+    return state === "loaded" || state === "error" ? state : false;
   }, null, { timeout: 20_000 });
   const modelState = await loaded.jsonValue();
   if (modelState !== "loaded") {

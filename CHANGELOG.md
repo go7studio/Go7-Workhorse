@@ -8,6 +8,34 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.7.5](https://github.com/go7studio/Go7-Workhorse/compare/v0.7.4...v0.7.5) (2026-10-17)
+
+
+### Features
+
+* add Blender environment MVP with 3D viewer panel ([4830518](https://github.com/go7studio/Go7-Workhorse/commit/4830518a82b4f0b09fa16680f949359d8e8e049d))
+* add Gemini through the Antigravity CLI ([8ba0fa1](https://github.com/go7studio/Go7-Workhorse/commit/8ba0fa122cb4d79f17f8cf8f5e31553e9cb07744))
+* add Gemini through the Antigravity CLI ([480e45a](https://github.com/go7studio/Go7-Workhorse/commit/480e45a2e19fa140239ee4509ce221c7e061d2d4))
+* ship verified Gemini tools and persistent model previews ([61608f0](https://github.com/go7studio/Go7-Workhorse/commit/61608f0735727fa45d2bdabd6052c1e5467cba9b))
+* show a preview file in the chat and send the marks ([5a7be6e](https://github.com/go7studio/Go7-Workhorse/commit/5a7be6e5ee4a4862652366f97c594ad843aeb5b4))
+
+
+### Bug Fixes
+
+* attach Gemini MCP tools without leaking server credentials ([d9d6c85](https://github.com/go7studio/Go7-Workhorse/commit/d9d6c85f008cb2e0b44906359db3319fe696324d))
+* confine preview dependency reads to their explicit project root ([380a343](https://github.com/go7studio/Go7-Workhorse/commit/380a343b6e763c07d97dd69144e72c780fd7191e))
+* include Blender in the eval command contract ([bb880b1](https://github.com/go7studio/Go7-Workhorse/commit/bb880b1a677b1f1809c26c4399ecb7419ce3c9f3))
+* persist preview marks and render scoped live assets ([24f1082](https://github.com/go7studio/Go7-Workhorse/commit/24f108287c41982df70d384f88616b64d561cd18))
+* preserve Gemini response tails and resumed usage ([7dbdd1f](https://github.com/go7studio/Go7-Workhorse/commit/7dbdd1fc1f2ad8eba36fd844f9480992180edcf4))
+* preview tools acknowledge real loads and capture safe artifacts ([80697fb](https://github.com/go7studio/Go7-Workhorse/commit/80697fb3ee357ee6d2ba8071b6370c8d48fdf420))
+* preview visibility follows live renderer acknowledgements ([ff2b5c7](https://github.com/go7studio/Go7-Workhorse/commit/ff2b5c7813f4ca4de5bc550e10080467bc6e257e))
+* refresh sidebar visibility for preview-only chats ([e1382fd](https://github.com/go7studio/Go7-Workhorse/commit/e1382fd3947255bfd81ad60995c2f269e21fb805))
+* render 3D previews on demand with numbered marks ([cbdaaff](https://github.com/go7studio/Go7-Workhorse/commit/cbdaaffd1765d819f98fbdf83b2aa96eff58d7fc))
+* resolve agy with the platform's own path rules ([8d5566b](https://github.com/go7studio/Go7-Workhorse/commit/8d5566bdfe98d2977317d6e9b5f5a33c7b9d7032))
+* retain chats used for previews before their first message ([6e704e8](https://github.com/go7studio/Go7-Workhorse/commit/6e704e88d100ab5544125734d1b833c73acf768c))
+* retire legacy Opus 5 from automatic selection ([ebb1731](https://github.com/go7studio/Go7-Workhorse/commit/ebb173141bbbb3cfe06c7e19b42ab52fe10e39ce))
+* retire legacy Opus 5 from automatic selection ([2e21558](https://github.com/go7studio/Go7-Workhorse/commit/2e2155889dc6943e46d9bf3315a6d02928e81f73))
+
 ## [0.7.4](https://github.com/go7studio/Go7-Workhorse/compare/v0.7.3...v0.7.4) (2026-10-13)
 
 

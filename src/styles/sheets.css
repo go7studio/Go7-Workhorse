@@ -134,6 +134,10 @@
   background: var(--codex);
 }
 
+.card .rail.gemini {
+  background: var(--gemini);
+}
+
 .card .rail.custom {
   background: var(--custom);
 }

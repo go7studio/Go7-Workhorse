@@ -127,6 +127,10 @@
   background: var(--cursor);
 }
 
+.usage-split-track i.gemini {
+  background: var(--gemini);
+}
+
 .usage-split-track i.custom {
   background: var(--custom);
 }
@@ -525,6 +529,10 @@
   background: var(--cursor);
 }
 
+.usage-swatch.gemini {
+  background: var(--gemini);
+}
+
 .usage-swatch.custom {
   background: var(--custom);
 }
@@ -674,6 +682,10 @@
   stroke: var(--desk-ink, var(--cursor));
 }
 
+.context-meter.gemini .context-ring-fill {
+  stroke: var(--desk-ink, var(--gemini));
+}
+
 .context-meter.custom .context-ring-fill {
   stroke: var(--desk-ink, var(--custom));
 }
@@ -774,6 +786,11 @@
 .context-meter-wrap.cursor .seg.messages,
 .context-meter-wrap.cursor .seg.used {
   background: var(--desk-ink, var(--cursor));
+}
+
+.context-meter-wrap.gemini .seg.messages,
+.context-meter-wrap.gemini .seg.used {
+  background: var(--desk-ink, var(--gemini));
 }
 
 .context-meter-wrap.custom .seg.messages,

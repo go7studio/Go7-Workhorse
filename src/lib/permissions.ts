@@ -1452,9 +1452,14 @@ export function pathOwnerMode(mode: PermissionMode): PermissionMode {
  */
 export function vendorLaunchMode(session: {
   mode: PermissionMode;
+  provider?: string;
   hidden?: boolean;
   agentRun?: { paths?: string[] };
 }): PermissionMode {
+  // Headless agy never emits an ask, and the inbox cannot answer one.
+  // Clamping a Gemini worker to Ask soft-denies its tools. The chat's own
+  // mode is the launch, including a later tighten to Ask.
+  if (session.provider === "gemini") return session.mode;
   if (session.hidden && (session.agentRun?.paths?.length ?? 0) > 0) return pathOwnerMode(session.mode);
   return session.mode;
 }

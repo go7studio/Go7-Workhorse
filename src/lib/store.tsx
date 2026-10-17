@@ -592,6 +592,7 @@ export type Store = AppState & {
   refreshCodexLogin: () => void;
   refreshClaudeLogin: (options?: { recheck?: boolean }) => void;
   refreshCursorLogin: () => void;
+  refreshGeminiLogin: () => void;
   refreshCustomLogin: () => void;
   cycleTheme: () => void;
   toggleWorkhorseTheme: () => void;
@@ -682,6 +683,8 @@ export type Store = AppState & {
   refreshClaudePlan: () => void;
   cursorPlan?: import("./types").GrokPlanUsage;
   refreshCursorPlan: () => void;
+  geminiPlan?: import("./types").GrokPlanUsage;
+  refreshGeminiPlan: () => void;
   customPlans: Record<string, import("./types").GrokPlanUsage | undefined>;
   customPlanKnown: Record<string, boolean>;
   /** Built-in vendors whose meter has answered at least once, by provider id. */
@@ -1150,6 +1153,7 @@ function cancelVendorSession(session: Pick<Session, "id" | "provider" | "agentRu
   if (session.provider === "codex") void window.workhorse?.codexCancel?.(session.id);
   else if (session.provider === "claude") void window.workhorse?.claudeCancel?.(session.id);
   else if (session.provider === "cursor") void window.workhorse?.cursorCancel?.(session.id);
+  else if (session.provider === "gemini") void window.workhorse?.geminiCancel?.(session.id);
   else if (session.provider === "custom") void window.workhorse?.customCancel?.(session.id);
   else void window.workhorse?.grokCancel?.(session.id);
 }
@@ -1305,6 +1309,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [codexPlan, setCodexPlan] = useState<GrokPlanUsage | undefined>();
   const [claudePlan, setClaudePlan] = useState<GrokPlanUsage | undefined>();
   const [cursorPlan, setCursorPlan] = useState<GrokPlanUsage | undefined>();
+  const [geminiPlan, setGeminiPlan] = useState<GrokPlanUsage | undefined>();
   const [customPlans, setCustomPlans] = useState<Record<string, GrokPlanUsage | undefined>>({});
   const [customPlanKnown, setCustomPlanKnown] = useState<Record<string, boolean>>({});
   // Runtime health, not settings: how many beats in a row this bot's meter has
@@ -1431,7 +1436,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const teamRef = useRef(team);
   teamRef.current = team;
   pathLeasesRef.current = state.leases ?? [];
-  plansRef.current = { grok: grokPlan, codex: codexPlan, claude: claudePlan, cursor: cursorPlan, custom: customPlans };
+  plansRef.current = { grok: grokPlan, codex: codexPlan, claude: claudePlan, cursor: cursorPlan, gemini: geminiPlan, custom: customPlans };
   meterHealthRef.current = customMeterHealth;
 
   /** Ask the meters again when a routing path is about to pace on an old reading. */
@@ -1459,7 +1464,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   );
   useEffect(() => {
     setState((current) => ({ ...current, deskPlans: plansRef.current }));
-  }, [grokPlan, codexPlan, claudePlan, cursorPlan, customPlans]);
+  }, [grokPlan, codexPlan, claudePlan, cursorPlan, geminiPlan, customPlans]);
 
   // A built-in meter that has answered once is known, whatever it answered. A
   // 404, an auth failure, or a dead socket must read unknown, not "Loading…"
@@ -1495,6 +1500,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             : { connected: false, accessDefaults: undefined };
           const cursor = window.workhorse?.detectCursorLogin
             ? await window.workhorse.detectCursorLogin()
+            : { connected: false, binary: null, accessDefaults: undefined };
+          const gemini = window.workhorse?.detectGeminiLogin
+            ? await window.workhorse.detectGeminiLogin()
             : { connected: false, binary: null, accessDefaults: undefined };
           const catalog = window.workhorse?.listVendorModels
             ? await window.workhorse.listVendorModels()
@@ -1557,6 +1565,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                       cursor.accessDefaults,
                     ),
                     ...vendorLaunchGate(cursor),
+                  },
+                  gemini: {
+                    ...current.settings.llms.gemini,
+                    available: Boolean(gemini.binary || gemini.connected),
+                    needsAuth: Boolean((gemini as { needsAuth?: boolean }).needsAuth) && !gemini.connected,
+                    accessDefaults: keepVendorAccessDefaults(
+                      current.settings.llms.gemini.accessDefaults,
+                      gemini.accessDefaults,
+                    ),
+                    ...vendorLaunchGate(gemini),
                   },
                   custom: { ...current.settings.llms.custom, connected: false },
                 },
@@ -1954,7 +1972,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         model,
         effort: withEffort(picked, model, remembered?.effort ?? null),
         sandbox: seat.sandbox,
-        mode: seat.mode,
+        // Gemini's own default is always-approve, even when the desk seat is
+        // tighter. Headless agy cannot ask, and a soft deny has no inbox.
+        mode: picked === "gemini" ? "always-approve" : seat.mode,
         customBotId,
       };
       const opened = openDraft(current.sessions, {
@@ -2437,6 +2457,34 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     })();
   }, [refreshVendorModels]);
 
+  const refreshGeminiLogin = useCallback(() => {
+    void (async () => {
+      const detected = window.workhorse?.detectGeminiLogin
+        ? await window.workhorse.detectGeminiLogin()
+        : { connected: false, binary: null, accessDefaults: undefined };
+      setState((current) => ({
+        ...current,
+        settings: {
+          ...current.settings,
+          llms: {
+            ...current.settings.llms,
+            gemini: {
+              ...current.settings.llms.gemini,
+              available: Boolean(detected.binary || detected.connected),
+              needsAuth: Boolean(detected.needsAuth) && !detected.connected,
+              accessDefaults: keepVendorAccessDefaults(
+                current.settings.llms.gemini.accessDefaults,
+                detected.accessDefaults,
+              ),
+              ...vendorLaunchGate(detected),
+            },
+          },
+        },
+      }));
+      refreshVendorModels();
+    })();
+  }, [refreshVendorModels]);
+
   const refreshClaudeLogin = useCallback((options?: { recheck?: boolean }) => {
     void (async () => {
       const detected = window.workhorse?.detectClaudeLogin
@@ -2485,6 +2533,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     if (session?.provider === "codex") void window.workhorse?.codexAnswerPermission?.(id, vendorAnswer);
     else if (session?.provider === "claude") void window.workhorse?.claudeAnswerPermission?.(id, vendorAnswer);
     else if (session?.provider === "cursor") void window.workhorse?.cursorAnswerPermission?.(id, vendorAnswer);
+    else if (session?.provider === "gemini") void window.workhorse?.geminiAnswerPermission?.(id, vendorAnswer);
     else if (session?.provider === "custom") void window.workhorse?.customAnswerPermission?.(id, vendorAnswer);
     else if (!vendorAsk) void window.workhorse?.grokAnswerPermission?.(id, vendorAnswer);
     const peer = elevatePeerReply.current.get(id);
@@ -3611,6 +3660,41 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           ingestCursorLedgerRef.current();
           return;
         }
+        if (live === "gemini") {
+          if (!window.workhorse?.geminiPrompt) {
+            throw new Error("Gemini agent runs in the Workhorse desktop window.");
+          }
+          if (options?.replaceUserId) vendorSessionId = undefined;
+          const result = await window.workhorse.geminiPrompt({ ...promptInput, vendorSessionId });
+          const reply = typeof result?.text === "string" ? result.text.trim() : "";
+          vendorSessionId =
+            typeof result?.vendorSessionId === "string" && result.vendorSessionId
+              ? result.vendorSessionId
+              : vendorSessionId;
+          setState((latest) => ({
+            ...latest,
+            sessions: latest.sessions.map((item) =>
+              item.id === session.id
+                ? {
+                    ...item,
+                    vendorSessionId,
+                    messages: item.messages.map((entry) =>
+                      entry.id === assistantId
+                        ? { ...entry, text: keepStreamedAssistantText({ reply, existingText: entry.text }) }
+                        : entry,
+                    ),
+                  }
+                : item,
+            ),
+          }));
+          void window.workhorse?.geminiPlanUsage?.()
+            .then((plan) => {
+              setGeminiPlan((previous) => planAfterRefresh(previous, plan));
+              markVendorPlanKnown("gemini");
+            })
+            .catch(() => markVendorPlanKnown("gemini"));
+          return;
+        }
         if (live === "codex") {
           if (!window.workhorse?.codexPrompt) {
             throw new Error("Codex agent runs in the Workhorse desktop window.");
@@ -4474,6 +4558,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           if (live === "cursor") {
             if (!window.workhorse?.cursorPrompt) throw new Error("Cursor agent runs in the Workhorse desktop window.");
             const result = await window.workhorse.cursorPrompt(promptInput);
+            return typeof result?.text === "string" ? result.text.trim() : "";
+          }
+          if (live === "gemini") {
+            if (!window.workhorse?.geminiPrompt) throw new Error("Gemini agent runs in the Workhorse desktop window.");
+            const result = await window.workhorse.geminiPrompt(promptInput);
             return typeof result?.text === "string" ? result.text.trim() : "";
           }
           if (!window.workhorse?.grokPrompt) throw new Error("Grok agent runs in the Workhorse desktop window.");
@@ -7841,6 +7930,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           owner?.provider === "codex" ||
           owner?.provider === "claude" ||
           owner?.provider === "cursor" ||
+          owner?.provider === "gemini" ||
           owner?.provider === "custom"
             ? owner.provider
             : "grok";
@@ -7859,6 +7949,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               if (provider === "codex") void window.workhorse?.codexAnswerPermission?.(event.requestId, "deny");
               else if (provider === "claude") void window.workhorse?.claudeAnswerPermission?.(event.requestId, "deny");
               else if (provider === "cursor") void window.workhorse?.cursorAnswerPermission?.(event.requestId, "deny");
+              else if (provider === "gemini") void window.workhorse?.geminiAnswerPermission?.(event.requestId, "deny");
               else if (provider === "custom") void window.workhorse?.customAnswerPermission?.(event.requestId, "deny");
               else void window.workhorse?.grokAnswerPermission?.(event.requestId, "deny");
               setState((current) => ({
@@ -8142,6 +8233,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           if (provider === "codex") void window.workhorse?.codexAnswerPermission?.(event.requestId, allowed);
           else if (provider === "claude") void window.workhorse?.claudeAnswerPermission?.(event.requestId, allowed);
           else if (provider === "cursor") void window.workhorse?.cursorAnswerPermission?.(event.requestId, allowed);
+          else if (provider === "gemini") void window.workhorse?.geminiAnswerPermission?.(event.requestId, allowed);
           else if (provider === "custom") void window.workhorse?.customAnswerPermission?.(event.requestId, allowed);
           else void window.workhorse?.grokAnswerPermission?.(event.requestId, allowed);
           setState((current) => ({
@@ -8331,6 +8423,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             })
             .catch(() => markVendorPlanKnown("cursor"));
           ingestCursorLedgerRef.current();
+        }
+        if (session?.provider === "gemini") {
+          void window.workhorse?.geminiPlanUsage?.()
+            .then((plan) => {
+              setGeminiPlan((previous) => planAfterRefresh(previous, plan));
+              markVendorPlanKnown("gemini");
+            })
+            .catch(() => markVendorPlanKnown("gemini"));
         }
         const closeTurn = () => {
         const idleHandle = turnIdleTimer.current[event.sessionId];
@@ -8591,6 +8691,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const offCodex = window.workhorse?.onCodexEvent?.(apply);
     const offClaude = window.workhorse?.onClaudeEvent?.(apply);
     const offCursor = window.workhorse?.onCursorEvent?.(apply);
+    const offGemini = window.workhorse?.onGeminiEvent?.(apply);
     const offCustom = window.workhorse?.onCustomEvent?.(apply);
     return () => {
       streamCommits.stop();
@@ -8602,6 +8703,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       offCodex?.();
       offClaude?.();
       offCursor?.();
+      offGemini?.();
       offCustom?.();
     };
   }, [recordUsage]);
@@ -9176,6 +9278,23 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     ingestCursorLedger();
   }, [ingestCursorLedger, markVendorPlanKnown]);
 
+  const refreshGeminiPlan = useCallback(() => {
+    if (!window.workhorse?.geminiPlanUsage) {
+      setGeminiPlan(undefined);
+      return;
+    }
+    void window.workhorse
+      .geminiPlanUsage()
+      .then((plan) => {
+        setGeminiPlan((previous) => planAfterRefresh(previous, plan));
+        markVendorPlanKnown("gemini");
+      })
+      .catch(() => {
+        setGeminiPlan((previous) => planAfterRefresh(previous, undefined));
+        markVendorPlanKnown("gemini");
+      });
+  }, [markVendorPlanKnown]);
+
   const refreshClaudePlan = useCallback(() => {
     if (!window.workhorse?.claudePlanUsage) return;
     void window.workhorse
@@ -9251,8 +9370,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     refreshCodexPlan();
     refreshClaudePlan();
     refreshCursorPlan();
+    refreshGeminiPlan();
     refreshCustomPlans();
-  }, [refreshGrokPlan, refreshCodexPlan, refreshClaudePlan, refreshCursorPlan, refreshCustomPlans]);
+  }, [refreshGrokPlan, refreshCodexPlan, refreshClaudePlan, refreshCursorPlan, refreshGeminiPlan, refreshCustomPlans]);
 
   /*
    * The meters used to refresh on launch, while the Usage pane was open, and
@@ -9608,11 +9728,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       watchVendorStatuses({
         settings: state.settings,
         usage: state.usage,
-        plans: { grok: grokPlan, codex: codexPlan, claude: claudePlan, cursor: cursorPlan, custom: customPlans },
+        plans: { grok: grokPlan, codex: codexPlan, claude: claudePlan, cursor: cursorPlan, gemini: geminiPlan, custom: customPlans },
         permits: state.watchPermits,
         dayMarks: state.watchDayMarks,
       }),
-    [state.settings, state.usage, state.watchPermits, state.watchDayMarks, grokPlan, codexPlan, claudePlan, customPlans],
+    [state.settings, state.usage, state.watchPermits, state.watchDayMarks, grokPlan, codexPlan, claudePlan, cursorPlan, geminiPlan, customPlans],
   );
 
   const watchNotices = useMemo(() => collectWatchNotices(watchStatuses), [watchStatuses]);
@@ -9795,6 +9915,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       refreshCodexLogin,
       refreshClaudeLogin,
       refreshCursorLogin,
+      refreshGeminiLogin,
       refreshCustomLogin,
       cycleTheme,
       toggleWorkhorseTheme,
@@ -9868,6 +9989,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       refreshClaudePlan,
       cursorPlan,
       refreshCursorPlan,
+      geminiPlan,
+      refreshGeminiPlan,
       customPlans,
       customPlanKnown,
       vendorPlanKnown,
@@ -9948,6 +10071,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       refreshCodexLogin,
       refreshClaudeLogin,
       refreshCursorLogin,
+      refreshGeminiLogin,
       refreshCustomLogin,
       cycleTheme,
       toggleWorkhorseTheme,
@@ -10019,6 +10143,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       refreshClaudePlan,
       cursorPlan,
       refreshCursorPlan,
+      geminiPlan,
+      refreshGeminiPlan,
       customPlans,
       customPlanKnown,
       vendorPlanKnown,

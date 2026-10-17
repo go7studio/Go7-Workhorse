@@ -277,6 +277,11 @@ test("startSession no longer seeds a new chat's seat from the last chat", () => 
   );
   assert.doesNotMatch(store, /rememberedAccess/, "the seat memory is gone, not merely unused");
   assert.match(store, /const picked = provider \?\? remembered!\.provider;/);
+  assert.match(
+    store,
+    /mode: picked === "gemini" \? "always-approve" : seat\.mode/,
+    "a new Gemini chat starts at always-approve",
+  );
   assert.match(store, /effort: withEffort\(picked, model, remembered\?\.effort \?\? null\)/);
   assert.match(store, /function rememberLastModel\(/);
   assert.match(store, /if \(!session \|\| session\.hidden\) return lastModel;/);

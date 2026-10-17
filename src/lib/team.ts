@@ -223,7 +223,7 @@ function count(value: unknown): number {
 const ROLES = new Set(["user", "assistant", "system"]);
 const KINDS = new Set(["tool", "compact", "thought", "peer", "subagent"]);
 const ATTACHMENT_KINDS = new Set(["image", "file", "document", "audio", "video"]);
-const PROVIDERS = new Set(["grok", "codex", "claude", "cursor", "custom"]);
+const PROVIDERS = new Set(["grok", "codex", "claude", "cursor", "gemini", "custom"]);
 const ANSWERS = new Set(["once", "session", "deny", "closed"]);
 
 function provider(value: unknown): ProviderId | undefined {

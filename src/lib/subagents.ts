@@ -103,6 +103,9 @@ const VENDOR_ALIASES: Record<string, ProviderId> = {
   minipax: "custom",
   cursor: "cursor",
   composer: "cursor",
+  gemini: "gemini",
+  antigravity: "gemini",
+  agy: "gemini",
 };
 
 function tokensOf(value: string): string[] {
@@ -116,7 +119,7 @@ function tokensOf(value: string): string[] {
 export function parseProviderId(value?: string): ProviderId | null {
   const raw = value?.trim().toLowerCase();
   if (!raw) return null;
-  if (raw === "grok" || raw === "claude" || raw === "codex" || raw === "cursor" || raw === "custom") return raw;
+  if (raw === "grok" || raw === "claude" || raw === "codex" || raw === "cursor" || raw === "gemini" || raw === "custom") return raw;
   return VENDOR_ALIASES[raw] ?? null;
 }
 
@@ -1857,7 +1860,7 @@ export function admitSpawn(input: SpawnAdmissionInput): SpawnAdmission {
 }
 
 export function vendorDisplayName(provider: ProviderId): string {
-  return { grok: "Grok", claude: "Claude", codex: "Codex", cursor: "Cursor", custom: "Custom" }[provider];
+  return { grok: "Grok", claude: "Claude", codex: "Codex", cursor: "Cursor", gemini: "Gemini", custom: "Custom" }[provider];
 }
 
 export function subagentLabel(provider: ProviderId, model: string, description?: string): string {

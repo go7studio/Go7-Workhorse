@@ -32,6 +32,7 @@ export function WatchPane() {
       codex: store.codexPlan,
       claude: store.claudePlan,
       cursor: store.cursorPlan,
+      gemini: store.geminiPlan,
       custom: store.customPlans,
     },
     permits: store.watchPermits,

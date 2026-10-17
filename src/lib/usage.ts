@@ -11,6 +11,7 @@ import {
   type CursorUsageLane,
   type CursorWatchKey,
 } from "./cursor-lane";
+import { agyGroupPlan, agyWatchKey, isAgyWatchKey } from "./agy-usage";
 import { isGrokBotUrl } from "./custom-http-identity";
 import { estimateMessageTokens } from "./context-stats";
 import type { TypicalRun } from "./model-prices";
@@ -705,18 +706,18 @@ export function byProvider(events: UsageEvent[]): UsageGroup[] {
 }
 
 export type DeskUsageCard = UsageGroup & {
-  focus: ProviderId | `bot:${string}` | CursorWatchKey;
+  focus: ProviderId | `bot:${string}` | CursorWatchKey | "gemini:argon" | "gemini:third-party";
   color?: string;
 };
 
-const DESK_VENDORS: Exclude<ProviderId, "custom">[] = ["grok", "codex", "claude", "cursor"];
+const DESK_VENDORS: Exclude<ProviderId, "custom">[] = ["grok", "codex", "claude", "cursor", "gemini"];
 
 export function usageProviderForSession(
   session?: { provider?: ProviderId } | null,
   fallback?: ProviderId,
 ): ProviderId {
   const provider = session?.provider ?? fallback;
-  if (provider === "claude" || provider === "codex" || provider === "cursor" || provider === "custom" || provider === "grok") {
+  if (provider === "claude" || provider === "codex" || provider === "cursor" || provider === "gemini" || provider === "custom" || provider === "grok") {
     return provider;
   }
   return "grok";
@@ -780,7 +781,7 @@ export function rehomeCustomUsage(
       const { lane: _lane, ...rest } = event;
       return { ...rest, provider: "custom", customBotId: namedBot.id };
     }
-    if (event.provider === "claude" || event.provider === "codex" || event.provider === "cursor") return event;
+    if (event.provider === "claude" || event.provider === "codex" || event.provider === "cursor" || event.provider === "gemini") return event;
     const session = event.sessionId ? sessions.find((item) => item.id === event.sessionId) : undefined;
     if (session && session.provider !== "custom") return event;
     const sessionBotId = session?.provider === "custom" ? session.customBotId : undefined;
@@ -805,7 +806,7 @@ export function cursorLaneEvents(events: UsageEvent[], key: CursorWatchKey): Usa
 }
 
 export type UsageVisibilitySettings = {
-  llms: Settings["llms"] | { grok: LlmLink; claude: LlmLink; codex: LlmLink; cursor?: LlmLink };
+  llms: Settings["llms"] | { grok: LlmLink; claude: LlmLink; codex: LlmLink; cursor?: LlmLink; gemini?: LlmLink };
   customBots: Array<Pick<CustomBot, "id" | "name" | "model" | "models" | "enabled">>;
 };
 
@@ -834,7 +835,7 @@ export function visibleUsageEvents<T extends Pick<UsageEvent, "provider" | "mode
 export function deskUsageCards(
   events: UsageEvent[],
   settings: {
-    llms: Settings["llms"] | { grok: LlmLink; claude: LlmLink; codex: LlmLink; cursor?: LlmLink };
+    llms: Settings["llms"] | { grok: LlmLink; claude: LlmLink; codex: LlmLink; cursor?: LlmLink; gemini?: LlmLink };
     customBots: CustomBot[];
   },
 ): DeskUsageCard[] {
@@ -850,6 +851,25 @@ export function deskUsageCards(
           label: cursorWatchKeyLabel(key),
           provider: "cursor",
           color: vendorTint("cursor", settings.llms.cursor),
+          ...rollup(slice),
+        });
+      }
+      continue;
+    }
+    if (id === "gemini") {
+      const rings = [
+        { key: "gemini" as const, label: "Gemini" },
+        { key: "gemini:argon" as const, label: "Gemini · Argon" },
+        { key: "gemini:third-party" as const, label: "Gemini · Claude and GPT" },
+      ];
+      for (const ring of rings) {
+        const slice = events.filter((event) => event.provider === "gemini" && agyWatchKey(event.model) === ring.key);
+        cards.push({
+          key: ring.key,
+          focus: ring.key,
+          label: ring.label,
+          provider: "gemini",
+          color: vendorTint("gemini", settings.llms.gemini),
           ...rollup(slice),
         });
       }
@@ -886,6 +906,7 @@ export function vendorUsedPercent(
     codex?: GrokPlanUsage;
     claude?: GrokPlanUsage;
     cursor?: GrokPlanUsage;
+    gemini?: GrokPlanUsage;
     custom?: Record<string, GrokPlanUsage | undefined>;
   },
   events: UsageEvent[] = [],
@@ -903,7 +924,9 @@ export function vendorUsedPercent(
       ? customBotUsageEvents(events, bot)
       : isCursorWatchKey(String(row.focus))
         ? cursorLaneEvents(events, row.focus as CursorWatchKey)
-        : events.filter((event) => event.provider === row.provider);
+        : isAgyWatchKey(String(row.focus)) || isAgyWatchKey(row.key)
+          ? events.filter((event) => event.provider === "gemini" && agyWatchKey(event.model) === (isAgyWatchKey(String(row.focus)) ? row.focus : row.key))
+          : events.filter((event) => event.provider === row.provider);
   const used = rollup(slice).totalTokens;
   if (budget && budget > 0 && used > 0) return Math.min(100, (used / budget) * 100);
   return 0;
@@ -940,6 +963,7 @@ export function vendorTidePercent(
     codex?: GrokPlanUsage;
     claude?: GrokPlanUsage;
     cursor?: GrokPlanUsage;
+    gemini?: GrokPlanUsage;
     custom?: Record<string, GrokPlanUsage | undefined>;
   },
   events: UsageEvent[] = [],
@@ -960,6 +984,7 @@ export function leftoverForCard(
     codex?: GrokPlanUsage;
     claude?: GrokPlanUsage;
     cursor?: GrokPlanUsage;
+    gemini?: GrokPlanUsage;
     custom?: Record<string, GrokPlanUsage | undefined>;
   },
 ): GrokPlanUsage | undefined {
@@ -973,6 +998,9 @@ export function leftoverForCard(
   if (row.provider === "cursor") {
     return cursorLanePlan(plans.cursor, cursorWatchLane(row.key));
   }
+  if (row.focus === "gemini:argon" || row.key === "gemini:argon") return agyGroupPlan(plans.gemini, "argon");
+  if (row.focus === "gemini:third-party" || row.key === "gemini:third-party") return agyGroupPlan(plans.gemini, "third-party");
+  if (row.provider === "gemini" || isAgyWatchKey(String(row.focus))) return agyGroupPlan(plans.gemini, "gemini");
   if (row.provider === "grok") return plans.grok;
   if (row.provider === "codex") return plans.codex;
   if (row.provider === "claude") return plans.claude;

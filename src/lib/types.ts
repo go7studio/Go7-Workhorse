@@ -1,4 +1,4 @@
-export type ProviderId = "grok" | "claude" | "codex" | "cursor" | "custom";
+export type ProviderId = "grok" | "claude" | "codex" | "cursor" | "gemini" | "custom";
 
 export type PermissionMode = "ask" | "accept-edits" | "always-approve" | "plan";
 
@@ -1034,6 +1034,7 @@ export type Settings = {
     claude: LlmLink;
     codex: LlmLink;
     cursor: LlmLink;
+    gemini: LlmLink;
     custom: CustomLlm;
   };
   customBots: CustomBot[];

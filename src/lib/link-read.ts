@@ -488,7 +488,7 @@ function projectedMap<T>(
 /** `Settings.usageBudgets`: one token bank per provider. Five known keys, five named. */
 function compactUsageBudgets(source: Record<string, unknown>): Record<string, number> {
   const out: Record<string, number> = {};
-  for (const id of ["grok", "claude", "codex", "cursor", "custom"] as const) {
+  for (const id of ["grok", "claude", "codex", "cursor", "gemini", "custom"] as const) {
     const value = source[id];
     if (typeof value === "number" && Number.isFinite(value)) out[id] = value;
   }
@@ -637,7 +637,7 @@ function compactSettings(settings: unknown): LooseMessage | undefined {
   if (!isRecord(settings)) return undefined;
   const llms = isRecord(settings.llms) ? settings.llms : undefined;
   const stock: LooseMessage = {};
-  for (const id of ["grok", "claude", "codex", "cursor"] as const) {
+  for (const id of ["grok", "claude", "codex", "cursor", "gemini"] as const) {
     const link = llms && isRecord(llms[id]) ? llms[id] : undefined;
     if (link) stock[id] = pick(link as Record<string, unknown>, LLM_LINK_FIELDS);
   }
@@ -678,7 +678,7 @@ function compactPlan(plan: unknown): LooseMessage | undefined {
 function compactDeskPlans(plans: unknown): LooseMessage | undefined {
   if (!isRecord(plans)) return undefined;
   const out: LooseMessage = {};
-  for (const id of ["grok", "codex", "claude", "cursor"] as const) {
+  for (const id of ["grok", "codex", "claude", "cursor", "gemini"] as const) {
     const plan = compactPlan(plans[id]);
     if (plan) out[id] = plan;
   }

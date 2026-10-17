@@ -19,11 +19,11 @@ export type ExternalErrorCode =
 
 export type { AgentGrant, AgentRuntimeId, CorrelationEnvelope, ExternalAgentRef };
 
-export const STOCK_PROVIDER_IDS: ProviderId[] = ["grok", "claude", "codex", "cursor", "custom"];
+export const STOCK_PROVIDER_IDS: ProviderId[] = ["grok", "claude", "codex", "cursor", "gemini", "custom"];
 
 export const DEFAULT_HOP_LIMIT = 2;
 
-export const PROVIDER_ID_SOURCE = 'export type ProviderId = "grok" | "claude" | "codex" | "cursor" | "custom"';
+export const PROVIDER_ID_SOURCE = 'export type ProviderId = "grok" | "claude" | "codex" | "cursor" | "gemini" | "custom"';
 
 const RUNTIME_IDS: AgentRuntimeId[] = ["openclaw", "hermes"];
 
@@ -32,7 +32,7 @@ export function isAgentRuntimeId(value: unknown): value is AgentRuntimeId {
 }
 
 export function isStockProviderId(value: unknown): value is ProviderId {
-  return value === "grok" || value === "claude" || value === "codex" || value === "cursor" || value === "custom";
+  return value === "grok" || value === "claude" || value === "codex" || value === "cursor" || value === "gemini" || value === "custom";
 }
 
 export function parseExternalAgentRef(value: unknown): ExternalAgentRef | undefined {

@@ -192,6 +192,20 @@ contextBridge.exposeInMainWorld("workhorse", {
       ipcRenderer.removeListener("cursor:event", listener);
     };
   },
+  detectGeminiLogin: () =>
+    ipcRenderer.invoke("gemini:detect-login") as Promise<import("./agy-login").AgyLoginDetectResult>,
+  geminiPrompt: (input: GrokPromptInput) => ipcRenderer.invoke("gemini:prompt", input),
+  geminiAnswerPermission: (requestId: string, answer: PermissionAnswer) =>
+    ipcRenderer.invoke("gemini:answer-permission", { requestId, answer }),
+  geminiCancel: (sessionId: string) => ipcRenderer.invoke("gemini:cancel", sessionId),
+  geminiPlanUsage: () => ipcRenderer.invoke("gemini:plan-usage") as Promise<import("../src/lib/types").GrokPlanUsage | null>,
+  onGeminiEvent: (handler: (event: GrokIpcEvent) => void) => {
+    const listener = (_event: IpcRendererEvent, payload: GrokIpcEvent) => handler(payload);
+    ipcRenderer.on("gemini:event", listener);
+    return () => {
+      ipcRenderer.removeListener("gemini:event", listener);
+    };
+  },
   detectCustomLogin: () => ipcRenderer.invoke("custom:detect"),
   customModels: (config: { baseUrl: string; apiKey: string }) => ipcRenderer.invoke("custom:models", config),
   probeCustom: (config: { baseUrl: string; apiKey: string; model: string; api?: "anthropic-messages" | "openai-completions" }) =>

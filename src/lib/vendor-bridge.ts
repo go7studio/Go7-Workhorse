@@ -1,12 +1,13 @@
 import type { ProviderId } from "./types";
 
-export type VendorSendTarget = "grok" | "codex" | "claude" | "cursor" | "custom" | "preview";
+export type VendorSendTarget = "grok" | "codex" | "claude" | "cursor" | "gemini" | "custom" | "preview";
 
 export function vendorSendTarget(provider: ProviderId): VendorSendTarget {
   if (provider === "grok") return "grok";
   if (provider === "codex") return "codex";
   if (provider === "claude") return "claude";
   if (provider === "cursor") return "cursor";
+  if (provider === "gemini") return "gemini";
   if (provider === "custom") return "custom";
   return "preview";
 }
@@ -15,6 +16,7 @@ export function vendorAgentLabel(provider: ProviderId): string {
   if (provider === "codex") return "Codex";
   if (provider === "claude") return "Claude";
   if (provider === "cursor") return "Cursor";
+  if (provider === "gemini") return "Gemini";
   if (provider === "custom") return "Custom";
   return "Grok";
 }
@@ -43,8 +45,8 @@ export function isVendorFailureReply(text: string | undefined | null): boolean {
   const value = (text ?? "").trim();
   if (!value) return false;
   return (
-    /^(?:Grok|Codex|Claude|Cursor|Custom) agent failed:/i.test(value) ||
-    /^(?:Grok|Codex|Claude|Cursor|Custom) hit a request rate limit\b/i.test(value) ||
+    /^(?:Grok|Codex|Claude|Cursor|Gemini|Custom) agent failed:/i.test(value) ||
+    /^(?:Grok|Codex|Claude|Cursor|Gemini|Custom) hit a request rate limit\b/i.test(value) ||
     /^Cursor cannot use “.+”\. Choose another model\.$/i.test(value)
   );
 }
@@ -55,7 +57,7 @@ export function vendorEmptyReply(provider: ProviderId): string {
 
 /** Placeholder the desk wrote because the vendor returned no prose. Not a reply. */
 export function isVendorEmptyReply(text: string | undefined | null): boolean {
-  return /^(?:Grok|Codex|Claude|Cursor|Custom) finished without a visible reply\.$/.test((text ?? "").trim());
+  return /^(?:Grok|Codex|Claude|Cursor|Gemini|Custom) finished without a visible reply\.$/.test((text ?? "").trim());
 }
 
 /** Desk notice for a real user stop. Not model prose — stream must replace it. */

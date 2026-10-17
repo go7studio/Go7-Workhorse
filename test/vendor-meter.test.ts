@@ -134,8 +134,8 @@ test("prepaid custom meters fill balance and do not invent leftover percent", ()
 // Cursor fetch read "Loading weekly plan usage…" forever.
 test("a built-in meter that answered reads unknown, never a permanent Loading", () => {
   const nothingFetched: Record<string, boolean> = {};
-  const answered: Record<string, boolean> = { grok: true, codex: true, claude: true, cursor: true };
-  const copyFor = (provider: "grok" | "codex" | "claude" | "cursor", vendorPlanKnown: Record<string, boolean>) =>
+  const answered: Record<string, boolean> = { grok: true, codex: true, claude: true, cursor: true, gemini: true };
+  const copyFor = (provider: "grok" | "codex" | "claude" | "cursor" | "gemini", vendorPlanKnown: Record<string, boolean>) =>
     leftoverMissingCopy({
       hasKey: true,
       fetchKnown: leftoverFetchKnown({ provider, vendorPlanKnown, customPlanKnown: {} }),
@@ -143,7 +143,7 @@ test("a built-in meter that answered reads unknown, never a permanent Loading", 
       planName: "SuperGrok",
     });
 
-  for (const provider of ["grok", "codex", "claude", "cursor"] as const) {
+  for (const provider of ["grok", "codex", "claude", "cursor", "gemini"] as const) {
     // Nothing has been asked yet, so "Loading" is still honest.
     assert.equal(leftoverFetchKnown({ provider, vendorPlanKnown: nothingFetched, customPlanKnown: {} }), false);
     assert.match(copyFor(provider, nothingFetched), /Loading weekly plan usage/);
@@ -187,7 +187,7 @@ test("a built-in meter that answered reads unknown, never a permanent Loading", 
 
   const store = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
   assert.match(store, /const \[vendorPlanKnown, setVendorPlanKnown\]/);
-  for (const provider of ["grok", "codex", "claude", "cursor"]) {
+  for (const provider of ["grok", "codex", "claude", "cursor", "gemini"]) {
     // Marked on both the resolve and the reject arm: settled either way is known.
     const marks = store.match(new RegExp(`markVendorPlanKnown\\("${provider}"\\)`, "g")) ?? [];
     assert.ok(marks.length >= 2, `${provider} marks its meter known on success and on failure`);

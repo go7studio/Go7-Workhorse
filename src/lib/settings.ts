@@ -21,6 +21,7 @@ export const DEFAULT_SETTINGS: Settings = {
     claude: { connected: false },
     codex: { connected: false },
     cursor: { connected: false },
+    gemini: { connected: false },
     custom: structuredClone(EMPTY_CUSTOM_DRAFT),
   },
   customBots: [],
@@ -216,7 +217,7 @@ export function vendorEnabled(link: LlmLink | undefined): boolean {
   return Boolean(link?.connected) && link?.enabled !== false;
 }
 
-const STOCK: Exclude<ProviderId, "custom">[] = ["grok", "codex", "claude", "cursor"];
+const STOCK: Exclude<ProviderId, "custom">[] = ["grok", "codex", "claude", "cursor", "gemini"];
 
 export function attachedStockVendors(settings: Settings): Exclude<ProviderId, "custom">[] {
   return STOCK.filter((id) => vendorEnabled(settings.llms[id]));
@@ -428,6 +429,7 @@ export function normalizeSettings(raw: unknown): Settings {
       claude: link(record.llms?.claude),
       codex: link(record.llms?.codex),
       cursor: link(record.llms?.cursor),
+      gemini: link(record.llms?.gemini),
       custom: custom(record.llms?.custom),
     },
     // The migration runs here, at the one seam every load passes through, and
@@ -457,7 +459,7 @@ function normalizeUsageBudgets(raw: unknown): Settings["usageBudgets"] {
   if (!raw || typeof raw !== "object") return { grok: 2_000_000 };
   const record = raw as Record<string, unknown>;
   const budgets: Settings["usageBudgets"] = {};
-  for (const id of ["grok", "claude", "codex", "cursor", "custom"] as const) {
+  for (const id of ["grok", "claude", "codex", "cursor", "gemini", "custom"] as const) {
     const value = Number(record[id]);
     if (Number.isFinite(value) && value > 0) budgets[id] = Math.round(value);
   }

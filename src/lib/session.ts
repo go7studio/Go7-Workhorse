@@ -155,11 +155,15 @@ export function applySessionModelChange(
     session.provider !== next.provider || (session.customBotId || undefined) !== (next.customBotId || undefined);
   const switched =
     providerChanged || session.model !== next.model || session.effort !== next.effort;
+  // Landing on Gemini sets always-approve. Headless agy cannot ask.
+  // A model change while the chat is already on Gemini keeps a later choice.
+  const landingOnGemini = next.provider === "gemini" && session.provider !== "gemini";
   return {
     ...session,
     provider: next.provider,
     model: next.model,
     effort: next.effort,
+    mode: landingOnGemini ? "always-approve" : session.mode,
     customBotId: next.customBotId,
     vendorSessionId: switched ? undefined : session.vendorSessionId,
     vendorProvider: switched ? undefined : session.vendorProvider,

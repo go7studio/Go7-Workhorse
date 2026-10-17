@@ -213,7 +213,7 @@ test("the five named laws survive word for word", () => {
   assert.match(MISSION_MODE_HINT, /workhorse_continue_mission with previousWorkerIds/);
 
   for (const core of [WORKHORSE_SESSION_RULES, CUSTOM_HTTP_SESSION_RULES]) {
-    assert.match(core, /Grok, Claude, Codex, and Cursor/);
+    assert.match(core, /Grok, Claude, Codex, Cursor, and Gemini/);
     assert.match(core, /MiniMax/);
   }
   assert.match(WORKHORSE_SESSION_RULES, /Custom HTTP bots are live desk slots the user added/);

@@ -83,11 +83,11 @@ export function BotKnowledgePane() {
   const [rubricTarget, setRubricTarget] = useState<RubricTarget | null>(null);
   const tbodyRef = useRef<HTMLTableSectionElement>(null);
   const rowRectsRef = useRef<Map<string, DOMRect>>(new Map());
-  const { settings, grokPlan, codexPlan, claudePlan, cursorPlan, customPlans, usage, watchPermits, watchDayMarks, sessions } =
+  const { settings, grokPlan, codexPlan, claudePlan, cursorPlan, geminiPlan, customPlans, usage, watchPermits, watchDayMarks, sessions } =
     store;
   const plans = useMemo(
-    () => ({ grok: grokPlan, codex: codexPlan, claude: claudePlan, cursor: cursorPlan, custom: customPlans }),
-    [grokPlan, codexPlan, claudePlan, cursorPlan, customPlans],
+    () => ({ grok: grokPlan, codex: codexPlan, claude: claudePlan, cursor: cursorPlan, gemini: geminiPlan, custom: customPlans }),
+    [grokPlan, codexPlan, claudePlan, cursorPlan, geminiPlan, customPlans],
   );
   const statuses = useMemo(
     () => watchVendorStatuses({ settings, usage, plans, permits: watchPermits, dayMarks: watchDayMarks }),

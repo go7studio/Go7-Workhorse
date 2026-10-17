@@ -117,7 +117,7 @@ test("the Link helper lists what the desk lists: the desk saves what it serves, 
     assert.deepEqual(lists?.codex?.map((row) => row.id), ["gpt-6-astra", "gpt-5.6-sol"]);
     assert.equal(lists?.codex?.[0]?.contextWindow, 872_000, "the vendor's max window, not the session cap");
     assert.deepEqual(lists?.codex?.[0]?.reasoningLevels?.map((level) => level.id), ["low", "medium", "high", "xhigh", "max", "ultra"]);
-    assert.equal(Object.keys(lists ?? {}).sort().join(","), "claude,codex,cursor,grok", "custom slots stay with the desk");
+    assert.equal(Object.keys(lists ?? {}).sort().join(","), "claude,codex,cursor,gemini,grok", "custom slots stay with the desk");
     assert.ok(lists?.cursor?.some((row) => row.id === "composer-2.5"), "Cursor keeps its stock rows without a CLI call");
     try {
       applyVendorCatalog(lists ?? {});

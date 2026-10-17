@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { useStore } from "../lib/store";
-import type { McpRuntimeId, McpServerConfig, ProviderId } from "../lib/types";
+import { mcpRuntimeChoices } from "../lib/mcp-servers";
+import type { McpRuntimeId, McpServerConfig } from "../lib/types";
 
 type Editor = {
   originalName?: string;
@@ -12,14 +13,6 @@ type Editor = {
   everyTool: boolean;
   discoveredTools: string[];
 };
-
-const STOCK_RUNTIMES: Array<{ id: ProviderId; label: string }> = [
-  { id: "grok", label: "Grok" },
-  { id: "claude", label: "Claude" },
-  { id: "codex", label: "Codex" },
-  { id: "cursor", label: "Cursor" },
-  { id: "custom", label: "Custom HTTP" },
-];
 
 function isCustomRuntime(id: McpRuntimeId): boolean {
   return id === "custom" || id.startsWith("custom:");
@@ -93,10 +86,7 @@ export function McpServersPane() {
   const [probing, setProbing] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
-  const runtimes = useMemo(() => [
-    ...STOCK_RUNTIMES,
-    ...store.settings.customBots.map((bot) => ({ id: `custom:${bot.id}` as McpRuntimeId, label: bot.name.trim() || "Untitled bot" })),
-  ], [store.settings.customBots]);
+  const runtimes = useMemo(() => mcpRuntimeChoices(store.settings.customBots), [store.settings.customBots]);
 
   const patchServer = (patch: Partial<McpServerConfig>) => {
     setEditor((current) => current ? { ...current, server: { ...current.server, ...patch } } : current);

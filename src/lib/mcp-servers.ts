@@ -1,5 +1,13 @@
 import { serversForChatPresets } from "./environment-presets";
-import type { McpRuntimeId, McpServerConfig, Session } from "./types";
+import { PROVIDERS } from "./providers";
+import type { CustomBot, McpRuntimeId, McpServerConfig, Session } from "./types";
+
+export function mcpRuntimeChoices(customBots: readonly Pick<CustomBot, "id" | "name">[] = []): Array<{ id: McpRuntimeId; label: string }> {
+  return [
+    ...PROVIDERS.map(provider => ({ id: provider.id, label: provider.id === "custom" ? "Custom HTTP" : provider.name })),
+    ...customBots.map(bot => ({ id: `custom:${bot.id}` as McpRuntimeId, label: bot.name.trim() || "Untitled bot" })),
+  ];
+}
 
 export function mcpRuntimeIdForSession(session: Pick<Session, "provider" | "customBotId">): McpRuntimeId {
   if (session.provider === "custom" && session.customBotId?.trim()) return `custom:${session.customBotId.trim()}`;

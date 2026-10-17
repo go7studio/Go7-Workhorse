@@ -5,7 +5,7 @@ import { DEFAULT_LOCAL_COMPUTE_SETTINGS, normalizeLocalComputeSettings } from ".
 import { DEFAULT_WORKSHOP_SETTINGS, normalizeWorkshopSettings } from "./workshop-pack";
 import { defaultModel, withEffort, type ModelChoice } from "./models";
 import { inboundAccess } from "./permissions";
-import { providerById } from "./providers";
+import { isProviderId, providerById } from "./providers";
 import type { AgentSystemsSettings, BotAccessDefaults, CustomBot, CustomLlm, DeskAccess, LlmLink, ProviderId, McpServerConfig, Profile, RoutingSettings, Session, Settings, SettingsSection, SkillDiscoverySettings } from "./types";
 import { normalizeBotKnowledge } from "./bot-knowledge-rubric";
 import { migrateCustomBotRatings } from "./routing";
@@ -398,8 +398,7 @@ export function normalizeMcpServers(raw: unknown): McpServerConfig[] {
         : undefined;
     const runtimeIds = Array.isArray(record.runtimeIds)
       ? [...new Set(record.runtimeIds.map((value) => String(value).trim()).filter((value) =>
-          value === "grok" || value === "claude" || value === "codex" || value === "cursor" ||
-          value === "custom" || /^custom:[^\s:][^\s]*$/.test(value)
+          isProviderId(value) || /^custom:[^\s:][^\s]*$/.test(value)
         ))] as McpServerConfig["runtimeIds"]
       : undefined;
     const includeTools = Array.isArray(record.includeTools)

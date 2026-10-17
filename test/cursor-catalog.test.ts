@@ -241,7 +241,7 @@ test("Auto ranks collapsed bases, not 204 spellings; Quick/Balanced/Deep are sta
   assert.notEqual(on?.model, off?.model, "leftover on must be able to move Balanced vs leftover off");
 
   const ranked = rankRoutingCandidates(rows, { prompt: "task", tier: "deep", now: Date.parse("2026-08-19T00:00:00Z") }, routingSettings);
-  assert.equal(ranked.length, bases.length);
+  assert.equal(ranked.length, bases.length - 1, "the retired Opus 5 family stays out of Auto");
   assert.ok(!ranked.some((row) => /-fast$/.test(row.model) || /-(low|high|xhigh|max)$/.test(row.model)));
 
   const slug = cursorSlugForEffort(first.deep!, pick("deep")?.effort ?? "high", { rows: bases });
@@ -306,8 +306,8 @@ test("collapsing the 204-id fixture cuts the ranking job to one row per family",
   const rankOnce = (candidates: typeof rawPool) => rankRoutingCandidates(candidates, request, routingSettings);
   const rawRanked = rankOnce(rawPool);
   const collapsedRanked = rankOnce(collapsedPool);
-  assert.equal(rawRanked.length, rawPool.length, "every uncollapsed candidate is scored");
-  assert.equal(collapsedRanked.length, collapsedPool.length, "every collapsed candidate is scored");
+  assert.equal(rawRanked.length, rawPool.length - 8, "the fixture's eight retired Opus 5 variants are not scored");
+  assert.equal(collapsedRanked.length, collapsedPool.length - 1, "the retired Opus 5 family is not scored");
   assert.ok(
     collapsedRanked.length * 3 <= rawRanked.length,
     `collapsing must cut the ranking job by at least two thirds: ${collapsedRanked.length} scored rows against ${rawRanked.length}`,

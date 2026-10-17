@@ -56,10 +56,10 @@ const bot = (
 test("the 1-10 table orders the mid-field the 1-5 scale collapsed", () => {
   const intelligence = (provider: Parameters<typeof routingProfileForModel>[0], model: string) =>
     routingProfileForModel(provider, model).intelligence;
-  // Frontier intelligence. Opus 5 is as capable as Fable 5; cost assigns.
+  // Frontier intelligence. Opus 5.5 is as capable as Fable 5; cost assigns.
   assert.equal(intelligence("claude", "claude-fable-5"), 10);
   assert.equal(intelligence("claude", "claude-fable-5-1"), 10);
-  assert.equal(intelligence("claude", "claude-opus-5"), 10);
+  assert.equal(intelligence("claude", "claude-opus-5-5"), 10);
   assert.equal(intelligence("codex", "gpt-5.6-sol"), 10);
   assert.equal(intelligence("codex", "gpt-6-astra"), 10, "GPT-6 Astra sits with Sol, ahead of the 5.6 rows it would otherwise miss");
   assert.deepEqual(
@@ -318,18 +318,18 @@ test("two generations at one price are not the same model", () => {
   // One `opus` row gave both generations an identical profile, so they tied
   // at 105.8 on the live desk and the final tiebreak — a.label.localeCompare
   // — handed every deep task to "Opus 4.8" because 4 sorts before 5.
-  assert.equal(routingProfileForModel("claude", "claude-opus-5").intelligence, 10);
+  assert.equal(routingProfileForModel("claude", "claude-opus-5-5").intelligence, 10);
   assert.equal(routingProfileForModel("claude", "claude-opus-4-8").intelligence, 9);
   // Same price, so nothing about cost separates them.
-  assert.equal(routingProfileForModel("claude", "claude-opus-5").cost, routingProfileForModel("claude", "claude-opus-4-8").cost);
+  assert.equal(routingProfileForModel("claude", "claude-opus-5-5").cost, routingProfileForModel("claude", "claude-opus-4-8").cost);
 });
 
 test("smarter at the same cost wins, at every tier", () => {
-  const five = bot("claude-opus-5", 10, 3, 4, midWeek(43), { label: "Opus 5" });
+  const five = bot("claude-opus-5-5", 10, 3, 4, midWeek(43), { label: "Opus 5.5" });
   const older = bot("claude-opus-4-8", 9, 3, 4, midWeek(43), { label: "Opus 4.8" });
   for (const tier of ["quick", "balanced", "deep"] as const) {
     const ranked = rankRoutingCandidates([older, five], { prompt: "", tier, now: NOW }, settings);
-    assert.equal(ranked[0]?.label, "Opus 5", `${tier}: the newer generation wins`);
+    assert.equal(ranked[0]?.label, "Opus 5.5", `${tier}: the newer generation wins`);
   }
   // And it is not the alphabet doing it: reverse the names and the smarter
   // model still wins.
@@ -345,7 +345,7 @@ test("being smarter is free; paying more for it is not", () => {
   // The premium is charged against the cheapest model that clears the bar,
   // so trivia still goes to the cheap model and never burns a frontier seat.
   const luna = bot("gpt-5.6-luna", 5, 5, 1, midWeek(45));
-  const opus = bot("claude-opus-5", 10, 3, 4, midWeek(43));
+  const opus = bot("claude-opus-5-5", 10, 3, 4, midWeek(43));
   const quick = rankRoutingCandidates([opus, luna], { prompt: "", tier: "quick", now: NOW }, settings);
   assert.equal(quick[0]?.model, "gpt-5.6-luna", "quick work does not pay the premium");
 
@@ -402,9 +402,9 @@ test("deep falls back to the understudy when every frontier bot is at reserve", 
   }
 });
 
-test("Opus 5 matches Fable intelligence; cost and task keep Fable for visual and creative work", () => {
+test("Opus 5.5 matches Fable intelligence; cost and task keep Fable for visual and creative work", () => {
   const fable = routingProfileForModel("claude", "claude-fable-5");
-  const opus = routingProfileForModel("claude", "claude-opus-5");
+  const opus = routingProfileForModel("claude", "claude-opus-5-5");
   assert.equal(fable.intelligence, opus.intelligence);
   assert.ok(fable.cost > opus.cost, "Fable is the expensive extra pool");
   assert.ok(opus.speed >= fable.speed);
@@ -422,13 +422,13 @@ test("Opus 5 matches Fable intelligence; cost and task keep Fable for visual and
   });
   const rows = [
     claude("claude-fable-5", "Fable 5"),
-    claude("claude-opus-5", "Opus 5"),
+    claude("claude-opus-5-5", "Opus 5.5"),
     claude("claude-sonnet-5", "Sonnet 5"),
   ];
   const uiPrompt = "Implement the bounded settings panel in Go7 Workhorse";
   assert.equal(inferRoutingTier(uiPrompt, [], { role: "worker" }), "balanced");
   const ui = rankRoutingCandidates(rows, { prompt: uiPrompt, role: "worker", now: NOW }, settings);
-  assert.equal(ui[0]?.model, "claude-opus-5", "same intelligence, cheaper coding slot wins");
+  assert.equal(ui[0]?.model, "claude-opus-5-5", "same intelligence, cheaper coding slot wins");
 
   const creativePrompt = "write a short story about the desk";
   assert.equal(inferRoutingTier(creativePrompt, [], { role: "worker" }), "deep");
@@ -475,5 +475,5 @@ test("Fable leftover is the extra pool, not the shared Claude week", () => {
     },
   });
   assert.equal(rows.find((row) => row.model === "claude-fable-5")?.capacity?.usedPercent, 40);
-  assert.equal(rows.find((row) => row.model === "claude-opus-5")?.capacity?.usedPercent, 13);
+  assert.equal(rows.find((row) => row.model === "claude-opus-5-5")?.capacity?.usedPercent, 13);
 });

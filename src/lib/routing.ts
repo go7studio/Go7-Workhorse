@@ -138,6 +138,20 @@ export function isNewerGeneration(
   return Boolean(a && b && a.line === b.line && compareVersions(a.version, b.version) > 0);
 }
 
+/** Opus 5 is dominated by 5.5. Keep explicit human picks, never allocate it through Auto. */
+export function isRetiredAutoModel(candidate: Pick<RoutingCandidate, "provider" | "model">): boolean {
+  return /^(?:claude )?opus 5(?: 0)?(?: thinking)?$/.test(deskModelKey(candidate.provider, candidate.model).base);
+}
+
+/** Dispatch backstop for saved Auto chats and workers that bypass a new routing decision. */
+export function retiredAutoModelError(
+  session: (Pick<RoutingCandidate, "provider" | "model"> & { routingMode?: "auto" | "manual" }) | null | undefined,
+): string | null {
+  return session?.routingMode === "auto" && isRetiredAutoModel(session)
+    ? "Opus 5 is retired from Auto. Choose Opus 5.5 or another model, or route again with Auto."
+    : null;
+}
+
 export type RoutingJobRole = "orchestrator" | "worker" | "auditor" | "builder";
 
 export type RoutingOutcomeTally = {
@@ -765,7 +779,9 @@ export function describeRoutingMiss(
   if (notExcluded.length === 0) return `all candidates are excluded${skipped}`;
   const roleOk = notExcluded.filter((candidate) => !isGrokBotCandidate(candidate) || grokBotAllowedOnRoute(request));
   if (roleOk.length === 0) return `all candidates are excluded${skipped}`;
-  const autoOk = roleOk.filter((candidate) => candidate.profile.autoRoute !== false);
+  const currentModels = roleOk.filter((candidate) => !isRetiredAutoModel(candidate));
+  if (currentModels.length === 0) return `Opus 5 is retired from Auto; enable Opus 5.5 or another model${skipped}`;
+  const autoOk = currentModels.filter((candidate) => candidate.profile.autoRoute !== false);
   if (autoOk.length === 0) return `training models are not used for Auto${skipped}`;
   const capable = autoOk.filter((candidate) => supports(candidate.profile, required));
   if (capable.length === 0) {
@@ -1284,6 +1300,7 @@ export type RoutingSkipReason =
   | "inputs"
   | "excluded"
   | "grok-bot"
+  | "retired"
   | "test-only"
   | "context";
 
@@ -1305,6 +1322,7 @@ export function routingSkipReason(
   if (!supports(candidate.profile, required)) return "inputs";
   if (routingIdentityExcluded(candidate, request.exclude)) return "excluded";
   if (isGrokBotCandidate(candidate) && !grokBotAllowedOnRoute(request)) return "grok-bot";
+  if (isRetiredAutoModel(candidate)) return "retired";
   if (candidate.profile.autoRoute === false) return "test-only";
   // A model that cannot hold the conversation is not a worse pick, it is a
   // failed send. Routing never knew the window before, so a 300k thread
@@ -1847,6 +1865,7 @@ export function rankRoutingCandidates(
     (candidate) =>
       candidate.connected &&
       candidate.launchable !== false &&
+      !isRetiredAutoModel(candidate) &&
       candidate.profile.autoRoute !== false &&
       (settings.allowLocal || !candidate.profile.local) &&
       candidate.profile.intelligence >= minimum,

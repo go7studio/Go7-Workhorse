@@ -179,7 +179,7 @@ test("buildClaudeLaunchSpec never spawns grok and maps permission modes", () => 
   process.env.WORKHORSE_BRIDGE_TOKEN = "token";
   try {
     assert.equal(resolveClaudeModel(""), "claude-sonnet-5");
-    assert.equal(resolveClaudeModel("opus"), "claude-opus-5");
+    assert.equal(resolveClaudeModel("opus"), "claude-opus-5-5");
     assert.equal(resolveClaudeModel("claude-sonnet"), "claude-sonnet-5");
     assert.equal(resolveClaudeModel("Fable 5"), "claude-fable-5");
     assert.equal(resolveClaudeModel("fable"), "claude-fable-5");

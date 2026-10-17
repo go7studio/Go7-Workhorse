@@ -2,7 +2,8 @@ import { readAgyUsage, type AgyTokenTotals } from "./agy-usage";
 
 export type AgyStreamEvent =
   | { kind: "init"; conversationId?: string }
-  | { kind: "text"; step: number; state: "ACTIVE" | "DONE"; delta: string }
+  | { kind: "text"; step: number; state: "ACTIVE" | "DONE"; delta: string; usage?: AgyTokenTotals }
+  | { kind: "step-usage"; step: number; usage: AgyTokenTotals }
   | { kind: "tool"; step: number; name: string; state: string; detail: string; failed: boolean }
   | { kind: "result"; status: string; response: string; conversationId?: string; error?: string; usage?: AgyTokenTotals }
   | { kind: "ignore" };
@@ -69,8 +70,14 @@ export function parseAgyStreamLine(line: string): AgyStreamEvent {
   if (!step) return { kind: "ignore" };
   const stepIndex = typeof step.step_index === "number" && Number.isFinite(step.step_index) ? step.step_index : 0;
   const state = textOf(step.state).toUpperCase();
-  if (step.step_type === "agent_response" && typeof step.text_delta === "string" && step.text_delta) {
-    return { kind: "text", step: stepIndex, state: state === "ACTIVE" ? "ACTIVE" : "DONE", delta: step.text_delta };
+  if (step.step_type === "agent_response") {
+    // DONE carries this model call's usage, even when the response only
+    // invoked a tool and produced no text. Result usage spans the conversation.
+    const usage = state === "DONE" ? readAgyUsage(step.usage) : undefined;
+    if (typeof step.text_delta === "string" && step.text_delta) {
+      return { kind: "text", step: stepIndex, state: state === "ACTIVE" ? "ACTIVE" : "DONE", delta: step.text_delta, ...(usage ? { usage } : {}) };
+    }
+    if (usage) return { kind: "step-usage", step: stepIndex, usage };
   }
   if (step.step_type === "tool") {
     const info = asRecord(step.tool_info);

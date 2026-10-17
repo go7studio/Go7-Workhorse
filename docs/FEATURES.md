@@ -57,6 +57,12 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
 - Gemini on the desk is the Antigravity CLI. The Gemini API preset stays a
   separate HTTP bot. A new Gemini chat starts on Always allow. Ask, Accept
   edits, and Plan stay available on that chat.
+- Gemini replies keep the final text delta, including a word completed as the
+  native CLI finishes the response.
+- Resuming a Gemini conversation bills the new turn's native model-call counts,
+  without charging its earlier conversation totals again.
+- Gemini's headless CLI cannot ask for interactive approval. A denied action
+  reports its reason in the reply.
 - Client and model are separate: **Grok Build CLI** runs the model ids
   **Grok 4.7**, **Grok 4.6**, and **Grok 4.5**.
 - The CLI's live catalog is authoritative. The desk shows the model, never the

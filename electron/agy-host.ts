@@ -38,7 +38,8 @@ type Turn = {
   model: string;
   projectId?: string;
   emit: GrokEventSink;
-  streamed: Set<number>;
+  usageByStep: Map<number, AgyTokenTotals>;
+  permissionDenial?: string;
   text: string;
   settled: boolean;
   resolve: (result: GrokPromptResult) => void;
@@ -225,22 +226,24 @@ export class AgySessionHost {
     };
     this.slots.set(input.sessionId, slot);
     this.starting.add(input.sessionId);
-    child.stdout?.on("data", (chunk) => this.onStdout(input.sessionId, chunk));
+    child.stdout?.on("data", (chunk) => {
+      if (this.slots.get(input.sessionId) === slot) this.onStdout(input.sessionId, chunk);
+    });
     child.stderr?.on("data", (chunk) => {
       const live = this.slots.get(input.sessionId);
-      if (!live) return;
+      if (live !== slot) return;
       const text = typeof chunk === "string" ? chunk : chunk.toString("utf8");
       live.stderr = `${live.stderr}${text}`.slice(-STDERR_CAP);
     });
     child.on("error", (error) => {
       const live = this.slots.get(input.sessionId);
-      if (!live || live.dead) return;
+      if (live !== slot || live.dead) return;
       live.dead = true;
       this.failTurn(live, error.message || "Gemini agent failed to start");
     });
     child.on("exit", () => {
       const live = this.slots.get(input.sessionId);
-      if (!live || live.dead) return;
+      if (live !== slot || live.dead) return;
       live.dead = true;
       if (!live.turn) return;
       if (live.turn.text && live.turn.settled) return;
@@ -267,7 +270,7 @@ export class AgySessionHost {
 
   private sendTurn(slot: Slot, input: GrokPromptInput, text: string, emit: GrokEventSink): Promise<GrokPromptResult> {
     return new Promise((resolve, reject) => {
-      slot.turn = { sessionId: input.sessionId, model: input.model, projectId: input.projectId, emit, streamed: new Set(), text: "", settled: false, resolve, reject };
+      slot.turn = { sessionId: input.sessionId, model: input.model, projectId: input.projectId, emit, usageByStep: new Map(), text: "", settled: false, resolve, reject };
       const line = `${JSON.stringify({ event: "user", message: { content: text } })}\n`;
       try {
         slot.child.stdin?.write(line);
@@ -304,18 +307,22 @@ export class AgySessionHost {
     }
     const turn = slot.turn;
     if (!turn || turn.settled) return;
+    if ((event.kind === "text" || event.kind === "step-usage") && event.usage) {
+      // A revision of DONE replaces that step's count; it does not bill it twice.
+      turn.usageByStep.set(event.step, event.usage);
+    }
+    if (event.kind === "step-usage") return;
     if (event.kind === "text") {
-      if (event.state === "ACTIVE") {
-        turn.streamed.add(event.step);
-        turn.text += event.delta;
-        turn.emit({ type: "chunk", sessionId: turn.sessionId, text: event.delta });
-      } else if (!turn.streamed.has(event.step)) {
-        turn.text += event.delta;
-        turn.emit({ type: "chunk", sessionId: turn.sessionId, text: event.delta });
-      }
+      // Native agy sends the remaining delta on DONE, not a snapshot of
+      // earlier ACTIVE chunks. The last word can arrive only on that event.
+      turn.text += event.delta;
+      turn.emit({ type: "chunk", sessionId: turn.sessionId, text: event.delta });
       return;
     }
     if (event.kind === "tool") {
+      if (event.failed && /permission|denied|not allowed/i.test(event.detail)) {
+        turn.permissionDenial = event.detail.split(/\r?\n/, 1)[0]!.slice(0, 300);
+      }
       const tool: GrokToolEvent = {
         toolCallId: `agy-${event.step}`,
         title: event.name,
@@ -326,12 +333,25 @@ export class AgySessionHost {
       return;
     }
     if (event.kind !== "result") return;
-    const notice = permissionNotice(slot.stderr);
+    const notice = permissionNotice(slot.stderr) || turn.permissionDenial;
     const response = event.response.trim() || turn.text.trim();
     const text = notice && !response.includes(notice) ? `${response}${response ? "\n\n" : ""}${notice}`.trim() : response;
-    if (event.usage) {
-      const delta = deltaAgyUsage(slot.usage, event.usage);
-      slot.usage = event.usage;
+    const nativeTurnUsage = turn.usageByStep.size > 0
+      ? [...turn.usageByStep.values()].reduce((sum, usage) => ({
+          input: sum.input + usage.input,
+          output: sum.output + usage.output,
+          cacheRead: sum.cacheRead + usage.cacheRead,
+        }), { input: 0, output: 0, cacheRead: 0 })
+      : undefined;
+    // A restored conversation's result includes earlier processes' calls.
+    // Without per-step counts or a known baseline, its first bill is unknown.
+    const delta = nativeTurnUsage
+      ? deltaAgyUsage(undefined, nativeTurnUsage)
+      : event.usage && (slot.usage || slot.opened === "session/new")
+        ? deltaAgyUsage(slot.usage, event.usage)
+        : undefined;
+    if (event.usage) slot.usage = event.usage;
+    if (delta) {
       if (delta.inputTokens || delta.outputTokens || delta.cacheReadTokens) {
         turn.emit({
           type: "usage",

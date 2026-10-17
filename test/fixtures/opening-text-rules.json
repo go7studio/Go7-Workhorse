@@ -518,10 +518,25 @@
     },
     {
       "was": "If asked what this desktop shell is, say Workhorse — one window for Grok, Claude, Codex, Cursor, and any custom bots on the desk.",
-      "now": "If asked what this desktop shell is, say Workhorse, one window for Grok, Claude, Codex, Cursor, and any custom bots on the desk.",
+      "now": "If asked what this desktop shell is, say Workhorse, one window for Grok, Claude, Codex, Cursor, Gemini, and any custom bots on the desk.",
       "keeps": [
         "say Workhorse",
-        "Grok, Claude, Codex, Cursor, and any custom bots on the desk"
+        "Grok, Claude, Codex, Cursor, Gemini, and any custom bots on the desk"
+      ]
+    },
+    {
+      "was": "The shipped vendors are Grok, Claude, Codex, and Cursor, plus any custom bots already on the desk.",
+      "now": "The shipped vendors are Grok, Claude, Codex, Cursor, and Gemini, plus any custom bots already on the desk.",
+      "keeps": [
+        "Grok, Claude, Codex, Cursor, and Gemini",
+        "plus any custom bots already on the desk"
+      ]
+    },
+    {
+      "was": "Built-in vendors are Grok, Claude, Codex, and Cursor.",
+      "now": "Built-in vendors are Grok, Claude, Codex, Cursor, and Gemini.",
+      "keeps": [
+        "Built-in vendors are Grok, Claude, Codex, Cursor, and Gemini"
       ]
     },
     {

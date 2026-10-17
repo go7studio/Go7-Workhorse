@@ -24,12 +24,12 @@ import { DEFAULT_SETTINGS, normalizeAgentSystems } from "../src/lib/settings";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
-test("ProviderId stays the five Workhorse vendors", () => {
+test("ProviderId stays the Workhorse vendors", () => {
   const source = readFileSync(path.join(ROOT, "src", "lib", "types.ts"), "utf8");
-  assert.match(source, /export type ProviderId = "grok" \| "claude" \| "codex" \| "cursor" \| "custom";/);
-  assert.doesNotMatch(source, /ProviderId = "[^"]+" \| "[^"]+" \| "[^"]+" \| "[^"]+" \| "[^"]+" \| "openclaw"/);
+  assert.match(source, /export type ProviderId = "grok" \| "claude" \| "codex" \| "cursor" \| "gemini" \| "custom";/);
+  assert.doesNotMatch(source, /ProviderId = "[^"]+" \| "[^"]+" \| "[^"]+" \| "[^"]+" \| "[^"]+" \| "[^"]+" \| "openclaw"/);
   assert.doesNotMatch(source, /ProviderId = .*"hermes"/);
-  assert.deepEqual(STOCK_PROVIDER_IDS, ["grok", "claude", "codex", "cursor", "custom"]);
+  assert.deepEqual(STOCK_PROVIDER_IDS, ["grok", "claude", "codex", "cursor", "gemini", "custom"]);
   assert.equal(PROVIDER_ID_SOURCE.includes("openclaw"), false);
   for (const id of STOCK_PROVIDER_IDS) assert.equal(isStockProviderId(id), true);
   assert.equal(isStockProviderId("openclaw"), false);

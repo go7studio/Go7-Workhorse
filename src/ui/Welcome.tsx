@@ -3,7 +3,7 @@ import { APP_VERSION } from "../lib/app-info";
 import { useStore } from "../lib/store";
 import type { ProviderId } from "../lib/types";
 
-const STOCK: Exclude<ProviderId, "custom">[] = ["grok", "codex", "claude", "cursor"];
+const STOCK: Exclude<ProviderId, "custom">[] = ["grok", "codex", "claude", "cursor", "gemini"];
 
 export function Welcome() {
   const { openSheet, createProject, openSettings, startSession, settings } = useStore();
@@ -13,7 +13,7 @@ export function Welcome() {
   const harnesses = [
     ...STOCK.map((id) => ({
       id,
-      name: id === "grok" ? "Grok" : id === "codex" ? "Codex" : id === "claude" ? "Claude" : "Cursor",
+      name: id === "grok" ? "Grok" : id === "codex" ? "Codex" : id === "claude" ? "Claude" : id === "gemini" ? "Gemini" : "Cursor",
       status: settings.llms[id].available
         ? settings.llms[id].connected
           ? "Ready"

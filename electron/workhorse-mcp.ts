@@ -2058,7 +2058,7 @@ function normalizeDelegateInitialBrain(value: unknown): { provider?: string; mod
   if (/^grok-4\.\d+$/.test(providerAlias)) {
     return { provider: "grok", model: rawModel || providerAlias, ...(effort ? { effort } : {}) };
   }
-  const provider = ["grok", "claude", "codex", "cursor", "custom"].includes(providerAlias)
+  const provider = ["grok", "claude", "codex", "cursor", "gemini", "custom"].includes(providerAlias)
     ? providerAlias
     : rawProvider;
   return {

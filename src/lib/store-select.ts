@@ -185,6 +185,7 @@ export type WatchDesk = {
   codexPlan: Store["codexPlan"];
   claudePlan: Store["claudePlan"];
   cursorPlan: Store["cursorPlan"];
+  geminiPlan: Store["geminiPlan"];
   customPlans: Store["customPlans"];
   answerPermission: Store["answerPermission"];
   permitWatchHold: Store["permitWatchHold"];
@@ -205,6 +206,7 @@ export function selectWatchDesk(store: Store): WatchDesk {
     codexPlan: store.codexPlan,
     claudePlan: store.claudePlan,
     cursorPlan: store.cursorPlan,
+    geminiPlan: store.geminiPlan,
     customPlans: store.customPlans,
     answerPermission: store.answerPermission,
     permitWatchHold: store.permitWatchHold,
@@ -240,6 +242,7 @@ export function sameWatchDesk(left: WatchDesk, right: WatchDesk): boolean {
     left.codexPlan === right.codexPlan &&
     left.claudePlan === right.claudePlan &&
     left.cursorPlan === right.cursorPlan &&
+    left.geminiPlan === right.geminiPlan &&
     left.customPlans === right.customPlans &&
     left.answerPermission === right.answerPermission &&
     left.permitWatchHold === right.permitWatchHold &&
@@ -306,6 +309,8 @@ export type UsageDesk = {
   refreshClaudePlan: Store["refreshClaudePlan"];
   cursorPlan: Store["cursorPlan"];
   refreshCursorPlan: Store["refreshCursorPlan"];
+  geminiPlan: Store["geminiPlan"];
+  refreshGeminiPlan: Store["refreshGeminiPlan"];
   customPlans: Store["customPlans"];
   customPlanKnown: Store["customPlanKnown"];
   vendorPlanKnown: Store["vendorPlanKnown"];
@@ -329,6 +334,8 @@ export function selectUsageDesk(store: Store): UsageDesk {
     refreshClaudePlan: store.refreshClaudePlan,
     cursorPlan: store.cursorPlan,
     refreshCursorPlan: store.refreshCursorPlan,
+    geminiPlan: store.geminiPlan,
+    refreshGeminiPlan: store.refreshGeminiPlan,
     customPlans: store.customPlans,
     customPlanKnown: store.customPlanKnown,
     vendorPlanKnown: store.vendorPlanKnown,
@@ -354,6 +361,8 @@ export function sameUsageDesk(left: UsageDesk, right: UsageDesk): boolean {
     left.refreshClaudePlan === right.refreshClaudePlan &&
     left.cursorPlan === right.cursorPlan &&
     left.refreshCursorPlan === right.refreshCursorPlan &&
+    left.geminiPlan === right.geminiPlan &&
+    left.refreshGeminiPlan === right.refreshGeminiPlan &&
     left.customPlans === right.customPlans &&
     left.customPlanKnown === right.customPlanKnown &&
     left.vendorPlanKnown === right.vendorPlanKnown &&

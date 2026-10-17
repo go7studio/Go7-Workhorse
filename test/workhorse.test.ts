@@ -3510,6 +3510,11 @@ test("session setup is a compact right-side model and access inspector", () => {
   );
   assert.match(setup, /"codex"/);
   assert.match(setup, /Approval behavior/);
+  assert.doesNotMatch(
+    setup,
+    /disabled=\{capabilities\.security\.network === "unavailable"\}/,
+    "Gemini's network flag must not freeze the approval dial or the vendor list",
+  );
   assert.match(setup, /File access/);
   assert.match(setup, /label: "Plan mode"/);
   assert.match(setup, /label: "Full access"/);
@@ -5385,6 +5390,7 @@ test("sidebar nests project chats in folders; top New chat stays loose", async (
       codex: { connected: true },
       claude: { connected: true },
       cursor: { connected: true },
+      gemini: { connected: true },
     }).map((item) => item.id),
     ["grok-bot", "dgx-spark", "own"],
   );
@@ -5394,8 +5400,18 @@ test("sidebar nests project chats in folders; top New chat stays loose", async (
       codex: { connected: false },
       claude: { connected: true },
       cursor: { connected: true },
+      gemini: { connected: true },
     }).map((item) => item.id),
     ["codex", "grok-bot", "dgx-spark", "own"],
+  );
+  assert.ok(
+    addBotChoices({
+      grok: { connected: true },
+      codex: { connected: true },
+      claude: { connected: true },
+      cursor: { connected: true },
+      gemini: { connected: false },
+    }).some((item) => item.id === "gemini"),
   );
   assert.equal(vendorStatusCopy("cursor", { connected: false, available: false }), "Needs Cursor Agent CLI");
   assert.equal(
@@ -7675,6 +7691,7 @@ test("turns keep the bot that ran them after a switch", () => {
     claude: { connected: true, name: "Clay", color: "#ff9f0a" },
     codex: { connected: false },
     cursor: { connected: false },
+    gemini: { connected: false },
     custom: { connected: false, baseUrl: "", model: "", apiKey: "", contextWindow: 1 },
   });
   assert.equal(renamed.name, "Clay");
@@ -11054,6 +11071,16 @@ test("a path-owned worker copies the orchestrator seat; only the vendor launch i
   // made a free parent look like it seated children at Ask each time.
   assert.deepEqual(workerAccess({ inherited: desk, owned: true }), desk);
   assert.equal(vendorLaunchMode({ mode: "always-approve", hidden: true, agentRun: { paths: ["src/app.ts"] } }), "ask");
+  assert.equal(
+    vendorLaunchMode({ provider: "gemini", mode: "always-approve", hidden: true, agentRun: { paths: ["src/app.ts"] } }),
+    "always-approve",
+    "Gemini has no ask in the stream, so a path-owned worker keeps Always",
+  );
+  assert.equal(
+    vendorLaunchMode({ provider: "gemini", mode: "ask", hidden: true, agentRun: { paths: ["src/app.ts"] } }),
+    "ask",
+    "a later tighten on that Gemini chat still launches without the skip flag",
+  );
   assert.deepEqual(workerAccess({ inherited: desk, owned: false, readOnly: true }), {
     mode: "always-approve",
     sandbox: "read-only",

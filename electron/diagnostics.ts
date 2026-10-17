@@ -28,7 +28,7 @@ export function buildSupportReport(input: {
   const settings = input.state.settings && typeof input.state.settings === "object" ? input.state.settings as Record<string, unknown> : {};
   const bots = Array.isArray(settings.customBots) ? settings.customBots as Record<string, unknown>[] : [];
   const providers: Record<string, unknown> = {};
-  for (const id of ["grok", "codex", "claude", "cursor"] as const) {
+  for (const id of ["grok", "codex", "claude", "cursor", "gemini"] as const) {
     providers[id] = {
       connected: Boolean(input.detections[id]?.connected),
       binaryDetected: Boolean(input.detections[id]?.binary),

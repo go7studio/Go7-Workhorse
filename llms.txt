@@ -1,6 +1,6 @@
 # Go7 Workhorse
 
-> One desk for every AI subscription you already pay for. A native desktop app for Windows and macOS that runs Grok, Claude, Codex, Cursor and your own API keys side by side, each under its own login. Pick a model per chat or let it route by task with a reserve you set. See what each vendor has left this week, before the bill. Open source under MIT. Runs on your machine; there is no hosted service and no account with us.
+> One desk for every AI subscription you already pay for. A native desktop app for Windows and macOS that runs Grok, Claude, Codex, Cursor, Gemini and your own API keys side by side, each under its own login. Pick a model per chat or let it route by task with a reserve you set. See what each vendor has left this week, before the bill. Open source under MIT. Runs on your machine; there is no hosted service and no account with us.
 
 ## Why it exists
 
@@ -8,7 +8,7 @@ It began at a desk paying for SuperGrok Heavy, Cursor, Claude and Codex, where o
 
 ## Who it is for
 
-- Someone who holds two or more AI subscriptions or API keys — Grok on any plan, Claude, Codex, Cursor, or an Anthropic- or OpenAI-compatible endpoint, hosted or local — and wants one place to choose which one does each job.
+- Someone who holds two or more AI subscriptions or API keys — Grok on any plan, Claude, Codex, Cursor, Gemini, or an Anthropic- or OpenAI-compatible endpoint, hosted or local — and wants one place to choose which one does each job.
 - Someone who wants that choice to stay theirs: a model per chat, or auto-routing by task (quick, balanced, deep) that can be turned off, with a weekly reserve per vendor.
 - Someone who wants the work to run locally, under their own logins, with per-vendor usage visible.
 

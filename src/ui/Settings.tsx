@@ -41,7 +41,7 @@ const SECTIONS: { id: SettingsSection; label: string }[] = [
   { id: "watch", label: "Watch" },
 ];
 
-const DESK_STOCK: Exclude<ProviderId, "custom">[] = ["grok", "codex", "claude", "cursor"];
+const DESK_STOCK: Exclude<ProviderId, "custom">[] = ["grok", "codex", "claude", "cursor", "gemini"];
 
 const DOCS = "https://github.com/go7studio/Go7-Workhorse/blob/main/docs";
 
@@ -133,8 +133,11 @@ export function Settings() {
   };
 
   useEffect(() => {
-    if (section === "llms") store.refreshCursorLogin();
-  }, [section, store.refreshCursorLogin]);
+    if (section === "llms") {
+      store.refreshCursorLogin();
+      store.refreshGeminiLogin();
+    }
+  }, [section, store.refreshCursorLogin, store.refreshGeminiLogin]);
 
   useEffect(() => {
     if (typeof llmFocus !== "string" || !llmFocus.startsWith("bot:")) return;
@@ -659,7 +662,9 @@ function StockBotDetail({
                   ? store.refreshCodexLogin()
                   : id === "cursor"
                     ? store.refreshCursorLogin()
-                    : store.refreshClaudeLogin({ recheck: true })
+                    : id === "gemini"
+                      ? store.refreshGeminiLogin()
+                      : store.refreshClaudeLogin({ recheck: true })
             }
           >
             Recheck

@@ -267,6 +267,10 @@
   --setup-chip: var(--claude);
 }
 
+.setup-effort button.gemini {
+  --setup-chip: var(--gemini);
+}
+
 .setup-effort button.custom {
   --setup-chip: var(--custom);
 }
@@ -1205,6 +1209,10 @@
 
 .watch-day-track i.cursor {
   background: var(--cursor);
+}
+
+.watch-day-track i.gemini {
+  background: var(--gemini);
 }
 
 .watch-day-track i.custom {

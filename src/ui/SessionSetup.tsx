@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { customBotEnabled, customBotModels } from "../lib/custom-bots";
 import { makerLabel, modelChipLabel, parseModelId } from "../lib/model-groups";
 import { cursorFamilyId } from "../lib/cursor-catalog";
+import { agyWatchKey, type AgyWatchKey } from "../lib/agy-usage";
 import { cursorWatchLane, type CursorWatchKey } from "../lib/cursor-lane";
 import { contextWindowFor, contextWindowsFor, defaultModel, effortLabel, effortStopAt, effortStopPos, effortsFor, formatWindow, modelName, modelsForPicker, withEffort } from "../lib/models";
 import { hasAttachedLlm, vendorEnabled, vendorLabel, vendorTint } from "../lib/settings";
@@ -10,7 +11,6 @@ import { sessionEnvironmentKind } from "../lib/session-environment";
 import { useActiveSession, useStore } from "../lib/store";
 import { vendorTidePercent } from "../lib/usage";
 import type { EffortLevel, PermissionMode, ProviderId, SandboxProfile } from "../lib/types";
-import { capabilitiesFor } from "../lib/provider-capabilities";
 
 const PERMISSIONS: { id: PermissionMode; label: string }[] = [
   { id: "ask", label: "Ask each time" },
@@ -40,7 +40,7 @@ const SANDBOX_ICONS: Record<SandboxProfile, string> = {
   strict: "◆",
 };
 
-const SETUP_VENDORS: Exclude<ProviderId, "custom">[] = ["grok", "codex", "claude", "cursor"];
+const SETUP_VENDORS: Exclude<ProviderId, "custom">[] = ["grok", "codex", "claude", "cursor", "gemini"];
 
 export function SessionSetup({ onClose }: { onClose: () => void }) {
   const session = useActiveSession();
@@ -60,11 +60,13 @@ export function SessionSetup({ onClose }: { onClose: () => void }) {
     codexPlan,
     claudePlan,
     cursorPlan,
+    geminiPlan,
     customPlans,
     refreshGrokPlan,
     refreshCodexPlan,
     refreshClaudePlan,
     refreshCursorPlan,
+    refreshGeminiPlan,
     refreshCustomPlans,
     folderExists,
   } = useStore();
@@ -78,8 +80,9 @@ export function SessionSetup({ onClose }: { onClose: () => void }) {
     refreshCodexPlan();
     refreshClaudePlan();
     refreshCursorPlan();
+    refreshGeminiPlan();
     refreshCustomPlans();
-  }, [refreshGrokPlan, refreshCodexPlan, refreshClaudePlan, refreshCursorPlan, refreshCustomPlans]);
+  }, [refreshGrokPlan, refreshCodexPlan, refreshClaudePlan, refreshCursorPlan, refreshGeminiPlan, refreshCustomPlans]);
 
   useEffect(() => {
     const onPointer = (event: MouseEvent) => {
@@ -119,15 +122,18 @@ export function SessionSetup({ onClose }: { onClose: () => void }) {
   };
   // A Cursor chat draws on the pool its model bills to. Read as plain
   // "cursor", the tide had no Cursor plan to read and fell back to a budget
-  // over both pools, or mapped to the API pool.
-  const focus: ProviderId | `bot:${string}` | CursorWatchKey = bot
+  // over both pools, or mapped to the API pool. A Gemini chat draws on
+  // Gemini, Argon, or the Claude and GPT pool the same way.
+  const focus: ProviderId | `bot:${string}` | CursorWatchKey | AgyWatchKey = bot
     ? `bot:${bot.id}`
     : session.provider === "cursor"
       ? cursorWatchLane(session.model)
-      : session.provider;
+      : session.provider === "gemini"
+        ? agyWatchKey(session.model)
+        : session.provider;
   const used = vendorTidePercent(
     { focus, provider: session.provider, key: bot?.id ?? focus },
-    { grok: grokPlan, codex: codexPlan, claude: claudePlan, cursor: cursorPlan, custom: customPlans },
+    { grok: grokPlan, codex: codexPlan, claude: claudePlan, cursor: cursorPlan, gemini: geminiPlan, custom: customPlans },
     usage ?? [],
     settings.usageBudgets[session.provider],
     bot,
@@ -137,7 +143,6 @@ export function SessionSetup({ onClose }: { onClose: () => void }) {
   const vendorColor =
     bot?.color ?? stockTint ?? `var(--${session.provider === "custom" ? "custom" : session.provider})`;
   const thinking = effortsFor(session.provider, session.model);
-  const capabilities = capabilitiesFor(session.provider);
   // Sheet can show a default level; persist only when the user picks or slides.
   const shownEffort = thinking.some((item) => item.id === session.effort)
     ? session.effort
@@ -215,7 +220,6 @@ export function SessionSetup({ onClose }: { onClose: () => void }) {
                   className={`${id}${on ? " on" : ""}`}
                   type="button"
                   aria-selected={on}
-                  disabled={capabilities.security.network === "unavailable"}
                   style={tint ? { ["--setup-chip" as string]: tint } : undefined}
                   onClick={() => setSessionModel(id, defaultModel(id).id)}
                 >
@@ -487,7 +491,6 @@ export function SessionSetup({ onClose }: { onClose: () => void }) {
                   key={item.id}
                   className={session.mode === item.id ? "on" : undefined}
                   type="button"
-                  disabled={capabilities.security.network === "unavailable"}
                   onClick={() => setMode(item.id)}
                 >
                   <span className="setup-choice-icon" aria-hidden="true">{PERMISSION_ICONS[item.id]}</span>

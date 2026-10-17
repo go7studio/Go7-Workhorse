@@ -6,7 +6,7 @@
 
 <p align="center"><strong>One desk. Every Subscription.</strong></p>
 
-Run Grok, Claude, Codex, Cursor, your own API keys and your local models in one
+Run Grok, Claude, Codex, Cursor, Gemini, your own API keys and your local models in one
 window. Each keeps its own login. Usage and costs are all tracked.
 
 Cursor puts a model in your editor. Workhorse puts your existing models to work.
@@ -22,7 +22,7 @@ Cursor puts a model in your editor. Workhorse puts your existing models to work.
 
 ## Who it's for
 
-You pay for more than one of these — Grok on any plan, Claude, Codex, Cursor,
+You pay for more than one of these — Grok on any plan, Claude, Codex, Cursor, Gemini,
 or an API key for a hosted or local model — and each sits idle while you work
 in the other. Workhorse is one place to pick which one does each job, and to
 see what each has left this week.

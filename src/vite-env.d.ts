@@ -223,6 +223,17 @@ type WorkhorseBridge = {
   cursorCancel?: (sessionId: string) => Promise<void>;
   onCursorEvent?: (handler: (event: GrokBridgeEvent) => void) => () => void;
   cursorPlanUsage?: () => Promise<import("./lib/types").GrokPlanUsage | null | undefined>;
+  detectGeminiLogin?: () => Promise<{ connected: boolean; needsAuth?: boolean; launchable?: boolean; binary: string | null; launchBlocker?: string; accessDefaults?: import("./lib/types").BotAccessDefaults }>;
+  geminiPrompt?: (input: GrokPromptBridgeInput) => Promise<{
+    text?: string;
+    stopReason?: string;
+    vendorSessionId?: string;
+    opened?: "session/new" | "session/load";
+  }>;
+  geminiAnswerPermission?: (requestId: string, answer: import("./lib/permissions").PermissionAnswer) => Promise<boolean>;
+  geminiCancel?: (sessionId: string) => Promise<void>;
+  onGeminiEvent?: (handler: (event: GrokBridgeEvent) => void) => () => void;
+  geminiPlanUsage?: () => Promise<import("./lib/types").GrokPlanUsage | null | undefined>;
   cursorLedgerEvents?: (input?: { startDate?: number; endDate?: number }) => Promise<import("./lib/usage").CursorLedgerJoinRow[] | null | undefined>;
   detectCustomLogin: () => Promise<{
     connected: boolean;

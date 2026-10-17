@@ -34,6 +34,7 @@ export function RoutingPane() {
     codex: store.codexPlan,
     claude: store.claudePlan,
     cursor: store.cursorPlan,
+    gemini: store.geminiPlan,
     custom: store.customPlans,
   };
   const statuses = watchVendorStatuses({

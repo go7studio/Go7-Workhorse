@@ -17,7 +17,10 @@ import type { CustomBot, ProviderId } from "../src/lib/types";
 import { customBotEnabled, customBotModels } from "../src/lib/custom-bots";
 import type { CustomCatalog } from "./custom-catalog";
 import { claudeAdvertisedRows, sameVendorModelCache, vendorModelCacheFrom, type VendorModelCache } from "../src/lib/advertised-models";
+import { parseAgyModelsOutput } from "../src/lib/agy-stream";
 import { parseCursorModelsOutput, reconcileCursorModels as collapseCursorLive } from "../src/lib/cursor-catalog";
+import { modelPinsEffort } from "./agy-launch";
+import { resolveAgyBinary } from "./agy-login";
 import { resolveCursorBinary, resolveCursorPrefixArgs, type CursorLoginDetectInput } from "./cursor-login";
 import { deskToolEnv } from "./desk-path";
 
@@ -29,6 +32,8 @@ export type VendorModelListInput = {
   readFile?: (filePath: string) => string;
   existsSync?: (filePath: string) => boolean;
   cursorModelsOutput?: string | null;
+  /** `agy models` stdout. Null skips the CLI. Omitted on the live desk runs it. */
+  agyModelsOutput?: string | null;
   /** The desk's userData. Holds what each vendor advertised to a live session. */
   userData?: string;
   /** Enabled custom bots and what their hosts last published, when known. */
@@ -137,6 +142,39 @@ function readInstalledCursorModels(env: NodeJS.Dict<string>): string | null {
       encoding: "utf8",
       env: cursorModelsEnv(env),
       timeout: 4_000,
+      maxBuffer: 1_048_576,
+      windowsHide: true,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+  } catch {
+    return null;
+  }
+}
+
+function agyModelRows(raw: string): ModelInfo[] {
+  const rows = parseAgyModelsOutput(raw).map((row) => {
+    const seed = MODEL_CATALOG.gemini.find((item) => item.id === row.id);
+    return {
+      id: row.id,
+      name: row.name,
+      effort: seed ? seed.effort : !modelPinsEffort(row.id),
+      contextWindow: seed?.contextWindow ?? 1_000_000,
+    };
+  });
+  const head = rows.find((row) => row.id === "gemini-3.8-flash-high");
+  if (!head) return rows;
+  return [head, ...rows.filter((row) => row !== head)];
+}
+
+/** `agy models` can take half a minute. Eight seconds, then the stock list. */
+function readInstalledAgyModels(env: NodeJS.Dict<string>): string | null {
+  const command = resolveAgyBinary({ env });
+  if (!command) return null;
+  try {
+    return execFileSync(command, ["models"], {
+      encoding: "utf8",
+      env: deskToolEnv(process.env, env as NodeJS.ProcessEnv),
+      timeout: 8_000,
       maxBuffer: 1_048_576,
       windowsHide: true,
       stdio: ["ignore", "pipe", "pipe"],
@@ -356,8 +394,8 @@ export function customVendorRows(rows: CustomBotCatalog[] = []): ModelInfo[] {
   return models;
 }
 
-export type DeskCatalog = Pick<VendorModelLists, "grok" | "claude" | "codex" | "cursor">;
-const DESK_CATALOG_VENDORS = ["grok", "claude", "codex", "cursor"] as const;
+export type DeskCatalog = Pick<VendorModelLists, "grok" | "claude" | "codex" | "cursor" | "gemini">;
+const DESK_CATALOG_VENDORS = ["grok", "claude", "codex", "cursor", "gemini"] as const;
 
 /** Where the desk keeps the stock lists it last served its picker: userData/vendor-models/desk.json */
 export function deskCatalogPath(userData: string): string {
@@ -372,7 +410,7 @@ export function deskCatalogPath(userData: string): string {
  */
 export function rememberDeskCatalog(userData: string, lists: VendorModelLists): boolean {
   if (!userData) return false;
-  const next: DeskCatalog = { grok: lists.grok, claude: lists.claude, codex: lists.codex, cursor: lists.cursor };
+  const next: DeskCatalog = { grok: lists.grok, claude: lists.claude, codex: lists.codex, cursor: lists.cursor, gemini: lists.gemini };
   const text = JSON.stringify(next, null, 2);
   const file = deskCatalogPath(userData);
   try {
@@ -447,6 +485,8 @@ export function listVendorModels(input: VendorModelListInput = {}): VendorModelL
   const claudeLive = parseCodexModelsCache(claudeRaw);
   const claudeFromGrokShape = claudeLive.length ? claudeLive : parseGrokModelsCache(claudeRaw);
   const cursorRaw = input.cursorModelsOutput !== undefined ? input.cursorModelsOutput : input.existsSync || input.readFile ? null : readInstalledCursorModels(env);
+  const agyRaw = input.agyModelsOutput !== undefined ? input.agyModelsOutput : input.existsSync || input.readFile ? null : readInstalledAgyModels(env);
+  const agyLive = agyModelRows(agyRaw ?? "");
   const claudeDesk = readDeskVendorCache(input.userData, "claude", existsSync, readFile);
   const claudeSeed = claudeFromGrokShape.length
     ? claudeFromGrokShape.map((model) => ({
@@ -461,6 +501,7 @@ export function listVendorModels(input: VendorModelListInput = {}): VendorModelL
     claude: claudeAdvertisedRows(claudeSeed, claudeDesk?.models.map((row) => row.slug) ?? []),
     codex: codexLive.length ? codexLive : MODEL_CATALOG.codex,
     cursor: reconcileCursorModels(cursorLive),
+    gemini: agyLive.length ? agyLive : MODEL_CATALOG.gemini,
     custom: customVendorRows(input.customBots),
   };
 }

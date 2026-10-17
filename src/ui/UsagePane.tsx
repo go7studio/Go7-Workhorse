@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { flushSync } from "react-dom";
 import { FuelRing, leftoverUnknownMark } from "./FuelRing";
 import { modelsFor, shortModelName, usageModelLabel } from "../lib/models";
+import { agyWatchKey, isAgyWatchKey, type AgyWatchKey } from "../lib/agy-usage";
 import { isCursorWatchKey } from "../lib/cursor-lane";
 import { useStoreSelector } from "../lib/store";
 import { sameUsageDesk, selectUsageDesk } from "../lib/store-select";
@@ -51,7 +52,7 @@ const RANGES: { id: UsageRange; label: string }[] = [
 
 const planWindowByFocus = new Map<string, string>();
 
-type Focus = ProviderId | `bot:${string}` | "overview" | "cursor:cursor-models" | "cursor:other-models";
+type Focus = ProviderId | `bot:${string}` | "overview" | "cursor:cursor-models" | "cursor:other-models" | AgyWatchKey;
 
 function SplitBar({
   label,
@@ -334,6 +335,7 @@ function planLoaderFor(row: { provider: ProviderId; focus: string }): boolean {
   if (row.provider === "codex") return Boolean(window.workhorse?.codexPlanUsage);
   if (row.provider === "claude") return Boolean(window.workhorse?.claudePlanUsage);
   if (row.provider === "cursor") return Boolean(window.workhorse?.cursorPlanUsage);
+  if (row.provider === "gemini") return Boolean(window.workhorse?.geminiPlanUsage);
   return Boolean(window.workhorse?.customPlanUsage);
 }
 
@@ -361,6 +363,8 @@ export function UsagePane({
     refreshClaudePlan,
     cursorPlan,
     refreshCursorPlan,
+    geminiPlan,
+    refreshGeminiPlan,
     customPlans,
     customPlanKnown,
     vendorPlanKnown,
@@ -412,9 +416,11 @@ export function UsagePane({
         )
       : focused && isCursorWatchKey(focused.focus)
         ? cursorLaneEvents(events, focused.focus)
-        : focused
-          ? events.filter((event) => event.provider === focused.provider)
-          : [];
+        : focused && isAgyWatchKey(focused.focus)
+          ? events.filter((event) => event.provider === "gemini" && agyWatchKey(event.model) === focused.focus)
+          : focused
+            ? events.filter((event) => event.provider === focused.provider)
+            : [];
   const focusedModels =
     !focused
       ? []
@@ -440,14 +446,15 @@ export function UsagePane({
       refreshCodexPlan();
       refreshClaudePlan();
       refreshCursorPlan();
+      refreshGeminiPlan();
       refreshCustomPlans();
     };
     pull();
     const timer = window.setInterval(pull, 180_000);
     return () => window.clearInterval(timer);
-  }, [refreshGrokPlan, refreshCodexPlan, refreshClaudePlan, refreshCursorPlan, refreshCustomPlans]);
+  }, [refreshGrokPlan, refreshCodexPlan, refreshClaudePlan, refreshCursorPlan, refreshGeminiPlan, refreshCustomPlans]);
 
-  const deskPlans = { grok: grokPlan, codex: codexPlan, claude: claudePlan, cursor: cursorPlan, custom: customPlans };
+  const deskPlans = { grok: grokPlan, codex: codexPlan, claude: claudePlan, cursor: cursorPlan, gemini: geminiPlan, custom: customPlans };
   const plan = focused ? leftoverForCard(focused, deskPlans) : undefined;
   const timeWindows = planTimeWindows(plan);
   const claudePick = pickClaudeWindow(focused?.provider === "claude" ? plan : claudePlan, claudeWindow);

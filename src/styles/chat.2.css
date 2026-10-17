@@ -523,6 +523,7 @@
 .turn-who:has(.dot.claude) { color: var(--claude); }
 .turn-who:has(.dot.codex) { color: var(--codex); }
 .turn-who:has(.dot.cursor) { color: var(--cursor); }
+.turn-who:has(.dot.gemini) { color: var(--gemini); }
 .turn-who:has(.dot.custom) { color: var(--custom); }
 
 .turn-who .dot {
@@ -1944,6 +1945,11 @@
 .dot.cursor {
   background: var(--cursor);
   color: var(--cursor);
+}
+
+.dot.gemini {
+  background: var(--gemini);
+  color: var(--gemini);
 }
 
 .dot.custom {

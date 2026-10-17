@@ -126,6 +126,21 @@ export const MODEL_CATALOG: Record<ProviderId, ModelInfo[]> = {
     { id: "cursor-grok-4.6-high", name: "Cursor Grok 4.6", effort: false, contextWindow: 200_000 },
     { id: "cursor-grok-4.5-high", name: "Cursor Grok 4.5", effort: false, contextWindow: 200_000 },
   ],
+  gemini: [
+    { id: "gemini-3.8-flash-high", name: "Gemini 3.8 Flash (High)", effort: false, contextWindow: 1_000_000 },
+    { id: "gemini-3.8-flash-medium", name: "Gemini 3.8 Flash (Medium)", effort: false, contextWindow: 1_000_000 },
+    { id: "gemini-3.8-flash-low", name: "Gemini 3.8 Flash (Low)", effort: false, contextWindow: 1_000_000 },
+    { id: "gemini-4-argon-medium", name: "Gemini 4 Argon (Medium)", effort: false, contextWindow: 1_000_000 },
+    { id: "gemini-4-argon-high", name: "Gemini 4 Argon (High)", effort: false, contextWindow: 1_000_000 },
+    { id: "gemini-4-argon-low", name: "Gemini 4 Argon (Low)", effort: false, contextWindow: 1_000_000 },
+    { id: "claude-opus-5-5-low", name: "Claude Opus 5.5 (Low)", effort: false, contextWindow: 1_000_000 },
+    { id: "claude-opus-5-5-medium", name: "Claude Opus 5.5 (Medium)", effort: false, contextWindow: 1_000_000 },
+    { id: "claude-opus-5-5-high", name: "Claude Opus 5.5 (High)", effort: false, contextWindow: 1_000_000 },
+    { id: "claude-sonnet-5-5-low", name: "Claude Sonnet 5.5 (Low)", effort: false, contextWindow: 1_000_000 },
+    { id: "claude-sonnet-5-5-medium", name: "Claude Sonnet 5.5 (Medium)", effort: false, contextWindow: 1_000_000 },
+    { id: "claude-sonnet-5-5-high", name: "Claude Sonnet 5.5 (High)", effort: false, contextWindow: 1_000_000 },
+    { id: "gpt-oss-120b-medium", name: "GPT-OSS 120B (Medium)", effort: false, contextWindow: 1_000_000 },
+  ],
   custom: [
     {
       id: "MiniMax-M3",
@@ -310,7 +325,7 @@ export function modelName(provider: ProviderId, modelId: string): string {
 export function usageModelLabel(provider: ProviderId, modelId: string): string {
   const name = modelName(provider, modelId);
   if (provider === "custom") return name;
-  const vendor = { grok: "Grok", claude: "Claude", codex: "Codex", cursor: "Cursor" }[provider];
+  const vendor = { grok: "Grok", claude: "Claude", codex: "Codex", cursor: "Cursor", gemini: "Gemini" }[provider];
   if (!vendor) return name;
   if (name.toLowerCase().startsWith(vendor.toLowerCase())) return name;
   return `${vendor} · ${name}`;
@@ -345,7 +360,7 @@ export function shortModelName(provider: ProviderId, modelIdOrName: string): str
     modelsFor(provider).find((model) => model.name === modelIdOrName) ??
     MODEL_CATALOG[provider].find((model) => model.name === modelIdOrName);
   const full = found?.name ?? modelIdOrName;
-  const vendor = { grok: "Grok", claude: "Claude", codex: "Codex", cursor: "Cursor", custom: "Custom" }[provider];
+  const vendor = { grok: "Grok", claude: "Claude", codex: "Codex", cursor: "Cursor", gemini: "Gemini", custom: "Custom" }[provider];
   if (vendor && full.toLowerCase().startsWith(vendor.toLowerCase())) {
     return full.slice(vendor.length).trim() || full;
   }
@@ -353,7 +368,16 @@ export function shortModelName(provider: ProviderId, modelIdOrName: string): str
 }
 
 export function defaultModel(provider: ProviderId): ModelInfo {
-  return modelsFor(provider)[0] ?? MODEL_CATALOG[provider][0];
+  const rows = modelsFor(provider);
+  if (provider === "gemini") {
+    return (
+      rows.find((row) => row.id === "gemini-3.8-flash-high") ??
+      rows.find((row) => row.id.includes("flash")) ??
+      rows[0] ??
+      MODEL_CATALOG.gemini[0]
+    );
+  }
+  return rows[0] ?? MODEL_CATALOG[provider][0];
 }
 
 /** 0–1 along the thinking slider. The last available level sits at the end of the bar. */

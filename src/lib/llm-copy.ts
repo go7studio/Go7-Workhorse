@@ -1,7 +1,7 @@
 import type { LlmLink, ProviderId } from "./types";
 import { vendorEnabled } from "./settings";
 
-const VENDOR_NAMES: Record<Exclude<ProviderId, "custom">, string> = { grok: "Grok", codex: "Codex", claude: "Claude", cursor: "Cursor" };
+const VENDOR_NAMES: Record<Exclude<ProviderId, "custom">, string> = { grok: "Grok", codex: "Codex", claude: "Claude", cursor: "Cursor", gemini: "Gemini" };
 
 /** The short word under a vendor's name on its Settings card. */
 export function llmCardHint(id: Exclude<ProviderId, "custom">, link: LlmLink): string {
@@ -11,7 +11,7 @@ export function llmCardHint(id: Exclude<ProviderId, "custom">, link: LlmLink): s
   // only one the person can fix from here.
   if (link.needsAuth && !link.connected) return "Needs auth";
   if (link.available === false) return "Not found";
-  if (id === "grok" || id === "codex" || id === "claude" || id === "cursor") return "Local login";
+  if (id === "grok" || id === "codex" || id === "claude" || id === "cursor" || id === "gemini") return "Local login";
   return "Marked";
 }
 
@@ -35,6 +35,7 @@ export function llmDetailCopy(id: Exclude<ProviderId, "custom">, link: LlmLink):
   if (link.needsAuth) {
     if (id === "claude") return "Not signed in. Log in with Claude mints a token for this desk.";
     if (id === "cursor") return "Sign in to Cursor Agent, then Recheck.";
+    if (id === "gemini") return "Sign in with agy, then Recheck.";
     return "Not signed in. Sign in, then Recheck.";
   }
   if (link.launchable === false && link.launchBlocker) return `${link.launchBlocker}. Install it, then Recheck.`;
@@ -54,6 +55,9 @@ export function llmDetailCopy(id: Exclude<ProviderId, "custom">, link: LlmLink):
   }
   if (id === "cursor") {
     return found || link.connected ? "Local Cursor Agent ready." : "Cursor ACP binary or login not found.";
+  }
+  if (id === "gemini") {
+    return found || link.connected ? "Local Antigravity CLI ready." : "Antigravity CLI (agy) not found.";
   }
   return found ? "Marked for a future adapter" : "Not connected";
 }

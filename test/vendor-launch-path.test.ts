@@ -414,17 +414,17 @@ test("a missing ACP server is its own blocker, named apart from the CLI", () => 
  */
 test("the store carries the launch gate onto every vendor link", () => {
   const store = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
-  for (const vendor of ["grok", "codex", "claude", "cursor"]) {
+  for (const vendor of ["grok", "codex", "claude", "cursor", "gemini"]) {
     assert.match(
       store,
       new RegExp(`\\.\\.\\.vendorLaunchGate\\(${vendor}\\)`),
       `the detect effect must carry ${vendor}'s launch gate onto its link`,
     );
   }
-  // Recheck is the button the blocker sends the person to, so all four of those
-  // paths have to be able to clear it too.
+  // Recheck is the button the blocker sends the person to, so each of those
+  // paths has to be able to clear it too.
   const rechecks = store.match(/\.\.\.vendorLaunchGate\(detected\)/g) ?? [];
-  assert.equal(rechecks.length, 4, `Recheck carries the gate for ${rechecks.length} vendors, not 4`);
+  assert.equal(rechecks.length, 5, `Recheck carries the gate for ${rechecks.length} vendors, not 5`);
 });
 
 /**

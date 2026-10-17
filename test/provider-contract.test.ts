@@ -43,6 +43,27 @@ test("portable history truncates by complete turns and retains the opening decis
   assert.match(history.turns.at(-1)?.text ?? "", /turn-19/);
 });
 
+test("landing on Gemini sets always-approve, and a model change keeps a later tighten", () => {
+  const base: Session = {
+    id: "s1", projectId: null, provider: "claude", model: "sonnet", effort: "medium",
+    title: "Chat", mode: "ask", sandbox: "off", status: "idle", messages, contextUsed: 0,
+  };
+  const landed = applySessionModelChange(base, {
+    provider: "gemini",
+    model: "gemini-3.8-flash-high",
+    effort: null,
+  });
+  assert.equal(landed.mode, "always-approve");
+  const tightened = { ...landed, mode: "ask" as const };
+  const retargeted = applySessionModelChange(tightened, {
+    provider: "gemini",
+    model: "gemini-3.8-flash-low",
+    effort: null,
+  });
+  assert.equal(retargeted.mode, "ask");
+  assert.equal(retargeted.model, "gemini-3.8-flash-low");
+});
+
 test("provider changes clear stale vendor context for portable replay", () => {
   const base: Session = {
     id: "s1", projectId: null, provider: "claude", model: "sonnet", effort: "medium",

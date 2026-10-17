@@ -29,6 +29,7 @@ import {
   isLocalEndpoint,
   weeklyPlanLeftover,
 } from "./usage";
+import { agyWatchKey, isAgyWatchKey, type AgyWatchKey } from "./agy-usage";
 import { cursorWatchKeyLabel, cursorWatchLane, isCursorWatchKey, type CursorWatchKey } from "./cursor-lane";
 import { DAY_SHARE_PERCENT, DEFAULT_SPENT_PERCENT, DEFAULT_WATCH } from "./watch-defaults";
 
@@ -39,6 +40,7 @@ export type WatchPlans = {
   codex?: GrokPlanUsage;
   claude?: GrokPlanUsage;
   cursor?: GrokPlanUsage;
+  gemini?: GrokPlanUsage;
   custom?: Record<string, GrokPlanUsage | undefined>;
 };
 
@@ -264,6 +266,7 @@ export function weekDayIndex(
 
 export function watchKeyForSession(session: Pick<Session, "provider" | "customBotId"> & { model?: string }): string {
   if (session.provider === "cursor") return cursorWatchLane(session.model);
+  if (session.provider === "gemini") return agyWatchKey(session.model ?? "");
   return session.customBotId ? `bot:${session.customBotId}` : session.provider;
 }
 
@@ -271,7 +274,7 @@ export function deskRowForKey(
   key: string,
   settings: { customBots: CustomBot[] },
 ): {
-  focus: ProviderId | `bot:${string}` | CursorWatchKey;
+  focus: ProviderId | `bot:${string}` | CursorWatchKey | AgyWatchKey;
   provider: ProviderId;
   key: string;
   label: string;
@@ -298,8 +301,17 @@ export function deskRowForKey(
       label: cursorWatchKeyLabel(key),
     };
   }
+  if (key === "gemini:argon" || key === "gemini:third-party" || key === "gemini") {
+    const label = key === "gemini:argon" ? "Gemini · Argon" : key === "gemini:third-party" ? "Gemini · Claude and GPT" : "Gemini";
+    return {
+      focus: key,
+      provider: "gemini",
+      key,
+      label,
+    };
+  }
   const provider: ProviderId =
-    key === "claude" || key === "codex" || key === "cursor" || key === "custom" ? key : "grok";
+    key === "claude" || key === "codex" || key === "cursor" || key === "gemini" || key === "custom" ? key : "grok";
   return {
     focus: provider,
     provider,
@@ -325,6 +337,7 @@ export function eventsForWatchKey(
   const row = deskRowForKey(key, settings);
   if (row.bot) return customBotUsageEvents(events, row.bot);
   if (isCursorWatchKey(key)) return cursorLaneEvents(events, key);
+  if (isAgyWatchKey(key)) return events.filter((event) => event.provider === "gemini" && agyWatchKey(event.model) === key);
   return events.filter((event) => event.provider === row.provider);
 }
 
@@ -594,7 +607,7 @@ function watchShowsCard(
     return customBotEnabled(settings.customBots.find((bot) => bot.id === id));
   }
   const link =
-    card.provider === "claude" || card.provider === "codex" || card.provider === "cursor"
+    card.provider === "claude" || card.provider === "codex" || card.provider === "cursor" || card.provider === "gemini"
       ? settings.llms[card.provider]
       : settings.llms.grok;
   return Boolean(link?.connected) && link?.enabled !== false;
@@ -711,7 +724,7 @@ export type DeskCallRow = {
   reason?: string;
 };
 
-const DESK_STOCK: Exclude<ProviderId, "custom">[] = ["grok", "codex", "claude", "cursor"];
+const DESK_STOCK: Exclude<ProviderId, "custom">[] = ["grok", "codex", "claude", "cursor", "gemini"];
 
 function deskCallRow(input: {
   key: string;
@@ -873,6 +886,43 @@ export function deskCallCatalog(input: {
       );
       continue;
     }
+    if (id === "gemini") {
+      const connected = Boolean(link?.connected);
+      const enabled = Boolean(link?.connected && link?.enabled !== false);
+      const rings = [
+        { key: "gemini" as const, name: "Gemini", model: "gemini-3.8-flash-high" },
+        { key: "gemini:argon" as const, name: "Gemini · Argon", model: "gemini-4-argon-medium" },
+        { key: "gemini:third-party" as const, name: "Gemini · Claude and GPT", model: "claude-sonnet-5-5-medium" },
+      ];
+      for (const ring of rings) {
+        const status = byKey.get(ring.key);
+        const models = modelsFor("gemini").filter((item) => agyWatchKey(item.id) === ring.key);
+        rows.push(
+          deskCallRow({
+            key: ring.key,
+            name: status?.label ?? ring.name,
+            provider: "gemini",
+            model: models.some((item) => item.id === ring.model) ? ring.model : models[0]?.id,
+            models: models.map((item) => ({ id: item.id, name: item.name })),
+            kind: "vendor",
+            connected,
+            enabled,
+            launchable: link?.launchable,
+            launchBlocker: link?.launchBlocker,
+            leftover: status?.leftover,
+            usedPercent: status?.usedPercent,
+            period: status?.period,
+            allowedPercent: status?.allowedPercent,
+            overPercent: status?.overPercent,
+            resetsAt: status?.resetsAt,
+            holding: Boolean(status?.holding),
+            spentPercent,
+            burstBlock: burstWindowBlocksCall(planForKey(ring.key), spentPercent),
+          }),
+        );
+      }
+      continue;
+    }
     const status = byKey.get(id);
     rows.push(
       deskCallRow({
@@ -944,6 +994,9 @@ export function deskCallRowForCatalogModel(
   if (query.provider === "cursor") {
     const lane = cursorWatchLane(query.model);
     return rows.find((row) => row.id === lane);
+  }
+  if (query.provider === "gemini") {
+    return rows.find((row) => row.id === agyWatchKey(query.model));
   }
   return rows.find((row) => row.id === query.provider);
 }
@@ -1460,7 +1513,7 @@ function finitePercent(value: unknown): number | undefined {
 }
 
 function isDeskCapacityProvider(value: string): value is ProviderId {
-  return value === "grok" || value === "claude" || value === "codex" || value === "cursor" || value === "custom";
+  return value === "grok" || value === "claude" || value === "codex" || value === "cursor" || value === "gemini" || value === "custom";
 }
 
 function officialCapacityMeter(input: {

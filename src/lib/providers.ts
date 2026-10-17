@@ -34,6 +34,14 @@ export const PROVIDERS: Provider[] = [
     statusNote: "Live ACP adapter. Uses the Cursor CLI (`agent acp`) and your existing Cursor login.",
   },
   {
+    id: "gemini",
+    name: "Gemini",
+    short: "Ge",
+    tagline: "Antigravity CLI via agy",
+    connected: false,
+    statusNote: "Headless Antigravity CLI (`agy`). Uses your existing Google login on this machine.",
+  },
+  {
     id: "custom",
     name: "Custom",
     short: "+",

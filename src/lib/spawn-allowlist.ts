@@ -5,7 +5,7 @@ import type { CustomBot, ProviderId, Session, Settings } from "./types";
 import type { RoutingCandidate } from "./routing";
 import type { DeskCallRow } from "./watch";
 
-export const STOCK_SPAWN_IDS = ["grok", "claude", "codex", "cursor"] as const;
+export const STOCK_SPAWN_IDS = ["grok", "claude", "codex", "cursor", "gemini"] as const;
 
 export type SpawnAllowlistId = (typeof STOCK_SPAWN_IDS)[number] | `bot:${string}`;
 
@@ -32,7 +32,7 @@ export function normalizeSpawnAllowlist(raw: unknown): string[] | undefined {
     if (typeof item !== "string") continue;
     const trimmed = item.trim();
     if (!trimmed) continue;
-    const id = trimmed.startsWith("cursor:") ? "cursor" : trimmed;
+    const id = trimmed.startsWith("cursor:") ? "cursor" : trimmed.startsWith("gemini:") ? "gemini" : trimmed;
     if (!isStockSpawnId(id) && !isCustomSpawnId(id)) continue;
     if (!ids.includes(id)) ids.push(id);
   }
@@ -52,6 +52,7 @@ export function spawnAllowlistIdForCatalogRow(row: Pick<DeskCallRow, "id" | "pro
     return row.id.startsWith("bot:") ? row.id : `bot:${row.id}`;
   }
   if (row.provider === "cursor" || row.id.startsWith("cursor:")) return "cursor";
+  if (row.provider === "gemini" || row.id.startsWith("gemini:")) return "gemini";
   if (row.provider === "grok" || row.provider === "claude" || row.provider === "codex") return row.provider;
   return undefined;
 }
@@ -63,6 +64,7 @@ export function spawnAllowlistIdForSpec(spec: {
   if (spec.customBotId?.trim()) return `bot:${spec.customBotId.trim()}`;
   const provider = typeof spec.provider === "string" ? spec.provider.trim() : "";
   if (provider === "cursor") return "cursor";
+  if (provider === "gemini") return "gemini";
   if (provider === "grok" || provider === "claude" || provider === "codex") return provider;
   return undefined;
 }
@@ -180,7 +182,7 @@ export function spawnSpecDisplayName(
   const title = spec.title?.trim();
   if (title) return title;
   const provider = typeof spec.provider === "string" ? spec.provider : "";
-  if (provider === "grok" || provider === "claude" || provider === "codex" || provider === "cursor") {
+  if (provider === "grok" || provider === "claude" || provider === "codex" || provider === "cursor" || provider === "gemini") {
     return providerById(provider).name;
   }
   return "that bot";

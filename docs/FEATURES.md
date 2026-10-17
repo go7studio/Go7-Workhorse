@@ -5,12 +5,13 @@ When you add a feature, add it here in the same commit.
 
 ## What it is
 
-- Go7 Workhorse runs Grok, Claude, Codex, Cursor and your own API bots in one
-  desktop window, each under its own login.
+- Go7 Workhorse runs Grok, Claude, Codex, Cursor, Gemini and your own API bots
+  in one desktop window, each under its own login.
 - Set the bot, model and thinking effort per chat, or let the desk pick.
 - Spawned workers copy this chat's Permission and Sandbox. A path allowlist
   still launches the vendor at Ask so writes can be preflighted; the worker
-  chip stays Always if the orchestrator is Always. Always with Sandbox Off or
+  chip stays Always if the orchestrator is Always. Gemini keeps the chat's
+  own permission, because headless agy does not ask. Always with Sandbox Off or
   Workspace skips that allowlist.
 - Chat status is a tiled Workhorse mascot, a 3-by-3 grid with the bottom-right
   pixel sliver omitted. It rests as one seamless image that separates into tiles
@@ -48,10 +49,14 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
 | Claude | ACP over stdio | Runs the local Claude Code CLI |
 | Codex | ACP, plus an App Server | App Server adds native history and capability discovery |
 | Cursor | ACP over stdio | Runs `cursor-agent` |
+| Gemini | Local Antigravity CLI (`agy`) | Uses the Google login already on this machine. Leftover is three rings: Gemini models, Gemini 4 Argon, and Claude or GPT models on that login. The desk does not drive the Gemini app. |
 | Custom | HTTP | Any Anthropic Messages or OpenAI Chat Completions endpoint, hosted or local |
 
 - Each vendor runs under its own login. Subscriptions, context and sandboxes are
   never pooled.
+- Gemini on the desk is the Antigravity CLI. The Gemini API preset stays a
+  separate HTTP bot. A new Gemini chat starts on Always allow. Ask, Accept
+  edits, and Plan stay available on that chat.
 - Client and model are separate: **Grok Build CLI** runs the model ids
   **Grok 4.7**, **Grok 4.6**, and **Grok 4.5**.
 - The CLI's live catalog is authoritative. The desk shows the model, never the

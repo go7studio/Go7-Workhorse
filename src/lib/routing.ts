@@ -24,6 +24,7 @@ import {
 } from "./custom-bots";
 import { isGrokBotModel, isGrokBotName } from "./custom-http-identity";
 import { cursorFamilyId, isCursorAutoModel } from "./cursor-catalog";
+import { agyGroupPlan, agyQuotaGroup, agyShortWindow, agyWatchKey } from "./agy-usage";
 import { cursorWatchLane } from "./cursor-lane";
 import { outcomeVerification } from "./learning-policy";
 import { isAssignedEffort, modelsFor, normalizeModelId, withEffort, contextWindowFor } from "./models";
@@ -291,7 +292,7 @@ export function routingCandidatesForDesk(
 ): RoutingCandidate[] {
   const status = new Map(statuses.map((item) => [item.key, item]));
   const candidates: RoutingCandidate[] = [];
-  for (const provider of ["grok", "codex", "claude", "cursor"] as const) {
+  for (const provider of ["grok", "codex", "claude", "cursor", "gemini"] as const) {
     const link = settings.llms[provider];
     if (!link.connected || link.enabled === false) continue;
     // A blocked vendor still produces candidates: dropping it here would leave
@@ -320,8 +321,13 @@ export function routingCandidatesForDesk(
       );
       const product = namedProduct ?? sharedProduct ?? plan?.products.find((item) => `${item.product} ${item.label}`.toLowerCase().includes(slug));
       const laneCapacity =
-        provider === "cursor" ? status.get(cursorWatchLane(model.id)) : capacity;
-      const shortWindow = shortWindowOf(plan);
+        provider === "cursor"
+          ? status.get(cursorWatchLane(model.id))
+          : provider === "gemini"
+            ? status.get(agyWatchKey(model.id))
+            : capacity;
+      const groupPlan = provider === "gemini" ? agyGroupPlan(plan, agyQuotaGroup(model.id)) : undefined;
+      const shortWindow = provider === "gemini" ? agyShortWindow(plan, model.id) : shortWindowOf(plan);
       candidates.push({
         provider,
         model: model.id,
@@ -334,10 +340,10 @@ export function routingCandidatesForDesk(
         contextWindow: contextWindowFor(provider, model.id),
         profile: routingProfileForModel(provider, model.id),
         capacity: {
-          usedPercent: product?.usagePercent ?? laneCapacity?.usedPercent ?? capacity?.usedPercent,
-          resetsAt: product?.resetsAt ?? laneCapacity?.resetsAt ?? capacity?.resetsAt,
-          period: plan?.period ?? laneCapacity?.period ?? capacity?.period,
-          ...(plan?.observedAt ? { observedAt: plan.observedAt } : {}),
+          usedPercent: groupPlan?.usedPercent ?? product?.usagePercent ?? laneCapacity?.usedPercent ?? capacity?.usedPercent,
+          resetsAt: groupPlan?.resetsAt ?? product?.resetsAt ?? laneCapacity?.resetsAt ?? capacity?.resetsAt,
+          period: groupPlan?.period ?? plan?.period ?? laneCapacity?.period ?? capacity?.period,
+          ...((groupPlan?.observedAt ?? plan?.observedAt) ? { observedAt: groupPlan?.observedAt ?? plan?.observedAt } : {}),
         },
         ...(shortWindow ? { shortWindow } : {}),
       });
@@ -1398,6 +1404,7 @@ const SHORT_WINDOW_GRACE_MS = 20 * 60 * 1000;
 export function routingPoolKey(candidate: Pick<RoutingCandidate, "provider" | "model" | "customBotId">): string {
   if (candidate.provider === "custom") return `bot:${candidate.customBotId ?? candidate.model.toLowerCase()}`;
   if (candidate.provider === "cursor") return cursorWatchLane(candidate.model);
+  if (candidate.provider === "gemini") return agyWatchKey(candidate.model);
   return candidate.provider;
 }
 

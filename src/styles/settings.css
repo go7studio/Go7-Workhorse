@@ -35,6 +35,11 @@
   color: var(--text);
 }
 
+.llm-mark.gemini.on {
+  border-color: var(--gemini);
+  color: var(--text);
+}
+
 /* Add a bot is a mark, not a meter reading, so it keeps its circle. */
 .llm-mark.plus {
   border-style: dashed;
@@ -474,6 +479,10 @@
   background: color-mix(in srgb, var(--cursor) 22%, transparent);
 }
 
+.skill-origin.gemini {
+  background: color-mix(in srgb, var(--gemini) 22%, transparent);
+}
+
 .skill-origin.workhorse {
   background: color-mix(in srgb, var(--accent) 22%, transparent);
 }
@@ -810,6 +819,10 @@
 
 .fuel-ring.cursor {
   --fuel: var(--cursor);
+}
+
+.fuel-ring.gemini {
+  --fuel: var(--gemini);
 }
 
 .fuel-ring.custom {

@@ -8,6 +8,14 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.7.6](https://github.com/go7studio/Go7-Workhorse/compare/v0.7.5...v0.7.6) (2026-10-17)
+
+
+### Bug Fixes
+
+* preserve Gemini MCP scopes in settings and runtime choices ([7dff67c](https://github.com/go7studio/Go7-Workhorse/commit/7dff67ccae1344249c61df439959ed8d8113bfe1))
+* preserve Gemini tool assignments in settings ([ec27a4a](https://github.com/go7studio/Go7-Workhorse/commit/ec27a4a1d2a93fc277f153639a78334a9c705355))
+
 ## [0.7.5](https://github.com/go7studio/Go7-Workhorse/compare/v0.7.4...v0.7.5) (2026-10-17)
 
 

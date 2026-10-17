@@ -409,12 +409,12 @@ const TOOLS = [
   },
   {
     name: "workhorse_viewer_load",
-    description: "Load a GLB or image asset into the viewer panel for the current chat. Returns the loaded asset path.",
+    description: "Load a GLB, glTF, image, or file path in the calling chat's visible preview. Files must be in that chat's linked project or worktree. Returns only after the preview loads or reports an error.",
     inputSchema: {
       type: "object",
       properties: {
         sessionId: { type: "string", description: "Chat session id" },
-        assetPath: { type: "string", description: "Absolute path to GLB, GLTF, PNG, or JPG file" },
+        assetPath: { type: "string", description: "Absolute local project path; GLB, glTF, PNG and JPG draw, other files show their path" },
       },
       required: ["sessionId", "assetPath"],
       additionalProperties: false,
@@ -440,7 +440,7 @@ const TOOLS = [
       type: "object",
       properties: {
         sessionId: { type: "string", description: "Chat session id" },
-        outputPath: { type: "string", description: "Optional output path for the screenshot" },
+        outputPath: { type: "string", description: "Optional unused PNG name in this chat's userData/viewer-snapshots directory; omitted chooses a safe unique path" },
       },
       required: ["sessionId"],
       additionalProperties: false,
@@ -4033,34 +4033,18 @@ async function callDeskTool(name: string, args: Record<string, unknown>, from?: 
     const assetPath = typeof args.assetPath === "string" ? args.assetPath : "";
     if (!sessionId.trim()) throw new Error("sessionId is required");
     if (!assetPath.trim()) throw new Error("assetPath is required");
-    return JSON.stringify({ ok: true, sessionId, assetPath, message: "Asset load requested" }, null, 2);
+    return postBridge("/bots", { ...botsAsk({ action: "viewer", viewerOperation: "load", assetPath }, from), toSessionId: sessionId }, { inbox: false });
   }
   if (name === "workhorse_viewer_annotations") {
     const sessionId = typeof args.sessionId === "string" ? args.sessionId : "";
     if (!sessionId.trim()) throw new Error("sessionId is required");
-    const annotationsDir = path.join(process.env.WORKHORSE_USER_DATA ?? "", "viewer-annotations");
-    const filePath = path.join(annotationsDir, `${sessionId}.json`);
-    let annotations: unknown[] = [];
-    try {
-      if (fs.existsSync(filePath)) {
-        annotations = JSON.parse(fs.readFileSync(filePath, "utf8"));
-      }
-    } catch {
-      annotations = [];
-    }
-    if (args.clear === true && annotations.length > 0) {
-      try {
-        fs.unlinkSync(filePath);
-      } catch {
-        // ignore
-      }
-    }
-    return JSON.stringify({ sessionId, annotations, count: annotations.length }, null, 2);
+    return postBridge("/bots", { ...botsAsk({ action: "viewer", viewerOperation: "annotations", clear: args.clear === true }, from), toSessionId: sessionId }, { inbox: false });
   }
   if (name === "workhorse_viewer_snapshot") {
     const sessionId = typeof args.sessionId === "string" ? args.sessionId : "";
     if (!sessionId.trim()) throw new Error("sessionId is required");
-    return JSON.stringify({ ok: true, sessionId, message: "Snapshot capture not yet implemented in MCP context" }, null, 2);
+    return postBridge("/bots", { ...botsAsk({ action: "viewer", viewerOperation: "snapshot",
+      outputPath: typeof args.outputPath === "string" ? args.outputPath : undefined }, from), toSessionId: sessionId }, { inbox: false });
   }
   throw new Error(`Unknown tool ${name}`);
 }

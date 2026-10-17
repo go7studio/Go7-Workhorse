@@ -345,6 +345,13 @@ contextBridge.exposeInMainWorld("workhorse", {
     ipcRenderer.invoke("viewer:load-annotations", sessionId) as Promise<unknown[]>,
   viewerSnapshot: (sessionId: string) =>
     ipcRenderer.invoke("viewer:snapshot", sessionId) as Promise<{ ok: boolean; path?: string }>,
+  onViewerRequest: (handler: (request: import("./viewer-host").ViewerRequest) => void) => {
+    const listener = (_event: IpcRendererEvent, request: import("./viewer-host").ViewerRequest) => handler(request);
+    ipcRenderer.on("viewer:request", listener);
+    return () => ipcRenderer.removeListener("viewer:request", listener);
+  },
+  viewerReplyRequest: (reply: import("./viewer-host").ViewerReply) =>
+    ipcRenderer.invoke("viewer:reply-request", reply) as Promise<boolean>,
   onViewerFileChanged: (handler: (event: { sessionId: string; path: string; format: string; type: string }) => void) => {
     const listener = (_event: IpcRendererEvent, payload: { sessionId: string; path: string; format: string; type: string }) => handler(payload);
     ipcRenderer.on("viewer:file-changed", listener);

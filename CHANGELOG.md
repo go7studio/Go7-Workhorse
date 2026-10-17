@@ -8,6 +8,15 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.7.7](https://github.com/go7studio/Go7-Workhorse/compare/v0.7.6...v0.7.7) (2026-10-17)
+
+
+### Bug Fixes
+
+* preserve Gemini reply text through streaming ([262cf70](https://github.com/go7studio/Go7-Workhorse/commit/262cf7027941b6f9ea81715b71bc2b64e20dd31a))
+* preserve native Gemini text through renderer streaming ([7cc2e2c](https://github.com/go7studio/Go7-Workhorse/commit/7cc2e2c912963b70f1692e05eee3cc5419d226be))
+* retain literal Gemini replies when a turn closes ([16a6295](https://github.com/go7studio/Go7-Workhorse/commit/16a629502b5e93889b270b1c423b648eb6287149))
+
 ## [0.7.6](https://github.com/go7studio/Go7-Workhorse/compare/v0.7.5...v0.7.6) (2026-10-17)
 
 

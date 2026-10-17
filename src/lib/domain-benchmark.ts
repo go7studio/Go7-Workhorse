@@ -268,6 +268,7 @@ const SKIP_TEXT: Record<RoutingSkipReason, string> = {
   inputs: "cannot take these inputs",
   excluded: "excluded on this ask",
   "grok-bot": "Grok Bot never takes desk work",
+  retired: "Opus 5 is retired from Auto; use Opus 5.5",
   "test-only": "training or test model",
   context: "window too small for this thread",
 };

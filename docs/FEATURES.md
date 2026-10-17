@@ -263,6 +263,9 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
 - A model name locks only when the user named it in their ask. A model the
   coordinator writes on the spawn is kept when it clears the domain bar (a
   `workhorse_find_bots` pick, say) and ranked away when it does not.
+- Auto never allocates Opus 5, including a coordinator's pick or an old Auto
+  chat's current model. Opus 5.5 is the default Opus choice. If it cannot take
+  work, Auto picks another eligible model. Explicit human model picks stay manual.
 - A spawn may say what kind of work its slice is (`domain`: coding, image
   generation, writing, visual, data, general); otherwise the desk reads it from
   the prompt, and an ask for prose (a release note, a post, "under 120 words")

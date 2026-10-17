@@ -85,7 +85,7 @@ test("find_bots says why a bot was not picked, clamps the squad, and honours the
   // Quick work takes any bot, so the older Opus clears the bar and is there to give way.
   const quick = findBots({ task: "rename the helper", domain: "coding", tier: "quick" }, desk());
   assert.ok(
-    quick.notPicked.some((row) => row.label === "Opus 4.8" && /gives way to Opus 5, newer on the same plan/.test(row.reason)),
+    quick.notPicked.some((row) => row.label === "Opus 4.8" && /gives way to Opus 5\.5, newer on the same plan/.test(row.reason)),
     "an older generation on the same plan names the one it gives way to",
   );
   assert.equal(findBots({ task: "implement the parser", squad: 0 }, desk()).squad.length, 1);

@@ -69,7 +69,7 @@ function ask(prompt: string, extra: Partial<RoutingRequest> = {}): RoutingReques
 }
 
 test("a deep ask routes even in a domain where nothing on the desk scores near the top", () => {
-  const rows = [candidate("codex", "gpt-5.6-sol"), candidate("claude", "claude-opus-5"), minimax()];
+  const rows = [candidate("codex", "gpt-5.6-sol"), candidate("claude", "claude-opus-5-5"), minimax()];
   for (const [domain, prompt] of [
     ["data", "analyze the csv of weekly signups"],
     ["writing", "write the launch announcement for the referral program"],
@@ -82,9 +82,9 @@ test("a deep ask routes even in a domain where nothing on the desk scores near t
 });
 
 test("a pool inside its reserve with days to run gives way to an equal model with room", () => {
-  // Opus 5 on two plans: the same model, two allowances.
+  // Opus 5.5 on two plans: the same model, two allowances.
   const ranked = rankRoutingCandidates(
-    [candidate("claude", "claude-opus-5", 90), candidate("cursor", "claude-opus-5", 20, { label: "Cursor Opus 5" })],
+    [candidate("claude", "claude-opus-5-5", 90), candidate("cursor", "claude-opus-5-5", 20, { label: "Cursor Opus 5.5" })],
     ask("implement the parser", { tier: "balanced", taskDomain: "coding" }),
     settings,
   );
@@ -186,7 +186,7 @@ test("quick work takes a far better model a few cents dearer over the floor", ()
 
 test("dear models keep their order however cheap the cheapest row is", () => {
   // GPT-6 Luna leads the writing board at about 2¢ a run but the Agent Arena
-  // has not rated it; Opus 5 and Fable 5.1 read the desk table (84 and 90).
+  // has not rated it; Opus 5.5 and Fable 5.1 read the desk table (84 and 90).
   applyBotScoresFeed({
     version: 1,
     source: "lmarena",
@@ -194,9 +194,9 @@ test("dear models keep their order however cheap the cheapest row is", () => {
     published: {},
     tables: { "text:creative_writing": board([["gpt-6-luna", 1700]]) },
   });
-  listPrices([["openai/gpt-6-luna", 0.1, 0.5], ["anthropic/claude-opus-5", 5, 25], ["anthropic/claude-fable-5.1", 10, 50]]);
+  listPrices([["openai/gpt-6-luna", 0.1, 0.5], ["anthropic/claude-opus-5-5", 5, 25], ["anthropic/claude-fable-5.1", 10, 50]]);
   const ranked = rankRoutingCandidates(
-    [candidate("codex", "gpt-6-luna"), candidate("claude", "claude-opus-5"), candidate("claude", "claude-fable-5-1")],
+    [candidate("codex", "gpt-6-luna"), candidate("claude", "claude-opus-5-5"), candidate("claude", "claude-fable-5-1")],
     ask("write the launch announcement", { tier: "balanced", taskDomain: "writing" }),
     settings,
   );
@@ -204,7 +204,7 @@ test("dear models keep their order however cheap the cheapest row is", () => {
   // twice-dearer run, and both frontier rows stay far ahead of the cheap one.
   assert.deepEqual(
     ranked.map((row) => row.model),
-    ["claude-fable-5-1", "claude-opus-5", "gpt-6-luna"],
+    ["claude-fable-5-1", "claude-opus-5-5", "gpt-6-luna"],
   );
   const [fable, opus] = ranked.map((row) => row.orchestration!);
   assert.ok(fable!.points.cost > opus!.points.cost, "the dearer run still costs more points: doublings are not capped");
@@ -220,9 +220,9 @@ test("workers already running on a pool send the next spawn to another pool", ()
   assert.equal(busy[0]?.provider, "cursor");
   assert.equal(busy.find((row) => row.provider === "codex")?.orchestration?.plan.busy, 1);
   // A higher match score keeps the row on top even when its pool is busier.
-  const gap = [candidate("codex", "gpt-5.6-sol"), candidate("claude", "claude-opus-5")];
-  assert.equal(rankRoutingCandidates(gap, { ...request, activeLoad: { claude: 2 } }, settings)[0]?.model, "claude-opus-5");
-  assert.equal(rankRoutingCandidates(gap, { ...request, activeLoad: { claude: 5 } }, settings)[0]?.model, "claude-opus-5");
+  const gap = [candidate("codex", "gpt-5.6-sol"), candidate("claude", "claude-opus-5-5")];
+  assert.equal(rankRoutingCandidates(gap, { ...request, activeLoad: { claude: 2 } }, settings)[0]?.model, "claude-opus-5-5");
+  assert.equal(rankRoutingCandidates(gap, { ...request, activeLoad: { claude: 5 } }, settings)[0]?.model, "claude-opus-5-5");
 });
 
 test("the stored routing note names the slice domain score, not general, when taskDomain is set", () => {
@@ -249,7 +249,7 @@ test("the stored routing note names the slice domain score, not general, when ta
 });
 
 test("a coordinator's named row is kept when it clears the bar, and ranked away when it does not", () => {
-  const rows = [candidate("codex", "gpt-5.6-sol"), candidate("claude", "claude-opus-5"), minimax()];
+  const rows = [candidate("codex", "gpt-5.6-sol"), candidate("claude", "claude-opus-5-5"), minimax()];
   const kept = chooseRoutingDecision(
     rows,
     ask("implement the parser", { tier: "balanced", taskDomain: "coding", preferred: [{ provider: "codex", model: "gpt-5.6-sol" }] }),
@@ -275,18 +275,18 @@ test("a 5h window close to full stalls a worker, unless it resets in minutes", (
   const tied = {
     byModel: {
       "codex:gpt-5.6-sol": { domainScores: { coding: 88 } },
-      "claude:claude-opus-5": { domainScores: { coding: 88 } },
+      "claude:claude-opus-5-5": { domainScores: { coding: 88 } },
     },
   };
   const tight = (resetInMs: number) =>
-    candidate("claude", "claude-opus-5", 20, {
+    candidate("claude", "claude-opus-5-5", 20, {
       shortWindow: { usedPercent: 98, resetsAt: new Date(now + resetInMs).toISOString(), observedAt },
     });
   const stalled = rankRoutingCandidates([tight(3 * 3_600_000), candidate("codex", "gpt-5.6-sol")], request, settings, tied);
   assert.equal(stalled[0]?.model, "gpt-5.6-sol");
   assert.equal(stalled.find((row) => row.provider === "claude")?.orchestration?.plan.shortWindowUsedPercent, 98);
   const resetting = rankRoutingCandidates([tight(10 * 60_000), candidate("codex", "gpt-5.6-sol")], request, settings, tied);
-  assert.equal(resetting[0]?.model, "claude-opus-5");
+  assert.equal(resetting[0]?.model, "claude-opus-5-5");
 });
 
 test("orchestration worker routes never elect grok-bot", () => {
@@ -355,14 +355,14 @@ test("public scores decide the fit, and the decision says which score it read", 
   const field = Array.from({ length: 30 }, (_, index) => ({ name: `m${index + 1}`, org: "lab", value: 1690 - 10 * index }));
   const board = [
     { name: "gpt-5.6-sol-xhigh", org: "openai", value: 1700 },
-    { name: "claude-opus-5-high", org: "anthropic", value: 1620 },
+    { name: "claude-opus-5-5-high", org: "anthropic", value: 1620 },
     ...field,
   ]
     .sort((a, b) => b.value - a.value)
     .map((row, index) => ({ ...row, rank: index + 1 }));
   const agents = [
     { name: "GPT 5.6 Sol (xHigh)", org: "openai", value: 0.2 },
-    { name: "Claude Opus 5 (High)", org: "anthropic", value: 0.15 },
+    { name: "Claude Opus 5.5 (High)", org: "anthropic", value: 0.15 },
     ...Array.from({ length: 30 }, (_, index) => ({ name: `Agent ${index + 1}`, org: "lab", value: 0.14 - 0.01 * index })),
   ].map((row, index) => ({ ...row, rank: index + 1 }));
   const feed: BotScoresFeed = {
@@ -373,7 +373,7 @@ test("public scores decide the fit, and the decision says which score it read", 
     tables: { "webdev:overall": board, "agent:overall": agents },
   };
   applyBotScoresFeed(feed);
-  const rows = [candidate("codex", "gpt-5.6-sol"), candidate("claude", "claude-opus-5")];
+  const rows = [candidate("codex", "gpt-5.6-sol"), candidate("claude", "claude-opus-5-5")];
   const request = ask("implement the parser", { tier: "deep", taskDomain: "coding" });
   const decision = chooseRoutingDecision(rows, request, settings);
   assert.equal(decision?.model, "gpt-5.6-sol");
@@ -402,7 +402,7 @@ test("an older model on the same plan gives way to a newer one that scores at le
 test("a newer model does not displace one on another plan, or one that is better at the task", () => {
   const request = ask("rename the helper", { tier: "quick", taskDomain: "coding" });
   const plans = rankRoutingCandidates(
-    [candidate("claude", "claude-opus-5"), candidate("cursor", "claude-opus-4-8", 20, { label: "Cursor Opus 4.8" })],
+    [candidate("claude", "claude-opus-5-5"), candidate("cursor", "claude-opus-4-8", 20, { label: "Cursor Opus 4.8" })],
     request,
     settings,
   );
@@ -443,24 +443,24 @@ test("a model whose runs take more of the plan pays for it, once the desk has me
 test("at alike quality the cheaper list price takes the work, and a dearer model needs a real quality lead", () => {
   const request = ask("implement the parser", { tier: "balanced", taskDomain: "coding" });
   // GPT-6 Sol reads GPT-5.6 Sol's row; on another pool, and GPT-5.6 Sol's output costs less.
-  listPrices([["openai/gpt-6-sol", 2, 10], ["openai/gpt-5.6-sol", 2, 6], ["anthropic/claude-opus-5", 5, 25]]);
+  listPrices([["openai/gpt-6-sol", 2, 10], ["openai/gpt-5.6-sol", 2, 6], ["anthropic/claude-opus-5-5", 5, 25]]);
   const alike = rankRoutingCandidates([candidate("codex", "gpt-6-sol"), candidate("cursor", "gpt-5.6-sol", 20, { label: "Cursor Sol" })], request, settings);
   assert.equal(alike[0]?.model, "gpt-5.6-sol");
   const dearer = alike.find((row) => row.provider === "codex")!.orchestration!;
   assert.ok(dearer.why.includes("about $0.42 a typical run ($2/M in, $10/M out)"));
   // Opus leads Sol by 23 points at two and a half times the run cost: well worth it.
-  listPrices([["openai/gpt-5.6-sol", 2, 10], ["anthropic/claude-opus-5", 5, 25]]);
-  const lead = rankRoutingCandidates([candidate("codex", "gpt-5.6-sol"), candidate("claude", "claude-opus-5")], request, settings);
-  assert.equal(lead[0]?.model, "claude-opus-5");
+  listPrices([["openai/gpt-5.6-sol", 2, 10], ["anthropic/claude-opus-5-5", 5, 25]]);
+  const lead = rankRoutingCandidates([candidate("codex", "gpt-5.6-sol"), candidate("claude", "claude-opus-5-5")], request, settings);
+  assert.equal(lead[0]?.model, "claude-opus-5-5");
   // At a hundred and fifty times the run cost it is not, when the match score is tied.
-  listPrices([["openai/gpt-5.6-sol", 2, 10], ["anthropic/claude-opus-5", 300, 1500]]);
+  listPrices([["openai/gpt-5.6-sol", 2, 10], ["anthropic/claude-opus-5-5", 300, 1500]]);
   const tied = {
     byModel: {
       "codex:gpt-5.6-sol": { domainScores: { coding: 90 } },
-      "claude:claude-opus-5": { domainScores: { coding: 90 } },
+      "claude:claude-opus-5-5": { domainScores: { coding: 90 } },
     },
   };
-  const dear = rankRoutingCandidates([candidate("codex", "gpt-5.6-sol"), candidate("claude", "claude-opus-5")], request, settings, tied);
+  const dear = rankRoutingCandidates([candidate("codex", "gpt-5.6-sol"), candidate("claude", "claude-opus-5-5")], request, settings, tied);
   assert.equal(dear[0]?.model, "gpt-5.6-sol");
 });
 
@@ -570,22 +570,22 @@ test("on balanced work the frontier is never ranked level with a model half as g
 });
 
 test("quick work takes the faster bot, and deep work takes the better one however slow", () => {
-  // Same list price, so only quality and speed differ: Opus 5 codes better, Sol runs four times faster here.
-  listPrices([["openai/gpt-5.6-sol", 2, 10], ["anthropic/claude-opus-5", 2, 10]]);
+  // Same list price, so only quality and speed differ: Opus 5.5 codes better, Sol runs four times faster here.
+  listPrices([["openai/gpt-5.6-sol", 2, 10], ["anthropic/claude-opus-5-5", 2, 10]]);
   const draws: RunDraws = {
     byModel: {
       [runDrawKey("codex", "gpt-5.6-sol")]: { medianTokens: 100_000, runs: 5, outputPerSecond: 80 },
-      [runDrawKey("claude", "claude-opus-5")]: { medianTokens: 100_000, runs: 5, outputPerSecond: 20 },
+      [runDrawKey("claude", "claude-opus-5-5")]: { medianTokens: 100_000, runs: 5, outputPerSecond: 20 },
     },
     deskMedianTokens: 100_000,
     deskRuns: 12,
     deskOutputPerSecond: 40,
   };
-  const rows = withRunDraws([candidate("codex", "gpt-5.6-sol"), candidate("claude", "claude-opus-5")], draws);
+  const rows = withRunDraws([candidate("codex", "gpt-5.6-sol"), candidate("claude", "claude-opus-5-5")], draws);
   const tied = {
     byModel: {
       "codex:gpt-5.6-sol": { domainScores: { coding: 85 } },
-      "claude:claude-opus-5": { domainScores: { coding: 85 } },
+      "claude:claude-opus-5-5": { domainScores: { coding: 85 } },
     },
   };
   const quick = rankRoutingCandidates(rows, ask("rename the helper", { tier: "quick", taskDomain: "coding" }), settings, tied);
@@ -595,7 +595,7 @@ test("quick work takes the faster bot, and deep work takes the better one howeve
   assert.equal(sol.points.speed, 6);
   assert.ok(sol.why.includes("80 tok/s here, 2× the desk's median"));
   const deep = rankRoutingCandidates(rows, ask("design the storage layer", { tier: "deep", taskDomain: "coding" }), settings);
-  assert.equal(deep[0]?.model, "claude-opus-5");
+  assert.equal(deep[0]?.model, "claude-opus-5-5");
   assert.equal(deep[0]?.orchestration?.points.speed, 0);
   // Without timed runs a row reads its family's speed rating.
   const unmeasured = rankRoutingCandidates([candidate("codex", "gpt-5.6-luna")], ask("rename the helper", { tier: "quick", taskDomain: "coding" }), settings);
@@ -606,7 +606,7 @@ test("quick work takes the faster bot, and deep work takes the better one howeve
 test("pool load counts running workers and routes handed out a moment ago", () => {
   const load = activeRouteLoad(
     [
-      { provider: "claude", model: "claude-opus-5", agentRun: { status: "running" } },
+      { provider: "claude", model: "claude-opus-5-5", agentRun: { status: "running" } },
       { provider: "claude", model: "claude-sonnet-5", agentRun: { status: "running" } },
       { provider: "codex", model: "gpt-5.6-sol", agentRun: { status: "completed" } },
       { provider: "custom", model: "MiniMax-M3", customBotId: "mm", agentRun: { status: "running" } },

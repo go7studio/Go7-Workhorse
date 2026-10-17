@@ -104,6 +104,7 @@ export const MODEL_CATALOG: Record<ProviderId, ModelInfo[]> = {
   claude: [
     { id: "claude-fable-5", name: "Fable 5", effort: true, contextWindow: 1_000_000 },
     { id: "claude-fable-5-1", name: "Fable 5.1", effort: true, contextWindow: 1_000_000 },
+    { id: "claude-opus-5-5", name: "Opus 5.5", effort: true, contextWindow: 1_000_000 },
     { id: "claude-opus-5", name: "Opus 5", effort: true, contextWindow: 1_000_000 },
     { id: "claude-sonnet-5", name: "Sonnet 5", effort: true, contextWindow: 1_000_000 },
     { id: "claude-haiku-4-5", name: "Haiku 4.5", effort: true, contextWindow: 200_000 },
@@ -575,6 +576,8 @@ const CLAUDE_MODEL_WINDOWS: Record<string, number> = {
   "claude-fable-5-1": 1_000_000,
   "claude-mythos-5": 1_000_000,
   "claude-mythos-5-1": 1_000_000,
+  "claude-opus-5-5": 1_000_000,
+  "claude-opus-5.5": 1_000_000,
   "claude-opus-5": 1_000_000,
   "claude-sonnet-5": 1_000_000,
   "claude-opus-4-8": 1_000_000,

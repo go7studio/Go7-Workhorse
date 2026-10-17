@@ -502,10 +502,10 @@ test("deep work still goes to a frontier seat, not to the cheap bot", () => {
   const kimi = kimiRow(settings, plansWith())!;
   const opus: RoutingCandidate = {
     provider: "claude",
-    model: "claude-opus-5",
-    label: "Opus 5",
+    model: "claude-opus-5-5",
+    label: "Opus 5.5",
     connected: true,
-    profile: routingProfileForModel("claude", "claude-opus-5"),
+    profile: routingProfileForModel("claude", "claude-opus-5-5"),
     capacity: { usedPercent: 22, resetsAt: "2026-09-09T21:44:28.000Z", period: "weekly" },
   };
   const ranked = rankRoutingCandidates([kimi, opus], { ...codingBrief, tier: "deep" }, routing);

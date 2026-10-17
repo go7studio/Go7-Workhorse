@@ -66,7 +66,11 @@ export type ClaudeLaunchSpec = Omit<GrokLaunchSpec, "sessionParams"> & {
 const DEFAULT_MODEL = "claude-sonnet-5";
 
 const CLAUDE_MODEL_ALIASES: Record<string, string> = {
-  opus: "claude-opus-5",
+  opus: "claude-opus-5-5",
+  "opus 5.5": "claude-opus-5-5",
+  "opus-5.5": "claude-opus-5-5",
+  "opus-5-5": "claude-opus-5-5",
+  "claude-opus-5.5": "claude-opus-5-5",
   "opus 5": "claude-opus-5",
   "opus-5": "claude-opus-5",
   sonnet: "claude-sonnet-5",
@@ -82,7 +86,7 @@ const CLAUDE_MODEL_ALIASES: Record<string, string> = {
   "fable-5.1": "claude-fable-5-1",
   "fable-5-1": "claude-fable-5-1",
   "claude-fable-5.1": "claude-fable-5-1",
-  "claude-opus": "claude-opus-5",
+  "claude-opus": "claude-opus-5-5",
   "claude-sonnet": "claude-sonnet-5",
   "claude-haiku": "claude-haiku-4-5",
   "claude-fable": "claude-fable-5",

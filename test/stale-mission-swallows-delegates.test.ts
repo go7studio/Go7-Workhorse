@@ -177,6 +177,71 @@ test("a real continuation still joins its own mission, and does not mint a new o
   }
 });
 
+test("continuation never inherits an automatically selected retired Opus", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "wh-retired-opus-cont-"));
+  const previous = { profile: process.env.WORKHORSE_MCP_PROFILE, state: process.env.WORKHORSE_STATE_PATH };
+  const cases: Array<{
+    label: string;
+    routingMode: "auto" | "manual";
+    args: Record<string, unknown>;
+    blocked?: boolean;
+    provider?: string;
+    model?: string;
+  }> = [
+    { label: "saved Auto", routingMode: "auto", args: {}, blocked: true },
+    { label: "explicit reroute", routingMode: "auto", args: { route: "auto" } },
+    { label: "replacement model", routingMode: "auto", args: { initialBrain: { provider: "claude", model: "claude-opus-5-5" } }, provider: "claude", model: "claude-opus-5-5" },
+    { label: "manual choice", routingMode: "manual", args: {}, provider: "claude", model: "claude-opus-5" },
+  ];
+  try {
+    delete process.env.WORKHORSE_MCP_PROFILE;
+    for (const [index, entry] of cases.entries()) {
+      const statePath = deskWhereAMissionFinished(path.join(dir, String(index)), "completed");
+      const state = JSON.parse(readFileSync(statePath, "utf8")) as { sessions: Record<string, unknown>[] };
+      Object.assign(state.sessions[1]!, {
+        provider: "claude", model: "claude-opus-5", effort: "high", routingMode: entry.routingMode,
+      });
+      writeFileSync(statePath, JSON.stringify(state));
+      process.env.WORKHORSE_STATE_PATH = statePath;
+      const spawns: Record<string, unknown>[] = [];
+      setWorkhorseDeskAsk(async (payload) => {
+        const ask = payload as unknown as Record<string, unknown>;
+        if (ask.action === "await-agents") {
+          return { text: JSON.stringify({
+            running: [],
+            reports: [{ childSessionId: "old_worker", status: "completed", mission: STALE, report: "pass 1 done" }],
+          }) };
+        }
+        spawns.push(ask);
+        return { text: JSON.stringify({ childSessionId: "pass_two" }) };
+      });
+      const result = (await handleWorkhorseRpc({
+        jsonrpc: "2.0", id: 100 + index, method: "tools/call",
+        params: { name: "workhorse_continue_mission", arguments: {
+          fromSessionId: "parent", previousWorkerIds: ["old_worker"], previousPass: 1,
+          remainingWork: "Finish and verify the next pass.", ...entry.args,
+        } },
+      })) as { error?: { message?: string } };
+      if (entry.blocked) {
+        assert.match(result.error?.message ?? "", /Opus 5 is retired from Auto/, entry.label);
+        assert.equal(spawns.length, 0, "retirement must be enforced before dispatch");
+      } else {
+        assert.equal(result.error, undefined, `${entry.label}: ${result.error?.message}`);
+        assert.equal(spawns.length, 1, entry.label);
+        assert.equal(spawns[0]?.provider, entry.provider, entry.label);
+        assert.equal(spawns[0]?.model, entry.model, entry.label);
+      }
+    }
+  } finally {
+    setWorkhorseDeskAsk(null);
+    if (previous.profile === undefined) delete process.env.WORKHORSE_MCP_PROFILE;
+    else process.env.WORKHORSE_MCP_PROFILE = previous.profile;
+    if (previous.state === undefined) delete process.env.WORKHORSE_STATE_PATH;
+    else process.env.WORKHORSE_STATE_PATH = previous.state;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("only a pass that is still running holds a spawn back", () => {
   const pass = (status: string) =>
     ([{ id: "w", parentId: "parent", agentRun: { status, startedAt: 1, mission: STALE } }] as unknown as Session[]);

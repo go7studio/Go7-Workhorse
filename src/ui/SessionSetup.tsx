@@ -7,6 +7,7 @@ import { agyWatchKey, type AgyWatchKey } from "../lib/agy-usage";
 import { cursorWatchLane, type CursorWatchKey } from "../lib/cursor-lane";
 import { contextWindowFor, contextWindowsFor, defaultModel, effortLabel, effortStopAt, effortStopPos, effortsFor, formatWindow, modelName, modelsForPicker, withEffort } from "../lib/models";
 import { hasAttachedLlm, vendorEnabled, vendorLabel, vendorTint } from "../lib/settings";
+import { BLENDER_PRESET, presetOn } from "../lib/environment-presets";
 import { sessionEnvironmentKind } from "../lib/session-environment";
 import { useActiveSession, useStore } from "../lib/store";
 import { vendorTidePercent } from "../lib/usage";
@@ -69,6 +70,7 @@ export function SessionSetup({ onClose }: { onClose: () => void }) {
     refreshGeminiPlan,
     refreshCustomPlans,
     folderExists,
+    setChatPreset,
   } = useStore();
   const root = useRef<HTMLDivElement>(null);
   const [slide, setSlide] = useState<number | null>(null);
@@ -518,6 +520,20 @@ export function SessionSetup({ onClose }: { onClose: () => void }) {
               ))}
             </div>
           </div>
+        </div>
+        <div className="setup-block">
+          <div className="setup-choice-title">
+            <strong>Blender</strong>
+          </div>
+          <button
+            className={presetOn(session.presets, "blender") ? "on" : undefined}
+            type="button"
+            aria-pressed={presetOn(session.presets, "blender")}
+            onClick={() => setChatPreset("blender", !presetOn(session.presets, "blender"))}
+          >
+            {presetOn(session.presets, "blender") ? "On for this chat" : "Off"}
+          </button>
+          <p className="setup-lede">{BLENDER_PRESET.permissionWarning}</p>
         </div>
       </section>
 

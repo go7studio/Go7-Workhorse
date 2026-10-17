@@ -26,6 +26,14 @@ import { claudeAuthFailure } from "./claude-auth-failure";
 import { StoreContext, StoreRuntimeContext, useStore } from "./store-context";
 export { useStore, useStoreReader, useStoreSelector } from "./store-context";
 import { commandContinuesToVendor, commandsForSession, matchCommand } from "./commands";
+import {
+  BLENDER_OFF_NOTE,
+  BLENDER_ON_NOTE,
+  blenderStatusNote,
+  parseBlenderCommand,
+  presetOn,
+  withPreset,
+} from "./environment-presets";
 import { isWorkhorseGoalControl, isWorkhorseGoalIntent, parseGoalInput, parseGrokGoalLine } from "./goal";
 import { nextGoalForSend, planHaltForward, prepareVendorSend, shouldIgnoreRedirectedCancel, vendorTerminalAction } from "./vendor-send";
 import { customChatHistory } from "./custom-history";
@@ -585,6 +593,7 @@ export type Store = AppState & {
   setMode: (mode: PermissionMode) => void;
   setDeskAccess: (patch: Partial<DeskAccess>) => void;
   setSandbox: (sandbox: SandboxProfile) => void;
+  setChatPreset: (id: "blender", on: boolean) => void;
   setSecurityPolicy: (patch: Partial<SessionSecurityPolicy>) => void;
   setMcpServers: (servers: McpServerConfig[]) => Promise<void>;
   probeMcpServer: (serverName: string) => Promise<import("./types").McpProbeResult>;
@@ -2297,6 +2306,31 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }));
   }, []);
 
+  const setChatPreset = useCallback((id: "blender", on: boolean) => {
+    const session = stateRef.current.sessions.find((item) => item.id === stateRef.current.activeSessionId);
+    if (!session) return;
+    const presets = withPreset(session.presets, id, on);
+    const unchanged = presetOn(session.presets, id) === on;
+    if (unchanged) return;
+    cancelVendorSession(session);
+    const note = on ? BLENDER_ON_NOTE : BLENDER_OFF_NOTE;
+    setState((current) => ({
+      ...current,
+      sessions: current.sessions.map((item) =>
+        item.id === session.id
+          ? {
+              ...item,
+              presets,
+              vendorSessionId: undefined,
+              vendorProvider: undefined,
+              status: item.status === "running" || item.status === "needs-input" ? "idle" : item.status,
+              messages: [...item.messages, { id: uid("msg"), role: "system" as const, text: note, createdAt: Date.now() }],
+            }
+          : item,
+      ),
+    }));
+  }, []);
+
   const setSandbox = useCallback((sandbox: SandboxProfile) => {
     const session = stateRef.current.sessions.find((item) => item.id === stateRef.current.activeSessionId);
     if (session && session.sandbox !== sandbox) {
@@ -2870,6 +2904,40 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if (match?.run === "sandbox") {
         const profile = parseSandbox(text.replace(/^\/sandbox\s*/i, ""));
         if (profile) setSandbox(profile);
+        return;
+      }
+      if (match?.run === "blender") {
+        if (!live) return;
+        const action = parseBlenderCommand(text);
+        if (!action) {
+          setState((current) => ({
+            ...current,
+            sessions: current.sessions.map((item) =>
+              item.id === live.id
+                ? {
+                    ...item,
+                    messages: [...item.messages, { id: uid("msg"), role: "system" as const, text: "Use /blender, /blender on, or /blender off.", createdAt: Date.now() }],
+                  }
+                : item,
+            ),
+          }));
+          return;
+        }
+        if (action === "status") {
+          setState((current) => ({
+            ...current,
+            sessions: current.sessions.map((item) =>
+              item.id === live.id
+                ? {
+                    ...item,
+                    messages: [...item.messages, { id: uid("msg"), role: "system" as const, text: blenderStatusNote(presetOn(item.presets, "blender")), createdAt: Date.now() }],
+                  }
+                : item,
+            ),
+          }));
+          return;
+        }
+        setChatPreset("blender", action === "on");
         return;
       }
       if (match?.run === "demo-permission") {
@@ -3887,7 +3955,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           : item,
       ),
     }));
-  }, [cycleTheme, demoPermission, linkFolder, setMode, setSandbox, setSessionEffort, setSessionModel]);
+  }, [cycleTheme, demoPermission, linkFolder, setMode, setSandbox, setChatPreset, setSessionEffort, setSessionModel]);
 
   /**
    * Pick up a worker the desk interrupted.
@@ -9908,6 +9976,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       setMode,
       setDeskAccess,
       setSandbox,
+      setChatPreset,
       setSecurityPolicy,
       setMcpServers,
       probeMcpServer,
@@ -10064,6 +10133,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       setMode,
       setDeskAccess,
       setSandbox,
+      setChatPreset,
       setSecurityPolicy,
       setMcpServers,
       probeMcpServer,

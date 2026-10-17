@@ -45,6 +45,7 @@ import { listDropFiles } from "./drop-files";
 import { attachDialogProperties, attachDialogTitle, windowsNeedsAttachChoice } from "./attach-pick";
 
 import { displaySrcForHref, openableMediaPath, resolveMediaProtocolFile, safeLocalPath } from "./media-src";
+import { watchViewerFolder } from "./viewer-watch";
 import { findSourceFile, listGitChanges, readEditStatsAsync, readFileDiff, readGitHead, readSourceText, recordFileInstance } from "./project-diff";
 import { TerminalHost, type TerminalEvent } from "./terminal-host";
 import {
@@ -2086,9 +2087,12 @@ app.whenReady().then(async () => {
   const viewerWatchers = new Map<string, import("./viewer-watch").ViewerWatchHandle>();
 
   ipcMain.handle("viewer:watch-start", (_event, sessionId: unknown, folder: unknown) => {
-    if (typeof sessionId !== "string" || typeof folder !== "string") return false;
-    if (viewerWatchers.has(sessionId)) return true;
-    const { watchViewerFolder } = require("./viewer-watch") as typeof import("./viewer-watch");
+    if (typeof sessionId !== "string" || typeof folder !== "string" || !folder.trim()) return false;
+    const previous = viewerWatchers.get(sessionId);
+    if (previous) {
+      previous.stop();
+      viewerWatchers.delete(sessionId);
+    }
     const handle = watchViewerFolder({
       folder,
       onFile: (fileEvent) => {

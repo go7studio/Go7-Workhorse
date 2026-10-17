@@ -3,7 +3,7 @@ import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import type { Annotation, ViewerAsset } from "../lib/viewer";
-import { buildAnnotation } from "../lib/viewer";
+import { buildAnnotation, formatMarksForChat } from "../lib/viewer";
 import { uid } from "../lib/id";
 
 type ViewerMode = "3d" | "2d";
@@ -22,6 +22,9 @@ type ViewerPanelProps = {
   asset: ViewerAsset | null;
   annotations: Annotation[];
   onAnnotation: (annotation: Annotation) => void;
+  onSendMarks: (text: string) => void;
+  onClearMarks: () => void;
+  onOpenFile: () => void;
   onClose: () => void;
   onSnapshot?: () => Promise<string | null>;
 };
@@ -56,9 +59,11 @@ const ThreeViewer = memo(function ThreeViewer({
   asset,
   annotations,
   onRaycast,
+  onStatus,
 }: {
   asset: ViewerAsset;
   annotations: Annotation[];
+  onStatus?: (status: "loaded" | "error", detail?: string) => void;
   onRaycast: (hit: {
     point: THREE.Vector3;
     normal: THREE.Vector3;
@@ -71,6 +76,8 @@ const ThreeViewer = memo(function ThreeViewer({
   }) => void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const onStatusRef = useRef(onStatus);
+  onStatusRef.current = onStatus;
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
@@ -155,6 +162,7 @@ const ThreeViewer = memo(function ThreeViewer({
     }
 
     const loader = new GLTFLoader();
+    if (containerRef.current) delete containerRef.current.dataset.model;
     loader.load(
       asset.uri,
       (gltf) => {
@@ -162,22 +170,26 @@ const ThreeViewer = memo(function ThreeViewer({
         const box = new THREE.Box3().setFromObject(model);
         const size = box.getSize(new THREE.Vector3());
         const center = box.getCenter(new THREE.Vector3());
-        const maxDim = Math.max(size.x, size.y, size.z);
-        const scale = 2 / maxDim;
-        model.scale.multiplyScalar(scale);
-        model.position.sub(center.multiplyScalar(scale));
+        const maxDim = Math.max(size.x, size.y, size.z, 0.001);
         scene.add(model);
         modelRef.current = model;
 
-        const dist = 2.5;
-        camera.position.set(dist, dist * 0.7, dist);
-        camera.lookAt(0, 0, 0);
-        controls.target.set(0, 0, 0);
+        const dist = maxDim * 1.8;
+        camera.position.set(center.x + dist, center.y + dist * 0.7, center.z + dist);
+        camera.lookAt(center);
+        controls.target.copy(center);
         controls.update();
+        if (containerRef.current) containerRef.current.dataset.model = "loaded";
+        onStatusRef.current?.("loaded");
       },
       undefined,
       (error) => {
-        console.error("GLTFLoader error:", error);
+        const detail = error instanceof Error ? error.message : "Could not load this file.";
+        if (containerRef.current) {
+          containerRef.current.dataset.model = "error";
+          containerRef.current.dataset.modelError = detail;
+        }
+        onStatusRef.current?.("error", detail);
       }
     );
   }, [asset?.uri]);
@@ -307,17 +319,21 @@ export function ViewerPanel({
   asset,
   annotations,
   onAnnotation,
+  onSendMarks,
+  onClearMarks,
+  onOpenFile,
   onClose,
 }: ViewerPanelProps) {
   const [note, setNote] = useState("");
+  const [modelError, setModelError] = useState("");
   const [pins, setPins] = useState<PinData[]>([]);
   const cameraRef = useRef<{ position: THREE.Vector3; quaternion: THREE.Quaternion } | null>(null);
   const viewportRef = useRef<[number, number]>([800, 600]);
 
-  const mode: ViewerMode = useMemo(() => {
-    if (!asset) return "3d";
+  const mode: ViewerMode | "file" = useMemo(() => {
+    if (!asset || asset.format === "file") return "file";
     return asset.format === "png" || asset.format === "jpg" ? "2d" : "3d";
-  }, [asset?.format]);
+  }, [asset]);
 
   useEffect(() => {
     setPins([]);
@@ -472,52 +488,70 @@ export function ViewerPanel({
     [annotations, asset?.uri]
   );
 
+  const sendMarks = () => {
+    if (!asset) return;
+    onSendMarks(formatMarksForChat({
+      filePath: asset.path,
+      format: asset.format,
+      annotations: annotationsForViewer,
+      note,
+    }));
+  };
+
   return (
-    <section className="viewer-panel" aria-label="3D Viewer">
+    <section className="viewer-panel" aria-label="3D preview">
       <div className="viewer-panel-head">
-        <strong>Viewer</strong>
+        <strong>Preview</strong>
         <span className="row-meta">
-          {asset ? asset.uri.split("/").pop() : "No asset loaded"}
+          {asset ? asset.path.split("/").pop() : "No file"}
         </span>
         <div className="viewer-panel-actions">
+          <button className="tiny" type="button" onClick={onOpenFile}>
+            Open
+          </button>
           <button className="tiny" type="button" onClick={onClose}>
             Close
           </button>
         </div>
       </div>
       <div className="viewer-panel-body">
-        {asset ? (
-          mode === "3d" ? (
-            <ThreeViewer
-              asset={asset}
-              annotations={annotationsForViewer}
-              onRaycast={handle3dRaycast}
-            />
-          ) : (
-            <ImageViewer
-              asset={asset}
-              annotations={annotationsForViewer}
-              onRaycast={handle2dRaycast}
-            />
-          )
+        {asset && mode === "3d" ? (
+          <ThreeViewer
+            asset={asset}
+            annotations={annotationsForViewer}
+            onRaycast={handle3dRaycast}
+            onStatus={(_status, detail) => setModelError(detail ?? "")}
+          />
+        ) : asset && mode === "2d" ? (
+          <ImageViewer
+            asset={asset}
+            annotations={annotationsForViewer}
+            onRaycast={handle2dRaycast}
+          />
         ) : (
           <div className="viewer-empty">
-            <p>No asset loaded.</p>
+            <p>{asset ? asset.path.split("/").pop() : "No file open."}</p>
             <p className="row-meta">
-              Export a GLB or render a PNG from Blender to see it here.
+              {asset
+                ? "This preview draws GLB, glTF, PNG, and JPG. The path can still go to the chat, and the model picks the tool."
+                : "Open a file, or put a GLB, glTF, PNG, or JPG in the project .workhorse/preview folder. Mark it, then add the marks to the chat."}
             </p>
           </div>
         )}
+        {modelError ? <p className="row-meta">{modelError}</p> : null}
       </div>
       <div className="viewer-annotation-bar">
         <input
           type="text"
           value={note}
           onChange={(e) => setNote(e.target.value)}
-          placeholder={`Note for pin ${nextMark}…`}
+          placeholder={mode === "file" || !asset ? "Note for the chat…" : `Note for pin ${nextMark}…`}
           className="viewer-note-input"
         />
-        <span className="row-meta">Click to place pin {nextMark}</span>
+        <span className="row-meta">{mode === "3d" || mode === "2d" ? `Click to place pin ${nextMark}` : "Path and note"}</span>
+        <button className="tiny" type="button" disabled={!asset} onClick={sendMarks}>
+          To chat
+        </button>
       </div>
       {pins.length > 0 && (
         <div className="viewer-pins-list">
@@ -525,7 +559,10 @@ export function ViewerPanel({
           <button
             className="tiny"
             type="button"
-            onClick={() => setPins([])}
+            onClick={() => {
+              setPins([]);
+              onClearMarks();
+            }}
           >
             Clear pins
           </button>

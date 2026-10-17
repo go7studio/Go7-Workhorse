@@ -580,6 +580,20 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
   in the auto-load catalog. Slash commands stay the exact route.
 - **MCP servers** Settings → Skills adds and tests local stdio servers, attaches
   each to selected runtimes, and picks the tools exposed to custom HTTP models.
+- **3D preview** 3D in the chat header opens a preview. Open any file, or
+  leave a GLB, glTF, PNG, or JPG in the project `.workhorse/preview/` folder.
+  Click the preview to drop numbered pins and a note. To chat puts the file
+  path and the pins in the composer. The model picks the tool, which can be
+  a headless server, CAD, or something else. The preview draws GLB, glTF,
+  PNG, and JPG. Other files still send their path. The watch does not start
+  Blender.
+- **Blender** stays off until `/blender on`, or Blender in the chat header and
+  in This chat. The next turn of that chat then receives `blender-mcp`
+  (`uvx blender-mcp`). Cursor and a custom bot such as Grok Bot both receive
+  it. Workhorse does not launch Blender and does not keep it open. `uvx` and
+  Blender have to be installed, and the add-on has to be listening, before
+  that turn can drive Blender. The add-on can run Python inside Blender.
+  `/blender off` removes it from that chat only. The 3D preview keeps working.
 - Those calls use the same approval and result path as built-in tools.
   Environment values go to the OS-encrypted credential store.
 - **Jev MCP bridge** (`scripts/jev-mcp.mjs`) is an optional, first-party,

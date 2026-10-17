@@ -10,12 +10,12 @@ import {
 describe("viewerWatchFolder paths", () => {
   test("returns correct path for project root", () => {
     const folder = viewerWatchFolder("/projects/myproject");
-    assert.strictEqual(folder, "/projects/myproject/.workhorse/env/blender");
+    assert.strictEqual(folder, "/projects/myproject/.workhorse/preview");
   });
 
-  test("viewerRendersFolder returns renders subfolder", () => {
+  test("stills share the preview folder so one watch is enough", () => {
     const folder = viewerRendersFolder("/projects/myproject");
-    assert.strictEqual(folder, "/projects/myproject/.workhorse/env/blender/renders");
+    assert.strictEqual(folder, "/projects/myproject/.workhorse/preview");
   });
 });
 

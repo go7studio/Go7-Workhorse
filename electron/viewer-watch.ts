@@ -1,11 +1,14 @@
 /**
  * File watcher for the 3D/2D viewer panel.
- * Watches project/.workhorse/env/blender/ for GLB and PNG changes.
+ * Watches project/.workhorse/preview/ for a model or a still. This does not start Blender.
  */
 
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
+import { viewerRendersFolder, viewerWatchFolder } from "../src/lib/viewer";
+
+export { viewerRendersFolder, viewerWatchFolder };
 
 export type ViewerWatchHandle = {
   stop: () => void;
@@ -165,12 +168,4 @@ export function watchViewerFolder(input: ViewerWatchInput): ViewerWatchHandle {
   };
 }
 
-/** Default watched folder under a project root. */
-export function viewerWatchFolder(projectRoot: string): string {
-  return path.join(projectRoot, ".workhorse", "env", "blender");
-}
 
-/** Renders folder for PNG output. */
-export function viewerRendersFolder(projectRoot: string): string {
-  return path.join(projectRoot, ".workhorse", "env", "blender", "renders");
-}

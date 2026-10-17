@@ -1,7 +1,21 @@
 /**
- * 3D/2D viewer and annotation types for the Blender environment.
+ * 3D/2D preview. A chat can show a model without starting Blender.
  * Schema: workhorse.annotation/v0 (matches prototype payloads.json).
  */
+
+import { pathToMediaUrl } from "./media-display";
+
+/** Forward slashes. The renderer cannot call node:path, and Windows accepts this form. */
+function previewPath(projectRoot: string, ...parts: string[]): string {
+  const root = projectRoot.trim().replace(/[\\/]+$/, "").replace(/\\/g, "/");
+  return [root, ...parts].join("/");
+}
+
+function fileExtension(filePath: string): string {
+  const base = filePath.replace(/\\/g, "/").split("/").pop() ?? "";
+  const dot = base.lastIndexOf(".");
+  return dot <= 0 ? "" : base.slice(dot).toLowerCase();
+}
 
 export type AnnotationKind = "3d-point" | "3d-region" | "2d-point" | "2d-rect" | "2d-lasso";
 
@@ -66,7 +80,7 @@ export type Annotation = {
 
 export type ViewerAsset = {
   uri: string;
-  format: "glb" | "gltf" | "png" | "jpg";
+  format: "glb" | "gltf" | "png" | "jpg" | "file";
   loadedAt: number;
   /** Absolute path on the filesystem. */
   path: string;
@@ -127,19 +141,62 @@ export function formatAnnotationForModel(ann: Annotation): string {
   if (ann.target) {
     lines.push(`  Object: ${ann.target.objectPath || ann.target.objectName}`);
     const [x, y, z] = ann.target.worldPoint;
-    lines.push(`  World point (glTF Y-up): [${x.toFixed(4)}, ${y.toFixed(4)}, ${z.toFixed(4)}]`);
-    const blender = gltfToBlender(ann.target.worldPoint);
-    lines.push(`  Blender coords (Z-up): [${blender[0].toFixed(4)}, ${blender[1].toFixed(4)}, ${blender[2].toFixed(4)}]`);
+    lines.push(`  Point (glTF Y-up): [${x.toFixed(4)}, ${y.toFixed(4)}, ${z.toFixed(4)}]`);
+    const zUp = gltfToBlender(ann.target.worldPoint);
+    lines.push(`  Z-up: [${zUp[0].toFixed(4)}, ${zUp[1].toFixed(4)}, ${zUp[2].toFixed(4)}]`);
     if (ann.target.worldNormal) {
       const [nx, ny, nz] = ann.target.worldNormal;
       lines.push(`  Normal: [${nx.toFixed(4)}, ${ny.toFixed(4)}, ${nz.toFixed(4)}]`);
     }
+  }
+  if (ann.region2d?.px) {
+    const [px, py] = ann.region2d.px;
+    lines.push(`  Image point: [${px}, ${py}]`);
   }
   if (ann.region2d?.rect) {
     const [rx, ry, rw, rh] = ann.region2d.rect;
     lines.push(`  2D rect: [${rx}, ${ry}, ${rw}x${rh}]`);
   }
   return lines.join("\n");
+}
+
+/** A drawable file uses the desk media address. A raw disk path will not load in the window. */
+export function previewAsset(filePath: string, format: ViewerAsset["format"]): Pick<ViewerAsset, "uri" | "path" | "format"> {
+  return {
+    path: filePath,
+    format,
+    uri: format === "file" ? filePath : pathToMediaUrl(filePath),
+  };
+}
+
+/** glTF and stills preview in the chat. Anything else is a path the model can open. */
+export function previewFormat(filePath: string): ViewerAsset["format"] {
+  const ext = fileExtension(filePath);
+  if (ext === ".glb") return "glb";
+  if (ext === ".gltf") return "gltf";
+  if (ext === ".png") return "png";
+  if (ext === ".jpg" || ext === ".jpeg") return "jpg";
+  return "file";
+}
+
+/**
+ * Text for the next chat turn. Names the file and the pins.
+ * Does not choose a tool. The model can use a headless server, CAD, or anything else.
+ */
+export function formatMarksForChat(input: {
+  filePath: string;
+  format: string;
+  annotations: readonly Annotation[];
+  note?: string;
+}): string {
+  const lead = input.annotations.length > 0
+    ? "Make the marked changes on this file. Pick the tool that can edit this format."
+    : "This file is in the chat. Pick the tool that can edit this format.";
+  const lines = [lead, `File: ${input.filePath} (${input.format})`];
+  const note = input.note?.trim();
+  if (note) lines.push(`Note: ${note}`);
+  if (input.annotations.length === 0) return lines.join("\n");
+  return [lines.join("\n"), ...input.annotations.map((ann) => formatAnnotationForModel(ann))].join("\n\n");
 }
 
 /** Validate annotation schema for tests. */
@@ -155,4 +212,14 @@ export function isValidAnnotation(value: unknown): value is Annotation {
   const asset = obj.asset as Record<string, unknown>;
   if (typeof asset.uri !== "string" || typeof asset.format !== "string") return false;
   return true;
+}
+
+/** One folder for models and stills. The desk watches this and does not start Blender. */
+export function viewerWatchFolder(projectRoot: string): string {
+  return previewPath(projectRoot, ".workhorse", "preview");
+}
+
+/** Stills sit in the same folder so one watch sees a PNG and a model. */
+export function viewerRendersFolder(projectRoot: string): string {
+  return viewerWatchFolder(projectRoot);
 }

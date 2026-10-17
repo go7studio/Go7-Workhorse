@@ -1,9 +1,17 @@
 import assert from "node:assert";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { test, describe } from "node:test";
+import { resolveMediaProtocolFile } from "../electron/media-src";
+import { mediaUrlToPath } from "../src/lib/media-display";
 import {
   buildAnnotation,
   isValidAnnotation,
   formatAnnotationForModel,
+  formatMarksForChat,
+  previewAsset,
+  previewFormat,
   blenderToGltf,
   gltfToBlender,
   type Annotation,
@@ -151,8 +159,9 @@ describe("viewer annotation schema", () => {
     assert.ok(output.includes("[Pin 3]"));
     assert.ok(output.includes("make this bigger"));
     assert.ok(output.includes("Scene/Duck"));
-    assert.ok(output.includes("World point"));
-    assert.ok(output.includes("Blender coords"));
+    assert.ok(output.includes("Point (glTF Y-up)"));
+    assert.ok(output.includes("Z-up"));
+    assert.equal(output.includes("Blender"), false);
   });
 
   test("formatAnnotationForModel handles missing note", () => {
@@ -180,6 +189,66 @@ describe("viewer annotation schema", () => {
 
     const output = formatAnnotationForModel(annotation);
     assert.ok(output.includes("(no note)"));
+  });
+});
+
+describe("marks for the chat", () => {
+  test("a pin names the file and leaves the tool open", () => {
+    const annotation = buildAnnotation({
+      id: "pin-1",
+      chatId: "chat",
+      kind: "3d-point",
+      note: "shorten this edge",
+      mark: 1,
+      asset: { uri: "part.glb", format: "glb" },
+      target: {
+        objectName: "Bracket",
+        objectPath: "Scene/Bracket",
+        worldPoint: [1, 2, 3],
+      },
+      camera: {
+        position: [0, 0, 1],
+        quaternion: [0, 0, 0, 1],
+        fovDeg: 45,
+        viewport: [800, 600],
+      },
+      screenPx: [10, 20],
+    });
+    const output = formatMarksForChat({
+      filePath: "/work/part.glb",
+      format: "glb",
+      annotations: [annotation],
+      note: "keep the holes",
+    });
+    assert.ok(output.includes("File: /work/part.glb (glb)"));
+    assert.ok(output.includes("shorten this edge"));
+    assert.ok(output.includes("Note: keep the holes"));
+    assert.ok(output.includes("Pick the tool"));
+    assert.equal(output.includes("Blender"), false);
+  });
+
+  test("a drawable file uses a media address the desk can fetch", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wh-preview-url-"));
+    const file = path.join(dir, "part.glb");
+    fs.writeFileSync(file, "glb");
+    const asset = previewAsset(file, "glb");
+    assert.match(asset.uri, /^workhorse-media:/);
+    assert.equal(mediaUrlToPath(asset.uri), file);
+    assert.equal(resolveMediaProtocolFile(asset.uri), file);
+    assert.equal(previewAsset(file, "file").uri, file);
+  });
+
+  test("a CAD file still goes to the chat", () => {
+    assert.equal(previewFormat("/work/bracket.glb"), "glb");
+    assert.equal(previewFormat("/work/photo.JPEG"), "jpg");
+    assert.equal(previewFormat("/work/bracket.step"), "file");
+    const output = formatMarksForChat({
+      filePath: "/work/bracket.step",
+      format: "file",
+      annotations: [],
+    });
+    assert.ok(output.includes("File: /work/bracket.step (file)"));
+    assert.equal(output.includes("Blender"), false);
   });
 });
 

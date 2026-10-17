@@ -15,6 +15,7 @@ export const COMMANDS: Command[] = [
   { id: "always", name: "/always-approve", hint: "Skip ordinary permission prompts", run: "mode:always-approve" },
   { id: "plan", name: "/plan", hint: "Plan first — research only, then a reviewable plan", run: "mode:plan" },
   { id: "sandbox", name: "/sandbox", hint: "Sandbox: off, workspace, read-only, or strict", run: "sandbox", inputHint: "off | workspace | read-only | strict" },
+  { id: "blender", name: "/blender", hint: "Optional. Hand Blender to the next turn. The 3D preview does not need it.", run: "blender", inputHint: "on | off | status" },
   { id: "demo", name: "/demo-permission", hint: "Show a permission prompt", run: "demo-permission" },
   { id: "theme", name: "/theme", hint: "Cycle light, dark, Workhorse, system", run: "theme", aliases: ["/t"] },
   { id: "settings", name: "/settings", hint: "Profile, connected LLMs, skills, workshop, bot knowledge, routing, learning, usage, watch", run: "settings", aliases: ["/config", "/preferences", "/prefs"] },

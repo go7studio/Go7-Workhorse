@@ -1,3 +1,4 @@
+import { serversForChatPresets } from "./environment-presets";
 import type { McpRuntimeId, McpServerConfig, Session } from "./types";
 
 export function mcpRuntimeIdForSession(session: Pick<Session, "provider" | "customBotId">): McpRuntimeId {
@@ -14,10 +15,11 @@ export function mcpServerEnabledForRuntime(server: McpServerConfig, runtimeId: M
 
 export function mcpServersForSession(
   servers: readonly McpServerConfig[],
-  session: Pick<Session, "provider" | "customBotId">,
+  session: Pick<Session, "provider" | "customBotId" | "presets">,
 ): McpServerConfig[] {
   const runtimeId = mcpRuntimeIdForSession(session);
-  return servers.filter((server) => {
+  const listed = serversForChatPresets(servers, session.presets);
+  return listed.filter((server) => {
     if (!mcpServerEnabledForRuntime(server, runtimeId)) return false;
     // Workhorse owns discovery for custom HTTP and can enforce an exact tool
     // subset there. ACP vendors own their MCP connection, so sending a

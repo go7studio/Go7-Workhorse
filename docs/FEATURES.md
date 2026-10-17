@@ -63,6 +63,9 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
   without charging its earlier conversation totals again.
 - Gemini's headless CLI cannot ask for interactive approval. A denied action
   reports its reason in the reply.
+- Gemini receives the MCP tools attached to that chat, including Workhorse
+  Link and optional Blender. Its temporary tool configuration leaves the
+  user's workspace and global CLI configuration unchanged.
 - Client and model are separate: **Grok Build CLI** runs the model ids
   **Grok 4.7**, **Grok 4.6**, and **Grok 4.5**.
 - The CLI's live catalog is authoritative. The desk shows the model, never the

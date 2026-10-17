@@ -109,12 +109,49 @@ test("load waits for the matching renderer result and propagates errors and time
     assert.match((await host.handle(ask("load", { assetPath: f.file })) as { error: string }).error, /did not finish/);
     assert.match((await host.handle(ask("load", { assetPath: f.file, toSessionId: "other" })) as { error: string }).error, /own chat/);
     f.state.activeSessionId = "other";
-    assert.match((await host.handle(ask("load", { assetPath: f.file })) as { error: string }).error, /Open this chat/);
+    const staleSelection = host.handle(ask("load", { assetPath: f.file }));
+    host.reply({ ...sent.at(-1), ok: true });
+    assert.equal(JSON.parse((await staleSelection as { text: string }).text).ok, true, "visible renderer ACK outranks a stale persisted selection");
+  } finally { host.dispose(); fs.rmSync(f.directory, { recursive: true, force: true }); }
+});
+
+test("overlapping preview operations cannot race a clear and stale annotation synchronization", async () => {
+  const f = fixture();
+  const sent: ViewerRequest[] = [];
+  const host = createViewerHost({ userData: f.userData, readState: () => f.state, send: (request) => sent.push(request), capture: async () => png });
+  try {
+    const reading = host.handle(ask("annotations"));
+    assert.match((await host.handle(ask("annotations", { clear: true })) as { error: string }).error, /another request/);
+    host.reply({ ...sent[0], ok: true, annotations: [annotation()] });
+    assert.equal(JSON.parse((await reading as { text: string }).text).count, 1);
+    const clearing = host.handle(ask("annotations", { clear: true }));
+    host.reply({ ...sent[1], ok: true, annotations: [annotation()] });
+    assert.equal(JSON.parse((await clearing as { text: string }).text).cleared, true);
+    assert.deepEqual(host.annotations.load("chat"), []);
+  } finally { host.dispose(); fs.rmSync(f.directory, { recursive: true, force: true }); }
+});
+
+test("snapshot capture has a timeout and a changed visible chat never produces an artifact", async () => {
+  const f = fixture();
+  let hang = true;
+  let snapshots = 0;
+  let host: ReturnType<typeof createViewerHost>;
+  host = createViewerHost({ userData: f.userData, readState: () => f.state, timeoutMs: 15,
+    send: (request) => {
+      snapshots += 1;
+      host.reply(snapshots > 2 ? { ...request, ok: false, error: "Open this chat" } : { ...request, ok: true, capture: { x: 0, y: 0, width: 10, height: 10 } });
+    }, capture: async () => hang ? new Promise<Buffer>(() => {}) : png });
+  try {
+    assert.match((await host.handle(ask("snapshot")) as { error: string }).error, /capture timed out/);
+    hang = false;
+    assert.match((await host.handle(ask("snapshot")) as { error: string }).error, /Open this chat/);
+    assert.deepEqual(fs.readdirSync(path.join(f.userData, "viewer-snapshots", "chat")), []);
   } finally { host.dispose(); fs.rmSync(f.directory, { recursive: true, force: true }); }
 });
 
 test("MCP annotations and clear share the IPC store and acknowledge the visible clear", async () => {
   const f = fixture();
+  f.state.activeSessionId = "other";
   let host: ReturnType<typeof createViewerHost>;
   host = createViewerHost({ userData: f.userData, readState: () => f.state, send: (request) => {
     const annotations = host.annotations.load("chat");
@@ -135,6 +172,7 @@ test("MCP annotations and clear share the IPC store and acknowledge the visible 
 
 test("snapshots capture a visible rectangle to a real safe PNG and refuse false success", async () => {
   const f = fixture();
+  f.state.activeSessionId = "other";
   let bytes = png;
   let reply: Partial<ViewerReply> = { ok: true, capture: { x: 20, y: 40, width: 100, height: 80 } };
   let host: ReturnType<typeof createViewerHost>;

@@ -196,13 +196,16 @@ export function createViewerHost(options: {
   timeoutMs?: number;
 }) {
   const annotations = createViewerAnnotationStore(options.userData);
+  const busy = new Set<string>();
+  let disposed = false;
   const waiters = new Map<string, { sessionId: string; resolve: (reply: ViewerReply) => void; timer: ReturnType<typeof setTimeout> }>();
-  const request = (sessionId: string, operation: ViewerRequest["operation"], assetPath?: string) => new Promise<ViewerReply>((resolve, reject) => {
+  const request = (sessionId: string, operation: ViewerRequest["operation"], assetPath?: string, timeoutMs = options.timeoutMs ?? 30_000) => new Promise<ViewerReply>((resolve, reject) => {
+    if (disposed) { reject(new Error("Preview window closed")); return; }
     const id = randomUUID();
     const timer = setTimeout(() => {
       waiters.delete(id);
       reject(new Error("Preview did not finish the request; open this chat's preview and try again"));
-    }, options.timeoutMs ?? 30_000);
+    }, timeoutMs);
     waiters.set(id, { sessionId, resolve, timer });
     try { options.send({ id, sessionId, operation, ...(assetPath ? { assetPath } : {}) }); }
     catch (error) { clearTimeout(timer); waiters.delete(id); reject(error); }
@@ -220,6 +223,7 @@ export function createViewerHost(options: {
       return true;
     },
     dispose() {
+      disposed = true;
       for (const [id, pending] of waiters) {
         clearTimeout(pending.timer);
         pending.resolve({ id, sessionId: pending.sessionId, ok: false, error: "Preview window closed" });
@@ -227,14 +231,21 @@ export function createViewerHost(options: {
       waiters.clear();
     },
     async handle(ask: PeerAsk): Promise<PeerAskResult> {
+      let owned = false;
+      const sessionId = ask.toSessionId;
+      const deadline = Date.now() + (options.timeoutMs ?? 30_000);
+      const remainingMs = () => Math.max(1, deadline - Date.now());
+      const askRenderer = (operation: ViewerRequest["operation"], assetPath?: string) => request(sessionId, operation, assetPath, remainingMs());
       try {
-        const sessionId = ask.toSessionId;
         const state = options.readState();
         viewerSession(state, sessionId, ask.fromSessionId);
         if (!ask.fromSessionId) throw new Error("Preview tools need their calling chat id");
-        if (record(state).activeSessionId !== sessionId) throw new Error("Open this chat before requesting its preview");
+        if (disposed) throw new Error("Preview window closed");
+        if (busy.has(sessionId)) throw new Error("This chat's preview is handling another request; retry when it finishes");
+        busy.add(sessionId);
+        owned = true;
         if (ask.viewerOperation === "annotations" && !ask.clear) {
-          const reply = await request(sessionId, "sync");
+          const reply = await askRenderer("sync");
           if (!reply.ok) throw new Error(reply.error || "Preview did not synchronize its annotations");
           const rows = validateViewerAnnotations(reply.annotations, sessionId);
           annotations.save(sessionId, rows);
@@ -242,13 +253,12 @@ export function createViewerHost(options: {
         }
         if (ask.viewerOperation === "load") {
           const assetPath = resolveViewerAsset(state, sessionId, ask.assetPath);
-          const reply = await request(sessionId, "load", assetPath);
+          const reply = await askRenderer("load", assetPath);
           if (!reply.ok || reply.assetPath !== assetPath) throw new Error(reply.error || "Preview did not load the requested file");
-          if (record(options.readState()).activeSessionId !== sessionId) throw new Error("Preview chat changed before the file loaded");
           return { text: JSON.stringify({ ok: true, sessionId, assetPath, format: previewFormat(assetPath) }) };
         }
         if (ask.viewerOperation === "annotations" && ask.clear === true) {
-          const reply = await request(sessionId, "clear");
+          const reply = await askRenderer("clear");
           if (!reply.ok) throw new Error(reply.error || "Preview did not clear its annotations");
           const rows = validateViewerAnnotations(reply.annotations, sessionId);
           annotations.save(sessionId, []);
@@ -261,21 +271,37 @@ export function createViewerHost(options: {
           throw new Error("Preview snapshots must be PNGs in this chat's viewer-snapshots directory");
         }
         if (regularFile(output)) throw new Error("Preview snapshot already exists; choose a new name");
-        const reply = await request(sessionId, "snapshot");
+        const reply = await askRenderer("snapshot");
         const rect = reply.capture;
         if (!reply.ok || !rect || ![rect.x, rect.y, rect.width, rect.height].every(Number.isFinite) ||
             rect.x < 0 || rect.y < 0 || rect.width < 1 || rect.height < 1 || rect.width > 16_384 || rect.height > 16_384) {
           throw new Error(reply.error || "Preview is not visible for a snapshot");
         }
-        if (record(options.readState()).activeSessionId !== sessionId) throw new Error("Preview chat changed before capture");
-        const bytes = await options.capture({ x: Math.floor(rect.x), y: Math.floor(rect.y), width: Math.ceil(rect.width), height: Math.ceil(rect.height) });
-        if (record(options.readState()).activeSessionId !== sessionId) throw new Error("Preview chat changed during capture");
+        let captureTimer: ReturnType<typeof setTimeout> | undefined;
+        let bytes: Buffer;
+        try {
+          bytes = await Promise.race([
+            options.capture({ x: Math.floor(rect.x), y: Math.floor(rect.y), width: Math.ceil(rect.width), height: Math.ceil(rect.height) }),
+            new Promise<never>((_resolve, reject) => {
+              captureTimer = setTimeout(() => reject(new Error("Preview capture timed out")), remainingMs());
+            }),
+          ]);
+        } finally { if (captureTimer) clearTimeout(captureTimer); }
+        // Selection changes can be ahead of the persisted desk. The renderer
+        // confirms the visible chat both before and after the native capture.
+        const confirmed = await askRenderer("snapshot");
+        if (!confirmed.ok || !confirmed.capture ||
+            ["x", "y", "width", "height"].some((key) => confirmed.capture![key as keyof ViewerCapture] !== rect[key as keyof ViewerCapture]) ||
+            confirmed.assetPath !== reply.assetPath) throw new Error(confirmed.error || "Preview changed during capture; try again");
         if (!bytes.length || bytes.length > 32 * 1024 * 1024 || !bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) {
           throw new Error("Preview did not produce a PNG snapshot");
         }
+        const verifiedDirectory = safeDirectory(safeDirectory(rootDirectory(options.userData), "viewer-snapshots"), sessionId);
+        if (verifiedDirectory !== directory) throw new Error("Preview storage changed during capture");
         fs.writeFileSync(output, bytes, { flag: "wx", mode: 0o600 });
         return { text: JSON.stringify({ ok: true, sessionId, path: output }) };
       } catch (error) { return { error: error instanceof Error ? error.message : "Preview request failed" }; }
+      finally { if (owned) busy.delete(sessionId); }
     },
   };
 }

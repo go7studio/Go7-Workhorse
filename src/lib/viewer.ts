@@ -5,6 +5,23 @@
 
 import { pathToMediaUrl } from "./media-display";
 
+export type ViewerRequest = {
+  id: string;
+  sessionId: string;
+  action: "context" | "load" | "annotations" | "snapshot";
+  assetPath?: string;
+  clear?: boolean;
+};
+
+export type ViewerReply = {
+  id: string;
+  error?: string;
+  cwd?: string;
+  assetPath?: string;
+  annotations?: Annotation[];
+  rect?: { x: number; y: number; width: number; height: number };
+};
+
 /** Forward slashes. The renderer cannot call node:path, and Windows accepts this form. */
 function previewPath(projectRoot: string, ...parts: string[]): string {
   const root = projectRoot.trim().replace(/[\\/]+$/, "").replace(/\\/g, "/");

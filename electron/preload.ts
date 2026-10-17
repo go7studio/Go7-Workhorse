@@ -339,12 +339,13 @@ contextBridge.exposeInMainWorld("workhorse", {
     ipcRenderer.invoke("viewer:watch-stop", sessionId) as Promise<void>,
   viewerResolveAsset: (href: string, cwd?: string) =>
     ipcRenderer.invoke("viewer:resolve-asset", href, cwd) as Promise<string | null>,
-  viewerSaveAnnotations: (sessionId: string, annotations: unknown[]) =>
-    ipcRenderer.invoke("viewer:save-annotations", sessionId, annotations) as Promise<boolean>,
-  viewerLoadAnnotations: (sessionId: string) =>
-    ipcRenderer.invoke("viewer:load-annotations", sessionId) as Promise<unknown[]>,
-  viewerSnapshot: (sessionId: string) =>
-    ipcRenderer.invoke("viewer:snapshot", sessionId) as Promise<{ ok: boolean; path?: string }>,
+  onViewerRequest: (handler: (request: import("../src/lib/viewer").ViewerRequest) => void) => {
+    const listener = (_event: IpcRendererEvent, request: import("../src/lib/viewer").ViewerRequest) => handler(request);
+    ipcRenderer.on("viewer:request", listener);
+    return () => ipcRenderer.removeListener("viewer:request", listener);
+  },
+  viewerReply: (reply: import("../src/lib/viewer").ViewerReply) =>
+    ipcRenderer.invoke("viewer:reply", reply) as Promise<boolean>,
   onViewerFileChanged: (handler: (event: { sessionId: string; path: string; format: string; type: string }) => void) => {
     const listener = (_event: IpcRendererEvent, payload: { sessionId: string; path: string; format: string; type: string }) => handler(payload);
     ipcRenderer.on("viewer:file-changed", listener);

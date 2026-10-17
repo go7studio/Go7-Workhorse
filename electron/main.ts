@@ -46,6 +46,8 @@ import { attachDialogProperties, attachDialogTitle, windowsNeedsAttachChoice } f
 
 import { displaySrcForHref, openableMediaPath, resolveMediaProtocolFile, safeLocalPath } from "./media-src";
 import { watchViewerFolder } from "./viewer-watch";
+import { createViewerBridge } from "./viewer-bridge";
+import type { ViewerReply } from "../src/lib/viewer";
 import { findSourceFile, listGitChanges, readEditStatsAsync, readFileDiff, readGitHead, readSourceText, recordFileInstance } from "./project-diff";
 import { TerminalHost, type TerminalEvent } from "./terminal-host";
 import {
@@ -1252,8 +1254,34 @@ app.whenReady().then(async () => {
   }
   void learningService.recover().catch((error) => console.warn("Learning recover failed", error));
   debugStartup("learning ready");
+  const viewerBridge = createViewerBridge({
+    send: (request) => {
+      const win = liveDeskWindow();
+      if (!win || win.webContents.isDestroyed()) throw new Error("Workhorse window is closed");
+      win.webContents.send("viewer:request", request);
+    },
+    capture: async (rect) => {
+      const win = liveDeskWindow();
+      if (!win || win.webContents.isDestroyed()) throw new Error("Workhorse window is closed");
+      return (await win.webContents.capturePage(rect)).toPNG();
+    },
+  });
+  disposeAtQuit("viewer", () => viewerBridge.dispose());
+  ipcMain.handle("viewer:reply", (event, reply: ViewerReply) => {
+    if (event.sender !== liveDeskWindow()?.webContents) return false;
+    return viewerBridge.reply(reply);
+  });
   const peerBusy = new Set<string>();
   const handlePeerAsk = async (ask: PeerAsk) => {
+    if (ask.action === "viewer") {
+      try {
+        const args = JSON.parse(ask.message);
+        if (!args || typeof args !== "object" || Array.isArray(args)) throw new Error("Invalid viewer arguments");
+        return { text: await viewerBridge.call(ask.name ?? "", args, ask.fromSessionId) };
+      } catch (error) {
+        return { error: error instanceof Error ? error.message : String(error) };
+      }
+    }
     const win = liveDeskWindow();
     if (!win || win.webContents.isDestroyed()) return { error: "Workhorse window is closed" };
     const bots = ask.mode === "bots";
@@ -2122,33 +2150,6 @@ app.whenReady().then(async () => {
     const cwdStr = typeof cwd === "string" ? cwd : undefined;
     const resolved = resolveMediaProtocolFile(`workhorse-media://${encodeURIComponent(href)}?cwd=${encodeURIComponent(cwdStr ?? "")}`);
     return resolved;
-  });
-
-  ipcMain.handle("viewer:save-annotations", (_event, sessionId: unknown, annotations: unknown) => {
-    if (typeof sessionId !== "string" || !Array.isArray(annotations)) return false;
-    const annotationsDir = path.join(app.getPath("userData"), "viewer-annotations");
-    fs.mkdirSync(annotationsDir, { recursive: true });
-    const filePath = path.join(annotationsDir, `${sessionId}.json`);
-    fs.writeFileSync(filePath, JSON.stringify(annotations, null, 2), "utf8");
-    return true;
-  });
-
-  ipcMain.handle("viewer:load-annotations", (_event, sessionId: unknown) => {
-    if (typeof sessionId !== "string") return [];
-    const filePath = path.join(app.getPath("userData"), "viewer-annotations", `${sessionId}.json`);
-    try {
-      if (fs.existsSync(filePath)) {
-        return JSON.parse(fs.readFileSync(filePath, "utf8"));
-      }
-    } catch {
-      // ignore
-    }
-    return [];
-  });
-
-  ipcMain.handle("viewer:snapshot", (_event, sessionId: unknown) => {
-    if (typeof sessionId !== "string") return { ok: false };
-    return { ok: true, path: undefined };
   });
 
   // safeLocalPath (media-src) refuses a path on another machine before any stat.

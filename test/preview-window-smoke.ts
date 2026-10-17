@@ -17,6 +17,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import zlib from "node:zlib";
+import { handleWorkhorseRpc } from "../electron/workhorse-mcp";
 import { grokBotChatSse } from "../src/lib/grok-bot-shim";
 
 function pngChunk(type: string, data: Buffer): Buffer {
@@ -59,7 +60,7 @@ if (process.env.WORKHORSE_PREVIEW_SMOKE !== "1") {
 }
 
 const stamp = Date.now();
-const root = path.join(os.tmpdir(), `wh-preview-smoke-${stamp}`);
+const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), `wh-preview-smoke-${stamp}-`)));
 const userData = path.join(root, "desk");
 const project = path.join(root, "project");
 const preview = path.join(project, ".workhorse", "preview");
@@ -80,7 +81,7 @@ fs.writeFileSync(
     "",
   ].join("\n"),
 );
-const made = spawnSync("blender", ["-b", "--python", maker], { encoding: "utf8" });
+const made = spawnSync("blender", ["-b", "--python", maker], { encoding: "utf8", timeout: 30_000 });
 if (made.status !== 0 || !fs.existsSync(glb)) {
   throw new Error(made.stderr || made.stdout || "Blender did not write the GLB");
 }
@@ -165,12 +166,14 @@ fs.writeFileSync(
   }),
 );
 
+const launchEnv = { ...process.env };
+delete launchEnv.ELECTRON_RUN_AS_NODE;
 const app = await electron.launch({
   args: [".", "--no-sandbox"],
   cwd: process.cwd(),
   timeout: 60_000,
   env: {
-    ...process.env,
+    ...launchEnv,
     WORKHORSE_USER_DATA_PATH: userData,
     WORKHORSE_VOLATILE_CREDENTIALS: "1",
   },
@@ -178,11 +181,21 @@ const app = await electron.launch({
 
 const shot = path.join(root, "window.png");
 const lines: string[] = [];
+process.env.WORKHORSE_STATE_PATH = path.join(userData, "workhorse-state.json");
+delete process.env.WORKHORSE_MCP_PROFILE;
+async function viewerTool(name: string, args: Record<string, unknown>) {
+  const response = await handleWorkhorseRpc({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: { sessionId: "sess_preview_smoke", ...args } } }) as { error?: { message: string }; result?: { content: { text: string }[] } };
+  if (response.error) throw new Error(response.error.message);
+  return JSON.parse(response.result!.content[0]!.text);
+}
 try {
   const page = await app.firstWindow();
   page.setDefaultTimeout(20_000);
   page.on("console", (msg) => lines.push(`${msg.type()}: ${msg.text()}`));
-  await page.getByRole("button", { name: "3D", exact: true }).click();
+  // Exercise the advertised MCP tool through the live HTTP bridge and renderer.
+  await page.getByRole("button", { name: "3D", exact: true }).waitFor();
+  const loadedByTool = await viewerTool("workhorse_viewer_load", { assetPath: glb });
+  if (loadedByTool.assetPath !== glb) throw new Error("MCP did not load the requested GLB");
   const canvas = page.locator(".viewer-canvas");
   await canvas.waitFor({ state: "visible" });
   const loaded = await page.waitForFunction(() => {
@@ -194,8 +207,43 @@ try {
     const detail = await canvas.getAttribute("data-model-error");
     throw new Error(`model ${modelState || "missing"}: ${detail ?? ""}`);
   }
+  const idleDraws = await page.evaluate(async () => {
+    let draws = 0;
+    const prototypes = [WebGLRenderingContext.prototype, WebGL2RenderingContext.prototype];
+    const originals = prototypes.map((prototype) => prototype.drawElements);
+    for (const prototype of prototypes) {
+      const original = prototype.drawElements;
+      prototype.drawElements = function (...args) { draws++; return original.apply(this, args); };
+    }
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      draws = 0;
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      return draws;
+    } finally {
+      prototypes.forEach((prototype, index) => { prototype.drawElements = originals[index]!; });
+    }
+  });
+  if (idleDraws !== 0) throw new Error(`Idle preview kept drawing: ${idleDraws}`);
+  console.log("PASS idle preview: zero WebGL draw calls over 300 ms");
   await canvas.click();
   await page.getByText("1 pin").waitFor();
+  await page.locator(".viewer-canvas .viewer-pin-label").filter({ hasText: "1" }).waitFor();
+  const marks = await viewerTool("workhorse_viewer_annotations", {});
+  if (marks.count !== 1 || marks.annotations[0]?.target?.objectName !== "TestCube") throw new Error("MCP missed the live cube pin");
+  const snapshot = await viewerTool("workhorse_viewer_snapshot", { outputPath: path.join(project, "snapshot.png") });
+  const pngBytes = fs.readFileSync(snapshot.path);
+  if (pngBytes.readUInt32BE(16) <= 0 || pngBytes.readUInt32BE(20) <= 0) throw new Error("Empty PNG snapshot");
+  console.log(`MCP snapshot ${snapshot.path} (${pngBytes.length} bytes)`);
+  for (const invalid of [
+    ["workhorse_viewer_annotations", { sessionId: "../sentinel", clear: true }],
+    ["workhorse_viewer_annotations", { sessionId: "inactive" }],
+    ["workhorse_viewer_load", { assetPath: path.join(project, "missing.glb") }],
+  ] as const) {
+    let failed = false;
+    try { await viewerTool(invalid[0], invalid[1]); } catch { failed = true; }
+    if (!failed) throw new Error(`MCP accepted invalid ${invalid[0]}`);
+  }
   await page.locator(".viewer-note-input").fill("shorten this edge");
   await page.getByRole("button", { name: "To chat" }).click();
   const draft = page.locator("[data-composer-field='true']");
@@ -262,7 +310,11 @@ try {
   if (!stillHanded.includes(`File: ${still} (png)`)) throw new Error(`model missed the still:\n${stillHanded.slice(0, 1500)}`);
   if (!stillHanded.includes("Image point:")) throw new Error(`model missed the image point:\n${stillHanded.slice(0, 1500)}`);
   if (!stillHanded.includes("raise this corner")) throw new Error(`model missed the still note:\n${stillHanded.slice(0, 1500)}`);
-  console.log("PASS preview window");
+  const cleared = await viewerTool("workhorse_viewer_annotations", { clear: true });
+  if (cleared.count !== 1) throw new Error("MCP missed the live image pin");
+  await page.getByText("Click to place pin 1", { exact: true }).waitFor();
+  if ((await viewerTool("workhorse_viewer_annotations", {})).count !== 0) throw new Error("MCP clear left annotations behind");
+  console.log("PASS preview window and live MCP load, annotations, clear, snapshot and invalid-request checks");
   console.log(visible.split("\n").slice(0, 12).join("\n"));
   console.log("--- handed to the model ---");
   console.log(handed.split("\n").filter((line) => /File:|Note:|Pin|TestCube|Make the marked/.test(line)).join("\n"));

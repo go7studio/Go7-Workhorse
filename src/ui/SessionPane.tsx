@@ -254,8 +254,69 @@ export function SessionPane() {
     return mergeEdits(projectEdits([session], roots), extraEdits);
   }, [session?.id, writesKey, roots, extraEdits, editsIdle]);
   const sessionId = session?.id ?? "";
+  const viewerSessionId = useRef(sessionId);
+  viewerSessionId.current = sessionId;
   const blenderOn = presetOn(session?.presets, "blender");
   const previewWatch = viewerOpen || blenderOn;
+
+  useEffect(() => {
+    setViewerAsset(null);
+    setViewerAnnotations([]);
+    setViewerOpen(false);
+  }, [sessionId]);
+
+  useEffect(() => window.workhorse?.onViewerRequest?.((request) => {
+    const reply = (value: Omit<import("../lib/viewer").ViewerReply, "id">) =>
+      window.workhorse?.viewerReply?.({ id: request.id, ...value });
+    if (request.sessionId !== sessionId) {
+      void reply({ error: "Open this chat in Workhorse to use its live preview" });
+      return;
+    }
+    if (request.action === "context") {
+      void reply({ cwd });
+      return;
+    }
+    if (request.action === "annotations") {
+      const annotations = viewerAnnotations.filter((item) => item.chatId === sessionId && item.asset.uri === viewerAsset?.uri);
+      if (request.clear) setViewerAnnotations([]);
+      void reply({ annotations });
+      return;
+    }
+    if (request.action === "snapshot") {
+      const bounds = document.querySelector(".session-viewer .viewer-panel")?.getBoundingClientRect();
+      if (!viewerOpen || !viewerAsset || !bounds) void reply({ error: "Open a file in this chat's preview first" });
+      else void reply({ rect: { x: Math.ceil(bounds.x), y: Math.ceil(bounds.y), width: Math.floor(bounds.width), height: Math.floor(bounds.height) } });
+      return;
+    }
+    if (!request.assetPath) {
+      void reply({ error: "The preview needs a file" });
+      return;
+    }
+    const file = request.assetPath;
+    setViewerAnnotations([]);
+    openViewer({ ...previewAsset(file, previewFormat(file)), loadedAt: Date.now() });
+    // Report success only after the actual model/image loads. This poll exists
+    // only during a tool request and stops on success, chat switch or timeout.
+    const deadline = Date.now() + 8_000;
+    const check = () => {
+      if (viewerSessionId.current !== request.sessionId) {
+        void reply({ error: "The active chat changed before the preview loaded" });
+        return;
+      }
+      const panel = document.querySelector(".session-viewer");
+      const canvas = panel?.querySelector<HTMLCanvasElement>(".viewer-canvas");
+      const image = panel?.querySelector<HTMLImageElement>(".viewer-image-container img");
+      const current = panel?.getAttribute("data-asset") === file;
+      if (current && (canvas?.dataset.model === "loaded" || (image?.complete && image.naturalWidth > 0))) {
+        void reply({ assetPath: file });
+      } else if (current && canvas?.dataset.model === "error") {
+        void reply({ error: canvas.dataset.modelError || "The model could not be loaded" });
+      } else if (Date.now() >= deadline) {
+        void reply({ error: "The preview did not load the file in time" });
+      } else setTimeout(check, 50);
+    };
+    setTimeout(check, 50);
+  }), [sessionId, cwd, viewerAnnotations, viewerAsset, viewerOpen, openViewer]);
 
   useEffect(() => {
     if (!sessionId || !cwd || !previewWatch) return;
@@ -790,7 +851,7 @@ export function SessionPane() {
         </aside>
       ) : null}
       {viewerOpen ? (
-        <aside className="session-viewer" aria-label="3D preview">
+        <aside className="session-viewer" aria-label="3D preview" data-asset={viewerAsset?.path}>
           <ViewerPanel
             sessionId={session.id}
             asset={viewerAsset}

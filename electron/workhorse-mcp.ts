@@ -4028,39 +4028,15 @@ async function callDeskTool(name: string, args: Record<string, unknown>, from?: 
     if (!skill.trim()) throw new Error("skill is required");
     return JSON.stringify(readDeskSkill(skill, projectFoldersFromState()), null, 2);
   }
-  if (name === "workhorse_viewer_load") {
-    const sessionId = typeof args.sessionId === "string" ? args.sessionId : "";
-    const assetPath = typeof args.assetPath === "string" ? args.assetPath : "";
-    if (!sessionId.trim()) throw new Error("sessionId is required");
-    if (!assetPath.trim()) throw new Error("assetPath is required");
-    return JSON.stringify({ ok: true, sessionId, assetPath, message: "Asset load requested" }, null, 2);
-  }
-  if (name === "workhorse_viewer_annotations") {
-    const sessionId = typeof args.sessionId === "string" ? args.sessionId : "";
-    if (!sessionId.trim()) throw new Error("sessionId is required");
-    const annotationsDir = path.join(process.env.WORKHORSE_USER_DATA ?? "", "viewer-annotations");
-    const filePath = path.join(annotationsDir, `${sessionId}.json`);
-    let annotations: unknown[] = [];
-    try {
-      if (fs.existsSync(filePath)) {
-        annotations = JSON.parse(fs.readFileSync(filePath, "utf8"));
-      }
-    } catch {
-      annotations = [];
-    }
-    if (args.clear === true && annotations.length > 0) {
-      try {
-        fs.unlinkSync(filePath);
-      } catch {
-        // ignore
-      }
-    }
-    return JSON.stringify({ sessionId, annotations, count: annotations.length }, null, 2);
-  }
-  if (name === "workhorse_viewer_snapshot") {
-    const sessionId = typeof args.sessionId === "string" ? args.sessionId : "";
-    if (!sessionId.trim()) throw new Error("sessionId is required");
-    return JSON.stringify({ ok: true, sessionId, message: "Snapshot capture not yet implemented in MCP context" }, null, 2);
+  if (["workhorse_viewer_load", "workhorse_viewer_annotations", "workhorse_viewer_snapshot"].includes(name)) {
+    return postBridge("/ask", {
+      fromSessionId: from ?? "",
+      toSessionId: "",
+      mode: "bots",
+      action: "viewer",
+      name,
+      message: JSON.stringify(args),
+    }, { inbox: false, timeoutMs: 30_000 });
   }
   throw new Error(`Unknown tool ${name}`);
 }

@@ -30,7 +30,8 @@ export type PeerAction =
   /** Rank the desk's bots for a task and suggest a squad. See src/lib/bot-search.ts. */
   | "find-bots"
   /** A read route answered from the desk's live state. See src/lib/link-read.ts. */
-  | "link-read";
+  | "link-read"
+  | "viewer";
 
 export type PeerAsk = {
   fromSessionId: string;

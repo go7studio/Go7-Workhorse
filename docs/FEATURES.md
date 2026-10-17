@@ -590,6 +590,10 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
   a headless server, CAD, or something else. The preview draws GLB, glTF,
   PNG, and JPG. Other files still send their path. The watch does not start
   Blender.
+- A chat's viewer tools load a workspace file into its live preview, read or
+  clear that preview's marks, and save a PNG snapshot with its pins. Open that
+  chat first. A missing file, inactive panel or failed capture returns an error.
+  Snapshot files stay in the chat's workspace and never overwrite existing files.
 - **Blender** stays off until `/blender on`, or Blender in the chat header and
   in This chat. The next turn of that chat then receives `blender-mcp`
   (`uvx blender-mcp`). Cursor and a custom bot such as Grok Bot both receive

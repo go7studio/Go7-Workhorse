@@ -115,6 +115,9 @@ export const MODEL_CATALOG: Record<ProviderId, ModelInfo[]> = {
     { id: "gpt-5.6-sol", name: "GPT-5.6-Sol", effort: true, contextWindow: 1_050_000 },
     { id: "gpt-5.6-terra", name: "GPT-5.6-Terra", effort: true, contextWindow: 1_050_000 },
     { id: "gpt-5.6-luna", name: "GPT-5.6-Luna", effort: true, contextWindow: 1_050_000 },
+    // Codex lists this first (priority 1). The max window is the one its cache
+    // reports; the 500k scalar is the session cap, the same split Astra uses.
+    { id: "gpt-6.1-sol", name: "GPT-6.1-Sol", effort: true, contextWindow: 872_000 },
     { id: "gpt-6-astra", name: "GPT-6-Astra", effort: true, contextWindow: 872_000 },
     { id: "gpt-5.5", name: "GPT-5.5", effort: true, contextWindow: 1_050_000 },
     { id: "gpt-5.4", name: "GPT-5.4", effort: true, contextWindow: 1_050_000 },
@@ -607,6 +610,8 @@ const CODEX_MODEL_WINDOWS: Record<string, number> = {
   // GPT-6 Astra: the max_context_window Codex's own model cache reports (2026-09-07).
   // No official figure is published yet; a larger live reading still wins.
   "gpt-6-astra": 872_000,
+  // GPT-6.1 Sol: Codex models_cache max_context_window, 2026-10-17. A larger live reading still wins.
+  "gpt-6.1-sol": 872_000,
   "gpt-5.6-sol": 1_050_000,
   "gpt-5.6-terra": 1_050_000,
   "gpt-5.6-luna": 1_050_000,

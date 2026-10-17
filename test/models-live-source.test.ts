@@ -86,6 +86,8 @@ test("a harness may name a model the way people write it", () => {
   assert.deepEqual(findChoice("Fable 5.1"), { provider: "claude", model: "claude-fable-5-1", effort: "medium", sandbox: "off" });
   assert.deepEqual(findChoice("GPT-6 Astra"), { provider: "codex", model: "gpt-6-astra", effort: "medium", sandbox: "off" });
   assert.equal(findChoice("gpt_6_astra")?.model, "gpt-6-astra");
+  assert.deepEqual(findChoice("GPT-6.1 Sol"), { provider: "codex", model: "gpt-6.1-sol", effort: "medium", sandbox: "off" });
+  assert.equal(findChoice("GPT 6.1 Sol")?.model, "gpt-6.1-sol");
   assert.equal(findChoice("GPT-5.6 Sol")?.model, "gpt-5.6-sol", "a space where the catalog has a hyphen still matches");
   assert.notEqual(findChoice("gpt-56-sol")?.model, "gpt-5.6-sol", "dots are not folded: 5.6 is not 56");
   assert.equal(findChoice("gpt-56-sol")?.unlisted, true, "so it goes to the vendor as its own id, and the vendor's refusal is the gate");

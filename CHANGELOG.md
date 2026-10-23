@@ -8,6 +8,13 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.7.8](https://github.com/go7studio/Go7-Workhorse/compare/v0.7.7...v0.7.8) (2026-10-23)
+
+
+### Features
+
+* expose subscription readiness and scoped MCP inventory through Link ([cea5f07](https://github.com/go7studio/Go7-Workhorse/commit/cea5f077100e89d8255548fff3c5dee20c2bd704))
+
 ## [0.7.7](https://github.com/go7studio/Go7-Workhorse/compare/v0.7.6...v0.7.7) (2026-10-17)
 
 

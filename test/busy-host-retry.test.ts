@@ -188,7 +188,7 @@ test("the custom host checks its folder the way every other host does", () => {
   );
   assert.match(
     host,
-    /new McpToolBridge\(input\.mcpServers \?\? \[\], \{ cwd: toolCwd\(\) \}\)/,
+    /new McpToolBridge\(input\.mcpServers \?\? \[\], \{ cwd: toolCwd\(\), sessionId: input\.sessionId \}\)/,
     "the bridge launches its servers in a folder that was checked first",
   );
   assert.match(host, /roots: \[toolCwd\(\), \.\.\.\(input\.folders \?\? \[\]\)\]/, "the security roots are checked too");

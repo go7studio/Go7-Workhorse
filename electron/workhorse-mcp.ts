@@ -9,6 +9,8 @@ import {
   type LinkReadRequest,
 } from "../src/lib/link-read";
 import { openMainLog } from "./main-log";
+import { mcpInventorySnapshot } from "./mcp-inventory";
+import type { McpInventory } from "../src/lib/mcp-inventory";
 import { readTranscriptSidecar } from "./transcript-store";
 import path from "node:path";
 import { createHash } from "node:crypto";
@@ -151,6 +153,7 @@ function readState(): {
   deskPlans?: WatchPlans;
   watchPermits?: WatchPermits;
   watchDayMarks?: WatchDayMarks;
+  mcpInventory?: McpInventory;
 } {
   return readLinkState() as ReturnType<typeof readState>;
 }
@@ -739,13 +742,23 @@ const TOOLS = [
   {
     name: "workhorse_query_capacity",
     description:
-      "Read current leftover and availability for Workhorse vendors and custom accounts. This is not a reservation and records no usage. Prefer this over workhorse_list_bots when you need a machine-readable snapshot.",
+      "Discover Workhorse subscriptions, models, authentication readiness, client transport, leftover and callability, plus separate custom API accounts. Gemini subscription access uses agy under its own Google login. This is not a reservation and records no usage. Prefer this over workhorse_list_bots for a machine-readable snapshot.",
     inputSchema: {
       type: "object",
       properties: {
         provider: { type: "string", description: "Optional vendor or custom account id" },
         callableOnly: { type: "boolean", description: "If true, return only rows you can call now" },
       },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "workhorse_mcp_inventory",
+    description:
+      "Read configured MCP servers and observed tool schemas without starting servers or granting access. Optional sessionId shows that chat's runtime and preset scope. Configured, authorized, connected and available are distinct; unknown means unverified. Tools execute only inside an authorized chat, not through this inventory.",
+    inputSchema: {
+      type: "object",
+      properties: { sessionId: { type: "string", description: "Optional exact Workhorse chat id for its runtime and preset scope" } },
       additionalProperties: false,
     },
   },
@@ -1575,7 +1588,8 @@ export async function readSnapshot(route: LinkReadRequest | null, caller: string
       // A dropped socket is the desk going down mid call, not an answer.
     }
   }
-  return loadLinkState(process.env.WORKHORSE_STATE_PATH ?? "");
+  const saved = loadLinkState(process.env.WORKHORSE_STATE_PATH ?? "");
+  return route?.route === "mcp" ? mcpInventorySnapshot(saved, route.id, caller, false) : saved;
 }
 
 /**
@@ -3608,6 +3622,11 @@ async function callDeskTool(name: string, args: Record<string, unknown>, from?: 
   if (name === "workhorse_query_capacity") {
     return queryCapacity(args);
   }
+  if (name === "workhorse_mcp_inventory") {
+    const snapshot = readState();
+    if (!snapshot.mcpInventory) throw new Error("MCP inventory unavailable");
+    return JSON.stringify(snapshot.mcpInventory);
+  }
   if (name === "workhorse_find_bots") {
     return findBotsOnDesk(args, from);
   }
@@ -4340,8 +4359,9 @@ export function linkCliCall(argv: string[]): { name: string; args: Record<string
   }
   const flag = (name: string): string | undefined => flags.get(name) || undefined;
   const usage =
-    "usage: link capabilities | capacity [--provider <id>] [--callable] | chats [--parents] [--full] [--all] [--limit <n>] [--cursor <n>] | read <id> [--limit <n>] | ask --chat <id> --message <text> [--trace <id>] [--key <id>] | delegate --chat <id> --task <text> [--provider <id>] [--model <id>] [--effort <level>] [--permission <seat>] [--sandbox <profile>] [--accept <criterion>] [--passes <n>] [--folder <path>] [--trace <id>] [--key <id>] | status <workerId> | follow-up <workerId> <text> --chat <id> [--pass <n>] [--provider <id>] [--model <id>] [--effort <level>] [--permission <seat>] [--sandbox <profile>] [--route <tier>] [--trace <id>] [--key <id>] | grok-pending | grok-reply <id> --text <answer> | local-hosts | local-capabilities [--host <id>] | local-upload <path> --capability <id> --kind <kind> --role <role> --media-type <mime> | local-invoke <capabilityId> ['<invocation-json>'] | local-chat <prompt> | local-3d <sourceArtifactId> | local-job <jobId> | local-cancel <jobId> | local-artifact <artifactId> | local-materialize <artifactId> | local-continue <jobId> <continuationId> --chat <id> --folder <path>";
+    "usage: link capabilities | capacity [--provider <id>] [--callable] | mcp [--chat <id>] | chats [--parents] [--full] [--all] [--limit <n>] [--cursor <n>] | read <id> [--limit <n>] | ask --chat <id> --message <text> [--trace <id>] [--key <id>] | delegate --chat <id> --task <text> [--provider <id>] [--model <id>] [--effort <level>] [--permission <seat>] [--sandbox <profile>] [--accept <criterion>] [--passes <n>] [--folder <path>] [--trace <id>] [--key <id>] | status <workerId> | follow-up <workerId> <text> --chat <id> [--pass <n>] [--provider <id>] [--model <id>] [--effort <level>] [--permission <seat>] [--sandbox <profile>] [--route <tier>] [--trace <id>] [--key <id>] | grok-pending | grok-reply <id> --text <answer> | local-hosts | local-capabilities [--host <id>] | local-upload <path> --capability <id> --kind <kind> --role <role> --media-type <mime> | local-invoke <capabilityId> ['<invocation-json>'] | local-chat <prompt> | local-3d <sourceArtifactId> | local-job <jobId> | local-cancel <jobId> | local-artifact <artifactId> | local-materialize <artifactId> | local-continue <jobId> <continuationId> --chat <id> --folder <path>";
   if (sub === "capabilities") return { name: "workhorse_capabilities", args: {} };
+  if (sub === "mcp") return { name: "workhorse_mcp_inventory", args: { ...(flag("chat") ? { sessionId: flag("chat") } : {}) } };
   if (sub === "capacity") {
     return { name: "workhorse_query_capacity", args: { ...(flag("provider") ? { provider: flag("provider") } : {}), ...(flag("callable") ? { callableOnly: true } : {}) } };
   }

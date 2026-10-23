@@ -2,6 +2,7 @@ import { providerById } from "./providers";
 import type {
   CustomBot,
   GrokPlanUsage,
+  LlmLink,
   ProviderId,
   Session,
   Settings,
@@ -1490,6 +1491,16 @@ export type CapacityRow = {
     reasonCode?: CapacityReasonCode;
   };
   meter: CapacityMeter;
+  /** Subscription readiness is separate from quota; no credential material is exposed. */
+  access?: {
+    kind: "subscription";
+    client: "grok" | "claude" | "codex" | "cursor-agent" | "agy";
+    transport: "acp" | "cli";
+    connected: boolean;
+    enabled: boolean;
+    authentication: "ready" | "required" | "unknown";
+    launchable?: boolean;
+  };
 };
 
 export type CapacitySnapshot = {
@@ -1505,7 +1516,7 @@ export type CapacitySnapshotQuery = {
   provider?: string;
   callableOnly?: boolean;
   plans?: WatchPlans;
-  settings?: { customBots: CustomBot[] };
+  settings?: { customBots: CustomBot[]; llms?: Partial<Record<ProviderId, LlmLink>> };
 };
 
 function finitePercent(value: unknown): number | undefined {
@@ -1633,6 +1644,17 @@ export function projectCapacitySnapshot(rows: DeskCallRow[], query: CapacitySnap
     if (query.callableOnly && !row.canCall) continue;
     const status = row.status;
     const reasonCode: CapacityReasonCode | undefined = status === "ok" ? undefined : status;
+    const link = row.kind === "vendor" ? query.settings?.llms?.[row.provider] : undefined;
+    const clients = { grok: "grok", claude: "claude", codex: "codex", cursor: "cursor-agent", gemini: "agy" } as const;
+    const subscription = row.kind === "vendor" && row.provider !== "custom" && link ? {
+      kind: "subscription" as const,
+      client: clients[row.provider],
+      transport: row.provider === "gemini" ? "cli" as const : "acp" as const,
+      connected: link.connected === true,
+      enabled: link.enabled !== false,
+      authentication: link.needsAuth === true ? "required" as const : link.connected && link.needsAuth === false ? "ready" as const : "unknown" as const,
+      ...(typeof link.launchable === "boolean" ? { launchable: link.launchable } : {}),
+    } : undefined;
     out.push({
       id: row.id,
       kind: row.kind,
@@ -1645,6 +1667,7 @@ export function projectCapacitySnapshot(rows: DeskCallRow[], query: CapacitySnap
         ...(reasonCode ? { reasonCode } : {}),
       },
       meter: capacityMeterForRow(row, query.plans, query.settings, now),
+      ...(subscription ? { access: subscription } : {}),
     });
   }
   return {

@@ -427,7 +427,7 @@ export class CustomSessionHost {
      * part-way through a turn is caught on the next call rather than never.
      */
     const toolCwd = () => spawnCwd(input.cwd) ?? input.cwd;
-    const mcp = new McpToolBridge(input.mcpServers ?? [], { cwd: toolCwd() });
+    const mcp = new McpToolBridge(input.mcpServers ?? [], { cwd: toolCwd(), sessionId: input.sessionId });
     const mcpTools = await mcp.tools();
     let text = "";
     const startedAt = this.now();

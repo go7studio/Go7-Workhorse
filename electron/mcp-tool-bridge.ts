@@ -9,6 +9,7 @@ import type { CustomToolResult, CustomToolUse } from "./custom-tools";
 import type { CustomHttpTool } from "./custom-http";
 import { APP_VERSION } from "../src/lib/app-info";
 import { spawnCwd } from "./spawn-cwd";
+import { publicMcpSchema, type McpObservation } from "../src/lib/mcp-inventory";
 
 type JsonRpcMessage = {
   jsonrpc?: string;
@@ -21,6 +22,35 @@ type JsonRpcMessage = {
 
 export type McpListedTool = { name: string; description?: string; inputSchema?: Record<string, unknown> };
 type Pending = { resolve: (value: unknown) => void; reject: (error: Error) => void; timer: NodeJS.Timeout };
+
+type ObservedConnection = Omit<McpObservation, "connectedSessionIds"> & { clients: Map<symbol, string> };
+const observations = new Map<string, ObservedConnection>();
+
+function observationKey(config: McpServerConfig): string {
+  // Private identity only: changing a command or credential invalidates its old catalog.
+  return createHash("sha256").update(JSON.stringify([config.name, config.command, config.args, config.env, config.envCredentialIds])).digest("hex");
+}
+
+function observe(config: McpServerConfig, tools: McpListedTool[] | null, client?: symbol, sessionId = ""): void {
+  const key = observationKey(config);
+  const previous = observations.get(key);
+  const clients = previous?.clients ?? new Map<symbol, string>();
+  if (client) clients.set(client, sessionId);
+  observations.set(key, {
+    checkedAt: Date.now(),
+    ok: tools !== null,
+    tools: (tools ?? []).slice(0, 500).map(tool => ({ name: tool.name, inputSchema: publicMcpSchema(tool.inputSchema) })),
+    clients,
+  });
+  if (observations.size > 128) observations.delete(observations.keys().next().value!);
+}
+
+/** Passive evidence only. Reading this never starts a server or calls a tool. */
+export function observedMcpServer(config: McpServerConfig): McpObservation | undefined {
+  const entry = observations.get(observationKey(config));
+  if (!entry) return undefined;
+  return { checkedAt: entry.checkedAt, ok: entry.ok, tools: entry.tools, connectedSessionIds: [...entry.clients.values()].filter(Boolean) };
+}
 
 const SAFE_AMBIENT_ENV = new Set([
   "path", "home", "userprofile", "appdata", "localappdata", "systemroot", "windir", "pathext",
@@ -96,8 +126,13 @@ class McpStdioClient {
   private child: ChildProcessWithoutNullStreams | null = null;
   private nextId = 1;
   private pending = new Map<number | string, Pending>();
+  private readonly observationId = Symbol();
 
-  constructor(private readonly config: McpServerConfig, private readonly cwd?: string) {}
+  constructor(private readonly config: McpServerConfig, private readonly cwd?: string, private readonly sessionId?: string) {}
+
+  private disconnected(): void {
+    observations.get(observationKey(this.config))?.clients.delete(this.observationId);
+  }
 
   async start(): Promise<void> {
     if (this.child) return;
@@ -113,8 +148,8 @@ class McpStdioClient {
     const lines = readline.createInterface({ input: child.stdout });
     lines.on("line", (line) => this.receive(line));
     child.stderr.on("data", () => undefined);
-    child.once("error", (error) => this.failAll(error));
-    child.once("exit", (code) => this.failAll(new Error(`${this.config.name} MCP exited${code == null ? "" : ` (${code})`}`)));
+    child.once("error", (error) => { this.disconnected(); this.failAll(error); });
+    child.once("exit", (code) => { this.disconnected(); this.failAll(new Error(`${this.config.name} MCP exited${code == null ? "" : ` (${code})`}`)); });
     await this.request("initialize", {
       protocolVersion: "2025-03-26",
       capabilities: {},
@@ -126,8 +161,7 @@ class McpStdioClient {
   async listTools(): Promise<McpListedTool[]> {
     await this.start();
     const result = await this.request("tools/list", {}) as { tools?: unknown };
-    if (!Array.isArray(result?.tools)) return [];
-    return result.tools.flatMap((item): McpListedTool[] => {
+    const tools = (Array.isArray(result?.tools) ? result.tools : []).flatMap((item): McpListedTool[] => {
       if (!item || typeof item !== "object") return [];
       const row = item as Record<string, unknown>;
       if (typeof row.name !== "string" || !row.name.trim()) return [];
@@ -139,6 +173,8 @@ class McpStdioClient {
           : {}),
       }];
     });
+    observe(this.config, tools, this.observationId, this.sessionId);
+    return tools;
   }
 
   async callTool(name: string, args: Record<string, unknown>): Promise<unknown> {
@@ -147,6 +183,7 @@ class McpStdioClient {
   }
 
   dispose(): void {
+    this.disconnected();
     const child = this.child;
     this.child = null;
     this.failAll(new Error(`${this.config.name} MCP closed`));
@@ -205,14 +242,14 @@ export class McpToolBridge {
   private clients: McpStdioClient[] = [];
   private routes = new Map<string, ToolRoute>();
 
-  constructor(private readonly configs: McpServerConfig[], private readonly options: { cwd?: string } = {}) {}
+  constructor(private readonly configs: McpServerConfig[], private readonly options: { cwd?: string; sessionId?: string } = {}) {}
 
   async tools(): Promise<CustomHttpTool[]> {
     const definitions: CustomHttpTool[] = [];
     for (const config of this.configs) {
       if (config.enabled === false) continue;
       if (!config.name?.trim() || !config.command?.trim()) continue;
-      const client = new McpStdioClient(config, this.options.cwd);
+      const client = new McpStdioClient(config, this.options.cwd, this.options.sessionId);
       this.clients.push(client);
       try {
         const listed = await client.listTools();
@@ -229,6 +266,7 @@ export class McpToolBridge {
           this.routes.set(exposed, { client, server: config.name, tool: tool.name });
         }
       } catch {
+        observe(config, null);
         client.dispose();
       }
     }
@@ -293,6 +331,7 @@ export async function probeMcpServer(config: McpServerConfig): Promise<McpProbeR
       tools,
     };
   } catch (error) {
+    observe(config, null);
     const message = error instanceof Error ? error.message : String(error);
     return { ok: false, message: redactProbeMessage(message || "MCP server did not respond.", config), tools: [] };
   } finally {

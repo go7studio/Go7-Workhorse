@@ -26,6 +26,7 @@ export const LINK_BASE_TOOLS = [
   "workhorse_list_chats",
   "workhorse_read_chat",
   "workhorse_query_capacity",
+  "workhorse_mcp_inventory",
   "workhorse_delegate",
   "workhorse_continue_mission",
   "workhorse_agent_status",
@@ -57,6 +58,8 @@ export type LinkTool = (typeof LINK_TOOLS)[number];
 
 export const LINK_BASE_CAPABILITIES = [
   "capacity.read",
+  "subscriptions.read",
+  "mcp.inventory.read",
   "chats.read",
   "workers.delegate",
   "workers.follow_up",
@@ -79,6 +82,8 @@ export type LinkCapability = (typeof LINK_CAPABILITIES)[number];
 /** One discoverable tool proves each public Link capability is actually usable. */
 export const LINK_CAPABILITY_TOOL_REQUIREMENT: Readonly<Record<LinkCapability, LinkTool>> = {
   "capacity.read": "workhorse_query_capacity",
+  "subscriptions.read": "workhorse_query_capacity",
+  "mcp.inventory.read": "workhorse_mcp_inventory",
   "chats.read": "workhorse_read_chat",
   "workers.delegate": "workhorse_delegate",
   "workers.follow_up": "workhorse_continue_mission",

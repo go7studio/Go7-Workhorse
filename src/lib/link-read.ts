@@ -20,7 +20,7 @@ import type { ChatMessage, Session } from "./types";
  * for a value that arrives under a field the desk did not write.
  */
 
-export const LINK_READ_ROUTES = ["chats", "chat", "capacity", "status"] as const;
+export const LINK_READ_ROUTES = ["chats", "chat", "capacity", "status", "mcp"] as const;
 
 export type LinkReadRoute = (typeof LINK_READ_ROUTES)[number];
 
@@ -193,6 +193,7 @@ export function linkReadRouteForTool(name: string, args: Record<string, unknown>
     return { route: "chat", id: chat, limit };
   }
   if (name === "workhorse_query_capacity") return { route: "capacity", id: "" };
+  if (name === "workhorse_mcp_inventory") return { route: "mcp", id: typeof args.sessionId === "string" ? args.sessionId.trim() : "" };
   if (name === "workhorse_agent_status") {
     const id = typeof args.id === "string" ? args.id.trim() : "";
     return id ? { route: "status", id } : null;

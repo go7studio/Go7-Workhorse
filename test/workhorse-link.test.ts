@@ -36,7 +36,7 @@ import { BRIDGE_RECORD_MODE, bridgeRecordPath, readBridgeRecord, writeBridgeReco
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const LAUNCH = { command: "/Applications/Go7 Workhorse.app/Contents/MacOS/Go7 Workhorse", script: "/app/workhorse-mcp.js", statePath: "/state/workhorse-state.json" };
 
-test("the Link v3 contract publishes workers and typed local capability execution", () => {
+test("the Link v3 contract publishes subscription and MCP discovery beside worker execution", () => {
   assert.equal(LINK_PROTOCOL_VERSION, 3);
   // Follow-up is continue_mission: delegate publishes no worker field, because
   // which worker runs a task is Workhorse's routing, not the harness's.
@@ -45,6 +45,7 @@ test("the Link v3 contract publishes workers and typed local capability executio
     "workhorse_list_chats",
     "workhorse_read_chat",
     "workhorse_query_capacity",
+    "workhorse_mcp_inventory",
     "workhorse_delegate",
     "workhorse_continue_mission",
     "workhorse_agent_status",
@@ -63,6 +64,8 @@ test("the Link v3 contract publishes workers and typed local capability executio
   ]);
   assert.deepEqual([...LINK_CAPABILITIES], [
     "capacity.read",
+    "subscriptions.read",
+    "mcp.inventory.read",
     "chats.read",
     "workers.delegate",
     "workers.follow_up",

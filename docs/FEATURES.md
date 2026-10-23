@@ -467,9 +467,16 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
   rest.
 - Connect Grok Bot copies its one-shot instructions, on Mac or Windows, with its
   runtime-owned weekly-usage exporter contract.
-- Every app gets the same versioned contract: eight core tools for capabilities,
+- Every app gets the same versioned contract: nine core tools for capabilities,
   list, read and ask chats, query leftover and availability, delegation,
-  continuation and worker status.
+  continuation, worker status and read-only MCP inventory.
+- Capacity discovery identifies each native subscription's client, models,
+  authentication readiness and callability. Gemini names the Antigravity CLI
+  (`agy`); API bots remain separate accounts.
+- MCP inventory lists configured servers, observed tool input shapes and a
+  chat's existing runtime and preset grants. Configuration, authorization,
+  connection and availability are separate states; unobserved stays unknown.
+  Reading it starts no server, grants no tools and exposes no credentials.
 - Typed local capability tools join them when a host is configured.
 - Call `workhorse_capabilities` first. It names follow-through: new slice, named
   worker or live chat, later status.

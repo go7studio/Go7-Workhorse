@@ -12,7 +12,9 @@ import { AgySessionHost } from "./agy-host";
 import { detectAgyLogin } from "./agy-login";
 import { readAgyPlan, readAgyUsageStdout } from "./agy-plan";
 import { CustomSessionHost, type CustomPromptInput } from "./custom-host";
-import { probeMcpServer } from "./mcp-tool-bridge";
+import { observedMcpServer, probeMcpServer } from "./mcp-tool-bridge";
+import { mcpInventorySnapshot } from "./mcp-inventory";
+import { boundLinkRead } from "../src/lib/link-read";
 import { guardIpcSender, guardNavigation, isDeskPage } from "./ipc-sender";
 import { detectGrokLogin } from "./grok-login";
 import { detectCodexLogin } from "./codex-login";
@@ -1279,6 +1281,9 @@ app.whenReady().then(async () => {
     const win = liveDeskWindow();
     if (!win || win.webContents.isDestroyed()) return { error: "Workhorse window is closed" };
     if (ask.action === "viewer") return viewerHost.handle(ask);
+    if (ask.mode === "bots" && ask.action === "link-read" && ask.name === "mcp") {
+      return boundLinkRead(JSON.stringify(mcpInventorySnapshot(readViewerState(), ask.message.trim(), ask.fromSessionId ?? "", true, observedMcpServer)));
+    }
     const bots = ask.mode === "bots";
     const spawn = !bots && ask.mode === "spawn";
     if (!bots && !spawn && ask.fromSessionId && ask.fromSessionId === ask.toSessionId) {

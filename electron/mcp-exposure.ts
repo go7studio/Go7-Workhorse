@@ -10,6 +10,7 @@ export const EXTERNAL_RUNTIME_ALLOW = [
   "workhorse_continue_mission",
   "workhorse_list_bots",
   "workhorse_query_capacity",
+  "workhorse_mcp_inventory",
   "workhorse_list_chats",
   "workhorse_read_chat",
   "workhorse_ask_chat",

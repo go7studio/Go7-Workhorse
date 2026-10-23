@@ -60,13 +60,15 @@ calling Claude's model through ACP is the other direction and stays separate.
   "protocolVersion": 3,
   "desk": "online",
   "capabilities": [
-    "capacity.read", "chats.read", "workers.delegate", "workers.follow_up",
+    "capacity.read", "subscriptions.read", "mcp.inventory.read",
+    "chats.read", "workers.delegate", "workers.follow_up",
     "local.hosts.read", "local.capabilities.read", "local.jobs.submit",
     "local.jobs.read", "local.jobs.cancel", "local.artifacts.transfer"
   ],
   "tools": [
     "workhorse_capabilities", "workhorse_list_chats", "workhorse_read_chat",
-    "workhorse_query_capacity", "workhorse_delegate", "workhorse_continue_mission",
+    "workhorse_query_capacity", "workhorse_mcp_inventory",
+    "workhorse_delegate", "workhorse_continue_mission",
     "workhorse_agent_status", "workhorse_ask_chat", "workhorse_local_hosts",
     "workhorse_local_capabilities", "workhorse_local_upload",
     "workhorse_local_invoke", "workhorse_local_chat", "workhorse_local_generate_3d",
@@ -115,6 +117,40 @@ or a new field in a reply does not, because a caller written against the old
 shape still works. `desk` is `offline` when no Workhorse window is running;
 reads still answer from the last saved state, delegation does not.
 
+## Subscription and MCP discovery
+
+`workhorse_query_capacity` is the subscription catalog as well as the leftover
+snapshot. A native vendor row's `access` names its client (`agy` for Gemini),
+transport, connected/enabled state, authentication readiness and known launch
+readiness. `availability.canCall` remains the final desk admission result: a
+login can be ready while a quota, reserve or daily bank holds the call. Each
+vendor keeps its own models and pools. Custom API accounts remain separate;
+discovery never turns a subscription into API credit or enables an API fallback.
+
+Call `workhorse_mcp_inventory` with no input for configured servers, or with
+`{"sessionId":"<exact chat id>"}` for that chat's runtime and optional presets.
+The command is `workhorse mcp [--chat <id>]`. `authorized` is null without a
+chat; with a chat it follows the same runtime/tool/preset policy as its next
+turn. Native adapters cannot enforce a partial tool allowlist, so their
+restricted servers remain unauthorized.
+
+`configured` and `enabled` are settings, not evidence of a working connection.
+`connection` is connected only while Workhorse owns a live MCP client for the
+exact chat. Vendor-owned connections that Workhorse cannot observe stay
+unknown. `catalog` records a successful tools/list observation for up to five
+minutes, then says stale. A completed Settings test can prove a catalog; it
+cannot prove an active chat connection. `availability` is available only for a
+fresh observed connection authorized for that chat; offline and blocked
+servers say unavailable, all other cases say unknown. Per-tool `available` is
+true, false or null by the same rule.
+
+This inventory is passive: no server starts, no tool runs and no access grant
+changes. Offline reads use the saved configuration and report no live
+connections. Names and structural input shapes travel; commands, arguments,
+environment values, credential references, raw errors, schema descriptions,
+defaults, examples, enums and URLs do not. It is discovery, not an arbitrary
+MCP execution proxy. Use an authorized Workhorse chat to perform the work.
+
 ## The tools
 
 | Tool | Does | Changes the desk |
@@ -122,7 +158,8 @@ reads still answer from the last saved state, delegation does not.
 | `workhorse_capabilities` | the contract above | no |
 | `workhorse_list_chats` | chats, compact by default (`id`, `title`, `worker`, `parentId`, `status`, `next`, `project`). Workers that finished over 24 hours ago are left out; `all` puts them back. `parents` omits workers. `full` adds preview and sidebar | no |
 | `workhorse_read_chat` | one chat's transcript | no |
-| `workhorse_query_capacity` | leftover and callability per bot; advisory | no |
+| `workhorse_query_capacity` | subscription client, transport, models, authentication readiness, leftover and callability per bot; API accounts remain separate; advisory | no |
+| `workhorse_mcp_inventory` | configured servers and observed tool input shapes; optional `sessionId` applies that chat's existing runtime and preset grants | no |
 | `workhorse_delegate` | run one task through Workhorse as a worker; Workhorse picks the worker | yes |
 | `workhorse_continue_mission` | follow up: continue the wave a worker finished with only the remaining work; Workhorse keeps that pass's coordinating brain unless `initialBrain` changes it or `route` opts into routing | yes |
 | `workhorse_agent_status` | follow through on a worker or asked chat: `next` is wait, done, or failed; report when done; `spend` on a worker the ledger has billed | no |
@@ -150,6 +187,7 @@ with the same bearer token, on four routes:
 | `GET /link/chats` | `workhorse_list_chats`, and the finished-worker watch | 1 MB |
 | `GET /link/chat/:id` | `workhorse_read_chat`. The id may be an id, a worker name or a title | 256 KB |
 | `GET /link/capacity` | `workhorse_query_capacity` | 256 KB |
+| `GET /link/mcp` or `GET /link/mcp/:sessionId` | `workhorse_mcp_inventory` | 256 KB |
 | `GET /link/status/:id` | `workhorse_agent_status`, and the caller's own row for `workhorse_capabilities` | 256 KB |
 
 These routes read. They change nothing. They are bearer authenticated like

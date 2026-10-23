@@ -1,5 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import fs from "node:fs";
+import type { McpInventory } from "../src/lib/mcp-inventory";
 
 export type LinkDeskState = {
   sessions?: unknown[];
@@ -13,6 +14,7 @@ export type LinkDeskState = {
   agentCatalog?: unknown;
   agentRuntimes?: unknown;
   externalTasks?: unknown;
+  mcpInventory?: McpInventory;
 };
 
 const rpcState = new AsyncLocalStorage<LinkDeskState>();

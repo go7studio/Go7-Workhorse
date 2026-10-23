@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
-import { openableMediaPath } from "../electron/media-src";
+import { openableHtmlPath, openableMediaPath, resolveDisplayFile } from "../electron/media-src";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -74,4 +75,59 @@ test("the desk opens by kind and reveals anything else local", () => {
   assert.doesNotMatch(handler, /shell\.openPath\(local\)/);
   assert.match(readFileSync(path.join(ROOT, "electron", "preload.ts"), "utf8"), /invoke\("desk:open-local-path", path, kind\)/);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "workshop-paint.tsx"), "utf8"), /openPath\(item\.path, item\.kind\)/);
+});
+
+test("a local html page is the only extra file a chat link may launch", () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), "workhorse-html-link."));
+  const spacedDir = path.join(dir, "My Gallery");
+  mkdirSync(spacedDir, { recursive: true });
+  const html = path.join(spacedDir, "index.html");
+  const htm = path.join(dir, "notes.htm");
+  const png = path.join(dir, "contact-sheet-800.png");
+  const exe = path.join(dir, "index.html.exe");
+  writeFileSync(html, "<!doctype html><title>Compare themes</title>");
+  writeFileSync(htm, "<!doctype html>");
+  writeFileSync(png, Buffer.from("png"));
+  writeFileSync(exe, "nope");
+  try {
+    const slashed = `/${html.replaceAll("\\", "/")}`;
+    const angled = `</${html.replaceAll("\\", "/")}>`;
+    assert.equal(path.resolve(openableHtmlPath(slashed)!), path.resolve(html));
+    assert.equal(path.resolve(openableHtmlPath(angled)!), path.resolve(html));
+    assert.equal(path.resolve(openableHtmlPath(html)!), path.resolve(html));
+    assert.equal(path.resolve(openableHtmlPath(`<${htm}>`)!), path.resolve(htm));
+    assert.equal(openableHtmlPath(`/${png.replaceAll("\\", "/")}`), null, "a png is not a page");
+    assert.equal(openableHtmlPath(exe), null, "a program whose name contains .html");
+    assert.equal(openableMediaPath(html, "image"), null);
+    assert.equal(openableMediaPath(html, "video"), null);
+    assert.equal(path.resolve(resolveDisplayFile(`/${png.replaceAll("\\", "/")}`, { home: path.join(dir, "no-home") })!), path.resolve(png));
+    assert.equal(path.resolve(resolveDisplayFile(`<${png}>`, { home: path.join(dir, "no-home") })!), path.resolve(png));
+    const { io: fs, stats } = io({});
+    for (const share of [
+      "\\\\evil.example\\share\\index.html",
+      "//evil.example/share/index.html",
+      "<\\\\evil.example\\share\\index.html>",
+      "file:////evil.example/share/index.html",
+    ]) {
+      assert.equal(openableHtmlPath(share, fs), null, share);
+    }
+    assert.deepEqual(stats, []);
+    const linked = io({ [path.win32.resolve("C:\\out\\index.html")]: link });
+    assert.equal(openableHtmlPath("C:\\out\\index.html", linked.io), null, "a link");
+    assert.equal(openableHtmlPath("C:\\out\\missing.html", io({}).io), null, "not there");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+
+  const main = readFileSync(path.join(ROOT, "electron", "main.ts"), "utf8");
+  const handler = main.slice(main.indexOf('ipcMain.handle("desk:open-local-html"'), main.indexOf('ipcMain.handle("localMedia:create"'));
+  assert.match(handler, /openableHtmlPath\(input\)/);
+  assert.match(handler, /shell\.openPath\(target\)/);
+  assert.doesNotMatch(handler, /shell\.openPath\(local\)/);
+  assert.doesNotMatch(handler, /shell\.openPath\(input\)/);
+  assert.match(readFileSync(path.join(ROOT, "electron", "preload.ts"), "utf8"), /invoke\("desk:open-local-html"/);
+  const body = readFileSync(path.join(ROOT, "src", "ui", "MessageBody.tsx"), "utf8");
+  assert.match(body, /openLocalHtml/);
+  assert.match(body, /isLocalHtmlHref/);
+  assert.match(body, /safeExternalUrl/);
 });

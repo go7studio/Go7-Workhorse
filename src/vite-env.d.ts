@@ -143,6 +143,8 @@ type WorkhorseBridge = {
   revealProject: (folder: string) => Promise<void>;
   missingFolders: (folders: string[]) => Promise<string[]>;
   openExternal?: (href: string) => Promise<boolean>;
+  /** Open a local .html/.htm page in the OS handler. Anything else returns false. */
+  openLocalHtml?: (filePath: string) => Promise<boolean>;
   fileDiff: (
     filePath: string,
     roots?: string[],

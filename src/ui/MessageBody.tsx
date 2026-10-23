@@ -1,5 +1,5 @@
 import { memo, useEffect, useState, type MouseEvent } from "react";
-import { parseChatMarkdown, parseInline, type Inline } from "../lib/markdown";
+import { isLocalHtmlHref, parseChatMarkdown, parseInline, type Inline } from "../lib/markdown";
 import { isPassThroughImageHref, mdImageInitialSrc } from "../lib/media-display";
 import { safeExternalUrl } from "../lib/open-external";
 import { copyText } from "../lib/copy-text";
@@ -98,6 +98,13 @@ function Inlines({
       openWebUrl(url);
       return;
     }
+    const openPage = window.workhorse?.openLocalHtml;
+    if (openPage && isLocalHtmlHref(href)) {
+      void openPage(href).then((opened) => {
+        if (!opened) openSource(href);
+      });
+      return;
+    }
     openSource(href);
   };
   return (
@@ -133,7 +140,11 @@ function Inlines({
               rel="noreferrer"
               onClick={(event) => onLink(event, part.href)}
             >
-              {part.text}
+              {part.children && part.children.length > 0 ? (
+                <Inlines parts={part.children} nearby={nearby} cwd={cwd} vendorSessionId={vendorSessionId} />
+              ) : (
+                part.text
+              )}
             </a>
           );
         }

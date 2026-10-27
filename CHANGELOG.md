@@ -8,6 +8,19 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.7.9](https://github.com/go7studio/Go7-Workhorse/compare/v0.7.8...v0.7.9) (2026-10-27)
+
+
+### Features
+
+* call Claude models through the Anthropic Messages API ([ad1786e](https://github.com/go7studio/Go7-Workhorse/commit/ad1786e19ba9eee43919ac089a747cb35ef83934))
+
+
+### Bug Fixes
+
+* heavy call load stalled saves, learning scans, and live transcripts ([30492e8](https://github.com/go7studio/Go7-Workhorse/commit/30492e8902f32c3535bda6e7c75194124238cf80))
+* keep refused bots on the list and name the Max Console grant ([100446d](https://github.com/go7studio/Go7-Workhorse/commit/100446da340266546bc8c900cb8eb4212aa5b3fc))
+
 ## [0.7.8](https://github.com/go7studio/Go7-Workhorse/compare/v0.7.7...v0.7.8) (2026-10-23)
 
 

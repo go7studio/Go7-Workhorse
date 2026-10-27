@@ -112,13 +112,15 @@ test("a hot tick reads the chats that moved and leaves the idle ones unread", ()
   assert.equal(hot.chatsRead, 2, "two live chats moved, so two bodies are read");
   assert.ok(hot.chatsRead < (hot.state.sessions as unknown[]).length);
   assert.equal((hot.state.sessions as Chat[])[0], residentSessions[0]);
-  assert.equal(hot.text.includes("super-secret"), false, "a hot tick still strips a key");
-  assert.equal(hot.text.includes("idle-body-idle-0"), true);
-  assert.equal(hot.text.includes("hot-token-a"), true);
-  assert.equal(hot.text.includes("hot-token-b"), true);
-  assert.equal(hot.text.includes("sessionOrder"), false);
-  const parsed = JSON.parse(hot.text) as PersistableState;
+  const hotText = hot.parts.join("");
+  assert.equal(hotText.includes("super-secret"), false, "a hot tick still strips a key");
+  assert.equal(hotText.includes("idle-body-idle-0"), true);
+  assert.equal(hotText.includes("hot-token-a"), true);
+  assert.equal(hotText.includes("hot-token-b"), true);
+  assert.equal(hotText.includes("sessionOrder"), false);
+  const parsed = JSON.parse(hotText) as PersistableState;
   assert.equal(sameJsonValue(parsed, hot.state), true, "the assembled file is the desk that was prepared");
+  assert.equal(hotText, JSON.stringify(hot.state));
   assert.equal((parsed.sessions as Chat[]).length, sessions.length);
 
   const quietTick = prepareDeskSaveText(hot.state, memory, hooks);
@@ -187,7 +189,8 @@ test("the store and the main process both use the hot tick", () => {
   assert.doesNotMatch(effect, /saveState\(\{\s*\.\.\.state/);
   const main = fs.readFileSync(path.join(ROOT, "electron", "main.ts"), "utf8");
   assert.match(main, /prepareDeskSaveText\(/);
-  assert.match(main, /text: prepared\.text/);
+  assert.match(main, /parts: prepared\.parts/);
+  assert.match(main, /clearPerfCause\(\);\s*\n\s*queueMicrotask\(clearPerfCause\);\s*\n\s*const pending = writeVersionedStateAsync\(/);
   assert.match(main, /const pending = writeVersionedStateAsync\(/);
   assert.match(main, /return stateSaves\.enqueue\(state\)/);
 });

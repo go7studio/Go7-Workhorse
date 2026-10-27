@@ -739,7 +739,12 @@ export function maxRootWorkers(deskBots: number): number {
 }
 
 export function rootSpawnError(
-  sessions: Array<Pick<Session, "parentId" | "status" | "agentRun" | "hidden">>,
+  sessions: Array<{
+    parentId?: string | null;
+    status?: string | null;
+    agentRun?: { status?: string | null } | null;
+    hidden?: boolean;
+  }>,
   parentId: string,
   limit = MIN_ROOT_WORKERS,
 ): string | null {
@@ -752,6 +757,133 @@ export function rootSpawnError(
   return running >= limit
     ? `This plan already has ${limit} workers running. Await one before spawning another.`
     : null;
+}
+
+export const SAME_SLICE_SPAWN_ERROR =
+  "A worker is already running this slice. Await it before spawning another.";
+
+/**
+ * A worker admitted by an updater React has not committed yet.
+ * Two delegates can both pass a snapshot taken before an await. The
+ * reservation is that worker until the session list shows it.
+ */
+export type SpawnReservation = {
+  childId: string;
+  parentId: string;
+  projectId: string | null;
+  slice: string;
+  nested: boolean;
+};
+
+export type SpawnAdmitSession = {
+  id: string;
+  parentId?: string | null;
+  projectId?: string | null;
+  hidden?: boolean;
+  archivedAt?: number | null;
+  status?: string;
+  title?: string;
+  workerName?: string;
+  agentRun?: { status?: string } | null;
+};
+
+function spawnSessionRunning(session: SpawnAdmitSession): boolean {
+  return session.status === "running" || session.agentRun?.status === "running";
+}
+
+/** Drop a reservation once its worker is in the list and no longer running. */
+export function pruneSpawnReservations(
+  reservations: readonly SpawnReservation[],
+  sessions: readonly SpawnAdmitSession[],
+): SpawnReservation[] {
+  if (reservations.length === 0) return reservations as SpawnReservation[];
+  const byId = new Map(sessions.map((session) => [session.id, session]));
+  const next = reservations.filter((reservation) => {
+    const session = byId.get(reservation.childId);
+    if (!session) return true;
+    return spawnSessionRunning(session);
+  });
+  return next.length === reservations.length ? (reservations as SpawnReservation[]) : next;
+}
+
+/** Same project rule as findRunningWorkerOnSlice: a null project matches any scope. */
+function reservationOnSlice(row: SpawnReservation, candidate: SpawnReservation, want: string): boolean {
+  if (row.parentId !== candidate.parentId) return false;
+  if (row.slice.trim().toLowerCase() !== want) return false;
+  return row.projectId == null || row.projectId === candidate.projectId;
+}
+
+/**
+ * Decide a spawn against the committed sessions and reservations an updater
+ * has not committed. Room under the cap admits. The same slice, or one past
+ * the cap, refuses. Reserving this child does not count it twice.
+ */
+export function reserveSpawnAdmission(
+  reservations: readonly SpawnReservation[],
+  sessions: readonly SpawnAdmitSession[],
+  candidate: SpawnReservation & { limit: number },
+): { ok: true; reservations: SpawnReservation[] } | { ok: false; error: string } {
+  const kept = pruneSpawnReservations(reservations, sessions).filter((row) => row.childId !== candidate.childId);
+  const slice = candidate.slice.trim();
+  if (slice) {
+    const want = slice.toLowerCase();
+    const running = findRunningWorkerOnSlice(
+      sessions as Array<WorkerRecord & { title?: string }>,
+      { parentId: candidate.parentId, projectId: candidate.projectId },
+      slice,
+    );
+    if (running && running.id !== candidate.childId) return { ok: false, error: SAME_SLICE_SPAWN_ERROR };
+    const reserved = kept.find((row) => reservationOnSlice(row, candidate, want));
+    if (reserved) return { ok: false, error: SAME_SLICE_SPAWN_ERROR };
+  }
+  if (candidate.nested) {
+    const withoutSelf = sessions.filter((session) => session.id !== candidate.childId);
+    const synthetic = kept
+      .filter((row) => row.nested && row.parentId === candidate.parentId && !withoutSelf.some((session) => session.id === row.childId))
+      .map((row) => ({
+        id: row.childId,
+        parentId: row.parentId,
+        hidden: true,
+        agentRun: { status: "running" },
+      }));
+    const blocked = nestedSpawnError([...withoutSelf, ...synthetic], candidate.parentId);
+    if (blocked) return { ok: false, error: blocked };
+  } else {
+    const withoutSelf = sessions.filter((session) => session.id !== candidate.childId);
+    const synthetic = kept
+      .filter((row) => !row.nested && row.parentId === candidate.parentId && !withoutSelf.some((session) => session.id === row.childId))
+      .map((row) => ({
+        id: row.childId,
+        parentId: row.parentId,
+        hidden: true,
+        status: "running" as const,
+        agentRun: { status: "running" },
+      }));
+    const counted = [
+      ...withoutSelf.map((session) => ({
+        parentId: session.parentId,
+        hidden: session.hidden,
+        status: session.status ?? "idle",
+        agentRun: session.agentRun ?? undefined,
+      })),
+      ...synthetic,
+    ];
+    const blocked = rootSpawnError(counted, candidate.parentId, candidate.limit);
+    if (blocked) return { ok: false, error: blocked };
+  }
+  return {
+    ok: true,
+    reservations: [
+      ...kept,
+      {
+        childId: candidate.childId,
+        parentId: candidate.parentId,
+        projectId: candidate.projectId,
+        slice: candidate.slice,
+        nested: candidate.nested,
+      },
+    ],
+  };
 }
 
 function namedSpawnPick(value: unknown): boolean {

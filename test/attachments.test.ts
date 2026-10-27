@@ -423,6 +423,70 @@ test("state save writes picture bytes once and keeps a path", () => {
   }
 });
 
+test("a session with no inline image is not cloned, and one with bytes still offloads", () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "workhorse-attach-id-"));
+  try {
+    const plainSession = { id: "plain", messages: [{ id: "m", role: "assistant", text: "no pictures" }] };
+    const plain = { settings: { theme: "dark" }, sessions: [plainSession] };
+    const kept = offloadStateAttachments(plain, root);
+    assert.equal(kept, plain);
+    assert.equal(kept.sessions[0], plainSession);
+
+    const stored = path.join(root, "attachments", "already.png");
+    const parkedSession = {
+      id: "parked",
+      messages: [{
+        id: "m2",
+        role: "user",
+        text: "see",
+        images: [{ id: "img", name: "already.png", mimeType: "image/png", data: "", kind: "image" as const, sourcePath: stored }],
+      }],
+    };
+    const parked = { sessions: [parkedSession] };
+    const parkedOut = offloadStateAttachments(parked, root);
+    assert.equal(parkedOut, parked);
+    assert.equal(parkedOut.sessions[0], parkedSession);
+
+    const inline: ChatImage = {
+      id: "img1",
+      name: "shot.png",
+      mimeType: "image/png",
+      data: Buffer.from("png-bytes").toString("base64"),
+      kind: "image",
+    };
+    const richSession = { id: "rich", messages: [{ id: "m3", role: "user", text: "see", images: [inline] }] };
+    const rich = { sessions: [richSession] };
+    const saved = offloadStateAttachments(rich, root);
+    assert.notEqual(saved, rich);
+    assert.equal(inline.data.length > 0, true, "the live row keeps its bytes");
+    assert.equal(richSession.messages[0]?.images?.[0]?.data, inline.data);
+    const moved = saved.sessions[0]?.messages?.[0]?.images?.[0];
+    assert.equal(moved?.data, "");
+    assert.ok(moved?.sourcePath?.startsWith(path.join(root, "attachments")));
+    assert.equal(readFileSync(moved!.sourcePath!).equals(Buffer.from("png-bytes")), true);
+
+    const shot = path.join(root, "outside.png");
+    writeFileSync(shot, Buffer.from("from-disk"));
+    const externalImage = {
+      id: "ext",
+      name: "outside.png",
+      mimeType: "image/png",
+      data: "",
+      kind: "image" as const,
+      sourcePath: shot,
+    };
+    const external = { sessions: [{ id: "ext-chat", messages: [{ id: "m4", role: "user", text: "disk", images: [externalImage] }] }] };
+    const copied = offloadStateAttachments(external, root);
+    assert.notEqual(copied, external);
+    assert.equal(externalImage.sourcePath, shot, "a failed or skipped offload must not retarget the live row");
+    const copiedPath = copied.sessions[0]?.messages?.[0]?.images?.[0]?.sourcePath ?? "";
+    assert.match(copiedPath, /attachments[/\\][0-9a-f]{64}\./);
+    assert.equal(readFileSync(copiedPath).equals(Buffer.from("from-disk")), true);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("offload keeps inlined bytes when the blob write fails", () => {
   const image: ChatImage = {
     id: "img1",

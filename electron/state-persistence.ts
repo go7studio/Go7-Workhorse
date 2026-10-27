@@ -58,24 +58,91 @@ export function atomicWriteJson(file: string, value: unknown, mode?: number, opt
 }
 
 /**
+ * How much UTF-8 one desk save encodes before it lets the event loop run.
+ *
+ * A 30MB stringify used to become one buffer on the main thread. Pieces stay
+ * separate, and each piece is encoded as it is written, a slice at a time.
+ */
+export const STATE_WRITE_YIELD_BYTES = 256 * 1024;
+
+function yieldToEventLoop(): Promise<void> {
+  return new Promise((resolve) => {
+    setImmediate(resolve);
+  });
+}
+
+/** End of the next slice. Never splits a surrogate pair, or the file would not match JSON.stringify. */
+function sliceEnd(text: string, offset: number, maxChars: number): number {
+  const cap = Math.max(1, maxChars);
+  let end = Math.min(offset + cap, text.length);
+  if (end < text.length) {
+    const code = text.charCodeAt(end - 1);
+    if (code >= 0xd800 && code <= 0xdbff) end -= 1;
+  }
+  if (end <= offset) end = Math.min(offset + 2, text.length);
+  return end;
+}
+
+async function writeAll(handle: fs.promises.FileHandle, bytes: Buffer): Promise<void> {
+  let written = 0;
+  while (written < bytes.length) {
+    const result = await handle.write(bytes, written, bytes.length - written);
+    if (result.bytesWritten <= 0) throw new Error("state write made no progress");
+    written += result.bytesWritten;
+  }
+}
+
+/**
+ * Write the pieces in order. Small ones share a buffer until the yield mark;
+ * a large chat is sliced so its encode cannot hold the loop.
+ */
+async function writeUtf8Chunks(handle: fs.promises.FileHandle, parts: readonly string[]): Promise<void> {
+  let batch: Buffer[] = [];
+  let batchBytes = 0;
+  const flushBatch = async (yieldAfter: boolean): Promise<void> => {
+    if (batchBytes === 0) return;
+    const bytes = batch.length === 1 ? batch[0]! : Buffer.concat(batch, batchBytes);
+    batch = [];
+    batchBytes = 0;
+    await writeAll(handle, bytes);
+    if (yieldAfter) await yieldToEventLoop();
+  };
+  for (const part of parts) {
+    let offset = 0;
+    while (offset < part.length) {
+      const end = sliceEnd(part, offset, STATE_WRITE_YIELD_BYTES);
+      const encoded = Buffer.from(part.slice(offset, end), "utf8");
+      if (batchBytes > 0 && batchBytes + encoded.length > STATE_WRITE_YIELD_BYTES) await flushBatch(true);
+      batch.push(encoded);
+      batchBytes += encoded.length;
+      offset = end;
+      if (batchBytes >= STATE_WRITE_YIELD_BYTES) await flushBatch(true);
+    }
+  }
+  await flushBatch(false);
+}
+
+/**
  * The disk half, and only the disk half. Serialization is the caller's —
  * review found the stringify (52ms on a 28MB desk state) hiding inside the
  * function sold as off-thread, which made the disk-half numbers read as the
  * whole call's, and left the block outside the stall recorder's tagged window
- * on rotate saves. Text in, bytes out, nothing on the loop but the syscalls'
- * bookkeeping.
+ * on rotate saves. Text in, bytes out. A string or a list of pieces is encoded
+ * in slices so the UTF-8 of a large desk is not one buffer on the main thread.
+ * The live file is renamed only after the temp is complete and closed.
  */
 export async function atomicWriteTextAsync(
   file: string,
-  text: string,
+  text: string | readonly string[],
   mode?: number,
   options?: { fsync?: boolean },
 ): Promise<void> {
   await fs.promises.mkdir(path.dirname(file), { recursive: true });
   const temp = `${file}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+  const parts = typeof text === "string" ? [text] : text;
   const handle = await fs.promises.open(temp, "wx", mode);
   try {
-    await handle.writeFile(text, "utf8");
+    await writeUtf8Chunks(handle, parts);
     if (options?.fsync !== false) await handle.sync();
   } finally {
     await handle.close();
@@ -157,6 +224,11 @@ export type WriteStateOptions = {
    * clone or stringify the desk again — that second pass was the multi-chat hang.
    */
   text?: string;
+  /**
+   * Those bytes in order, not joined. Takes precedence over `text`.
+   * The writer encodes each piece as it is written.
+   */
+  parts?: readonly string[];
 };
 
 export async function writeVersionedStateAsync(
@@ -167,22 +239,26 @@ export async function writeVersionedStateAsync(
 ): Promise<PersistableState> {
   // A caller that already built the bytes — the hot save, which serialises
   // only the chats that moved — must not have this function walk the desk
-  // again. `protect` stays the path for every other caller.
+  // again. `parts` is that save: the pieces stay separate. `protect` stays
+  // the path for every other caller.
   let protectedState: PersistableState;
-  let text: string;
-  if (typeof options.text === "string") {
+  let payload: string | readonly string[];
+  if (Array.isArray(options.parts)) {
     protectedState = state;
-    text = options.text;
+    payload = options.parts;
+  } else if (typeof options.text === "string") {
+    protectedState = state;
+    payload = options.text;
   } else {
     const migrated = migrateState(state);
     protectedState = migrateState(protect(migrated));
     // Serialize before the first await: everything that can hold the loop —
     // clones above, stringify here — happens on the caller's tagged stretch,
     // and what follows is genuinely off-thread.
-    text = JSON.stringify(protectedState);
+    payload = JSON.stringify(protectedState);
   }
   if (options.rotateBackups !== false) await rotateFileBackupsAsync(file);
-  await atomicWriteTextAsync(file, text, undefined, { fsync: options.fsync ?? options.rotateBackups !== false });
+  await atomicWriteTextAsync(file, payload, undefined, { fsync: options.fsync ?? options.rotateBackups !== false });
   return protectedState;
 }
 

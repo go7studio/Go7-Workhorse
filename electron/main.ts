@@ -720,13 +720,10 @@ function stateFileSize(file: string): number {
 async function writeState(state: Persistable): Promise<boolean> {
   try {
     /*
-     * The tag covers the clones and the stringify — the stretch that actually
-     * holds the loop. It clears before the disk await: an instrument that kept
-     * "state:save" set across the off-thread wait blamed the save for every
-     * unrelated stall in that window, and an instrument that leans toward the
-     * hypothesis it was built to test is worse than none. The stringify runs
-     * before the first await inside the write, so clearing on the next
-     * microtask leaves only genuinely-off-thread time untagged.
+     * The tag covers the dirty-chat stringify — the stretch that holds the
+     * loop. It clears before the chunked write. A tag left set across that
+     * write's awaits blamed the save for every unrelated stall in the window.
+     * The microtask clear stays so the tag is gone at the first await.
      */
     setPerfCause("state:save");
     fs.mkdirSync(path.dirname(statePath()), { recursive: true });
@@ -781,12 +778,13 @@ async function writeState(state: Persistable): Promise<boolean> {
     // A newer save can only arrive after the await below, so this assignment
     // cannot clobber a fold that already happened.
     if (residentDesk === state) residentDesk = prepared.state;
+    clearPerfCause();
+    queueMicrotask(clearPerfCause);
     const pending = writeVersionedStateAsync(file, prepared.state, (snapshot) => snapshot, {
       rotateBackups,
       fsync,
-      text: prepared.text,
+      parts: prepared.parts,
     });
-    queueMicrotask(clearPerfCause);
     await pending;
     // The tail is save work too — the bookmark walk and jobEngine.sync run on
     // the loop over every session. Untagged, a stall here reads "unknown" and

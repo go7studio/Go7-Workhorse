@@ -4,8 +4,10 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { createHotDeskMemory, prepareDeskSaveText } from "../electron/hot-desk-save";
 import {
   CURRENT_STATE_VERSION,
+  STATE_WRITE_YIELD_BYTES,
   createSaveQueue,
   readComposerDraftFile,
   readStringMapFile,
@@ -201,6 +203,114 @@ test("overlapping saves keep last-writer-wins order", async () => {
     await Promise.all(writes);
     assert.equal((readVersionedState(file).state.sessions as unknown[]).length, 5, "the last snapshot is the file");
   } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("piece writes match JSON.stringify of a desk with a large chat", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "workhorse-piece-save-"));
+  const file = path.join(root, "workhorse-state.json");
+  try {
+    const marker = "\uD83D\uDE42";
+    const stub = {
+      id: "large",
+      messages: [
+        { id: "th", kind: "thought", text: "kept-thought" },
+        { id: "tool", kind: "tool", text: "" },
+      ],
+    };
+    const skeleton = JSON.stringify(stub);
+    const at = skeleton.lastIndexOf('""');
+    assert.equal(skeleton.slice(at - 7, at + 2), '"text":""');
+    const insertAt = at + 1;
+    const pad = STATE_WRITE_YIELD_BYTES - 1 - insertAt;
+    assert.ok(pad > 0, "the yield boundary has to fall inside the large chat");
+    const large = {
+      id: "large",
+      messages: [
+        { id: "th", kind: "thought", text: "kept-thought" },
+        { id: "tool", kind: "tool", text: `${"a".repeat(pad)}${marker}${"b".repeat(STATE_WRITE_YIELD_BYTES)}` },
+      ],
+    };
+    const largeJson = JSON.stringify(large);
+    assert.equal(largeJson.charCodeAt(STATE_WRITE_YIELD_BYTES - 1), marker.charCodeAt(0), "the slice boundary sits on a surrogate");
+    assert.equal(largeJson.charCodeAt(STATE_WRITE_YIELD_BYTES), marker.charCodeAt(1));
+    const desk: PersistableState = {
+      settings: { theme: "plain" },
+      sessions: [
+        { id: "small", messages: [{ id: "s", text: "hi" }] },
+        large,
+        { id: "tail", status: "idle", messages: [{ id: "t", kind: "thought", text: "still here" }] },
+      ],
+      usage: [{ model: "grok", tokens: 3 }],
+    };
+    const prepared = prepareDeskSaveText(desk, createHotDeskMemory(), {
+      protectSecrets: (state) => state,
+      offloadFull: (state) => state,
+      offloadOne: (session) => session,
+    });
+    const joined = prepared.parts.join("");
+    assert.ok(prepared.parts.length > 4, "the desk must stay in pieces, not one string");
+    assert.equal(joined, JSON.stringify(prepared.state));
+    assert.equal(prepared.chatsRead, 3);
+    await writeVersionedStateAsync(file, prepared.state, (state) => state, {
+      rotateBackups: false,
+      fsync: false,
+      parts: prepared.parts,
+    });
+    const written = fs.readFileSync(file, "utf8");
+    assert.equal(written, JSON.stringify(desk));
+    assert.equal(written.includes("kept-thought"), true);
+    assert.equal(written.includes("\"kind\":\"tool\""), true);
+    const persistence = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "electron", "state-persistence.ts"), "utf8");
+    assert.match(persistence, /setImmediate\(resolve\)/);
+    assert.match(persistence, /STATE_WRITE_YIELD_BYTES = 256 \* 1024/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a throw or a failed rename does not replace a good desk file", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "workhorse-piece-fail-"));
+  const file = path.join(root, "workhorse-state.json");
+  const good = JSON.stringify({ sessions: [{ id: "kept", messages: [{ text: "safe" }] }] });
+  const realOpen = fs.promises.open;
+  const realRename = fs.promises.rename;
+  const nextParts = ['{"sessions":[{"id":"lost"}]}'];
+  try {
+    fs.writeFileSync(file, good, "utf8");
+    (fs.promises as { open: typeof realOpen }).open = (async (...args: Parameters<typeof realOpen>) => {
+      const handle = await realOpen(...args);
+      handle.write = (async () => {
+        throw new Error("disk full");
+      }) as typeof handle.write;
+      return handle;
+    }) as typeof realOpen;
+    await assert.rejects(
+      () => writeVersionedStateAsync(file, { sessions: [{ id: "lost" }] }, (state) => state, {
+        rotateBackups: false,
+        parts: nextParts,
+      }),
+      /disk full/,
+    );
+    assert.equal(fs.readFileSync(file, "utf8"), good, "a throw mid-write must leave the live file");
+
+    (fs.promises as { open: typeof realOpen }).open = realOpen;
+    (fs.promises as { rename: typeof realRename }).rename = (async () => {
+      throw new Error("rename refused");
+    }) as typeof realRename;
+    await assert.rejects(
+      () => writeVersionedStateAsync(file, { sessions: [{ id: "lost" }] }, (state) => state, {
+        rotateBackups: false,
+        parts: nextParts,
+      }),
+      /rename refused/,
+    );
+    assert.equal(fs.readFileSync(file, "utf8"), good, "a failed rename must leave the live file");
+    assert.equal(fs.existsSync(`${file}.replace-${process.pid}`), false);
+  } finally {
+    (fs.promises as { open: typeof realOpen }).open = realOpen;
+    (fs.promises as { rename: typeof realRename }).rename = realRename;
     fs.rmSync(root, { recursive: true, force: true });
   }
 });

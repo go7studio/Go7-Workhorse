@@ -10,7 +10,8 @@ import type { PersistableState } from "./state-persistence";
  * The first save still reads every chat, because the file has to contain a
  * complete desk. A later save, while any chat is running or waiting, reads a
  * chat only when that object is not the one already prepared. Idle chats stay
- * the bytes from last time.
+ * the bytes from last time. Those bytes are kept as separate pieces: joining
+ * them into one string was another full copy of the desk on the main thread.
  */
 
 export type HotDeskMemory = {
@@ -20,7 +21,11 @@ export type HotDeskMemory = {
 
 export type PreparedDesk = {
   state: PersistableState;
-  text: string;
+  /**
+   * The file, in order, not joined. Concatenation is the desk JSON.
+   * Idle chats reuse the string from the last save.
+   */
+  parts: string[];
   /** Chats whose bodies were serialised on this call. */
   chatsRead: number;
   /** 1 when this call cloned or offloaded the whole desk, 0 on a hot tick. */
@@ -52,17 +57,17 @@ function isBusySession(session: unknown): boolean {
   return status === "running" || status === "needs-input";
 }
 
-function deskText(state: PersistableState, memory: HotDeskMemory): { text: string; chatsRead: number } {
-  const shell = { ...state };
-  delete shell.sessions;
-  delete shell.sessionOrder;
+function deskPieces(state: PersistableState, memory: HotDeskMemory): { parts: string[]; chatsRead: number } {
+  const view: PersistableState = { ...state };
+  delete view.sessionOrder;
   const sessions = Array.isArray(state.sessions) ? state.sessions : null;
   if (!sessions) {
+    delete view.sessions;
     memory.byId = new Map();
     memory.primed = true;
-    return { text: JSON.stringify(shell), chatsRead: 0 };
+    return { parts: [JSON.stringify(view)], chatsRead: 0 };
   }
-  const parts: string[] = [];
+  const sessionJson: string[] = [];
   const nextById = new Map<string, { ref: unknown; json: string }>();
   let chatsRead = 0;
   for (const session of sessions) {
@@ -75,15 +80,35 @@ function deskText(state: PersistableState, memory: HotDeskMemory): { text: strin
       chatsRead += 1;
       json = JSON.stringify(session) ?? "null";
     }
-    parts.push(json);
+    sessionJson.push(json);
     if (id) nextById.set(id, { ref: session, json });
   }
   memory.byId = nextById;
   memory.primed = true;
-  const sessionsJson = `"sessions":[${parts.join(",")}]`;
-  const shellJson = JSON.stringify(shell);
-  const text = shellJson === "{}" ? `{${sessionsJson}}` : `${shellJson.slice(0, -1)},${sessionsJson}}`;
-  return { text, chatsRead };
+  // Same bytes as JSON.stringify of the desk with sessionOrder removed, but
+  // each chat stays its own string so the writer can yield between them.
+  const parts: string[] = ["{"];
+  let emitted = false;
+  for (const key of Object.keys(view)) {
+    if (key === "sessions") {
+      if (emitted) parts.push(",");
+      emitted = true;
+      parts.push(`${JSON.stringify("sessions")}:[`);
+      for (let index = 0; index < sessionJson.length; index += 1) {
+        if (index > 0) parts.push(",");
+        parts.push(sessionJson[index] ?? "null");
+      }
+      parts.push("]");
+      continue;
+    }
+    const encoded = JSON.stringify(view[key]);
+    if (encoded === undefined) continue;
+    if (emitted) parts.push(",");
+    emitted = true;
+    parts.push(`${JSON.stringify(key)}:${encoded}`);
+  }
+  parts.push("}");
+  return { parts, chatsRead };
 }
 
 /**
@@ -102,8 +127,8 @@ export function prepareDeskSaveText(
   const hot = memory.primed && !!sessions?.some(isBusySession);
   if (!sessions || !hot) {
     const full = hooks.offloadFull(safe);
-    const written = deskText(full, memory);
-    return { state: full, text: written.text, chatsRead: written.chatsRead, fullDeskReads: 1 };
+    const written = deskPieces(full, memory);
+    return { state: full, parts: written.parts, chatsRead: written.chatsRead, fullDeskReads: 1 };
   }
   const nextSessions = sessions.map((session) => {
     const id = sessionId(session);
@@ -114,8 +139,8 @@ export function prepareDeskSaveText(
   });
   const prepared: PersistableState = { ...safe, sessions: nextSessions };
   delete prepared.sessionOrder;
-  const written = deskText(prepared, memory);
-  return { state: prepared, text: written.text, chatsRead: written.chatsRead, fullDeskReads: 0 };
+  const written = deskPieces(prepared, memory);
+  return { state: prepared, parts: written.parts, chatsRead: written.chatsRead, fullDeskReads: 0 };
 }
 
 /**

@@ -859,57 +859,317 @@ export function compactFromResult(
   };
 }
 
+/** A line or Content-Length body over this is skipped, not parsed and not kept. */
+export const ACP_FRAME_MAX_BYTES = 2_000_000;
+
+const ACP_CONTENT_LENGTH = "Content-Length:";
+const ACP_HEADER_SCAN_MAX = 65_536;
+const EMPTY_BUFFER = Buffer.alloc(0);
+
+/**
+ * Stdout chunks kept as they arrived. Appending does not copy the bytes
+ * already held; a complete line is copied once, when it is parsed.
+ */
+export type ByteQueue = {
+  parts: Buffer[];
+  head: number;
+  offset: number;
+  length: number;
+  /** Index of the next LF in the live bytes, or -1 when there is none. */
+  newlineAt: number;
+};
+
+export function createByteQueue(): ByteQueue {
+  return { parts: [], head: 0, offset: 0, length: 0, newlineAt: -1 };
+}
+
+function clearByteQueue(queue: ByteQueue): void {
+  queue.parts = [];
+  queue.head = 0;
+  queue.offset = 0;
+  queue.length = 0;
+  queue.newlineAt = -1;
+}
+
+function rescanNewline(queue: ByteQueue): void {
+  let seen = 0;
+  for (let partIndex = queue.head; partIndex < queue.parts.length; partIndex += 1) {
+    const part = queue.parts[partIndex]!;
+    const from = partIndex === queue.head ? queue.offset : 0;
+    const at = part.indexOf(0x0a, from);
+    if (at >= 0) {
+      queue.newlineAt = seen + (at - from);
+      return;
+    }
+    seen += part.length - from;
+  }
+  queue.newlineAt = -1;
+}
+
+export function appendByteChunk(queue: ByteQueue, chunk: Buffer | string): void {
+  const buf = typeof chunk === "string" ? (chunk ? Buffer.from(chunk) : EMPTY_BUFFER) : chunk;
+  if (buf.length === 0) return;
+  if (queue.newlineAt < 0) {
+    const at = buf.indexOf(0x0a);
+    if (at >= 0) queue.newlineAt = queue.length + at;
+  }
+  queue.parts.push(buf);
+  queue.length += buf.length;
+}
+
+function advanceByteQueue(queue: ByteQueue, count: number): void {
+  let left = Math.min(count, queue.length);
+  queue.length -= left;
+  while (left > 0) {
+    const part = queue.parts[queue.head]!;
+    const avail = part.length - queue.offset;
+    if (avail > left) {
+      queue.offset += left;
+      break;
+    }
+    left -= avail;
+    queue.head += 1;
+    queue.offset = 0;
+  }
+  if (queue.length === 0) {
+    clearByteQueue(queue);
+    return;
+  }
+  if (queue.head > 16) {
+    queue.parts.splice(0, queue.head);
+    queue.head = 0;
+  }
+  rescanNewline(queue);
+}
+
+function copyByteQueue(queue: ByteQueue, count: number): Buffer {
+  if (count <= 0) return EMPTY_BUFFER;
+  const out = Buffer.allocUnsafe(count);
+  let filled = 0;
+  let partIndex = queue.head;
+  let offset = queue.offset;
+  while (filled < count && partIndex < queue.parts.length) {
+    const part = queue.parts[partIndex]!;
+    const take = Math.min(part.length - offset, count - filled);
+    part.copy(out, filled, offset, offset + take);
+    filled += take;
+    partIndex += 1;
+    offset = 0;
+  }
+  return out;
+}
+
+function byteAt(queue: ByteQueue, index: number): number {
+  if (index < 0 || index >= queue.length) return -1;
+  let left = index;
+  for (let partIndex = queue.head; partIndex < queue.parts.length; partIndex += 1) {
+    const part = queue.parts[partIndex]!;
+    const from = partIndex === queue.head ? queue.offset : 0;
+    const avail = part.length - from;
+    if (left < avail) return part[from + left]!;
+    left -= avail;
+  }
+  return -1;
+}
+
+/** Complete LF-delimited lines. The remainder stays in the queue, uncopied. */
+export function takeByteLines(queue: ByteQueue): string[] {
+  const lines: string[] = [];
+  while (queue.newlineAt >= 0) {
+    const line = copyByteQueue(queue, queue.newlineAt);
+    advanceByteQueue(queue, queue.newlineAt + 1);
+    let text = line.toString("utf8");
+    if (text.endsWith("\r")) text = text.slice(0, -1);
+    lines.push(text);
+  }
+  return lines;
+}
+
+export type AcpStdout = {
+  queue: ByteQueue;
+  /** Bytes of an oversized Content-Length body still to drop. */
+  discardBytes: number;
+  /** Drop through the next LF. The oversized line is not kept. */
+  discardLine: boolean;
+};
+
+export function createAcpStdout(): AcpStdout {
+  return { queue: createByteQueue(), discardBytes: 0, discardLine: false };
+}
+
+export function acpBufferedBytes(state: AcpStdout): number {
+  return state.queue.length;
+}
+
+export function acpDiscardBytes(state: AcpStdout): number {
+  return state.discardBytes;
+}
+
+export function acpDiscardingLine(state: AcpStdout): boolean {
+  return state.discardLine;
+}
+
+function discardIncoming(state: AcpStdout, chunk: Buffer): Buffer {
+  let rest = chunk;
+  if (state.discardBytes > 0) {
+    if (rest.length <= state.discardBytes) {
+      state.discardBytes -= rest.length;
+      return EMPTY_BUFFER;
+    }
+    rest = rest.subarray(state.discardBytes);
+    state.discardBytes = 0;
+  }
+  if (state.discardLine) {
+    const at = rest.indexOf(0x0a);
+    if (at < 0) return EMPTY_BUFFER;
+    state.discardLine = false;
+    rest = rest.subarray(at + 1);
+  }
+  return rest;
+}
+
+function contentLengthGate(queue: ByteQueue): "yes" | "no" | "short" {
+  const prefix = ACP_CONTENT_LENGTH;
+  const n = Math.min(queue.length, prefix.length);
+  for (let index = 0; index < n; index += 1) {
+    if (byteAt(queue, index) !== prefix.charCodeAt(index)) return "no";
+  }
+  return queue.length < prefix.length ? "short" : "yes";
+}
+
+/** Index of the first byte after the header's blank line, or -1. */
+function findHeaderEnd(queue: ByteQueue): number {
+  const limit = Math.min(queue.length, ACP_HEADER_SCAN_MAX);
+  let prev1 = -1;
+  let prev2 = -1;
+  let prev3 = -1;
+  let seen = 0;
+  for (let partIndex = queue.head; partIndex < queue.parts.length && seen < limit; partIndex += 1) {
+    const part = queue.parts[partIndex]!;
+    const from = partIndex === queue.head ? queue.offset : 0;
+    for (let index = from; index < part.length && seen < limit; index += 1) {
+      const bite = part[index]!;
+      if (bite === 0x0a && prev1 === 0x0a) return seen + 1;
+      if (bite === 0x0a && prev1 === 0x0d && prev2 === 0x0a && prev3 === 0x0d) return seen + 1;
+      prev3 = prev2;
+      prev2 = prev1;
+      prev1 = bite;
+      seen += 1;
+    }
+  }
+  return -1;
+}
+
+function pushParsed(messages: JsonRpcMessage[], raw: string, why: string): void {
+  if (!raw.trim()) return;
+  try {
+    messages.push(JSON.parse(raw) as JsonRpcMessage);
+  } catch {
+    debugAcp({ skip: why, raw: raw.slice(0, 240) });
+  }
+}
+
+function drainAcp(state: AcpStdout, messages: JsonRpcMessage[]): void {
+  const queue = state.queue;
+  for (let guard = 0; queue.length > 0 && guard < 100_000; guard += 1) {
+    const before = queue.length;
+    const first = byteAt(queue, 0);
+    if (first === 0x0a) {
+      advanceByteQueue(queue, 1);
+      continue;
+    }
+    if (first === 0x0d && byteAt(queue, 1) === 0x0a) {
+      advanceByteQueue(queue, 2);
+      continue;
+    }
+    const gate = contentLengthGate(queue);
+    if (gate === "short" && queue.newlineAt < 0) {
+      if (queue.length > ACP_FRAME_MAX_BYTES) {
+        clearByteQueue(queue);
+        state.discardLine = true;
+      }
+      break;
+    }
+    if (gate === "yes") {
+      const headerEnd = findHeaderEnd(queue);
+      if (headerEnd < 0) {
+        if (queue.length >= ACP_HEADER_SCAN_MAX) {
+          clearByteQueue(queue);
+          state.discardLine = true;
+        }
+        break;
+      }
+      const headerText = copyByteQueue(queue, headerEnd).toString("ascii");
+      const header = headerText.match(/^Content-Length:\s*(\d+)\r?\n(?:[A-Za-z0-9-]+:[^\n]*\n)*\r?\n/i);
+      if (!header) break;
+      const headerBytes = Buffer.byteLength(header[0], "utf8");
+      const length = Number(header[1]);
+      if (length > ACP_FRAME_MAX_BYTES) {
+        const have = Math.max(0, queue.length - headerBytes);
+        const drop = Math.min(have, length);
+        advanceByteQueue(queue, headerBytes + drop);
+        const restBody = length - drop;
+        if (restBody > 0) state.discardBytes = restBody;
+        continue;
+      }
+      if (queue.length < headerBytes + length) break;
+      const raw = copyByteQueue(queue, headerBytes + length).subarray(headerBytes).toString("utf8");
+      advanceByteQueue(queue, headerBytes + length);
+      pushParsed(messages, raw, "content-length-json");
+      continue;
+    }
+    if (first === 0x7b) {
+      if (queue.newlineAt < 0) {
+        if (queue.length > ACP_FRAME_MAX_BYTES) {
+          clearByteQueue(queue);
+          state.discardLine = true;
+        }
+        break;
+      }
+      if (queue.newlineAt > ACP_FRAME_MAX_BYTES) {
+        advanceByteQueue(queue, queue.newlineAt + 1);
+        continue;
+      }
+      const line = copyByteQueue(queue, queue.newlineAt).toString("utf8").replace(/\r$/, "");
+      advanceByteQueue(queue, queue.newlineAt + 1);
+      pushParsed(messages, line, "ndjson");
+      continue;
+    }
+    if (queue.newlineAt < 0) {
+      if (queue.length > ACP_FRAME_MAX_BYTES) {
+        clearByteQueue(queue);
+        state.discardLine = true;
+      }
+      break;
+    }
+    debugAcp({
+      skip: "prefix",
+      raw: copyByteQueue(queue, Math.min(queue.newlineAt, 120)).toString("utf8"),
+    });
+    advanceByteQueue(queue, queue.newlineAt + 1);
+    if (queue.length === before) break;
+  }
+}
+
+/** Append one stdout chunk. Earlier chunks are not copied again. */
+export function pushAcpStdout(state: AcpStdout, chunk: Buffer | string): JsonRpcMessage[] {
+  const incoming = typeof chunk === "string" ? (chunk ? Buffer.from(chunk) : EMPTY_BUFFER) : chunk;
+  const kept = incoming.length ? discardIncoming(state, incoming) : EMPTY_BUFFER;
+  if (kept.length) appendByteChunk(state.queue, kept);
+  const messages: JsonRpcMessage[] = [];
+  drainAcp(state, messages);
+  return messages;
+}
+
 export function consumeAcpMessages(buffer: string): { messages: JsonRpcMessage[]; rest: string } {
   const parsed = consumeAcpBuffers(Buffer.from(buffer, "utf8"));
   return { messages: parsed.messages, rest: parsed.rest.toString("utf8") };
 }
 
 export function consumeAcpBuffers(input: Buffer): { messages: JsonRpcMessage[]; rest: Buffer } {
-  const messages: JsonRpcMessage[] = [];
-  let rest = input;
-  while (rest.length > 0) {
-    if (rest[0] === 0x0a) {
-      rest = rest.subarray(1);
-      continue;
-    }
-    if (rest[0] === 0x0d && rest[1] === 0x0a) {
-      rest = rest.subarray(2);
-      continue;
-    }
-    const asText = rest.toString("utf8");
-    if (asText.startsWith("Content-Length:")) {
-      const header = asText.match(/^Content-Length:\s*(\d+)\r?\n(?:[A-Za-z0-9-]+:[^\n]*\n)*\r?\n/i);
-      if (!header) break;
-      const headerBytes = Buffer.byteLength(header[0], "utf8");
-      const length = Number(header[1]);
-      if (rest.length < headerBytes + length) break;
-      const raw = rest.subarray(headerBytes, headerBytes + length).toString("utf8");
-      rest = rest.subarray(headerBytes + length);
-      try {
-        messages.push(JSON.parse(raw) as JsonRpcMessage);
-      } catch {
-        debugAcp({ skip: "content-length-json", raw: raw.slice(0, 240) });
-      }
-      continue;
-    }
-    if (rest[0] === 0x7b) {
-      const newline = rest.indexOf(0x0a);
-      if (newline < 0) break;
-      const line = rest.subarray(0, newline).toString("utf8").replace(/\r$/, "");
-      rest = rest.subarray(newline + 1);
-      if (!line.trim()) continue;
-      try {
-        messages.push(JSON.parse(line) as JsonRpcMessage);
-      } catch {
-        debugAcp({ skip: "ndjson", raw: line.slice(0, 240) });
-      }
-      continue;
-    }
-    const newline = rest.indexOf(0x0a);
-    if (newline < 0) break;
-    debugAcp({ skip: "prefix", raw: rest.subarray(0, Math.min(newline, 120)).toString("utf8") });
-    rest = rest.subarray(newline + 1);
-  }
+  const state = createAcpStdout();
+  const messages = pushAcpStdout(state, input);
+  const rest = state.queue.length ? copyByteQueue(state.queue, state.queue.length) : EMPTY_BUFFER;
   return { messages, rest };
 }
 
@@ -1108,7 +1368,7 @@ export class GrokAgent {
   private readonly spawn: GrokSpawnFn;
   private child: ChildProcessWithoutNullStreams | null = null;
   private nextId = 1;
-  private buffer = "";
+  private stdoutState = createAcpStdout();
   private stderr = "";
   private pending = new Map<JsonRpcId, Pending>();
   private permissionWaiters = new Map<string, (answer: PermissionAnswer) => void>();
@@ -1167,9 +1427,8 @@ export class GrokAgent {
     // stopping this group can still find it at the next boot.
     const child = trackProcessGroup(this.spawn(this.spec), sessionIdFromSpec(this.spec));
     this.child = child;
-    child.stdout.setEncoding("utf8");
     child.stderr.setEncoding("utf8");
-    child.stdout.on("data", (chunk: string) => this.onStdout(chunk));
+    child.stdout.on("data", (chunk: Buffer | string) => this.onStdout(chunk));
     child.stderr.on("data", (chunk: string) => {
       // The tail is what explains an exit. The whole of it grew for as long as
       // the chat stayed open, and was pasted entire into the exit's error.
@@ -1569,12 +1828,11 @@ export class GrokAgent {
     this.child.stdin.write(`${JSON.stringify(message)}\n`);
   }
 
-  private onStdout(chunk: string): void {
+  private onStdout(chunk: Buffer | string): void {
     try {
-      debugAcp({ stdout: chunk.length, head: chunk.slice(0, 180) });
-      this.buffer += chunk;
-      const { messages, rest } = consumeAcpMessages(this.buffer);
-      this.buffer = rest;
+      const head = typeof chunk === "string" ? chunk.slice(0, 180) : chunk.toString("utf8", 0, Math.min(180, chunk.length));
+      debugAcp({ stdout: chunk.length, head });
+      const messages = pushAcpStdout(this.stdoutState, chunk);
       const { live, replies } = partitionAcpBatch(messages);
       for (const message of live) this.onMessage(message);
       for (const message of replies) this.onMessage(message);

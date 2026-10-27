@@ -122,10 +122,25 @@ function killIo(io: Partial<KillIo>): KillIo {
   };
 }
 
-/** True while any process in the group is still there. */
+/**
+ * True while the group is still there.
+ *
+ * POSIX signals the group (`kill(-pgid, 0)`). Windows has no such group:
+ * the record's pgid is the leader pid, and `kill(pid, 0)` is the existence
+ * check. EPERM means it is there. ESRCH, or any other miss, means it is gone.
+ * A constant false made the boot reaper delete the record and leave the orphan.
+ */
 export function groupIsAlive(pgid: number, io: Partial<KillIo> = {}): boolean {
   const resolved = killIo(io);
-  if (resolved.platform === "win32") return false;
+  if (resolved.platform === "win32") {
+    if (!Number.isInteger(pgid) || pgid <= 0) return false;
+    try {
+      resolved.kill(pgid, 0);
+      return true;
+    } catch (error) {
+      return (error as NodeJS.ErrnoException)?.code === "EPERM";
+    }
+  }
   try {
     resolved.kill(-pgid, 0);
     return true;

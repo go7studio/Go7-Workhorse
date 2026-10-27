@@ -1022,6 +1022,17 @@ test("a state:save row carries the payload size beside the gap and the cause", (
   }
 });
 
+test("the save tag clears before the chunked desk write", () => {
+  const save = source("electron", "main.ts");
+  const body = save.slice(save.indexOf("async function writeState"), save.indexOf("const HOUSEKEEPING_DELAY_MS"));
+  const prepared = body.indexOf("prepareDeskSaveText(");
+  const clear = body.indexOf("clearPerfCause()");
+  const write = body.indexOf("writeVersionedStateAsync(");
+  assert.ok(prepared > 0 && clear > prepared && write > clear, "stringify stays tagged; the chunked write must not");
+  assert.match(body, /parts: prepared\.parts/);
+  assert.match(body, /queueMicrotask\(clearPerfCause\)/);
+});
+
 /* ------------------------------------------- item 5: backups on a slower clock */
 
 test("two saves inside the cadence rotate once", () => {

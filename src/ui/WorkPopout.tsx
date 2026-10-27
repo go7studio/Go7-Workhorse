@@ -419,6 +419,7 @@ export const WorkPopout = memo(function WorkPopout({
   workedMs,
   live,
   onOpenThread,
+  onRevealSpilled,
 }: {
   block: Extract<TranscriptBlock, { type: "reply" }>;
   peeled?: { thought: string; body: string };
@@ -426,6 +427,8 @@ export const WorkPopout = memo(function WorkPopout({
   workedMs?: number;
   live: boolean;
   onOpenThread?: (id: string) => void;
+  /** Ask the pane to read spilled steps into view state, not the saved session. */
+  onRevealSpilled?: () => void;
 }) {
   const [now, setNow] = useState(Date.now());
   const { open: bodyOpen, onToggle: onBodyToggle } = useFoldOpen(false);
@@ -487,7 +490,14 @@ export const WorkPopout = memo(function WorkPopout({
       {bodyOpen && hasInner ? (
         <div className="work-body">
           {packed.earlier.length > 0 ? (
-            <details className="work-fold work-step" data-kind="earlier" onToggle={onEarlierToggle}>
+            <details
+              className="work-fold work-step"
+              data-kind="earlier"
+              onToggle={(event) => {
+                onEarlierToggle(event);
+                if (event.currentTarget.open) onRevealSpilled?.();
+              }}
+            >
               <summary>{earlierWorkLabel(packed.earlier)}</summary>
               {earlierOpen ? (
               <div className="work-fold-body">

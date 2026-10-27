@@ -29,11 +29,14 @@ import type { ChatMessage } from "../src/lib/types";
  *
  * Three lines are drawn deliberately:
  *
- * - **Only terminal workers.** A running worker's transcript is being appended
- *   to; a finished one's never changes again.
+ * - **Terminal workers still move every thought and tool row.** A finished
+ *   worker's transcript is not being appended to. Any other chat spills only
+ *   once it holds more than `TRANSCRIPT_INLINE_STEP_LIMIT` of those rows, and
+ *   the newest of them stay inline, in order, with every prose row.
  * - **Only thinking and tool rows.** The prose is what a person reads — the
  *   brief, the replies, the final report — and it stays in the chat where
- *   opening it costs nothing.
+ *   opening it costs nothing. User, assistant, system, peer, and compact rows
+ *   are not spilled. A live chat is never retired to an empty message list.
  * - **Nothing is ever deleted.** Not capped, not trimmed, not garbage
  *   collected. A sidecar with no chat pointing at it stays on disk, for exactly
  *   the reason attachment blobs do: deleting a file on the strength of a
@@ -45,6 +48,14 @@ const FINISHED_WORKER_STATUS = new Set(["completed", "failed", "cancelled", "tim
 
 /** The rows worth moving. Thinking and tool output are the bulk; prose is what a person opens the chat for. */
 const OFFLOADABLE_KIND = new Set(["thought", "tool"]);
+
+/**
+ * Thought and tool rows a non-terminal chat keeps inline.
+ *
+ * Older ones move to the sidecar. The newest stay, so the open window can
+ * paint the live hop without the rows that already scrolled into Earlier.
+ */
+export const TRANSCRIPT_INLINE_STEP_LIMIT = 240;
 
 /**
  * How old a finished worker's last activity has to be before the whole
@@ -199,6 +210,12 @@ const diskIo: TranscriptIo = {
  * be there.
  */
 const verifiedSidecars = new Map<string, string>();
+/**
+ * A live tail already within the inline cap, keyed by that messages array.
+ * The next save of the same array must not read the sidecar back and merge it.
+ * A new array — another thought or tool — is checked again.
+ */
+const settledLiveTails = new WeakSet<object>();
 
 function sidecarShape(sidecar: TranscriptSidecar): string {
   return `${sidecar.total}:${sidecar.rows.length}`;
@@ -289,43 +306,37 @@ function keepEarlierSidecar(file: string, messages: readonly unknown[], io: Tran
   }
 }
 
+function isOffloadableMessage(message: unknown): boolean {
+  const kind = record(message)?.kind;
+  return typeof kind === "string" && OFFLOADABLE_KIND.has(kind);
+}
+
 /**
- * Move one finished worker's thinking and tool rows to a sidecar.
- *
- * Fails closed in every direction: no user-data folder, no messages, nothing
- * offloadable, a write that throws, a file that reads back wrong — each one
- * returns the session exactly as it arrived, still holding every row.
+ * Write a sidecar and return the stripped session, or the original session
+ * when the write cannot be trusted. `full` is the array the indexes refer to.
  */
-export function offloadSessionTranscript(session: unknown, userData: string, io: TranscriptIo = diskIo): unknown {
-  const row = record(session);
-  if (!row || !userData.trim()) return session;
-  if (!isTerminalWorker(row)) return session;
-  const sessionId = typeof row.id === "string" ? row.id.trim() : "";
-  if (!sessionId) return session;
-  const messages = Array.isArray(row.messages) ? row.messages : null;
-  if (!messages || messages.length === 0) return session;
-
-  const inline: unknown[] = [];
-  const rows: TranscriptSidecar["rows"] = [];
-  messages.forEach((message, index) => {
-    const kind = record(message)?.kind;
-    if (typeof kind === "string" && OFFLOADABLE_KIND.has(kind)) rows.push({ index, message: message as ChatMessage });
-    else inline.push(message);
-  });
-  if (rows.length === 0) return session;
-
+function commitOffload(
+  session: unknown,
+  row: Record<string, unknown>,
+  full: readonly unknown[],
+  inline: unknown[],
+  rows: TranscriptSidecar["rows"],
+  sessionId: string,
+  userData: string,
+  io: TranscriptIo,
+): unknown {
   const file = transcriptSidecarPath(userData, sessionId);
   const sidecar: TranscriptSidecar = {
     version: TRANSCRIPT_SIDECAR_VERSION,
     sessionId,
-    total: messages.length,
+    total: full.length,
     rows,
   };
   const shape = sidecarShape(sidecar);
   const alreadyOnDisk = verifiedSidecars.get(file) === shape && io.exists(file);
   if (!alreadyOnDisk) {
     verifiedSidecars.delete(file);
-    if (!keepEarlierSidecar(file, messages, io)) return session;
+    if (!keepEarlierSidecar(file, full, io)) return session;
     try {
       io.write(file, sidecar);
     } catch {
@@ -341,6 +352,108 @@ export function offloadSessionTranscript(session: unknown, userData: string, io:
     transcriptSidecar: file,
     transcriptOffloaded: rows.length,
   };
+}
+
+/**
+ * Spill thought and tool rows past the inline cap for a chat that is still live.
+ *
+ * Fails closed the same way as a terminal offload: a sidecar we cannot read,
+ * a merge that will not line up, a write that throws, or a file that reads
+ * back short all return the session still holding every inline row. Prose
+ * stays. The message list is never cleared.
+ */
+function offloadLiveOverflow(
+  session: unknown,
+  row: Record<string, unknown>,
+  messages: ChatMessage[],
+  sessionId: string,
+  userData: string,
+  io: TranscriptIo,
+): unknown {
+  if (settledLiveTails.has(messages)) return session;
+  let source: ChatMessage[] = messages;
+  const existing = typeof row.transcriptSidecar === "string" ? row.transcriptSidecar.trim() : "";
+  if (existing) {
+    const held = readTranscriptSidecar(existing, io);
+    if (!held || held.sessionId !== sessionId) return session;
+    const inlineIds = new Set(messages.flatMap((message) => (typeof message?.id === "string" ? [message.id] : [])));
+    let missing = false;
+    let overlap = false;
+    for (const entry of held.rows) {
+      const id = entry.message?.id;
+      if (typeof id !== "string" || !inlineIds.has(id)) missing = true;
+      else overlap = true;
+    }
+    // Some spilled ids are back inline and some are not: splicing would invent
+    // an order. Keep the rows we still have.
+    if (missing && overlap) return session;
+    // The tail is already spilled and still inside the cap. Merging the sidecar
+    // here put the whole chat back on the main thread on every save.
+    if (missing && !overlap) {
+      let inlineOffloadable = 0;
+      for (const message of messages) {
+        if (isOffloadableMessage(message)) inlineOffloadable += 1;
+      }
+      if (inlineOffloadable <= TRANSCRIPT_INLINE_STEP_LIMIT) {
+        settledLiveTails.add(messages);
+        return session;
+      }
+    }
+    if (missing) {
+      const whole = mergeTranscriptRows(messages, held);
+      if (!whole) return session;
+      source = whole;
+    }
+  }
+
+  const offloadableAt: number[] = [];
+  source.forEach((message, index) => {
+    if (isOffloadableMessage(message)) offloadableAt.push(index);
+  });
+  if (offloadableAt.length <= TRANSCRIPT_INLINE_STEP_LIMIT) {
+    settledLiveTails.add(messages);
+    return session;
+  }
+
+  const spill = new Set(offloadableAt.slice(0, offloadableAt.length - TRANSCRIPT_INLINE_STEP_LIMIT));
+  const inline: ChatMessage[] = [];
+  const rows: TranscriptSidecar["rows"] = [];
+  source.forEach((message, index) => {
+    if (spill.has(index)) rows.push({ index, message });
+    else inline.push(message);
+  });
+  return commitOffload(session, row, source, inline, rows, sessionId, userData, io);
+}
+
+/**
+ * Move thinking and tool rows to a sidecar.
+ *
+ * A terminal worker loses every thought and tool row; the prose stays. Any
+ * other chat waits until it has more than {@link TRANSCRIPT_INLINE_STEP_LIMIT}
+ * of those rows, then spills the older ones and keeps the newest, plus every
+ * row that is not a thought or a tool, in their original order.
+ *
+ * Fails closed in every direction: no user-data folder, no messages, nothing
+ * offloadable, a write that throws, a file that reads back wrong — each one
+ * returns the session exactly as it arrived, still holding every row.
+ */
+export function offloadSessionTranscript(session: unknown, userData: string, io: TranscriptIo = diskIo): unknown {
+  const row = record(session);
+  if (!row || !userData.trim()) return session;
+  const sessionId = typeof row.id === "string" ? row.id.trim() : "";
+  if (!sessionId) return session;
+  const messages = Array.isArray(row.messages) ? (row.messages as ChatMessage[]) : null;
+  if (!messages || messages.length === 0) return session;
+  if (!isTerminalWorker(row)) return offloadLiveOverflow(session, row, messages, sessionId, userData, io);
+
+  const inline: unknown[] = [];
+  const rows: TranscriptSidecar["rows"] = [];
+  messages.forEach((message, index) => {
+    if (isOffloadableMessage(message)) rows.push({ index, message: message as ChatMessage });
+    else inline.push(message);
+  });
+  if (rows.length === 0) return session;
+  return commitOffload(session, row, messages, inline, rows, sessionId, userData, io);
 }
 
 /** Days from Settings, or the default. Anything unreadable, negative or absurd falls back. */

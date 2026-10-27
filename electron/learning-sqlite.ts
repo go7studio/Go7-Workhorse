@@ -16,6 +16,43 @@ import { boundedReplace, expandDependentMemoryIds, removeSidecars, type MemorySt
 
 const BUSY_MS = 5_000;
 
+/** Equality on status so the planner can use idx_runs_lane_status_started. */
+export const COMPLETED_SETTLED_LOOKUP_SQL =
+  "SELECT *, rowid AS settled_rowid FROM compiler_runs WHERE intelligence_lane = ? AND status = 'completed' ORDER BY started_at DESC LIMIT 1";
+
+/**
+ * The later `started_at` of the two equality lookups. NULL loses to any
+ * stamp, matching `ORDER BY started_at DESC`. An equal stamp keeps the row
+ * the hash index would meet first: smaller input hash, then smaller rowid.
+ */
+function laterSettledRow(
+  completed: Record<string, unknown> | undefined,
+  abandoned: Record<string, unknown> | undefined,
+): Record<string, unknown> | undefined {
+  if (!completed) return abandoned;
+  if (!abandoned) return completed;
+  const left = settledStartedAt(completed);
+  const right = settledStartedAt(abandoned);
+  if (left === right) return settledTieBreak(completed, abandoned);
+  if (left === null) return abandoned;
+  if (right === null) return completed;
+  return left > right ? completed : abandoned;
+}
+
+function settledTieBreak(completed: Record<string, unknown>, abandoned: Record<string, unknown>): Record<string, unknown> {
+  const completedHash = String(completed.input_hash ?? "");
+  const abandonedHash = String(abandoned.input_hash ?? "");
+  if (completedHash !== abandonedHash) return completedHash < abandonedHash ? completed : abandoned;
+  return Number(completed.settled_rowid ?? 0) <= Number(abandoned.settled_rowid ?? 0) ? completed : abandoned;
+}
+
+function settledStartedAt(row: Record<string, unknown>): number | null {
+  const value = row.started_at;
+  if (value == null) return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 type SqliteDatabase = InstanceType<typeof DatabaseSync>;
 
 function json(value: unknown): string {
@@ -310,11 +347,14 @@ export class SqliteMemoryStore implements MemoryStore {
       if (!columns("compiler_runs").has("input_memory_ids")) {
         db.exec("ALTER TABLE compiler_runs ADD COLUMN input_memory_ids TEXT");
       }
-      // A desk that has compiled for weeks holds tens of thousands of runs. The
-      // attempt budget and the watermark are read on every quiet tick, so both
-      // reads must be an index seek rather than a table scan.
+      // A desk that has compiled for weeks holds tens of thousands of runs and
+      // memories. The attempt budget, the watermark, a lane's memories, and the
+      // event scan are read on every quiet tick, so those reads must be index
+      // seeks rather than table scans.
       db.exec("CREATE INDEX IF NOT EXISTS idx_runs_lane_hash ON compiler_runs (intelligence_lane, input_hash)");
       db.exec("CREATE INDEX IF NOT EXISTS idx_runs_lane_status_started ON compiler_runs (intelligence_lane, status, started_at)");
+      db.exec("CREATE INDEX IF NOT EXISTS idx_memory_lane_status ON memory_items (intelligence_lane, status)");
+      db.exec("CREATE INDEX IF NOT EXISTS idx_events_actor_time ON learning_events (actor_class, tombstone, purged, created_at, id)");
       db.prepare("INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('schema_version', ?)").run(String(LEARNING_SCHEMA_VERSION));
       db.exec("COMMIT");
     } catch (error) {
@@ -655,7 +695,21 @@ export class SqliteMemoryStore implements MemoryStore {
   }
 
   listMemories(filter: MemoryFilter = {}): MemoryItem[] {
-    const rows = this.conn().prepare("SELECT * FROM memory_items").all() as Record<string, unknown>[];
+    if (filter.statuses && filter.statuses.length === 0) return [];
+    const clauses: string[] = [];
+    const params: string[] = [];
+    if (filter.intelligenceLane) {
+      clauses.push("intelligence_lane = ?");
+      params.push(filter.intelligenceLane);
+    }
+    if (filter.statuses && filter.statuses.length > 0) {
+      clauses.push(`status IN (${filter.statuses.map(() => "?").join(", ")})`);
+      params.push(...filter.statuses);
+    }
+    const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
+    const rows = this.conn()
+      .prepare(`SELECT * FROM memory_items ${where} ORDER BY rowid ASC`)
+      .all(...params) as Record<string, unknown>[];
     return rows.map(rowMemory).filter((item) => {
       if (!filter.includeDeleted && (item.status === "deleted" || item.deletedAt)) return false;
       if (filter.intelligenceLane && item.intelligenceLane !== filter.intelligenceLane) return false;
@@ -771,11 +825,14 @@ export class SqliteMemoryStore implements MemoryStore {
   }
 
   lastSettledRun(lane: IntelligenceLane): CompilerRun | undefined {
-    const row = this.conn()
+    const db = this.conn();
+    const completed = db.prepare(COMPLETED_SETTLED_LOOKUP_SQL).get(lane) as Record<string, unknown> | undefined;
+    const abandoned = db
       .prepare(
-        "SELECT * FROM compiler_runs WHERE intelligence_lane = ? AND (status = 'completed' OR (status = 'failed' AND error_class = ?)) ORDER BY started_at DESC LIMIT 1",
+        "SELECT *, rowid AS settled_rowid FROM compiler_runs WHERE intelligence_lane = ? AND status = 'failed' AND error_class = ? ORDER BY started_at DESC LIMIT 1",
       )
       .get(lane, ABANDONED_INPUT) as Record<string, unknown> | undefined;
+    const row = laterSettledRow(completed, abandoned);
     return row ? rowRun(row) : undefined;
   }
 

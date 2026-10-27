@@ -78,15 +78,18 @@ Three habits cover the rest:
   finished worker's thinking and tool rows write once to
   `userData/transcripts/<sessionId>.json` and the chat keeps a path; the prose
   and the final report stay inline, because that is what a person opens the
-  chat to read. Measured on a year-old desk: 45.72 MB of state, 39.64 MB of it
+  chat to read. Any other chat that grows past 240 thought or tool rows spills
+  the older ones the same way and keeps the newest 240 inline. Opening that
+  chat does not copy the spilled rows back onto the session that gets saved.
+  Measured on a year-old desk: 45.72 MB of state, 39.64 MB of it
   belonging to 624 workers whose runs had ended, thinking 16.37 MB and tool
   output 11.52 MB — 61% of a file that is parsed at every launch and serialised
   at every save. The sidecar is read back and counted before the inline rows are
-  cleared, an unwritable one keeps them, and nothing is ever deleted: no cap, no
-  trim, no collection, for the same reason blobs are not collected — that waits
-  for a reference count. Only workers whose `agentRun.status` is terminal are
-  touched, and `interrupted` is not terminal, because that is the desk stopping
-  rather than the worker finishing. One save may write at most 25 sidecars
+  cleared, an unwritable one keeps them, and nothing is deleted: spilled rows
+  stay on disk, for the same reason blobs are not collected — that waits
+  for a reference count. A hidden worker is fully stripped only when
+  `agentRun.status` is terminal, and `interrupted` is not terminal, because
+  that is the desk stopping rather than the worker finishing. One save may write at most 25 sidecars
   (`TRANSCRIPT_OFFLOAD_PER_SAVE`), because each write flushes and the offload
   runs on the main loop before the save's first await — an unbounded first pass
   on a 624-worker desk is seconds of held loop spent fixing a stall. Opening a

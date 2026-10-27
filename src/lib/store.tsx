@@ -22,6 +22,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { flushSync } from "react-dom";
 import { claudeAuthFailure } from "./claude-auth-failure";
 import { StoreContext, StoreRuntimeContext, useStore } from "./store-context";
 export { useStore, useStoreReader, useStoreSelector } from "./store-context";
@@ -75,7 +76,7 @@ import { isTerminalRunStatus, settledWorkers, workerJustSettled } from "./worker
 import { foldersToCount, leftInFolderNote, workerLabel } from "./worker-folders";
 import { deskPersistBodyEqual, hotSavePayload, persistDelayMs } from "./desk-persist";
 import { restoredPanel } from "./restored-panel";
-import { mergeTranscriptRows, normalizeRetentionDays, transcriptFetchPlan, transcriptStillOnDisk } from "./transcript-sidecar";
+import { mergeTranscriptRows, normalizeRetentionDays, transcriptFetchPlan, transcriptStillOnDisk, transcriptTailStaysInline } from "./transcript-sidecar";
 import { autoTitleForSend, firstUserText, suggestedTitleForSession, titleAcceptsVendor, titleFromIntent } from "./titles";
 import {
   applyPermissionAnswer,
@@ -347,6 +348,9 @@ import {
   parseWorkerHandoff,
   workerStartMessages,
   reserveWorkerName,
+  pruneSpawnReservations,
+  reserveSpawnAdmission,
+  type SpawnReservation,
   recordParentTakeover,
   releaseCancelledSessionLeases,
   releaseDeletedSessionLeases,
@@ -1375,6 +1379,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const runPlanRefresh = useRef<() => void>(() => undefined);
   const planRefreshAt = useRef<number | undefined>(undefined);
   const pathLeasesRef = useRef<FileLease[]>([]);
+  /** Root and nested spawns admitted before React commits the session. */
+  const spawnAdmitRef = useRef<SpawnReservation[]>([]);
   const pathPermissionPreflight = useRef(new Set<string>());
   const approvedPathWrites = useRef(new Map<string, Array<{ path: string; root: string }>>());
   const pathFingerprintRefreshes = useRef(new Map<string, Promise<void>>());
@@ -1448,6 +1454,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const teamRef = useRef(team);
   teamRef.current = team;
   pathLeasesRef.current = state.leases ?? [];
+  spawnAdmitRef.current = pruneSpawnReservations(spawnAdmitRef.current, state.sessions);
   plansRef.current = { grok: grokPlan, codex: codexPlan, claude: claudePlan, cursor: cursorPlan, gemini: geminiPlan, custom: customPlans };
   meterHealthRef.current = customMeterHealth;
 
@@ -1748,6 +1755,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       asked: transcriptAsked.current,
     });
     if (!plan) return;
+    const open = state.sessions.find((item) => item.id === plan.sessionId);
+    // The newest steps are already inline. Copying the sidecar onto the session
+    // would make the next save write those rows back. Earlier reads them beside
+    // the session instead.
+    if (open && transcriptTailStaysInline(open.messages)) {
+      transcriptAsked.current.add(plan.sessionId);
+      return;
+    }
     const bridge = window.workhorse?.loadTranscript;
     if (!bridge) return;
     const { sessionId, offloaded } = plan;
@@ -6831,6 +6846,28 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             // Reserve synchronously. Concurrent HTTP spawn handlers can run
             // before React commits state; the ref closes that admission race.
             pathLeasesRef.current = claimedLeases;
+            const spawnCandidate = {
+              childId,
+              parentId: parent.id,
+              projectId: spawnProjectId,
+              slice: spawnSliceLabel(String(payload.message ?? "")),
+              limit: maxRootWorkers(catalog.length),
+              nested: isNested,
+            };
+            // rootSpawnError above read a snapshot taken before the awaits.
+            // Reserve this worker before React commits, and count reservations
+            // already held by an updater that has not committed.
+            const spawnAdmit = reserveSpawnAdmission(
+              spawnAdmitRef.current,
+              stateRef.current.sessions,
+              spawnCandidate,
+            );
+            if (!spawnAdmit.ok) {
+              pathLeasesRef.current = releaseSessionLeases(pathLeasesRef.current, childId);
+              await replyAsk({ error: spawnAdmit.error });
+              return;
+            }
+            spawnAdmitRef.current = spawnAdmit.reservations;
             grokAssistantId.current[childId] = assistantId;
             const childCorrelationId = payload.traceId || learningTurns.current[parent.id]?.correlationId || payload.id || uid("corr");
             learningTurns.current[childId] = { correlationId: childCorrelationId, agentRunId: assistantId, toolIds: [] };
@@ -6973,7 +7010,20 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               }),
             };
             const waveText = lastUserMessage(parent)?.text ?? "";
-            setState((current) => {
+            let spawnAdmitError: string | null = null;
+            flushSync(() => {
+              setState((current) => {
+              // Count sessions this update will commit and reservations whose
+              // updater has not committed. Refuse a duplicate slice or one past the cap.
+              const again = reserveSpawnAdmission(
+                spawnAdmitRef.current.filter((row) => row.childId !== childId),
+                current.sessions,
+                spawnCandidate,
+              );
+              if (!again.ok) {
+                spawnAdmitError = again.error;
+                return current;
+              }
               const base =
                 inboundHost && !current.sessions.some((item) => item.id === inboundHost.id)
                   ? [inboundHost, ...current.sessions]
@@ -7044,7 +7094,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                   ...(priorWorker ? [] : [child]),
                 ],
               };
+              });
             });
+            if (spawnAdmitError) {
+              spawnAdmitRef.current = spawnAdmitRef.current.filter((row) => row.childId !== childId);
+              pathLeasesRef.current = releaseSessionLeases(pathLeasesRef.current, childId);
+              workerNameReservations.current = workerNameReservations.current.filter((row) => row.workerId !== childId);
+              delete grokAssistantId.current[childId];
+              delete learningTurns.current[childId];
+              await replyAsk({ error: spawnAdmitError });
+              return;
+            }
             const waitForReply = spawnWaitsForReply(payload);
             // Uncapped on purpose: `boundLinkReply` picks the board and counts
             // the rest, so `crewCount` is what this parent has had, not what

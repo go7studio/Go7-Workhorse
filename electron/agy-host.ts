@@ -1,10 +1,9 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { StringDecoder } from "node:string_decoder";
 import { composeVendorPrompt } from "../src/lib/context-preface";
 import { deltaAgyUsage, type AgyTokenTotals } from "../src/lib/agy-usage";
 import { parseAgyStreamLine } from "../src/lib/agy-stream";
 import type { ChatImage } from "../src/lib/types";
-import type { GrokPromptResult, GrokToolEvent } from "./grok-agent";
+import { appendByteChunk, createByteQueue, takeByteLines, type ByteQueue, type GrokPromptResult, type GrokToolEvent } from "./grok-agent";
 import {
   isWorkerRuntime,
   stoppedBeforePrompt,
@@ -56,8 +55,7 @@ type Slot = {
   conversationId?: string;
   announced: boolean;
   usage?: AgyTokenTotals;
-  buffer: string;
-  decoder: StringDecoder;
+  pending: ByteQueue;
   stderr: string;
   dead: boolean;
   disposeMcp?: () => void;
@@ -237,8 +235,7 @@ export class AgySessionHost {
       opened: input.vendorSessionId?.trim() ? "session/load" : "session/new",
       conversationId: input.vendorSessionId?.trim() || undefined,
       announced: false,
-      buffer: "",
-      decoder: new StringDecoder("utf8"),
+      pending: createByteQueue(),
       stderr: "",
       dead: false,
       disposeMcp: overlay?.dispose,
@@ -305,10 +302,9 @@ export class AgySessionHost {
   private onStdout(sessionId: string, chunk: Buffer | string): void {
     const slot = this.slots.get(sessionId);
     if (!slot) return;
-    slot.buffer += typeof chunk === "string" ? chunk : slot.decoder.write(chunk);
-    const lines = slot.buffer.split(/\r?\n/);
-    slot.buffer = lines.pop() ?? "";
-    for (const line of lines) this.onLine(slot, line);
+    // One copy of each complete line. Chunks stay as they arrived until the LF.
+    appendByteChunk(slot.pending, chunk);
+    for (const line of takeByteLines(slot.pending)) this.onLine(slot, line);
   }
 
   private onLine(slot: Slot, line: string): void {

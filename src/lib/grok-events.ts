@@ -411,6 +411,17 @@ export function thoughtGrows(previous: string, incoming: string): boolean {
   return Boolean(have && add.length > have.length && add.startsWith(have));
 }
 
+/**
+ * A user row, or assistant prose. Thought, tool, and compact rows stay inside
+ * the hop, so a replay is matched only against that stretch.
+ */
+export function isThoughtHopBoundary(message: ChatMessage): boolean {
+  if (message.role === "user") return true;
+  if (message.role !== "assistant") return false;
+  const kind = message.kind;
+  return kind !== "thought" && kind !== "tool" && kind !== "compact";
+}
+
 /** Remove a completed hop replayed inside a later thought snapshot. */
 export function stripRepeatedThought(incoming: string, previous: string): string {
   const have = collapseThoughtDisplay(previous).trim();
@@ -439,10 +450,12 @@ function collapseChainedSnapshots(text: string): string {
 export function upsertThoughtMessage(messages: ChatMessage[], text: string, now = Date.now()): ChatMessage[] {
   let add = text.trimEnd();
   const last = messages[messages.length - 1];
-  // Only earlier hops in this turn are replays; the active hop can still grow.
+  // Only earlier thoughts in this hop are replays. Stop at the nearer of the
+  // latest user row and the latest assistant prose, so a new hop does not walk
+  // every older thought in the chat.
   for (let i = messages.length - (last?.kind === "thought" ? 2 : 1); i >= 0; i -= 1) {
     const message = messages[i];
-    if (message.role === "user") break;
+    if (!message || isThoughtHopBoundary(message)) break;
     if (message.kind === "thought") add = stripRepeatedThought(add, message.text);
   }
   if (!add.trim()) return messages;

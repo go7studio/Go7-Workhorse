@@ -669,7 +669,8 @@ export type Session = {
    * many went. The pair is the only thing linking the chat to that file, so it
    * has to survive every load: a chat that arrives without it holds the prose,
    * saves the prose back, and orphans its own steps on disk with nothing left
-   * pointing at them. Cleared the moment the rows are merged back in.
+   * pointing at them. Cleared when a fully stripped chat merges the rows back.
+   * A chat that still holds its newest steps inline keeps the pointer.
    */
   transcriptSidecar?: string;
   transcriptOffloaded?: number;

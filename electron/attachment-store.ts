@@ -173,12 +173,57 @@ function mapSessionImages(session: Record<string, unknown>, userData: string): R
   return { ...session, messages, composerImages };
 }
 
-/** Move inlined attachment bytes into userData/attachments. Fail closed: keep data if the write fails. */
+/** True when offload would copy bytes out and clear or retarget the row. */
+function attachmentMightMove(image: unknown, userData: string): boolean {
+  if (!image || typeof image !== "object") return false;
+  const row = image as { data?: unknown; sourcePath?: unknown; derivedImages?: unknown };
+  if (Array.isArray(row.derivedImages)) {
+    for (const derived of row.derivedImages) {
+      if (attachmentMightMove(derived, userData)) return true;
+    }
+  }
+  if (typeof row.data === "string" && stripDataUrl(row.data).length > 0) return true;
+  const source = typeof row.sourcePath === "string" ? row.sourcePath.trim() : "";
+  return source.length > 0 && !insideDir(attachmentsDir(userData), source);
+}
+
+function snapshotMightOffloadAttachments(state: object, userData: string): boolean {
+  if (!userData.trim()) return false;
+  const sessions = (state as { sessions?: unknown }).sessions;
+  if (!Array.isArray(sessions)) return false;
+  for (const session of sessions) {
+    if (!session || typeof session !== "object" || Array.isArray(session)) continue;
+    const row = session as { messages?: unknown; composerImages?: unknown };
+    if (Array.isArray(row.composerImages)) {
+      for (const image of row.composerImages) {
+        if (attachmentMightMove(image, userData)) return true;
+      }
+    }
+    if (!Array.isArray(row.messages)) continue;
+    for (const message of row.messages) {
+      if (!message || typeof message !== "object" || Array.isArray(message)) continue;
+      const images = (message as { images?: unknown }).images;
+      if (!Array.isArray(images)) continue;
+      for (const image of images) {
+        if (attachmentMightMove(image, userData)) return true;
+      }
+    }
+  }
+  return false;
+}
+
+/**
+ * Move inlined attachment bytes into userData/attachments. Fail closed: keep data if the write fails.
+ *
+ * The clone is the whole snapshot. A chat with thousands of messages and no
+ * inline bytes was paying that copy on every save. When nothing would move,
+ * the same object comes back.
+ */
 export function offloadStateAttachments<T>(state: T, userData: string): T {
   if (!state || typeof state !== "object") return state;
+  if (!snapshotMightOffloadAttachments(state, userData)) return state;
   const next = structuredClone(state) as T & { sessions?: unknown };
-  if (!Array.isArray(next.sessions) || !userData.trim()) return next;
-  next.sessions = next.sessions.map((session) =>
+  next.sessions = (next.sessions as unknown[]).map((session) =>
     session && typeof session === "object" && !Array.isArray(session)
       ? mapSessionImages(session as Record<string, unknown>, userData)
       : session,

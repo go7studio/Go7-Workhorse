@@ -165,7 +165,16 @@ function pushStep(
   );
 }
 
-export function groupTranscript(messages: ChatMessage[]): TranscriptBlock[] {
+/** Messages passed to `groupTranscript` since process start. Tests read the delta. */
+let groupedTranscriptMessages = 0;
+
+/** How many transcript rows grouping has walked. A full-chat regroup shows up here. */
+export function transcriptGroupWork(): number {
+  return groupedTranscriptMessages;
+}
+
+export function groupTranscript(messages: ChatMessage[], starts?: number[]): TranscriptBlock[] {
+  groupedTranscriptMessages += messages.length;
   const source = commitClosingThought(messages);
   const blocks: TranscriptBlock[] = [];
   let tools: ChatMessage[] = [];
@@ -174,9 +183,12 @@ export function groupTranscript(messages: ChatMessage[]): TranscriptBlock[] {
   let subagents: ChatMessage[] = [];
   let steps: WorkStep[] = [];
   let assistant: ChatMessage | null = null;
+  let replyStart = 0;
+  let replyOpen = false;
 
   const flush = () => {
     if (!assistant && tools.length === 0 && compacts.length === 0 && thoughts.length === 0 && subagents.length === 0) {
+      replyOpen = false;
       return;
     }
     const placeholder: ChatMessage = assistant ?? {
@@ -186,6 +198,7 @@ export function groupTranscript(messages: ChatMessage[]): TranscriptBlock[] {
       createdAt:
         tools[0]?.createdAt ?? compacts[0]?.createdAt ?? thoughts[0]?.createdAt ?? subagents[0]?.createdAt ?? 0,
     };
+    if (starts) starts.push(replyStart);
     blocks.push({ type: "reply", assistant: placeholder, tools, compacts, thoughts, subagents, steps });
     tools = [];
     compacts = [];
@@ -193,42 +206,62 @@ export function groupTranscript(messages: ChatMessage[]): TranscriptBlock[] {
     subagents = [];
     steps = [];
     assistant = null;
+    replyOpen = false;
   };
 
-  for (const message of source) {
+  const markReply = (index: number) => {
+    if (!replyOpen) {
+      replyStart = index;
+      replyOpen = true;
+    }
+  };
+
+  for (let index = 0; index < source.length; index += 1) {
+    const message = source[index];
+    if (!message) continue;
     if (message.role === "user") {
       flush();
+      if (starts) starts.push(index);
       blocks.push({ type: "user", message });
+      replyStart = index + 1;
       continue;
     }
     if (message.kind === "tool") {
+      markReply(index);
       pushStep(steps, { tools, compacts, thoughts, subagents }, "tool", message);
       continue;
     }
     if (message.kind === "compact") {
+      markReply(index);
       pushStep(steps, { tools, compacts, thoughts, subagents }, "compact", message);
       continue;
     }
     if (message.kind === "thought") {
+      markReply(index);
       pushStep(steps, { tools, compacts, thoughts, subagents }, "thought", message);
       continue;
     }
     if (message.kind === "subagent") {
+      markReply(index);
       pushStep(steps, { tools, compacts, thoughts, subagents }, "subagent", message);
       continue;
     }
     if (message.role === "assistant") {
       if (assistant?.text.trim() && message.text.trim()) flush();
+      markReply(index);
       assistant = mergeAssistantMessage(assistant, message);
       continue;
     }
     if (isSessionIntro(message)) continue;
     if (isDeskNotice(message)) {
+      markReply(index);
       pushStep(steps, { tools, compacts, thoughts, subagents }, "tool", deskNoticeAsTool(message));
       continue;
     }
     flush();
+    if (starts) starts.push(index);
     blocks.push({ type: "system", message });
+    replyStart = index + 1;
   }
   flush();
   return blocks;
@@ -240,13 +273,87 @@ export type TranscriptGrouper = {
 };
 
 /**
+ * Unchanged rows a live hop may rewalk on top of the rows that actually
+ * changed. A short turn still regroups from its user row. A longer walk —
+ * one user row, then thousands of tool rows — keeps the prefix blocks and
+ * regroups from a boundary near the change.
+ */
+const REGROUP_SLACK = 240;
+
+function sliceReplyBlock(block: TranscriptBlock, messages: ChatMessage[], start: number, from: number): TranscriptBlock | null {
+  if (block.type === "user" || block.type === "system") return start < from ? block : null;
+  const end = Math.min(from, messages.length);
+  const keep = new Set<string>();
+  for (let index = start; index < end; index += 1) {
+    const id = messages[index]?.id;
+    if (id) keep.add(id);
+  }
+  const steps = block.steps.filter((step) => keep.has(step.message.id));
+  const assistantInHead = messages.slice(start, end).some((message) => message === block.assistant);
+  if (!assistantInHead && steps.length === 0) return null;
+  const tools: ChatMessage[] = [];
+  const compacts: ChatMessage[] = [];
+  const thoughts: ChatMessage[] = [];
+  const subagents: ChatMessage[] = [];
+  for (const step of steps) {
+    if (step.type === "tool") tools.push(step.message);
+    else if (step.type === "compact") compacts.push(step.message);
+    else if (step.type === "thought") thoughts.push(step.message);
+    else subagents.push(step.message);
+  }
+  const assistant = assistantInHead
+    ? block.assistant
+    : {
+        id: steps[0]?.message.id ?? block.assistant.id,
+        role: "assistant" as const,
+        text: "",
+        createdAt: steps[0]?.message.createdAt ?? block.assistant.createdAt,
+      };
+  return { type: "reply", assistant, tools, compacts, thoughts, subagents, steps };
+}
+
+function takePrefix(
+  blocks: TranscriptBlock[],
+  starts: number[],
+  messages: ChatMessage[],
+  from: number,
+  previousLength: number,
+): { blocks: TranscriptBlock[]; starts: number[] } {
+  const prefix: TranscriptBlock[] = [];
+  const prefixStarts: number[] = [];
+  for (let index = 0; index < blocks.length; index += 1) {
+    const block = blocks[index];
+    if (!block) continue;
+    const start = starts[index] ?? 0;
+    const end = index + 1 < starts.length ? (starts[index + 1] ?? previousLength) : previousLength;
+    if (start >= from) break;
+    if (end <= from) {
+      prefix.push(block);
+      prefixStarts.push(start);
+      continue;
+    }
+    const sliced = sliceReplyBlock(block, messages, start, from);
+    if (sliced) {
+      prefix.push(sliced);
+      prefixStarts.push(start);
+    }
+    break;
+  }
+  return { blocks: prefix, starts: prefixStarts };
+}
+
+/**
  * Keep completed turns stable while the live turn streams. React can then
  * preserve every older turn instead of reparsing the whole transcript.
  */
 export function createTranscriptGrouper(): TranscriptGrouper {
   let previous: ChatMessage[] = [];
   let blocks: TranscriptBlock[] = [];
+  let starts: number[] = [];
   let lastRebuiltFrom = 0;
+  let cachedPrefix: TranscriptBlock[] | null = null;
+  let cachedStarts: number[] = [];
+  let cachedCut = 0;
   return {
     group(messages) {
       if (messages === previous) return blocks;
@@ -258,16 +365,66 @@ export function createTranscriptGrouper(): TranscriptGrouper {
         return blocks;
       }
 
-      let from = Math.min(shared, messages.length);
-      while (from > 0 && messages[from]?.role !== "user") from -= 1;
-      const boundary = messages[from];
-      const cut = boundary?.role === "user"
-        ? blocks.findIndex((block) => block.type === "user" && block.message.id === boundary.id)
-        : -1;
-      // A new prompt is not in the old blocks yet (cut === -1). Keep them and
-      // append. Dropping the prefix here emptied the transcript on send.
-      const prefix = cut >= 0 ? blocks.slice(0, cut) : from > 0 ? blocks : [];
-      blocks = [...prefix, ...groupTranscript(messages.slice(from))];
+      let userFrom = Math.min(shared, messages.length);
+      while (userFrom > 0 && messages[userFrom]?.role !== "user") userFrom -= 1;
+      const changed = Math.max(0, messages.length - shared);
+      const unchanged = Math.min(shared, messages.length) - userFrom;
+      const changedAt = Math.min(shared, messages.length);
+      const longWalk = blocks.length > 0 && unchanged > changed + REGROUP_SLACK;
+
+      let from = userFrom;
+      let prefix: TranscriptBlock[];
+      let prefixStarts: number[];
+      if (longWalk) {
+        const reuseWindow = REGROUP_SLACK * 2;
+        if (cachedPrefix && cachedCut <= changedAt && changedAt - cachedCut <= reuseWindow && shared >= cachedCut) {
+          from = cachedCut;
+          prefix = cachedPrefix;
+          prefixStarts = cachedStarts;
+        } else {
+          const earliest = Math.max(0, changedAt - REGROUP_SLACK);
+          let boundary = -1;
+          for (const start of starts) {
+            if (start >= earliest && start <= changedAt && start > boundary) boundary = start;
+          }
+          from = boundary >= 0 ? boundary : Math.floor(earliest / REGROUP_SLACK) * REGROUP_SLACK;
+          const taken = from > 0 ? takePrefix(blocks, starts, messages, from, previous.length) : { blocks: [], starts: [] };
+          // A cut that drops every block is the bug that emptied the transcript.
+          if (from > 0 && taken.blocks.length > 0) {
+            prefix = taken.blocks;
+            prefixStarts = taken.starts;
+            cachedPrefix = prefix;
+            cachedStarts = prefixStarts;
+            cachedCut = from;
+          } else {
+            from = userFrom;
+            cachedPrefix = null;
+            cachedCut = 0;
+            const boundaryMessage = messages[from];
+            const cut = boundaryMessage?.role === "user"
+              ? blocks.findIndex((block) => block.type === "user" && block.message.id === boundaryMessage.id)
+              : -1;
+            prefix = cut >= 0 ? blocks.slice(0, cut) : from > 0 ? blocks : [];
+            prefixStarts = cut >= 0 ? starts.slice(0, cut) : from > 0 ? starts : [];
+          }
+        }
+      } else {
+        cachedPrefix = null;
+        cachedCut = 0;
+        const boundaryMessage = messages[from];
+        const cut = boundaryMessage?.role === "user"
+          ? blocks.findIndex((block) => block.type === "user" && block.message.id === boundaryMessage.id)
+          : -1;
+        // A new prompt is not in the old blocks yet (cut === -1). Keep them and
+        // append. Dropping the prefix here emptied the transcript on send.
+        prefix = cut >= 0 ? blocks.slice(0, cut) : from > 0 ? blocks : [];
+        prefixStarts = cut >= 0 ? starts.slice(0, cut) : from > 0 ? starts : [];
+      }
+
+      const tailStarts: number[] = [];
+      const tail = groupTranscript(messages.slice(from), tailStarts);
+      blocks = [...prefix, ...tail];
+      starts = [...prefixStarts, ...tailStarts.map((start) => start + from)];
       previous = messages;
       lastRebuiltFrom = from;
       return blocks;

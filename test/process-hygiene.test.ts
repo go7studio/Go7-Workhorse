@@ -10,6 +10,7 @@ import {
   PROC_RECORD_GRACE_MS,
   PROC_START_SKEW_MS,
   configureProcRegistry,
+  groupIsAlive,
   groupSpawnOptions,
   killProcessGroup,
   procRecordFile,
@@ -836,6 +837,80 @@ test("a launch writes one small record, and its stop takes it away", { skip: !PO
     resetProcRegistry();
     fs.rmSync(userData, { recursive: true, force: true });
   }
+});
+
+test("Windows groupIsAlive is whether that pid exists", () => {
+  const asked: [number, number][] = [];
+  assert.equal(
+    groupIsAlive(4242, {
+      platform: "win32",
+      kill: (pid, signal) => {
+        asked.push([pid, signal as number]);
+      },
+    }),
+    true,
+  );
+  assert.deepEqual(asked, [[4242, 0]], "Windows checks the leader pid, not a negative group");
+
+  assert.equal(
+    groupIsAlive(4242, {
+      platform: "win32",
+      kill: () => {
+        throw Object.assign(new Error("gone"), { code: "ESRCH" });
+      },
+    }),
+    false,
+    "a pid the injected kill says is gone is not alive",
+  );
+  assert.equal(
+    groupIsAlive(4242, {
+      platform: "win32",
+      kill: () => {
+        throw Object.assign(new Error("denied"), { code: "EPERM" });
+      },
+    }),
+    true,
+    "EPERM still means the pid is there",
+  );
+  assert.equal(groupIsAlive(0, { platform: "win32", kill: () => { throw new Error("no"); } }), false);
+});
+
+test("Windows boot reap kills a live orphan and does not signal a reused pid", () => {
+  const now = 1_700_000_000_000;
+  const alive = new Set([201, 203]);
+  const records: Record<string, ProcRecord> = {
+    "orphan.json": { pgid: 201, sessionId: "s-orphan", deskPid: 900, startedAt: now - 60_000 },
+    "gone.json": { pgid: 202, sessionId: "s-gone", deskPid: 900, startedAt: now - 60_000 },
+    "reused.json": { pgid: 203, sessionId: "s-reused", deskPid: 900, startedAt: now - 600_000 },
+  };
+  const killed: number[] = [];
+  const decisions = reapOrphanProcessGroups("/procs", {
+    now: () => now,
+    deskPid: 902,
+    deskAlive: () => false,
+    groupAlive: (pgid) =>
+      groupIsAlive(pgid, {
+        platform: "win32",
+        kill: (pid, signal) => {
+          if (signal !== 0) throw new Error(`groupIsAlive must not signal ${signal}`);
+          if (!alive.has(pid)) throw Object.assign(new Error("missing"), { code: "ESRCH" });
+        },
+      }),
+    leaderStartedAt: (pgid) => (pgid === 203 ? now - 1_000 : now - 60_000),
+    kill: (pgid) => {
+      killed.push(pgid);
+    },
+    list: () => Object.keys(records).map((name) => `/procs/${name}`),
+    read: (file) => records[file.slice("/procs/".length)] ?? null,
+    remove: () => {},
+  });
+  assert.deepEqual(killed, [201], "a live orphan is killed; a missing pid and a reused pid are not");
+  const by = (pgid: number) => decisions.find((decision) => decision.record.pgid === pgid);
+  assert.equal(by(201)?.action, "reaped");
+  assert.equal(by(202)?.action, "dropped");
+  assert.match(by(202)?.why ?? "", /group_gone/);
+  assert.equal(by(203)?.action, "dropped");
+  assert.match(by(203)?.why ?? "", /pid_reused/);
 });
 
 test("the boot reap kills a dead desk's group and leaves everyone else's alone", () => {

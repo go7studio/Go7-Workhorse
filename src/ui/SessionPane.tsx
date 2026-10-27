@@ -1,5 +1,6 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { canPlaceInProject, omitQueuedUserMessages } from "../lib/chats";
+import { mergeTranscriptRows, type TranscriptSidecar } from "../lib/transcript-sidecar";
 import { primaryFolder } from "../lib/project";
 import { editListKey, fileFolderFromPath, fileNameFromPath, holdEditStats, markStatsFetched, mergeEdits, projectEdits, projectWritesKey, sameEditPath, startEditStatsHarvest, type ProjectEdit } from "../lib/project-edits";
 import { sessionExecutionCwd } from "../lib/session-environment";
@@ -62,7 +63,7 @@ import {
   sizeTranscriptView,
   transcriptPaddingY,
 } from "../lib/transcript-scroll";
-import type { AppState, ProviderId } from "../lib/types";
+import type { AppState, ChatMessage, ProviderId } from "../lib/types";
 
 const SCROLL_SLACK = 96;
 
@@ -124,6 +125,7 @@ const AssistantTurn = memo(function AssistantTurn({
   vendorSessionId,
   onFork,
   onOpenThread,
+  onRevealSpilled,
 }: {
   block: Extract<TranscriptBlock, { type: "reply" }>;
   live: boolean;
@@ -135,6 +137,7 @@ const AssistantTurn = memo(function AssistantTurn({
   vendorSessionId?: string;
   onFork: (id: string) => void;
   onOpenThread: (id: string) => void;
+  onRevealSpilled: () => void;
 }) {
   const assistantText = block.assistant.text ?? "";
   const peeled = peelPlanningPreamble(assistantText, live);
@@ -157,6 +160,7 @@ const AssistantTurn = memo(function AssistantTurn({
         workedMs={block.assistant.workedMs}
         live={live}
         onOpenThread={onOpenThread}
+        onRevealSpilled={onRevealSpilled}
       />
       {body ? (
         <div className={`say final${live ? " streaming" : ""}`}>
@@ -212,6 +216,24 @@ export function SessionPane() {
   const editsBarOpenRef = useRef(false);
   const heldEditsRef = useRef<ProjectEdit[]>([]);
   const transcriptGrouper = useRef(createTranscriptGrouper());
+  const [spilled, setSpilled] = useState<{ id: string; sidecar: TranscriptSidecar } | null>(null);
+  const inlineRef = useRef<ChatMessage[]>([]);
+  const spilledRef = useRef(spilled);
+  spilledRef.current = spilled;
+  const revealRef = useRef<() => void>(() => undefined);
+  revealRef.current = () => {
+    const current = session;
+    if (!current?.transcriptSidecar || !current.transcriptOffloaded) return;
+    if (spilledRef.current?.id === current.id) return;
+    const sessionId = current.id;
+    const inline = inlineRef.current;
+    void window.workhorse?.loadTranscript?.(sessionId).then((sidecar) => {
+      if (!sidecar || sidecar.sessionId !== sessionId) return;
+      if (!mergeTranscriptRows(inline, sidecar)) return;
+      setSpilled({ id: sessionId, sidecar });
+    }).catch(() => undefined);
+  };
+  const revealSpilled = useCallback(() => revealRef.current(), []);
   const pinLatest = useMemo(
     () =>
       createPinScheduler(
@@ -266,10 +288,15 @@ export function SessionPane() {
     return () => off?.();
   }, [sessionId, cwd, refreshViewer]);
 
-  const transcriptMessages = useMemo(
+  const inlineMessages = useMemo(
     () => (session ? omitQueuedUserMessages(session.messages, session.queue) : []),
     [session?.messages, session?.queue],
   );
+  inlineRef.current = inlineMessages;
+  const transcriptMessages = useMemo(() => {
+    if (!session || spilled?.id !== session.id) return inlineMessages;
+    return mergeTranscriptRows(inlineMessages, spilled.sidecar) ?? inlineMessages;
+  }, [inlineMessages, session?.id, spilled]);
   const blocks = session ? transcriptGrouper.current.group(transcriptMessages) : [];
   const nearby = useMemo(
     () => recentTranscriptText(transcriptMessages),
@@ -681,6 +708,7 @@ export function SessionPane() {
               vendorSessionId={session.vendorSessionId}
               onFork={desk.forkFrom}
               onOpenThread={desk.selectSession}
+              onRevealSpilled={revealSpilled}
             />
           );
         })}

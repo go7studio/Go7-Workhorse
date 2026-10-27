@@ -147,6 +147,17 @@ export function transcriptStillOnDisk(session: { transcriptSidecar?: unknown }):
 }
 
 /**
+ * The open chat still holds recent thought or tool rows.
+ *
+ * Merging the sidecar into that session would put the spilled rows back in the
+ * object the next save writes. The tail stays inline; a reader that wants the
+ * older steps loads them beside the session, not onto it.
+ */
+export function transcriptTailStaysInline(messages: ReadonlyArray<{ kind?: unknown }>): boolean {
+  return messages.some((message) => message.kind === "thought" || message.kind === "tool");
+}
+
+/**
  * The rows a reader should work from, whether or not this chat still holds them.
  *
  * Retention moves a finished worker's whole transcript to disk, so every reader

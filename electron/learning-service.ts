@@ -51,6 +51,12 @@ import type {
 
 type EventIntelligenceLane = typeof HUMAN_INTELLIGENCE_LANE | typeof AGENT_INTELLIGENCE_LANE;
 
+/** Leading events that, each alone, cannot become an agent memory. */
+function leadingQuietAgentEvents(events: LearningEvent[]): LearningEvent[] {
+  const needyAt = events.findIndex((event) => eventsRequireAgentMemory([event]));
+  return needyAt === -1 ? events : events.slice(0, needyAt);
+}
+
 export type LearningServiceOptions = {
   store: MemoryStore;
   settings: () => LearningSettings;
@@ -432,14 +438,19 @@ export class LearningService {
     const pendingEvents = lane === HUMAN_INTELLIGENCE_LANE ? humanEvents : agentEvents;
     if (pendingEvents.length === 0) return this.compileMismatch(input);
     const policy = this.policy();
-    const memories = boundedCompilerMemories(
-      this.options.store.listMemories({
-        intelligenceLane: lane,
-        statuses: ["active", "approved", "proposed"],
-      }),
-      policy.maxMemoryChars,
-    );
-    const events = boundedCompilerBatch(pendingEvents, memories, policy.maxPayloadChars, lane).map((event) =>
+    // Skip the memory read when this batch cannot write one. Stop before an event that can.
+    const quietLeading = lane === AGENT_INTELLIGENCE_LANE ? leadingQuietAgentEvents(pendingEvents) : [];
+    const batchSource = quietLeading.length > 0 ? quietLeading : pendingEvents;
+    const memories = quietLeading.length > 0
+      ? []
+      : boundedCompilerMemories(
+          this.options.store.listMemories({
+            intelligenceLane: lane,
+            statuses: ["active", "approved", "proposed"],
+          }),
+          policy.maxMemoryChars,
+        );
+    const events = boundedCompilerBatch(batchSource, memories, policy.maxPayloadChars, lane).map((event) =>
       trimmedCompilerEvent(event, policy.maxPayloadChars),
     );
     const inputHash = compilerInputHash(events, memories, lane);

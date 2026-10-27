@@ -1597,6 +1597,68 @@ test("MiniMax Anthropic request and stream usage parse", async () => {
   assert.equal(probe.contextWindow, 1_000_000);
 });
 
+test("Anthropic prompt cache marks the tool prefix, the system block, and the prior turn", () => {
+  const body = buildAnthropicBody({
+    model: "claude-sonnet-5-5",
+    preface: "Stay in the project.",
+    messages: [
+      { role: "user", text: "first" },
+      { role: "assistant", text: "earlier reply" },
+      { role: "user", text: "newest question" },
+    ],
+  });
+  assert.deepEqual(body.system, [
+    { type: "text", text: "Stay in the project.", cache_control: { type: "ephemeral" } },
+  ]);
+  assert.equal(body.thinking, undefined);
+  const tools = body.tools as { name: string; cache_control?: { type: string; ttl?: string } }[];
+  assert.ok(tools.length > 1);
+  for (const tool of tools.slice(0, -1)) assert.equal(tool.cache_control, undefined, tool.name);
+  assert.deepEqual(tools.at(-1)?.cache_control, { type: "ephemeral" });
+  assert.equal("ttl" in (tools.at(-1)?.cache_control ?? {}), false);
+  const messages = body.messages as { role: string; content: unknown }[];
+  assert.deepEqual(messages[0]?.content, [{ type: "text", text: "first" }]);
+  assert.deepEqual(messages[1]?.content, [
+    { type: "text", text: "earlier reply", cache_control: { type: "ephemeral" } },
+  ]);
+  assert.deepEqual(messages[2]?.content, [{ type: "text", text: "newest question" }]);
+
+  const round = buildAnthropicBody({
+    model: "claude-opus-5-5",
+    messages: [
+      { role: "user", text: "do it" },
+      { role: "assistant", text: "", toolUses: [{ id: "t1", name: "list_dir", input: {} }] },
+      { role: "user", text: "", toolResults: [{ id: "t1", name: "list_dir", content: "ok" }] },
+    ],
+  });
+  const roundMessages = round.messages as { content: Record<string, unknown>[] }[];
+  assert.equal(roundMessages[1]?.content.at(-1)?.type, "tool_use");
+  assert.equal(roundMessages[1]?.content.at(-1)?.id, "t1");
+  assert.deepEqual(roundMessages[1]?.content.at(-1)?.cache_control, { type: "ephemeral" });
+  assert.equal(roundMessages[2]?.content[0]?.type, "tool_result");
+  assert.equal(roundMessages[2]?.content[0]?.tool_use_id, "t1");
+  assert.equal(roundMessages[2]?.content[0]?.cache_control, undefined);
+  assert.equal(round.thinking, undefined);
+
+  const one = buildAnthropicBody({
+    model: "claude-haiku-5-5",
+    messages: [{ role: "user", text: "only" }],
+  });
+  assert.equal(JSON.stringify(one.messages).includes("cache_control"), false);
+  assert.equal(one.thinking, undefined);
+
+  const openai = buildOpenAiBody({
+    model: "llama-3.3-70b-versatile",
+    preface: "Stay in the project.",
+    messages: [
+      { role: "user", text: "first" },
+      { role: "assistant", text: "earlier reply" },
+      { role: "user", text: "newest question" },
+    ],
+  });
+  assert.equal(JSON.stringify(openai).includes("cache_control"), false);
+});
+
 test("Grok Bot weekly leftover reads the local leftover fixture and missing/stale stays unknown", async () => {
   const now = Date.parse("2026-08-22T03:10:00.000Z");
   const fixturePath = grokBotLeftoverPath(path.join("fixture", "Go7 Workhorse"));

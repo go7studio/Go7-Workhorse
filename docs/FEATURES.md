@@ -83,7 +83,7 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
   `hermes/<profile>`. Those tasks join the lineup, with no Usage ring.
 - **Add a bot** lists MiniMax, Synthetic, OpenRouter, Groq, DeepSeek, Together,
   Fireworks, Hugging Face, Novita, Cerebras, AI/ML API, Vercel AI Gateway,
-  Kimi Code, Gemini API, Grok Bot, and DGX Spark.
+  Kimi Code, Gemini API, Anthropic, Grok Bot, and DGX Spark.
 - Presets group as subscription plans, gateway credits or BYOK,
   direct API billing, and on this Mac.
 - **DGX Spark** is a local OpenAI-compatible bot on `127.0.0.1:8788`. NVIDIA
@@ -95,8 +95,10 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
 - Leftover pings only official key-only JSON meters: MiniMax, Synthetic,
   OpenRouter.
 - DeepSeek, Novita, AI/ML API and Vercel AI Gateway fill a prepaid balance.
-- Together, Fireworks, Groq, Hugging Face, Cerebras, Kimi Code and Gemini stay
-  unknown until those hosts publish leftover JSON.
+- Together, Fireworks, Groq, Hugging Face, Cerebras, Kimi Code, Gemini and
+  Anthropic stay unknown until those hosts publish leftover JSON. The
+  Anthropic bot spends a Console key. The Claude login on the desk stays the
+  Max plan.
 
 ### Grok Bot
 

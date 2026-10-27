@@ -225,6 +225,22 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     models: [{ id: "gemini-3.7-flash", name: "Gemini 3.7 Flash", contextWindow: 1_000_000 }],
   },
   {
+    id: "anthropic",
+    name: "Anthropic",
+    hint: "Console keys start with sk-ant-. This slot spends API credit. The Claude login on the desk stays the Max plan.",
+    color: "#d97757",
+    baseUrl: "https://api.anthropic.com",
+    api: "anthropic-messages",
+    billing: "direct",
+    keyPrefixes: ["sk-ant-"],
+    models: [
+      { id: "claude-haiku-5-5", name: "Haiku 5.5", contextWindow: 1_000_000 },
+      { id: "claude-sonnet-5-5", name: "Sonnet 5.5", contextWindow: 1_000_000 },
+      { id: "claude-opus-5-5", name: "Opus 5.5", contextWindow: 1_000_000 },
+      { id: "claude-fable-5-1", name: "Fable 5.1", contextWindow: 1_000_000 },
+    ],
+  },
+  {
     id: "grok-bot",
     name: "Grok Bot",
     hint: "Local OpenAI-compatible shim on 127.0.0.1. Fail closed if it is down. Do not paste a pairing token.",
@@ -306,7 +322,7 @@ export function contextFromModelList(payload: unknown, model: string): number | 
     const rec = row as Record<string, unknown>;
     const id = typeof rec.id === "string" ? rec.id : typeof rec.name === "string" ? rec.name : "";
     if (id.toLowerCase() !== want) continue;
-    for (const field of ["context_length", "context_window", "contextWindow", "max_context_length"]) {
+    for (const field of ["context_length", "context_window", "contextWindow", "max_context_length", "max_input_tokens"]) {
       const value = rec[field];
       if (typeof value === "number" && value > 0) return Math.round(value);
     }

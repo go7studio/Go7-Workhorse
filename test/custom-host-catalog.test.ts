@@ -75,6 +75,8 @@ test("the list endpoint sits where the chat path already looks", () => {
   assert.equal(customCatalogUrl("https://api.synthetic.new/openai/v1"), "https://api.synthetic.new/openai/v1/models");
   assert.equal(customCatalogUrl("https://openrouter.ai/api/v1/models"), "https://openrouter.ai/api/v1/models");
   assert.equal(customCatalogUrl("http://127.0.0.1:11434/v1"), "http://127.0.0.1:11434/v1/models");
+  assert.equal(customCatalogUrl("https://api.anthropic.com"), "https://api.anthropic.com/v1/models");
+  assert.equal(customCatalogUrl("https://api.anthropic.com/"), "https://api.anthropic.com/v1/models");
   assert.equal(customCatalogUrl("not a url"), undefined);
   assert.equal(customCatalogUrl(""), undefined);
 });
@@ -104,6 +106,138 @@ test("a host's own numbers survive the read, and junk never becomes a row", () =
   assert.equal(parseCustomCatalog({ data: [{}, 7, ""] }, 1), undefined);
   assert.equal(parseCustomCatalog(null, 1), undefined);
   assert.equal(parseCustomCatalog({ data: [{ id: "x".repeat(201) }] }, 1), undefined);
+});
+
+test("an Anthropic models page reads max_input_tokens and does not invent a price", () => {
+  const page = catalogOf({
+    data: [
+      { id: "claude-haiku-5-5", display_name: "Haiku 5.5", max_input_tokens: 1_000_000, max_tokens: 64_000, type: "model" },
+      { id: "claude-sonnet-5-5", display_name: "Sonnet 5.5", max_input_tokens: 0, type: "model" },
+      { id: "dropped", max_input_tokens: -5, type: "model" },
+      { id: "openai-shape", context_length: 50, max_input_tokens: 99 },
+    ],
+    has_more: false,
+    last_id: "openai-shape",
+  });
+  assert.equal(page.models.find((model) => model.id === "claude-haiku-5-5")?.contextWindow, 1_000_000);
+  assert.equal(page.models.find((model) => model.id === "claude-sonnet-5-5")?.contextWindow, undefined);
+  assert.equal(page.models.find((model) => model.id === "dropped")?.contextWindow, undefined);
+  assert.equal(page.models.find((model) => model.id === "openai-shape")?.contextWindow, 50, "an OpenAI window still leads");
+  assert.equal(page.models.every((model) => model.pricePerMTokIn === undefined && model.pricePerMTokOut === undefined), true);
+});
+
+test("Anthropic catalog paging follows has_more and a host with no has_more stays one page", async () => {
+  const seen: string[] = [];
+  const paged = await fetchCustomCatalog({
+    baseUrl: "https://api.anthropic.com",
+    apiKey: "sk-ant-test",
+    fetchImpl: async (url, init) => {
+      const target = String(url);
+      seen.push(target);
+      const headers = new Headers(init?.headers);
+      assert.equal(headers.get("x-api-key"), "sk-ant-test");
+      assert.equal(headers.get("anthropic-version"), "2023-06-01");
+      assert.equal(headers.get("authorization"), "Bearer sk-ant-test");
+      if (!target.includes("after_id=")) {
+        return jsonResponse({
+          data: [{ id: "claude-haiku-5-5", display_name: "Haiku 5.5", max_input_tokens: 1_000_000, type: "model" }],
+          has_more: true,
+          last_id: "claude-haiku-5-5",
+        });
+      }
+      assert.equal(target, "https://api.anthropic.com/v1/models?after_id=claude-haiku-5-5");
+      return jsonResponse({
+        data: [{ id: "claude-opus-5-5", display_name: "Opus 5.5", max_input_tokens: 1_000_000, type: "model" }],
+        has_more: false,
+        last_id: "claude-opus-5-5",
+      });
+    },
+  });
+  assert.deepEqual(seen, [
+    "https://api.anthropic.com/v1/models",
+    "https://api.anthropic.com/v1/models?after_id=claude-haiku-5-5",
+  ]);
+  assert.equal(paged?.models.find((model) => model.id === "claude-haiku-5-5")?.contextWindow, 1_000_000);
+  assert.equal(paged?.models.find((model) => model.id === "claude-opus-5-5")?.contextWindow, 1_000_000);
+  assert.equal(paged?.models.every((model) => model.pricePerMTokIn === undefined), true);
+
+  let openRouterCalls = 0;
+  const openRouter = await fetchCustomCatalog({
+    baseUrl: "https://openrouter.ai/api/v1",
+    apiKey: "sk-or-test",
+    fetchImpl: async () => {
+      openRouterCalls += 1;
+      return jsonResponse(OPENROUTER_MODELS);
+    },
+  });
+  assert.equal(openRouterCalls, 1);
+  assert.equal(openRouter?.models.find((model) => model.id === "moonshotai/kimi-k3")?.pricePerMTokIn, 1.5);
+});
+
+test("catalog paging stops on a repeated cursor, an empty page, a bad status, and the tenth page", async () => {
+  const repeated: string[] = [];
+  const repeat = await fetchCustomCatalog({
+    baseUrl: "https://api.anthropic.com",
+    apiKey: "k",
+    fetchImpl: async (url) => {
+      repeated.push(String(url));
+      const page = repeated.length;
+      return jsonResponse({
+        data: [{ id: `page-${page}`, max_input_tokens: 1_000 }],
+        has_more: true,
+        last_id: page === 1 ? "cursor" : "cursor",
+      });
+    },
+  });
+  assert.equal(repeated.length, 2);
+  assert.deepEqual(repeat?.models.map((model) => model.id), ["page-1", "page-2"]);
+
+  let emptyCalls = 0;
+  const emptySecond = await fetchCustomCatalog({
+    baseUrl: "https://api.anthropic.com",
+    apiKey: "k",
+    fetchImpl: async () => {
+      emptyCalls += 1;
+      if (emptyCalls === 1) {
+        return jsonResponse({ data: [{ id: "kept", max_input_tokens: 8 }], has_more: true, last_id: "kept" });
+      }
+      return jsonResponse({ data: [], has_more: true, last_id: "kept" });
+    },
+  });
+  assert.equal(emptyCalls, 2);
+  assert.deepEqual(emptySecond?.models.map((model) => model.id), ["kept"]);
+
+  let badCalls = 0;
+  const badSecond = await fetchCustomCatalog({
+    baseUrl: "https://api.anthropic.com",
+    apiKey: "k",
+    fetchImpl: async () => {
+      badCalls += 1;
+      if (badCalls === 1) {
+        return jsonResponse({ data: [{ id: "kept", max_input_tokens: 8 }], has_more: true, last_id: "kept" });
+      }
+      return jsonResponse({ error: "no" }, 500);
+    },
+  });
+  assert.equal(badCalls, 2);
+  assert.deepEqual(badSecond?.models.map((model) => model.id), ["kept"]);
+
+  let capped = 0;
+  const ten = await fetchCustomCatalog({
+    baseUrl: "https://api.anthropic.com",
+    apiKey: "k",
+    fetchImpl: async () => {
+      capped += 1;
+      return jsonResponse({
+        data: [{ id: `m${capped}`, max_input_tokens: 100 }],
+        has_more: true,
+        last_id: `m${capped}`,
+      });
+    },
+  });
+  assert.equal(capped, 10);
+  assert.equal(ten?.models.length, 10);
+  assert.equal(ten?.models.some((model) => model.id === "m11"), false);
 });
 
 test("a host that has no list, or refuses the key, stays unknown", async () => {

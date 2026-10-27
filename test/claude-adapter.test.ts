@@ -24,7 +24,7 @@ import {
 } from "../electron/claude-launch";
 import { clearClaudePlanCache, fetchClaudePlanUsage, parseClaudePlanUsage, resolveClaudePlanToken, usedPercentFromUtilization } from "../electron/claude-plan";
 import { previewOnlyReply, vendorSendTarget } from "../src/lib/vendor-bridge";
-import { CLAUDE_EFFORTS, effortsFor } from "../src/lib/models";
+import { CLAUDE_EFFORTS, contextWindowFor, effortsFor, MODEL_CATALOG } from "../src/lib/models";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -181,6 +181,26 @@ test("buildClaudeLaunchSpec never spawns grok and maps permission modes", () => 
     assert.equal(resolveClaudeModel(""), "claude-sonnet-5");
     assert.equal(resolveClaudeModel("opus"), "claude-opus-5-5");
     assert.equal(resolveClaudeModel("claude-sonnet"), "claude-sonnet-5");
+    assert.equal(resolveClaudeModel("sonnet"), "claude-sonnet-5");
+    assert.equal(resolveClaudeModel("haiku"), "claude-haiku-4-5");
+    assert.equal(resolveClaudeModel("claude-haiku"), "claude-haiku-4-5");
+    assert.equal(resolveClaudeModel("haiku 5.5"), "claude-haiku-5-5");
+    assert.equal(resolveClaudeModel("haiku-5.5"), "claude-haiku-5-5");
+    assert.equal(resolveClaudeModel("haiku-5-5"), "claude-haiku-5-5");
+    assert.equal(resolveClaudeModel("claude-haiku-5.5"), "claude-haiku-5-5");
+    assert.equal(resolveClaudeModel("sonnet 5.5"), "claude-sonnet-5-5");
+    assert.equal(resolveClaudeModel("sonnet-5.5"), "claude-sonnet-5-5");
+    assert.equal(resolveClaudeModel("sonnet-5-5"), "claude-sonnet-5-5");
+    assert.equal(resolveClaudeModel("claude-sonnet-5.5"), "claude-sonnet-5-5");
+    assert.equal(resolveClaudeModel("claude-opus-5.5"), "claude-opus-5-5");
+    for (const id of ["claude-sonnet-5-5", "claude-haiku-5-5"] as const) {
+      const row = MODEL_CATALOG.claude.find((model) => model.id === id);
+      assert.equal(row?.effort, true, id);
+      assert.equal(row?.contextWindow, 1_000_000, id);
+      assert.equal(contextWindowFor("claude", id), 1_000_000, id);
+    }
+    assert.equal(MODEL_CATALOG.claude.some((model) => /-5-5-(high|medium|low)$/.test(model.id)), false);
+    assert.equal(MODEL_CATALOG.custom.some((model) => /-5-5-(high|medium|low)$/.test(model.id)), false);
     assert.equal(resolveClaudeModel("Fable 5"), "claude-fable-5");
     assert.equal(resolveClaudeModel("fable"), "claude-fable-5");
     assert.equal(resolveClaudeModel("claude-fable-5"), "claude-fable-5");
@@ -211,6 +231,7 @@ test("buildClaudeLaunchSpec never spawns grok and maps permission modes", () => 
     assert.ok(!spec.argv.includes("--sandbox"));
     assert.equal(spec.model, "claude-opus-5");
     assert.equal(spec.env?.ANTHROPIC_MODEL, "claude-opus-5");
+    assert.equal(spec.env?.ANTHROPIC_API_KEY, undefined);
     assert.equal(spec.effort, "high");
     assert.equal(spec.sessionParams._meta?.model, "claude-opus-5");
     assert.equal(spec.sessionParams._meta?.permissionMode, "default");

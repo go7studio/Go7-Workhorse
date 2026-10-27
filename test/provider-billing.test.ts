@@ -10,6 +10,7 @@ import { CUSTOM_METERS, customMeterForUrl, customPlanRemainsUrl } from "../src/l
 import {
   PROVIDER_BILLING_GROUPS,
   PROVIDER_PRESETS,
+  detectProviderFromKey,
   detectProviderFromUrl,
   draftFromProvider,
   findProvider,
@@ -72,6 +73,7 @@ test("Add Bot presets keep every existing host and group billing copy", () => {
     cerebras: "direct",
     aimlapi: "direct",
     gemini: "direct",
+    anthropic: "direct",
     "grok-bot": "local",
     "dgx-spark": "local",
   };
@@ -104,7 +106,7 @@ test("Add Bot presets keep every existing host and group billing copy", () => {
   );
   assert.deepEqual(
     groups.find((item) => item.group.id === "direct")?.presets.map((item) => item.id),
-    ["groq", "deepseek", "together", "fireworks", "novita", "cerebras", "aimlapi", "gemini"],
+    ["groq", "deepseek", "together", "fireworks", "novita", "cerebras", "aimlapi", "gemini", "anthropic"],
   );
   assert.deepEqual(
     groups.find((item) => item.group.id === "local")?.presets.map((item) => item.id),
@@ -164,6 +166,37 @@ test("Vercel Kimi Code and Gemini ship as Custom HTTP presets with documented de
     "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
   );
   assert.equal(customModelsUrl(gemini!.baseUrl), "https://generativelanguage.googleapis.com/v1beta/openai/models");
+});
+
+test("Anthropic is a direct custom preset and not a Claude plan meter", () => {
+  const preset = findProvider("anthropic");
+  assert.ok(preset);
+  assert.equal(preset.name, "Anthropic");
+  assert.equal(preset.api, "anthropic-messages");
+  assert.equal(preset.billing, "direct");
+  assert.equal(preset.baseUrl, "https://api.anthropic.com");
+  assert.deepEqual(preset.keyPrefixes, ["sk-ant-"]);
+  assert.match(preset.hint, /Console key/);
+  assert.match(preset.hint, /API credit/);
+  assert.match(preset.hint, /Max plan/);
+  assert.doesNotMatch(preset.hint, /leftover|unlimited/i);
+  assert.deepEqual(
+    preset.models.map((model) => [model.id, model.name, model.contextWindow]),
+    [
+      ["claude-haiku-5-5", "Haiku 5.5", 1_000_000],
+      ["claude-sonnet-5-5", "Sonnet 5.5", 1_000_000],
+      ["claude-opus-5-5", "Opus 5.5", 1_000_000],
+      ["claude-fable-5-1", "Fable 5.1", 1_000_000],
+    ],
+  );
+  assert.equal(detectProviderFromKey("sk-ant-api03-fixture")?.id, "anthropic");
+  assert.equal(detectProviderFromUrl("https://api.anthropic.com")?.id, "anthropic");
+  assert.equal(customMeterForUrl("https://api.anthropic.com"), undefined);
+  assert.equal(customPlanRemainsUrl("https://api.anthropic.com"), undefined);
+  assert.equal(customMessagesUrl(preset.baseUrl, preset.api), "https://api.anthropic.com/v1/messages");
+  assert.equal(draftFromProvider(preset).model, "claude-haiku-5-5");
+  assert.equal(draftFromProvider(preset).contextWindow, 1_000_000);
+  assert.equal(draftFromProvider(preset).api, "anthropic-messages");
 });
 
 test("Vercel credits are prepaid; Kimi and Gemini leftover stay unknown", () => {
@@ -305,6 +338,9 @@ test("FEATURES names the shipped billing groups and new Custom HTTP presets", ()
   assert.doesNotMatch(features, /\bRemote\b/);
   assert.match(features, /Kimi Code[\s\S]*unknown/);
   assert.match(features, /Gemini stay unknown|Gemini API[\s\S]*unknown/);
+  assert.match(features, /Anthropic[\s\S]*unknown/);
+  assert.match(features, /Anthropic bot spends a Console key/);
+  assert.match(features, /Claude login on the desk stays the\s+Max plan/);
   assert.match(features, /fails closed if the\s+shim is down/);
   assert.match(features, /optional finishing step/);
   assert.doesNotMatch(features, /wake: true/);

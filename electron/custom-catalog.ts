@@ -11,6 +11,8 @@ import { customHttpIdentityHeaders } from "../src/lib/custom-http-identity";
  * see the price they are agreeing to. Both are already in the answer — Synthetic
  * sends `context_length`, OpenRouter sends that plus `pricing` per token — so
  * reading them is not a new request, only a fuller read of the one being made.
+ * Anthropic sends `max_input_tokens` and pages with `has_more` / `last_id`.
+ * It does not send prices.
  *
  * Nothing here invents a row. A host with no `/models`, a host that refuses the
  * key, and a host whose answer this cannot parse all come back `undefined`, and
@@ -90,7 +92,8 @@ function catalogRow(raw: unknown): CustomCatalogModel | undefined {
     positiveInt(topProvider.context_length) ??
     positiveInt(record.context_window) ??
     positiveInt(record.contextWindow) ??
-    positiveInt(record.max_context_length);
+    positiveInt(record.max_context_length) ??
+    positiveInt(record.max_input_tokens);
   const pricing = asRecord(record.pricing);
   const pricePerMTokIn = perMillion(pricing.prompt ?? pricing.input);
   const pricePerMTokOut = perMillion(pricing.completion ?? pricing.output);
@@ -155,6 +158,37 @@ async function getJson(url: string, headers: Record<string, string>): Promise<{ 
   });
 }
 
+/** Anthropic pages the model list. Ten pages is the stop, not a guess of its size. */
+const CATALOG_MAX_PAGES = 10;
+
+function catalogRows(raw: unknown): unknown[] {
+  const root = asRecord(raw);
+  if (Array.isArray(root.data)) return root.data;
+  if (Array.isArray(root.models)) return root.models;
+  if (Array.isArray(raw)) return raw;
+  return [];
+}
+
+function withAfterId(url: string, afterId: string): string {
+  const next = new URL(url);
+  next.searchParams.set("after_id", afterId);
+  return next.toString();
+}
+
+async function readCatalogBody(
+  url: string,
+  headers: Record<string, string>,
+  fetchImpl?: typeof fetch,
+): Promise<{ ok: boolean; json: unknown }> {
+  if (fetchImpl) {
+    const response = await fetchImpl(url, { headers });
+    if (!response.ok) return { ok: false, json: null };
+    return { ok: true, json: await response.json() };
+  }
+  const { status, json } = await getJson(url, headers);
+  return { ok: status >= 200 && status < 300, json };
+}
+
 export async function fetchCustomCatalog(input: {
   baseUrl: string;
   apiKey: string;
@@ -172,15 +206,37 @@ export async function fetchCustomCatalog(input: {
     Accept: "application/json",
     ...customHttpIdentityHeaders(input.baseUrl),
   };
+  const merged: unknown[] = [];
+  const seenCursors = new Set<string>();
+  let afterId = "";
   try {
-    if (input.fetchImpl) {
-      const response = await input.fetchImpl(url, { headers });
-      if (!response.ok) return undefined;
-      return parseCustomCatalog(await response.json(), fetchedAt);
+    for (let page = 0; page < CATALOG_MAX_PAGES; page += 1) {
+      const pageUrl = afterId ? withAfterId(url, afterId) : url;
+      let result: { ok: boolean; json: unknown };
+      try {
+        result = await readCatalogBody(pageUrl, headers, input.fetchImpl);
+      } catch {
+        return page === 0 ? undefined : parseCustomCatalog({ data: merged }, fetchedAt);
+      }
+      if (!result.ok) return page === 0 ? undefined : parseCustomCatalog({ data: merged }, fetchedAt);
+      const rows = catalogRows(result.json);
+      if (rows.length === 0) {
+        return page === 0 ? parseCustomCatalog(result.json, fetchedAt) : parseCustomCatalog({ data: merged }, fetchedAt);
+      }
+      const root = asRecord(result.json);
+      const more = root.has_more === true;
+      const lastId = typeof root.last_id === "string" ? root.last_id.trim() : "";
+      if (!more) {
+        if (page === 0) return parseCustomCatalog(result.json, fetchedAt);
+        merged.push(...rows);
+        return parseCustomCatalog({ data: merged }, fetchedAt);
+      }
+      merged.push(...rows);
+      if (!lastId || seenCursors.has(lastId)) return parseCustomCatalog({ data: merged }, fetchedAt);
+      seenCursors.add(lastId);
+      afterId = lastId;
     }
-    const { status, json } = await getJson(url, headers);
-    if (status < 200 || status >= 300) return undefined;
-    return parseCustomCatalog(json, fetchedAt);
+    return parseCustomCatalog({ data: merged }, fetchedAt);
   } catch {
     return undefined;
   }

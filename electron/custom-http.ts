@@ -332,6 +332,41 @@ function openAiAttachmentBlocks(
   ];
 }
 
+const EPHEMERAL_CACHE = { type: "ephemeral" } as const;
+
+/** Last tool is the first cache breakpoint, so the whole tool list is one prefix. */
+function anthropicCachedTools(tools: CustomHttpTool[]): Array<CustomHttpTool | (CustomHttpTool & { cache_control: typeof EPHEMERAL_CACHE })> {
+  if (tools.length === 0) return tools;
+  return tools.map((tool, index) => (index === tools.length - 1 ? { ...tool, cache_control: EPHEMERAL_CACHE } : tool));
+}
+
+/** A plain string becomes a text block only when the mark needs a block to sit on. */
+function attachCacheControl(message: { content: unknown }): void {
+  if (typeof message.content === "string") {
+    message.content = [{ type: "text", text: message.content, cache_control: EPHEMERAL_CACHE }];
+    return;
+  }
+  if (!Array.isArray(message.content) || message.content.length === 0) return;
+  const last = message.content[message.content.length - 1];
+  if (!last || typeof last !== "object" || Array.isArray(last)) return;
+  (last as Record<string, unknown>).cache_control = EPHEMERAL_CACHE;
+}
+
+/** Mark the message before the final user turn. Leave that turn, and tool pairing, as built. */
+function markPriorTurnCache(messages: { role: string; content: unknown }[]): void {
+  let lastUser = -1;
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    if (messages[index]?.role === "user") {
+      lastUser = index;
+      break;
+    }
+  }
+  if (lastUser <= 0) return;
+  const prior = messages[lastUser - 1];
+  if (!prior) return;
+  attachCacheControl(prior);
+}
+
 export function buildAnthropicBody(input: {
   model: string;
   messages: CustomChatMessage[];
@@ -342,7 +377,7 @@ export function buildAnthropicBody(input: {
   role?: import("../src/lib/workhorse-rules").DeskRole;
   inputs?: Partial<ModelInputCapabilities>;
 }): Record<string, unknown> {
-  const messages = input.messages
+  const messages: { role: "user" | "assistant"; content: unknown }[] = input.messages
     .filter((item) => item.role === "user" || item.role === "assistant")
     .map((item) => {
       if (item.role === "assistant") {
@@ -374,13 +409,14 @@ export function buildAnthropicBody(input: {
       for (const image of item.images ?? []) blocks.push(...anthropicAttachmentBlocks(image, input.inputs));
       return { role: "user", content: blocks.length > 0 ? blocks : [{ type: "text", text: item.text || "" }] };
     });
+  markPriorTurnCache(messages);
   const thinking = customThinking(input.model, input.effort);
   const body: Record<string, unknown> = {
     model: input.model,
     max_tokens: customMaxTokens(input.model, input.effort, input.maxTokens),
     stream: true,
     messages,
-    tools: customHttpTools(input.tools, { role: input.role }),
+    tools: anthropicCachedTools(customHttpTools(input.tools, { role: input.role })),
   };
   if (input.preface?.trim()) {
     /*

@@ -175,9 +175,11 @@ test("Anthropic is a direct custom preset and not a Claude plan meter", () => {
   assert.equal(preset.api, "anthropic-messages");
   assert.equal(preset.billing, "direct");
   assert.equal(preset.baseUrl, "https://api.anthropic.com");
-  assert.deepEqual(preset.keyPrefixes, ["sk-ant-"]);
+  assert.deepEqual(preset.keyPrefixes, ["sk-ant-api", "sk-ant-usr"]);
   assert.match(preset.hint, /Console key/);
   assert.match(preset.hint, /API credit/);
+  assert.match(preset.hint, /\$200/);
+  assert.match(preset.hint, /ring stays unread/);
   assert.match(preset.hint, /Max plan/);
   assert.doesNotMatch(preset.hint, /leftover|unlimited/i);
   assert.deepEqual(
@@ -190,6 +192,8 @@ test("Anthropic is a direct custom preset and not a Claude plan meter", () => {
     ],
   );
   assert.equal(detectProviderFromKey("sk-ant-api03-fixture")?.id, "anthropic");
+  assert.equal(detectProviderFromKey("sk-ant-usr-fixture")?.id, "anthropic");
+  assert.equal(detectProviderFromKey("sk-ant-oat01-fixture"), undefined);
   assert.equal(detectProviderFromUrl("https://api.anthropic.com")?.id, "anthropic");
   assert.equal(customMeterForUrl("https://api.anthropic.com"), undefined);
   assert.equal(customPlanRemainsUrl("https://api.anthropic.com"), undefined);
@@ -341,6 +345,8 @@ test("FEATURES names the shipped billing groups and new Custom HTTP presets", ()
   assert.match(features, /Anthropic[\s\S]*unknown/);
   assert.match(features, /Anthropic bot spends a Console key/);
   assert.match(features, /Claude login on the desk stays the\s+Max plan/);
+  assert.match(features, /Max 20x publishes \$200 of Platform credit/);
+  assert.match(features, /not a balance the desk has read/);
   assert.match(features, /fails closed if the\s+shim is down/);
   assert.match(features, /optional finishing step/);
   assert.doesNotMatch(features, /wake: true/);

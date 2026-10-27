@@ -227,12 +227,12 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
   {
     id: "anthropic",
     name: "Anthropic",
-    hint: "Console keys start with sk-ant-. This slot spends API credit. The Claude login on the desk stays the Max plan.",
+    hint: "Console keys start with sk-ant-api or sk-ant-usr. Max 20x includes $200 of Platform credit each month. This slot spends API credit. The balance is not published to the key, so the ring stays unread. The Claude login on the desk stays the Max plan.",
     color: "#d97757",
     baseUrl: "https://api.anthropic.com",
     api: "anthropic-messages",
     billing: "direct",
-    keyPrefixes: ["sk-ant-"],
+    keyPrefixes: ["sk-ant-api", "sk-ant-usr"],
     models: [
       { id: "claude-haiku-5-5", name: "Haiku 5.5", contextWindow: 1_000_000 },
       { id: "claude-sonnet-5-5", name: "Sonnet 5.5", contextWindow: 1_000_000 },

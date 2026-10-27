@@ -98,7 +98,8 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
 - Together, Fireworks, Groq, Hugging Face, Cerebras, Kimi Code, Gemini and
   Anthropic stay unknown until those hosts publish leftover JSON. The
   Anthropic bot spends a Console key. The Claude login on the desk stays the
-  Max plan.
+  Max plan. Max 20x publishes $200 of Platform credit each month. That figure
+  is the plan grant, not a balance the desk has read.
 
 ### Grok Bot
 

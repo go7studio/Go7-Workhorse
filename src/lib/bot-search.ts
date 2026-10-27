@@ -30,6 +30,17 @@ import type { WatchPlans, WatchVendorStatus } from "./watch";
 
 export const FIND_BOTS_MAX_SQUAD = 8;
 const FIND_BOTS_MAX_PICKS = 8;
+
+/**
+ * What a head must never name comes first, then an older model that gives
+ * way, then a model under the bar. The list is capped, and a longer catalog
+ * was pushing "Grok Bot never takes desk work" off the end.
+ */
+function notPickedRank(row: { callable: boolean; supersededBy?: string }): number {
+  if (!row.callable) return 0;
+  if (row.supersededBy) return 1;
+  return 2;
+}
 const TASK_CHARS = 4000;
 
 export type FindBotsInput = {
@@ -202,6 +213,7 @@ export function findBots(input: FindBotsInput, desk: FindBotsDesk): FindBotsResu
     squad,
     notPicked: snapshot.models
       .filter((row) => !row.clearsBar)
+      .sort((a, b) => notPickedRank(a) - notPickedRank(b))
       .slice(0, 12)
       .map((row) => ({ label: row.label, reason: row.skip ?? `${row.score}/100` })),
     howToUse:

@@ -46,7 +46,7 @@ import { existingPeerReply } from "../src/lib/session-bridge";
 import { listDropFiles } from "./drop-files";
 import { attachDialogProperties, attachDialogTitle, windowsNeedsAttachChoice } from "./attach-pick";
 
-import { displaySrcForHref, openableMediaPath, resolveMediaProtocolFile, safeLocalPath } from "./media-src";
+import { displaySrcForHref, openableHtmlPath, openableMediaPath, resolveMediaProtocolFile, safeLocalPath } from "./media-src";
 import { watchViewerFolder } from "./viewer-watch";
 import { createViewerHost, viewerSession, resolveViewerWatchFolder } from "./viewer-host";
 import { pathToMediaUrl } from "../src/lib/media-display";
@@ -2192,6 +2192,14 @@ app.whenReady().then(async () => {
     if (!target) return false;
     shell.showItemInFolder(target);
     return true;
+  });
+  // A chat link to a local .html/.htm page opens in the OS handler. Pictures
+  // and videos stay on desk:open-local-path. A share is refused before any stat.
+  ipcMain.handle("desk:open-local-html", async (_event, input: unknown) => {
+    const target = openableHtmlPath(input);
+    if (!target) return false;
+    const err = await shell.openPath(target);
+    return !err;
   });
   ipcMain.handle("localMedia:create", async (_event, input: unknown) => {
     const stateDir = path.join(app.getPath("userData"), "local-media-create");

@@ -66,6 +66,7 @@ contextBridge.exposeInMainWorld("workhorse", {
   revealProject: (folder: string) => ipcRenderer.invoke("project:reveal", folder),
   missingFolders: (folders: string[]) => ipcRenderer.invoke("project:missing-folders", folders),
   openExternal: (href: string) => ipcRenderer.invoke("shell:open", href) as Promise<boolean>,
+  openLocalHtml: (filePath: string) => ipcRenderer.invoke("desk:open-local-html", filePath) as Promise<boolean>,
   fileDiff: (filePath: string, roots: string[] = [], created = false) =>
     ipcRenderer.invoke("project:file-diff", filePath, roots, created),
   recordFileWrite: (filePath: string, roots: string[] = []) =>

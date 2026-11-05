@@ -1,20 +1,26 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { fileURLToPath } from "node:url";
-import { flushLinkHistoryWrites, readLinkHistoryFile } from "../electron/link-history-file";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { flushLinkHistoryWrites, readLinkHistoryFile, readLinkInspectFile } from "../electron/link-history-file";
 import { resetLinkStateCache } from "../electron/link-state";
 import { handleWorkhorseRpc, setWorkhorseDeskAsk } from "../electron/workhorse-mcp";
 import { isDraftChat, isListedLooseChat } from "../src/lib/chats";
-import { inspectCallers, pageNewest, redactInspectText } from "../src/lib/link-inspect";
+import { inspectCallers, inspectTranscriptRows, pageNewest, redactInspectText } from "../src/lib/link-inspect";
 import { linkBridgeHostFor } from "../src/lib/link-bridge";
 import {
   LINK_HISTORY_LIMIT,
+  LINK_WORKER_INDEX_LIMIT,
+  applyLinkRecord,
   boundLinkHistory,
+  emptyLinkInspect,
   linkCallFromObservation,
+  linkRetentionNote,
   normalizeLinkHistory,
+  normalizeLinkInspect,
 } from "../src/lib/link-history";
 import { normalizeSession } from "../src/lib/session";
 import { buildSidebarChatIndex } from "../src/lib/sidebar-index";
@@ -387,6 +393,11 @@ test("a real status call links the worker and keeps the transcript secret out of
     assert.equal(text.includes("Could not write"), false);
     assert.equal(text.includes("disk full"), false);
     const rows = readLinkHistoryFile(statePath);
+    const stored = readLinkInspectFile(statePath);
+    assert.equal(stored.version, 2);
+    assert.equal(stored.callers.find((item) => item.caller === "Codex")?.workers.some((item) => item.sessionId === "sess_wren"), true);
+    assert.equal(stored.callers.find((item) => item.caller === "Claude")?.workers.some((item) => item.sessionId === "sess_wren"), false);
+    assert.match(stored.retention.note, /Different caller names stay different/);
     const tree = inspectCallers(rows);
     const codex = tree.find((item) => item.caller === "Codex");
     const claude = tree.find((item) => item.caller === "Claude");
@@ -411,6 +422,212 @@ test("a real status call links the worker and keeps the transcript secret out of
   }
 });
 
+test("a worker stays listed after its call leaves the 40-row log", () => {
+  let file = emptyLinkInspect();
+  file = applyLinkRecord(
+    file,
+    linkCallFromObservation({
+      tool: "workhorse_delegate",
+      ok: true,
+      callerHint: "Codex",
+      resultText: JSON.stringify({ childSessionId: "sess_old01", worker: "Wren", status: "completed" }),
+      now: 1,
+      id: "link_old",
+    }),
+  );
+  for (let index = 0; index < LINK_HISTORY_LIMIT + 5; index += 1) {
+    file = applyLinkRecord(
+      file,
+      linkCallFromObservation({
+        tool: "workhorse_list_chats",
+        ok: true,
+        callerHint: "Claude",
+        resultText: index === 0 ? JSON.stringify({ childSessionId: "sess_new01", worker: "Ada", parentId: "sess_parent", status: "running" }) : JSON.stringify({ chats: [{ id: "sess_old01" }] }),
+        now: 10 + index,
+        id: `link_claude_${index}`,
+      }),
+    );
+  }
+  assert.equal(file.calls.length, LINK_HISTORY_LIMIT);
+  assert.equal(file.calls.some((row) => row.workerSessionIds?.includes("sess_old01")), false);
+  const codex = file.callers.find((item) => item.caller === "Codex");
+  const claude = file.callers.find((item) => item.caller === "Claude");
+  assert.equal(codex?.workers[0]?.sessionId, "sess_old01");
+  assert.equal(codex?.callCount, 1);
+  assert.equal(claude?.callCount, LINK_HISTORY_LIMIT + 5);
+  assert.equal(claude?.workers.some((item) => item.sessionId === "sess_old01"), false);
+  assert.equal(claude?.workers.some((item) => item.sessionId === "sess_new01"), true);
+  const tree = inspectCallers(file.calls);
+  assert.equal(tree.some((item) => item.caller === "Codex"), false);
+  const durable = inspectCallers([]);
+  assert.equal(durable.length, 0);
+  const restored = normalizeLinkInspect(file);
+  assert.equal(restored.callers.find((item) => item.caller === "Codex")?.workers[0]?.sessionId, "sess_old01");
+  assert.match(linkRetentionNote(), /latest 40/);
+  assert.match(restored.retention.note, /Different caller names stay different/);
+});
+
+test("the older-worker bound drops the quietest worker and does not merge callers", () => {
+  let file = emptyLinkInspect();
+  const total = LINK_WORKER_INDEX_LIMIT + 1;
+  for (let index = 0; index < total; index += 1) {
+    const sessionId = `sess_old${index.toString(36).padStart(4, "0")}`;
+    file = applyLinkRecord(
+      file,
+      linkCallFromObservation({
+        tool: "workhorse_delegate",
+        ok: true,
+        callerHint: "Codex",
+        resultText: JSON.stringify({ childSessionId: sessionId, worker: "Wren", status: "completed" }),
+        now: index + 1,
+        id: `link_codex_${index}`,
+      }),
+    );
+  }
+  file = applyLinkRecord(
+    file,
+    linkCallFromObservation({
+      tool: "workhorse_delegate",
+      ok: true,
+      callerHint: "Claude",
+      resultText: JSON.stringify({ childSessionId: "sess_claude01", worker: "Ada", status: "completed" }),
+      now: total + 1,
+      id: "link_claude_keep",
+    }),
+  );
+  for (let index = 0; index < LINK_HISTORY_LIMIT; index += 1) {
+    file = applyLinkRecord(
+      file,
+      linkCallFromObservation({
+        tool: "workhorse_list_chats",
+        ok: true,
+        callerHint: "Cursor",
+        now: total + 10 + index,
+        id: `link_cursor_${index}`,
+      }),
+    );
+  }
+  assert.equal(file.calls.length, LINK_HISTORY_LIMIT);
+  assert.equal(file.calls.every((row) => row.caller === "Cursor"), true);
+  const codex = file.callers.find((item) => item.caller === "Codex");
+  const claude = file.callers.find((item) => item.caller === "Claude");
+  assert.equal(codex?.workers.some((item) => item.sessionId === "sess_old0000"), false);
+  assert.equal(codex?.workers.length, LINK_WORKER_INDEX_LIMIT - 1);
+  assert.equal(claude?.workers[0]?.sessionId, "sess_claude01");
+  assert.equal(file.callers.filter((item) => item.caller === "Codex").length, 1);
+  assert.equal(file.callers.filter((item) => item.caller === "Claude").length, 1);
+  assert.equal(file.callers.some((item) => item.caller === "Cursor"), true);
+});
+
+test("two helper processes keep every caller's count, and a new process can read it", async (t) => {
+  const dir = mkdtempSync(path.join(tmpdir(), "wh-link-inspect-lock-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const statePath = path.join(dir, "workhorse-state.json");
+  writeFileSync(statePath, "{}\n");
+  const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  const tsx = path.join(root, "node_modules", "tsx", "dist", "cli.mjs");
+  const writer = path.join(dir, "append-link-history.ts");
+  const reader = path.join(dir, "read-link-history.ts");
+  writeFileSync(
+    writer,
+    `import { appendLinkHistoryFile, flushLinkHistoryWrites } from ${JSON.stringify(pathToFileURL(path.join(root, "electron", "link-history-file.ts")).href)};\n` +
+      `import { linkCallFromObservation } from ${JSON.stringify(pathToFileURL(path.join(root, "src", "lib", "link-history.ts")).href)};\n` +
+      `const statePath = process.argv[2] ?? "";\n` +
+      `const caller = process.argv[3] ?? "";\n` +
+      `const sessionId = process.argv[4] ?? "";\n` +
+      `const count = Number(process.argv[5] ?? "30");\n` +
+      `async function main() {\n` +
+      `  for (let index = 0; index < count; index += 1) {\n` +
+      `    const first = index === 0;\n` +
+      `    appendLinkHistoryFile(statePath, linkCallFromObservation({\n` +
+      `      tool: first ? "workhorse_agent_status" : "workhorse_list_chats",\n` +
+      `      ok: true,\n` +
+      `      callerHint: caller,\n` +
+      `      now: Date.now() + index,\n` +
+      `      id: "link_" + caller.replace(/[^A-Za-z0-9]/g, "") + "_" + index + "_" + process.pid,\n` +
+      `      resultText: first ? JSON.stringify({ id: sessionId, worker: caller, parentId: "sess_parent", status: "completed" }) : JSON.stringify({ chats: [{ id: sessionId }] }),\n` +
+      `    }));\n` +
+      `  }\n` +
+      `  await flushLinkHistoryWrites();\n` +
+      `}\n` +
+      `main();\n`,
+  );
+  writeFileSync(
+    reader,
+    `import { readLinkInspectFile } from ${JSON.stringify(pathToFileURL(path.join(root, "electron", "link-history-file.ts")).href)};\n` +
+      `const file = readLinkInspectFile(process.argv[2] ?? "");\n` +
+      `process.stdout.write(JSON.stringify({ calls: file.calls.length, callers: file.callers.map((caller) => ({ caller: caller.caller, callCount: caller.callCount, workers: caller.workers.map((worker) => worker.sessionId) })) }));\n`,
+  );
+  const run = (args: string[]) =>
+    new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve) => {
+      const child = spawn(process.execPath, [tsx, ...args], { cwd: root, windowsHide: true });
+      let stdout = "";
+      let stderr = "";
+      const timer = setTimeout(() => child.kill(), 60_000);
+      child.stdout.setEncoding("utf8");
+      child.stderr.setEncoding("utf8");
+      child.stdout.on("data", (chunk) => {
+        stdout += chunk;
+      });
+      child.stderr.on("data", (chunk) => {
+        stderr += chunk;
+      });
+      child.on("close", (code) => {
+        clearTimeout(timer);
+        resolve({ code, stdout, stderr });
+      });
+    });
+  const [first, second] = await Promise.all([
+    run([writer, statePath, "Link process A", "sess_proca01", "30"]),
+    run([writer, statePath, "Link process B", "sess_procb01", "30"]),
+  ]);
+  assert.equal(first.code, 0, first.stderr);
+  assert.equal(second.code, 0, second.stderr);
+  const read = await run([reader, statePath]);
+  assert.equal(read.code, 0, read.stderr);
+  const parsed = JSON.parse(read.stdout) as {
+    calls: number;
+    callers: Array<{ caller: string; callCount: number; workers: Array<string | undefined> }>;
+  };
+  assert.equal(parsed.calls, LINK_HISTORY_LIMIT);
+  const alpha = parsed.callers.find((item) => item.caller === "Link process A");
+  const beta = parsed.callers.find((item) => item.caller === "Link process B");
+  assert.equal(alpha?.callCount, 30);
+  assert.equal(beta?.callCount, 30);
+  assert.deepEqual(alpha?.workers, ["sess_proca01"]);
+  assert.deepEqual(beta?.workers, ["sess_procb01"]);
+  const again = readLinkInspectFile(statePath);
+  assert.equal(again.callers.find((item) => item.caller === "Link process A")?.callCount, 30);
+  assert.equal(again.callers.find((item) => item.caller === "Link process B")?.workers[0]?.sessionId, "sess_procb01");
+});
+
+test("a worker transcript stays the sidecar for that session id", () => {
+  const wren = {
+    version: 1,
+    sessionId: "sess_wren01",
+    total: 1,
+    rows: [{ index: 0, message: { id: "msg_wren", role: "assistant" as const, text: "wren step", createdAt: 1 } }],
+  };
+  const dexter = {
+    version: 1,
+    sessionId: "sess_dext01",
+    total: 1,
+    rows: [{ index: 0, message: { id: "msg_dex", role: "assistant" as const, text: "dexter step", createdAt: 1 } }],
+  };
+  const dexterSession = { id: "sess_dext01", messages: [] as [], transcriptSidecar: "C:/dexter.json" };
+  const shown = inspectTranscriptRows(dexterSession, wren, "sess_wren01");
+  assert.equal(shown.length, 1);
+  assert.equal(shown[0]?.text, "wren step");
+  assert.equal(inspectTranscriptRows(dexterSession, dexter, "sess_wren01").length, 0);
+  const matched = inspectTranscriptRows(
+    { id: "sess_wren01", messages: [], transcriptSidecar: "C:/wren.json" },
+    wren,
+    "sess_wren01",
+  );
+  assert.equal(matched.length, 1);
+  assert.equal(matched[0]?.text, "wren step");
+});
+
 test("Inspect replaces the desk and Projects stay above Chats", () => {
   const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
   const sidebar = readFileSync(path.join(root, "src", "ui", "Sidebar.tsx"), "utf8");
@@ -427,5 +644,14 @@ test("Inspect replaces the desk and Projects stay above Chats", () => {
   assert.match(workspace, /Back to desk/);
   assert.match(workspace, /aria-label="External callers"/);
   assert.match(workspace, /aria-label="Transcript"/);
+  assert.match(workspace, /Earlier callers/);
+  assert.match(workspace, /Progress ·/);
+  assert.match(workspace, /message\.text\?\.length/);
+  assert.match(workspace, /\(store\) => store\.sessions/);
+  assert.match(workspace, /inspectTranscriptRows\(/);
+  assert.match(workspace, /Reading transcript…/);
+  assert.match(workspace, /setInterval/);
   assert.match(app, /<InspectWorkspace \/>/);
+  assert.match(readFileSync(path.join(root, "electron", "link-history-file.ts"), "utf8"), /openSync\(lock, "wx"\)/);
+  assert.match(readFileSync(path.join(root, "electron", "main.ts"), "utf8"), /readLinkInspectFile\(statePath\(\)\)/);
 });

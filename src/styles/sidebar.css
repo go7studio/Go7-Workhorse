@@ -373,6 +373,12 @@ html.pane-dragging * {
   margin: 4px 4px 8px;
 }
 
+.inspect-note {
+  margin: 0 0 14px;
+  color: var(--text-secondary);
+  font-size: var(--text-12);
+}
+
 .inspect-nav {
   min-height: 0;
   overflow: auto;

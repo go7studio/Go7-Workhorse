@@ -111,7 +111,7 @@ contextBridge.exposeInMainWorld("workhorse", {
   installExternalMcp: (hosts?: string[]) => ipcRenderer.invoke("agentRuntime:installMcp", hosts),
   linkConfig: () => ipcRenderer.invoke("agentRuntime:linkConfig"),
   linkGrokBotOneshot: () => ipcRenderer.invoke("agentRuntime:linkGrokBotOneshot"),
-  linkHistory: () => ipcRenderer.invoke("link:history") as Promise<import("../src/lib/link-history").LinkCallRecord[]>,
+  linkHistory: () => ipcRenderer.invoke("link:history") as Promise<import("../src/lib/link-history").LinkInspectFile>,
   linkBridge: () => ipcRenderer.invoke("link:bridge") as Promise<{ listening: boolean }>,
   onLinkHistory: (handler: () => void) => {
     const listener = () => handler();

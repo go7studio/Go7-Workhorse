@@ -372,7 +372,7 @@ type WorkhorseBridge = {
   installExternalMcp?: (hosts?: string[]) => Promise<{ ok: boolean; message?: string }>;
   linkConfig?: () => Promise<string>;
   linkGrokBotOneshot?: () => Promise<string>;
-  linkHistory?: () => Promise<import("./lib/link-history").LinkCallRecord[]>;
+  linkHistory?: () => Promise<import("./lib/link-history").LinkInspectFile>;
   linkBridge?: () => Promise<{ listening: boolean }>;
   onLinkHistory?: (handler: () => void) => () => void;
   grokBotWakeStatus?: () => Promise<import("./lib/grok-bot-wake").GrokBotWakeStatus>;

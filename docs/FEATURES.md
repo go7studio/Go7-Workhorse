@@ -518,8 +518,12 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
   Claude, or Cursor, is named. A client that does not identify itself shows
   as Unknown caller, and separate unknown clients stay separate. Workers that
   caller started stay nested under them, with the activity and the stored
-  transcript. Tool names, the name a client sent, session ids, and the
-  retention rules stay behind Details. The call log keeps the latest 40.
+  transcript. The caller list and the traffic each scroll on their own.
+  A worker shows who called, that worker's vendor and model, and the tokens
+  the desk recorded for that worker. The caller's own model and tokens stay
+  Not available, because the call does not include them. A missing count stays
+  Not available, and a recorded zero stays zero. Tool names, the name a client
+  sent, session ids, and the retention rules stay behind Details. The call log keeps the latest 40.
   Inspect lists a worker when that caller successfully delegated, asked, or
   spawned it, and keeps the 240 most recently invoked older workers. A status
   or read does not claim someone else's worker. Callers are not merged. A

@@ -14,6 +14,9 @@ import {
   activityLabel,
   activityTool,
   callerTrafficStatus,
+  inspectAccount,
+  inspectCallerStep,
+  inspectScrollTop,
   presentCallers,
   reliableCallerTitle,
   trafficStatus,
@@ -34,7 +37,7 @@ import {
 } from "../src/lib/link-history";
 import { normalizeSession } from "../src/lib/session";
 import { buildSidebarChatIndex } from "../src/lib/sidebar-index";
-import type { Session } from "../src/lib/types";
+import type { Session, UsageEvent } from "../src/lib/types";
 
 function chat(over: Partial<Session> = {}): Session {
   return {
@@ -1033,4 +1036,215 @@ test("Inspect names a real caller, keeps unknown clients apart, and hides protoc
   assert.equal(source.includes("inspect-note"), false);
   assert.equal(source.includes("{row.tool}"), false);
   assert.equal(source.includes("{selectedCaller.caller}"), false);
+});
+
+function bill(over: Partial<UsageEvent> & Pick<UsageEvent, "id" | "at" | "sessionId" | "provider" | "model">): UsageEvent {
+  return {
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+    ...over,
+  };
+}
+
+test("Inspect reports the worker model and recorded tokens without inventing a caller bill", () => {
+  const none = inspectAccount({ callerTitle: "Codex", sessionId: "sess_wren01" });
+  assert.equal(none.callerTitle, "Codex");
+  assert.equal(none.callerModel, "Not available");
+  assert.equal(none.callerTokens, "Not available");
+  assert.equal(none.worker, "Not available");
+  assert.equal(none.tokens, "Not available");
+  assert.equal(none.tokensRecorded, false);
+
+  const zero = inspectAccount({
+    callerTitle: "Codex",
+    sessionId: "sess_wren01",
+    session: { provider: "grok", model: "grok-4.7", archivedAt: 5 },
+    usage: [bill({ id: "u0", at: 1_000, sessionId: "sess_wren01", provider: "grok", model: "grok-4.7", source: "request" })],
+  });
+  assert.equal(zero.worker, "Grok · grok-4.7");
+  assert.equal(zero.tokens, "0");
+  assert.equal(zero.tokensRecorded, true);
+  assert.equal(zero.callerModel, "Not available");
+  assert.equal(zero.callerTokens, "Not available");
+
+  const gauge = inspectAccount({
+    callerTitle: "Unknown caller",
+    sessionId: "sess_wren01",
+    session: { provider: "grok", model: "grok-4.7" },
+    usage: [bill({
+      id: "ug",
+      at: 1_000,
+      sessionId: "sess_wren01",
+      provider: "grok",
+      model: "grok-4.7",
+      source: "gauge",
+      inputTokens: 50,
+      outputTokens: 10,
+    })],
+  });
+  assert.equal(gauge.worker, "Grok · grok-4.7");
+  assert.equal(gauge.tokens, "Not available");
+  assert.equal(gauge.tokensRecorded, false);
+
+  const once = inspectAccount({
+    callerTitle: "Codex",
+    sessionId: "sess_wren01",
+    session: { provider: "grok", model: "claude-opus" },
+    usage: [
+      bill({
+        id: "u1",
+        at: 1_000,
+        sessionId: "sess_wren01",
+        provider: "claude",
+        model: "claude-opus",
+        inputTokens: 1200,
+        outputTokens: 30,
+        source: "turn",
+      }),
+      bill({
+        id: "u1b",
+        at: 1_500,
+        sessionId: "sess_wren01",
+        provider: "claude",
+        model: "claude-opus",
+        inputTokens: 1200,
+        outputTokens: 30,
+        source: "turn",
+      }),
+      bill({
+        id: "other",
+        at: 1_200,
+        sessionId: "sess_other1",
+        provider: "grok",
+        model: "grok-4.7",
+        inputTokens: 9000,
+        outputTokens: 9000,
+        source: "turn",
+      }),
+    ],
+  });
+  assert.equal(once.worker, "Grok · claude-opus");
+  assert.equal(once.tokens, "1.2k in · 30 out");
+  assert.equal(once.callerModel, "Not available");
+  assert.equal(once.callerTokens, "Not available");
+
+  const before = inspectAccount({
+    callerTitle: "Unknown caller 3",
+    sessionId: "sess_wren01",
+    session: { provider: "grok", model: "grok-4.7" },
+    usage: [bill({
+      id: "live1",
+      at: 10_000,
+      sessionId: "sess_wren01",
+      provider: "grok",
+      model: "grok-4.7",
+      inputTokens: 100,
+      outputTokens: 10,
+      source: "turn",
+    })],
+  });
+  const after = inspectAccount({
+    callerTitle: "Unknown caller 3",
+    sessionId: "sess_wren01",
+    session: { provider: "grok", model: "grok-4.7" },
+    usage: [
+      bill({
+        id: "live1",
+        at: 10_000,
+        sessionId: "sess_wren01",
+        provider: "grok",
+        model: "grok-4.7",
+        inputTokens: 100,
+        outputTokens: 10,
+        source: "turn",
+      }),
+      bill({
+        id: "live2",
+        at: 80_000,
+        sessionId: "sess_wren01",
+        provider: "grok",
+        model: "grok-4.7",
+        inputTokens: 40,
+        outputTokens: 5,
+        source: "request",
+      }),
+    ],
+  });
+  assert.equal(before.tokens, "100 in · 10 out");
+  assert.equal(after.tokens, "140 in · 15 out");
+  assert.equal(after.tokens.includes("99999"), false);
+
+  const gone = inspectAccount({
+    callerTitle: "Unknown caller 3",
+    sessionId: "sess_wren01",
+    session: null,
+    usage: [bill({
+      id: "gone",
+      at: 5_000,
+      sessionId: "sess_wren01",
+      provider: "cursor",
+      model: "composer-2",
+      inputTokens: 8,
+      outputTokens: 2,
+      source: "turn",
+    })],
+  });
+  assert.equal(gone.worker, "Cursor · composer-2");
+  assert.equal(gone.callerModel, "Not available");
+  assert.equal(gone.callerTokens, "Not available");
+
+  const named = inspectAccount({
+    callerTitle: "Link process",
+    sessionId: "sess_mini01",
+    session: { provider: "custom", model: "MiniMax-M2", customBotId: "bot_1", archivedAt: null },
+    botName: "MiniMax",
+    usage: [bill({
+      id: "mini",
+      at: 9_000,
+      sessionId: "sess_mini01",
+      provider: "custom",
+      model: "MiniMax-M2",
+      inputTokens: 3,
+      outputTokens: 4,
+      source: "request",
+    })],
+  });
+  assert.equal(named.callerTitle, "Link process");
+  assert.equal(named.worker, "MiniMax · MiniMax-M2");
+  assert.equal(named.callerModel, "Not available");
+  assert.equal(named.tokens, "3 in · 4 out");
+});
+
+test("Inspect gives the traffic and the caller list their own scroll", () => {
+  const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  const css = readFileSync(path.join(root, "src", "styles", "sidebar.css"), "utf8");
+  const traffic = css.slice(css.indexOf(".main.inspect-main {"), css.indexOf(".main.inspect-main:focus-visible"));
+  assert.match(traffic, /min-height:\s*0/);
+  assert.match(traffic, /overflow-y:\s*auto/);
+  assert.equal(/overflow:\s*hidden/.test(traffic), false);
+  const callers = css.slice(css.indexOf(".inspect-nav {"), css.indexOf(".inspect-nav:focus-visible"));
+  assert.match(callers, /flex:\s*1 1 auto/);
+  assert.match(callers, /min-height:\s*0/);
+  assert.match(callers, /overflow-y:\s*auto/);
+  assert.match(css, /\.main \{[\s\S]*overflow:\s*hidden/);
+  const source = readFileSync(path.join(root, "src", "ui", "InspectWorkspace.tsx"), "utf8");
+  assert.match(source, /className="main inspect-main" tabIndex=\{0\}/);
+  assert.match(source, /className="inspect-nav"/);
+  assert.match(source, /onKeyDown=\{onCallerKey\}/);
+  assert.match(source, /onKeyDown=\{onTrafficKey\}/);
+  assert.match(source, /\(store\) => store\.usage/);
+  assert.equal(source.includes("usedTokens"), false);
+  assert.equal(source.includes("outputTokensTotal"), false);
+  const long = { scrollTop: 0, clientHeight: 200, scrollHeight: 2000, shift: false };
+  assert.equal(inspectScrollTop({ ...long, key: "ArrowDown" }), 48);
+  assert.equal(inspectScrollTop({ ...long, key: "PageDown" }), 152);
+  assert.equal(inspectScrollTop({ ...long, scrollTop: 1900, key: "End" }), 1800);
+  assert.equal(inspectScrollTop({ ...long, key: "Enter" }), null);
+  assert.equal(inspectCallerStep(0, 4, "ArrowDown"), 1);
+  assert.equal(inspectCallerStep(0, 4, "ArrowUp"), 0);
+  assert.equal(inspectCallerStep(3, 4, "Home"), 0);
+  assert.equal(inspectCallerStep(1, 4, "End"), 3);
+  assert.equal(inspectCallerStep(-1, 4, "ArrowDown"), null);
 });

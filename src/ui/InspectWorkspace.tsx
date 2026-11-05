@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type KeyboardEvent } from "react";
 import horseMark from "../../assets/app-icons/go7-workhorse-transparent.png";
 import { setInspectOpen } from "../lib/inspect-mode";
 import {
@@ -19,6 +19,9 @@ import {
   activityLabel,
   activityTool,
   callerTrafficStatus,
+  inspectAccount,
+  inspectCallerStep,
+  inspectScrollTop,
   presentCallers,
   statusTone,
   trafficStatus,
@@ -48,6 +51,9 @@ function workerStatus(worker: InspectWorkerNode): string {
 export function InspectWorkspace() {
   const theme = useStoreSelector((store) => store.theme, (left, right) => left === right);
   const toggleTheme = useStoreSelector((store) => store.toggleWorkhorseTheme, (left, right) => left === right);
+  const sessions = useStoreSelector((store) => store.sessions, (left, right) => left === right);
+  const usage = useStoreSelector((store) => store.usage, (left, right) => left === right);
+  const bots = useStoreSelector((store) => store.settings.customBots, (left, right) => left === right);
   const [snap, setSnap] = useState<LinkInspectFile | null>(null);
   const [unavailable, setUnavailable] = useState(false);
   const [bridge, setBridge] = useState<boolean | null>(null);
@@ -112,6 +118,20 @@ export function InspectWorkspace() {
       : bridge
         ? "Listening. Calls stay off the chat list."
         : "Not listening right now.";
+  const accountSession = transcriptWorker?.sessionId
+    ? sessions.find((item) => item.id === transcriptWorker.sessionId)
+    : undefined;
+  const account = selectedFace
+    ? inspectAccount({
+        callerTitle: selectedFace.title,
+        sessionId: transcriptWorker?.sessionId,
+        session: accountSession,
+        usage,
+        botName: accountSession?.customBotId
+          ? bots.find((bot) => bot.id === accountSession.customBotId)?.name
+          : undefined,
+      })
+    : null;
 
   useEffect(() => {
     setCallShown(INSPECT_CALL_PAGE);
@@ -148,7 +168,12 @@ export function InspectWorkspace() {
             <i />
             <span>{listeningText}</span>
           </p>
-          <nav className="inspect-nav" aria-label="Callers">
+          <nav
+            className="inspect-nav"
+            aria-label="Callers"
+            tabIndex={0}
+            onKeyDown={onCallerKey}
+          >
             {snap === null ? <p className="inspect-quiet">Reading traffic…</p> : null}
             {snap && callers.length === 0 ? <p className="inspect-quiet">No calls yet.</p> : null}
             {callerPage.page.map((caller) => {
@@ -201,7 +226,7 @@ export function InspectWorkspace() {
             ) : null}
           </nav>
         </aside>
-        <main className="main inspect-main">
+        <main className="main inspect-main" tabIndex={0} onKeyDown={onTrafficKey}>
           {snap === null ? (
             <div className="inspect-empty">
               <h2>Reading traffic…</h2>
@@ -228,6 +253,7 @@ export function InspectWorkspace() {
                     ? `Called by ${selectedFace.title}.`
                     : `${selectedCaller.callCount} ${selectedCaller.callCount === 1 ? "call" : "calls"}${transcriptWorker ? ` · latest worker ${transcriptWorker.label}` : ""}`}
                 </p>
+                {account ? <AccountFacts account={account} /> : null}
                 {selectedFace.reportedName || selectedWorker?.sessionId || (selectedWorker && !selectedWorker.sessionId) ? (
                   <details className="inspect-tech">
                     <summary>Details</summary>
@@ -283,6 +309,67 @@ export function InspectWorkspace() {
       </div>
     </>
   );
+}
+
+function AccountFacts({ account }: { account: ReturnType<typeof inspectAccount> }) {
+  return (
+    <dl className="inspect-facts">
+      <div>
+        <dt>Called by</dt>
+        <dd>{account.callerTitle}</dd>
+      </div>
+      <div>
+        <dt>Worker</dt>
+        <dd>{account.worker}</dd>
+      </div>
+      <div>
+        <dt>Tokens</dt>
+        <dd>{account.tokens}</dd>
+      </div>
+      <div>
+        <dt>Caller model</dt>
+        <dd>{account.callerModel}</dd>
+      </div>
+      <div>
+        <dt>Caller tokens</dt>
+        <dd>{account.callerTokens}</dd>
+      </div>
+    </dl>
+  );
+}
+
+function onTrafficKey(event: KeyboardEvent<HTMLElement>) {
+  if (event.target !== event.currentTarget) return;
+  nudgeScroll(event);
+}
+
+function onCallerKey(event: KeyboardEvent<HTMLElement>) {
+  const buttons = [...event.currentTarget.querySelectorAll<HTMLButtonElement>("button")];
+  const index = buttons.findIndex((button) => button === document.activeElement);
+  const step = inspectCallerStep(index, buttons.length, event.key);
+  if (step !== null) {
+    const next = buttons[step];
+    next?.focus();
+    next?.scrollIntoView({ block: "nearest" });
+    event.preventDefault();
+    return;
+  }
+  if (event.target !== event.currentTarget && event.key === " ") return;
+  nudgeScroll(event);
+}
+
+function nudgeScroll(event: KeyboardEvent<HTMLElement>) {
+  const el = event.currentTarget;
+  const next = inspectScrollTop({
+    scrollTop: el.scrollTop,
+    clientHeight: el.clientHeight,
+    scrollHeight: el.scrollHeight,
+    key: event.key,
+    shift: event.shiftKey,
+  });
+  if (next === null) return;
+  event.preventDefault();
+  el.scrollTop = next;
 }
 
 function latestLinkedWorker(caller: InspectCallerNode | null): InspectWorkerNode | null {

@@ -1,7 +1,12 @@
 /**
- * Words Inspect shows for a stored caller and a stored tool.
+ * Words Inspect shows for a stored caller, a stored tool, and a worker's bill.
  * The stored caller string stays the ownership key. This file only names it.
+ * Token totals come from the desk ledger. A missing bill stays missing.
  */
+
+import { isProviderId, providerById } from "./providers";
+import type { UsageEvent } from "./types";
+import { collapseInflatedUsage, formatIoLine, rollup } from "./usage";
 
 const RELIABLE: Array<[RegExp, string]> = [
   [/^(?:grok bot)$/, "Grok Bot"],
@@ -162,4 +167,144 @@ export function statusTone(label: string): "working" | "done" | "bad" | "quiet" 
   if (label === "Finished" || label === "Done") return "done";
   if (label === "Failed" || label === "Refused") return "bad";
   return "quiet";
+}
+
+export type InspectAccount = {
+  callerTitle: string;
+  /** Link stores the client name. It does not store the caller's model. */
+  callerModel: "Not available";
+  /** Link stores no bill for the outside app. */
+  callerTokens: "Not available";
+  /** Vendor and model recorded for this worker, or Not available. */
+  worker: string;
+  /** Recorded tokens, the string 0 when a bill exists and is zero, or Not available. */
+  tokens: string;
+  tokensRecorded: boolean;
+};
+
+/**
+ * Who called, which worker model ran, and what the desk recorded.
+ * The caller's model and tokens are not on the call, so they stay Not available.
+ * A worker's vendor comes from the session or from a usage row for that session.
+ * A model name never picks the vendor. Gauge rows are not token bills.
+ * Duplicate rows for one moment are collapsed once. A budget meter is not added.
+ */
+export function inspectAccount(input: {
+  callerTitle: string;
+  sessionId?: string;
+  session?: { provider?: string; model?: string; customBotId?: string; archivedAt?: number | null } | null;
+  usage?: readonly UsageEvent[];
+  botName?: string;
+}): InspectAccount {
+  const bills = workerBills(input.sessionId, input.usage);
+  const vendor = workerVendor(input.session, bills, input.botName);
+  const model = workerModel(input.session, bills);
+  const tokens = tokenLine(bills);
+  return {
+    callerTitle: input.callerTitle.trim() || "Unknown caller",
+    callerModel: "Not available",
+    callerTokens: "Not available",
+    worker: joinWorker(vendor, model),
+    tokens: tokens.text,
+    tokensRecorded: tokens.recorded,
+  };
+}
+
+function workerBills(sessionId: string | undefined, usage: readonly UsageEvent[] | undefined): UsageEvent[] {
+  if (!sessionId || !usage?.length) return [];
+  const mine = usage.filter((event) => event.sessionId === sessionId && event.source !== "gauge");
+  return collapseInflatedUsage(mine);
+}
+
+function workerVendor(
+  session: { provider?: string; customBotId?: string } | null | undefined,
+  bills: readonly UsageEvent[],
+  botName: string | undefined,
+): string | null {
+  const provider = knownProvider(session?.provider) ?? knownProvider(latestBill(bills)?.provider);
+  if (!provider) return null;
+  if (provider === "custom") {
+    const name = botName?.trim();
+    if (name && session?.customBotId) return name;
+    return "Custom";
+  }
+  return providerById(provider).name;
+}
+
+function workerModel(
+  session: { model?: string } | null | undefined,
+  bills: readonly UsageEvent[],
+): string | null {
+  const fromSession = session?.model?.trim();
+  if (fromSession) return fromSession;
+  const fromBill = latestBill(bills)?.model.trim();
+  return fromBill || null;
+}
+
+function latestBill(bills: readonly UsageEvent[]): UsageEvent | undefined {
+  return [...bills].sort((left, right) => right.at - left.at)[0];
+}
+
+function knownProvider(value: string | undefined) {
+  return value && isProviderId(value) ? value : null;
+}
+
+function joinWorker(vendor: string | null, model: string | null): string {
+  if (!vendor && !model) return "Not available";
+  if (!vendor) return model ?? "Not available";
+  if (!model) return vendor;
+  return `${vendor} · ${model}`;
+}
+
+/** How far a focused Inspect scroller moves. Null means this key does not scroll. */
+export function inspectScrollTop(input: {
+  scrollTop: number;
+  clientHeight: number;
+  scrollHeight: number;
+  key: string;
+  shift: boolean;
+}): number | null {
+  const page = Math.max(80, input.clientHeight - 48);
+  let next = input.scrollTop;
+  if (input.key === "ArrowDown") next += 48;
+  else if (input.key === "ArrowUp") next -= 48;
+  else if (input.key === "PageDown" || (input.key === " " && !input.shift)) next += page;
+  else if (input.key === "PageUp" || (input.key === " " && input.shift)) next -= page;
+  else if (input.key === "Home") next = 0;
+  else if (input.key === "End") next = input.scrollHeight;
+  else return null;
+  const limit = Math.max(0, input.scrollHeight - input.clientHeight);
+  return Math.max(0, Math.min(next, limit));
+}
+
+/** Next caller button for arrow keys. Null means this key does not move. */
+export function inspectCallerStep(index: number, count: number, key: string): number | null {
+  if (count <= 0 || index < 0) return null;
+  if (key === "ArrowDown") return Math.min(count - 1, index + 1);
+  if (key === "ArrowUp") return Math.max(0, index - 1);
+  if (key === "Home") return 0;
+  if (key === "End") return count - 1;
+  return null;
+}
+
+function tokenLine(bills: readonly UsageEvent[]): { text: string; recorded: boolean } {
+  if (bills.length === 0) return { text: "Not available", recorded: false };
+  const totals = rollup([...bills]);
+  if (
+    totals.inputTokens === 0 &&
+    totals.outputTokens === 0 &&
+    totals.cacheReadTokens === 0 &&
+    totals.cacheWriteTokens === 0
+  ) {
+    return { text: "0", recorded: true };
+  }
+  return {
+    text: formatIoLine({
+      inputTokens: totals.inputTokens,
+      outputTokens: totals.outputTokens,
+      cacheReadTokens: totals.cacheReadTokens,
+      events: totals.events,
+    }),
+    recorded: true,
+  };
 }

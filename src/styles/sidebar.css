@@ -280,6 +280,7 @@ html.pane-dragging * {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-shrink: 0;
   padding: 4px 4px 10px;
 }
 
@@ -358,6 +359,7 @@ html.pane-dragging * {
 }
 
 .inspect-back {
+  flex-shrink: 0;
   width: 100%;
   margin: 2px 0 10px;
   padding: 8px 12px;
@@ -384,6 +386,7 @@ html.pane-dragging * {
 
 .inspect-listen {
   display: flex;
+  flex-shrink: 0;
   align-items: flex-start;
   gap: 8px;
   margin: 0 8px 12px;
@@ -419,14 +422,21 @@ html.pane-dragging * {
 }
 
 .inspect-nav {
+  flex: 1 1 auto;
   min-height: 0;
   min-width: 0;
   overflow-x: hidden;
   overflow-y: auto;
+  overscroll-behavior: contain;
   display: flex;
   flex-direction: column;
   gap: 8px;
   padding-bottom: 16px;
+}
+
+.inspect-nav:focus-visible {
+  outline: 1px solid var(--line);
+  outline-offset: -1px;
 }
 
 .inspect-caller {
@@ -478,9 +488,17 @@ html.pane-dragging * {
   color: var(--text-tertiary);
 }
 
-.inspect-main {
-  overflow: auto;
+.main.inspect-main {
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 28px 40px 48px;
+}
+
+.main.inspect-main:focus-visible {
+  outline: 1px solid var(--line);
+  outline-offset: -1px;
 }
 
 .inspect-head,
@@ -530,6 +548,33 @@ html.pane-dragging * {
 
 .inspect-lead {
   margin-top: 6px;
+}
+
+.inspect-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 18px;
+  margin: 14px 0 0;
+  padding: 0;
+}
+
+.inspect-facts div {
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+}
+
+.inspect-facts dt {
+  color: var(--text-tertiary);
+  font-size: var(--text-12);
+  font-weight: 500;
+}
+
+.inspect-facts dd {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--text-12);
+  font-variant-numeric: tabular-nums;
 }
 
 .inspect-section h3 {

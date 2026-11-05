@@ -513,8 +513,9 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
 - Paths must sit inside the chat's project folder, so a linked app cannot read
   outside it.
 - An unnamed inbound spawn uses the Link bridge: one real parent for the
-  worker, kept out of the sidebar. Inspect, on the brand menu, lists recent
-  Link calls. A chat or project you pick in Settings is still that parent.
+  worker, kept out of the sidebar. Inspect, on the brand menu, replaces the
+  desk with callers and their workers, and opens the stored transcript for
+  the one you select. A chat or project you pick in Settings is still that parent.
 - An explicit request to work with Workhorse delegates before direct execution,
   and blocked delegation returns the Workhorse error first.
 - Delete, rename, credentials, bot setup and project changes are refused. No

@@ -1002,10 +1002,13 @@ function createWindow() {
   deskWindow = win;
   mainLog.record("window", `created id=${win.id}`);
 
+  const openInspect = process.env.WORKHORSE_OPEN_INSPECT === "1";
   if (process.env.VITE_DEV_SERVER_URL) {
-    win.loadURL(process.env.VITE_DEV_SERVER_URL);
+    const devUrl = new URL(process.env.VITE_DEV_SERVER_URL);
+    if (openInspect) devUrl.hash = "inspect";
+    win.loadURL(devUrl.toString());
   } else {
-    win.loadFile(DESK_INDEX_FILE);
+    win.loadFile(DESK_INDEX_FILE, openInspect ? { hash: "inspect" } : undefined);
   }
   return win;
 }

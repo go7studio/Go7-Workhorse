@@ -357,35 +357,102 @@ html.pane-dragging * {
   background: var(--bg-hover);
 }
 
-.link-inspect {
-  display: grid;
-  gap: 4px;
-  max-height: 280px;
-  overflow: auto;
+.inspect-back {
+  width: 100%;
+  margin: 8px 0 4px;
+  padding: 8px 10px;
+  text-align: left;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-10);
+  background: var(--bg-hover);
+  color: var(--text);
+  font-weight: 590;
 }
 
-.link-inspect-head {
+.inspect-bridge {
+  margin: 4px 4px 8px;
+}
+
+.inspect-nav {
+  min-height: 0;
+  overflow: auto;
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  gap: 4px;
+  padding-bottom: 12px;
+}
+
+.inspect-caller > button,
+.inspect-worker {
+  width: 100%;
+  padding: 6px 8px;
+  text-align: left;
+  border-radius: var(--radius-10);
+}
+
+.inspect-caller > button {
+  display: flex;
+  justify-content: space-between;
   gap: 8px;
 }
 
-.link-inspect-head button {
-  width: auto;
+.inspect-caller > button span,
+.inspect-worker {
+  color: var(--text-secondary);
+  font-size: var(--text-12);
 }
 
-.link-inspect-row {
+.inspect-worker {
+  padding-left: 18px;
+}
+
+.inspect-caller > button[aria-current="true"],
+.inspect-worker[aria-current="true"] {
+  background: var(--bg-hover);
+}
+
+.inspect-main {
+  overflow: auto;
+  padding: 18px 22px 32px;
+}
+
+.inspect-main h2,
+.inspect-main h3 {
+  margin: 0 0 8px;
+  font-weight: 620;
+}
+
+.inspect-main h3 {
+  margin-top: 18px;
+  font-size: var(--text-13);
+}
+
+.inspect-call,
+.inspect-line {
   display: grid;
   gap: 2px;
-  padding: 6px 8px;
+  padding: 8px 0;
   border-top: 1px solid var(--line);
-  font-size: var(--text-11);
-  color: var(--text-secondary);
 }
 
-.link-inspect-row strong {
-  color: var(--text);
+.inspect-call span,
+.inspect-line span,
+.inspect-call p,
+.inspect-line p {
+  margin: 0;
+  color: var(--text-secondary);
   font-size: var(--text-12);
+  white-space: pre-wrap;
+}
+
+.inspect-line p,
+.inspect-call strong {
+  color: var(--text);
+}
+
+.inspect-error {
+  margin: 0 0 8px;
+  color: var(--danger, var(--text));
 }
 
 .brand-title {

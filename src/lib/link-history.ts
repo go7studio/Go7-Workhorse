@@ -18,8 +18,9 @@ export type LinkCallRecord = {
   workerStatus?: string;
   worker?: string;
   /**
-   * Session ids the reply itself named as workers. A display name is not an id,
-   * and an id from another field is not a worker.
+   * Session ids this call may attach to a worker row.
+   * An invocation id is one this call started or asked. A status or read id is
+   * only the worker that reply was about, and it does not start a row.
    */
   workerSessionIds?: string[];
   detail?: string;
@@ -79,31 +80,64 @@ function pushSessionId(into: string[], raw: unknown) {
   into.push(id);
 }
 
-/** Ids a reply named as workers. One level of workers/reports. No other walk. */
-export function workerSessionIdsFrom(rec: Record<string, unknown>): string[] {
+const INVOCATION_TOOLS = new Set([
+  "workhorse_delegate",
+  "workhorse_ask_chat",
+  "workhorse_spawn_agent",
+  "workhorse_continue_mission",
+]);
+
+export function invocationToolName(tool: string | undefined): boolean {
+  return typeof tool === "string" && INVOCATION_TOOLS.has(tool);
+}
+
+/** A successful delegate, ask, spawn, or continuation. Status and read are not this. */
+export function callInvokesWorker(call: Pick<LinkCallRecord, "tool" | "status">): boolean {
+  return call.status === "ok" && invocationToolName(call.tool);
+}
+
+/**
+ * The session this successful call actually started or asked.
+ * `started`, `accepted`, or `completed` is the desk's own signal. A status
+ * snapshot, a list, `spawned: false`, and ids merely echoed from an earlier
+ * pass are not a call.
+ */
+function invokedSessionIds(rec: Record<string, unknown>): string[] {
+  if (rec.spawned === false) return [];
+  if (rec.started !== true && rec.accepted !== true && rec.completed !== true) return [];
   const into: string[] = [];
   pushSessionId(into, rec.childSessionId);
-  pushSessionId(into, rec.workerId);
-  if (typeof rec.worker === "string" || typeof rec.parentId === "string") pushSessionId(into, rec.id);
-  if (Array.isArray(rec.workerIds)) {
-    for (const item of rec.workerIds) pushSessionId(into, item);
+  if (into.length === 0) pushSessionId(into, rec.workerId);
+  return into;
+}
+
+/** The one worker a status or read was about. Nested rows are other workers. */
+function followedSessionIds(tool: string, rec: Record<string, unknown>): string[] {
+  const into: string[] = [];
+  if (tool === "workhorse_agent_status") {
+    if (typeof rec.worker === "string" || typeof rec.parentId === "string") pushSessionId(into, rec.id);
+    return into;
   }
-  for (const key of ["workers", "reports"] as const) {
-    const list = rec[key];
-    if (!Array.isArray(list)) continue;
-    for (const item of list) {
-      if (!item || typeof item !== "object" || Array.isArray(item)) continue;
-      const row = item as Record<string, unknown>;
-      pushSessionId(into, row.childSessionId);
-      pushSessionId(into, row.workerId);
-      if (typeof row.worker === "string" || typeof row.parentId === "string") pushSessionId(into, row.id);
-    }
+  if (tool === "workhorse_read_chat") {
+    pushSessionId(into, rec.id);
+    return into;
   }
   return into;
 }
 
-function workerFields(rec: Record<string, unknown>): { worker?: string; workerStatus?: string; workerSessionIds?: string[] } {
-  const workerSessionIds = workerSessionIdsFrom(rec);
+function sessionIdsForCall(tool: string, ok: boolean, rec: Record<string, unknown> | undefined): string[] {
+  if (!ok || !rec) return [];
+  if (invocationToolName(tool)) return invokedSessionIds(rec);
+  if (tool === "workhorse_agent_status" || tool === "workhorse_read_chat") return followedSessionIds(tool, rec);
+  return [];
+}
+
+function workerFields(
+  tool: string,
+  ok: boolean,
+  rec: Record<string, unknown>,
+): { worker?: string; workerStatus?: string; workerSessionIds?: string[] } {
+  const workerSessionIds = sessionIdsForCall(tool, ok, rec);
   const named = workerBit(rec.worker);
   const worker = named && !sessionIdBit(named) ? named : undefined;
   const workerStatus = workerStatusBit(rec.status);
@@ -114,12 +148,12 @@ function workerFields(rec: Record<string, unknown>): { worker?: string; workerSt
   };
 }
 
-function resultFields(text: string | undefined): { worker?: string; workerStatus?: string; workerSessionIds?: string[] } {
+function resultFields(tool: string, ok: boolean, text: string | undefined): { worker?: string; workerStatus?: string; workerSessionIds?: string[] } {
   if (!text) return {};
   try {
     const parsed = JSON.parse(text) as unknown;
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
-    return workerFields(parsed as Record<string, unknown>);
+    return workerFields(tool, ok, parsed as Record<string, unknown>);
   } catch {
     return {};
   }
@@ -157,7 +191,7 @@ export function linkCallFromObservation(input: {
   const callerKind: LinkCallerKind = !named && !botCall ? "unknown" : looksLikeBot(caller) || botCall ? "bot" : "named";
   const at = typeof input.now === "number" && Number.isFinite(input.now) ? input.now : Date.now();
   const id = input.id && /^[A-Za-z0-9_.:-]{1,80}$/.test(input.id) ? input.id : `link_${tool}_${at.toString(36)}`;
-  const found = resultFields(input.resultText);
+  const found = resultFields(tool, input.ok, input.resultText);
   const detail = status === "ok" ? undefined : publicLinkDetail(input.errorDetail);
   return {
     id,
@@ -202,7 +236,7 @@ export function linkCallFromDraft(draft: LinkCallDraft, callerHint?: string, now
   const at = typeof draft.createdAt === "number" && Number.isFinite(draft.createdAt) ? draft.createdAt : now;
   const idRaw = typeof draft.id === "string" && /^[A-Za-z0-9_.:-]{1,80}$/.test(draft.id) ? draft.id : "";
   const id = idRaw || `link_${tool}_${at.toString(36)}`;
-  const found = workerFields(payload);
+  const found = workerFields(tool, status === "ok", payload);
   const workerStatus =
     workerStatusBit(payload.workerStatus) ?? workerStatusBit(payload.resultStatus);
   const detail = status === "ok" ? undefined : publicLinkDetail(payload.error);
@@ -221,8 +255,9 @@ export function linkCallFromDraft(draft: LinkCallDraft, callerHint?: string, now
 }
 
 /**
- * Workers Inspect can still open after their calls have left the log.
- * The log's own workers are extra: they are never dropped to make this number.
+ * Workers Inspect can still open after the invocation that started them has
+ * left the log. A worker that log still proves is extra: it is never dropped
+ * to make this number.
  */
 export const LINK_WORKER_INDEX_LIMIT = 240;
 
@@ -230,7 +265,7 @@ export const LINK_WORKER_INDEX_LIMIT = 240;
 export const LINK_CALLER_INDEX_LIMIT = 80;
 
 export function linkRetentionNote(): string {
-  return `The log keeps the latest ${LINK_HISTORY_LIMIT} calls. Inspect still lists every worker named in that log, plus the ${LINK_WORKER_INDEX_LIMIT} most recently seen older workers. A caller leaves only when it has no listed worker and no call left in the log. Different caller names stay different.`;
+  return `The log keeps the latest ${LINK_HISTORY_LIMIT} calls. Inspect lists a worker when this caller successfully delegated, asked, or spawned it, plus the ${LINK_WORKER_INDEX_LIMIT} most recently invoked older workers. A status or read updates a worker this caller already invoked and does not claim any other. A caller leaves only when it has no listed worker and no call left in the log. Different caller names stay different.`;
 }
 
 export type LinkIndexedWorker = {
@@ -280,15 +315,12 @@ function finiteAt(raw: unknown): number {
 
 function workerTouches(call: LinkCallRecord): Array<{ key: string; label: string; sessionId?: string; rename: boolean }> {
   const ids = call.workerSessionIds ?? [];
-  if (ids.length === 0) {
-    if (!call.worker) return [];
-    return [{ key: `name:${call.worker}`, label: call.worker, rename: true }];
-  }
+  if (ids.length === 0) return [];
   return ids.map((id) => ({
     key: `id:${id}`,
     label: ids.length === 1 && call.worker ? call.worker : id,
     sessionId: id,
-    rename: ids.length === 1 && Boolean(call.worker),
+    rename: ids.length === 1 && Boolean(call.worker) && callInvokesWorker(call),
   }));
 }
 
@@ -327,9 +359,11 @@ export function applyLinkRecord(file: LinkInspectFile, record: LinkCallRecord): 
     caller.callerKind = normalized.callerKind;
   }
   if (!duplicate) caller.callCount += 1;
+  const invoking = callInvokesWorker(normalized);
   for (const touch of workerTouches(normalized)) {
     let worker = caller.workers.find((item) => item.key === touch.key);
     if (!worker) {
+      if (!invoking) continue;
       worker = {
         key: touch.key,
         label: touch.label,
@@ -340,14 +374,16 @@ export function applyLinkRecord(file: LinkInspectFile, record: LinkCallRecord): 
       };
       caller.workers.push(worker);
     }
-    if (caller.firstAt <= 0 || normalized.at < worker.firstAt) worker.firstAt = normalized.at;
+    if (normalized.at < worker.firstAt) worker.firstAt = normalized.at;
     if (!duplicate) worker.callCount += 1;
     if (touch.sessionId) worker.sessionId = touch.sessionId;
     if (normalized.at >= worker.lastAt) {
       worker.lastAt = normalized.at;
-      worker.lastTool = normalized.tool;
       worker.lastStatus = normalized.workerStatus ?? normalized.status;
-      if (touch.rename) worker.label = touch.label;
+      if (invoking) {
+        worker.lastTool = normalized.tool;
+        if (touch.rename) worker.label = touch.label;
+      }
     }
   }
   return trimLinkInspect({ ...emptyLinkInspect(), calls, callers });
@@ -443,6 +479,30 @@ function normalizeStoredCaller(raw: unknown): LinkIndexedCaller | null {
   };
 }
 
+/**
+ * A stored worker stays when this caller still has a successful invocation of
+ * that session in the log, or when the row itself was written by one
+ * (`lastTool`). A status-only row is not proof. A display name with no
+ * session id is not a called worker.
+ */
+function storedWorkerStands(caller: string, worker: LinkIndexedWorker, calls: LinkCallRecord[]): boolean {
+  if (!worker.sessionId) return false;
+  const invoked = calls.some(
+    (call) => call.caller === caller && callInvokesWorker(call) && Boolean(call.workerSessionIds?.includes(worker.sessionId!)),
+  );
+  return invoked || invocationToolName(worker.lastTool);
+}
+
+function dropUnprovenWorkers(file: LinkInspectFile): LinkInspectFile {
+  return {
+    ...file,
+    callers: file.callers.map((caller) => ({
+      ...caller,
+      workers: caller.workers.filter((worker) => storedWorkerStands(caller.caller, worker, file.calls)),
+    })),
+  };
+}
+
 function repairMissingWorkers(file: LinkInspectFile): LinkInspectFile {
   const callers = file.callers.map((caller) => ({ ...caller, workers: caller.workers.map((worker) => ({ ...worker })) }));
   for (const call of [...file.calls].sort((left, right) => left.at - right.at)) {
@@ -458,6 +518,7 @@ function repairMissingWorkers(file: LinkInspectFile): LinkInspectFile {
       };
       callers.push(caller);
     }
+    if (!callInvokesWorker(call)) continue;
     for (const touch of workerTouches(call)) {
       if (caller.workers.some((worker) => worker.key === touch.key)) continue;
       caller.workers.push({
@@ -485,7 +546,7 @@ export function normalizeLinkInspect(raw: unknown): LinkInspectFile {
     return file;
   }
   const callers = stored.map((item) => normalizeStoredCaller(item)).filter((item): item is LinkIndexedCaller => Boolean(item));
-  return repairMissingWorkers({ ...emptyLinkInspect(), calls, callers });
+  return repairMissingWorkers(dropUnprovenWorkers({ ...emptyLinkInspect(), calls, callers }));
 }
 
 /** Newest first, capped. A repeated id replaces the older row. */

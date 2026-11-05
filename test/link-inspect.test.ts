@@ -16,6 +16,7 @@ import {
   LINK_WORKER_INDEX_LIMIT,
   applyLinkRecord,
   boundLinkHistory,
+  callInvokesWorker,
   emptyLinkInspect,
   linkCallFromObservation,
   linkRetentionNote,
@@ -245,7 +246,7 @@ test("callers keep their own workers, and a second id is not the same worker", (
     tool: "workhorse_delegate",
     ok: true,
     callerHint: "Codex",
-    resultText: JSON.stringify({ childSessionId: "sess_wren2", worker: "Wren", status: "failed", report: secret }),
+    resultText: JSON.stringify({ started: true, childSessionId: "sess_wren2", worker: "Wren", status: "running", report: secret }),
     now: 5,
     id: "link_wren2",
   });
@@ -281,13 +282,13 @@ test("callers keep their own workers, and a second id is not the same worker", (
   const codex = tree.find((item) => item.caller === "Codex");
   const claudeNode = tree.find((item) => item.caller === "Claude");
   assert.equal(tree[0]?.caller, "Claude");
-  assert.equal(codex?.workers.length, 3);
+  assert.equal(codex?.workers.length, 2);
   const linked = codex?.workers.find((item) => item.sessionId === "sess_wren");
   assert.equal(linked?.calls.length, 2);
   assert.equal(linked?.label.startsWith("Wren"), true);
   assert.ok(codex?.workers.some((item) => item.sessionId === "sess_wren2"));
-  assert.ok(codex?.workers.some((item) => item.key === "name:Wren" && !item.sessionId));
-  assert.equal(claudeNode?.workers[0]?.sessionId, "sess_ada01");
+  assert.equal(codex?.workers.some((item) => item.key === "name:Wren"), false);
+  assert.equal(claudeNode?.workers.length, 0);
   assert.equal(claudeNode?.workers.some((item) => item.sessionId === "sess_wren"), false);
   const page = pageNewest(codex?.calls ?? [], 2);
   assert.equal(page.page.length, 2);
@@ -298,7 +299,192 @@ test("callers keep their own workers, and a second id is not the same worker", (
   assert.match(shown, /apiKey=\[redacted\]/);
 });
 
-test("a real status call links the worker and keeps the transcript secret out of history", { concurrency: false }, async () => {
+test("a status query never creates a called worker, and a successful invocation does", () => {
+  const secret = "notes the harness must not store";
+  const status = linkCallFromObservation({
+    tool: "workhorse_agent_status",
+    ok: true,
+    callerHint: "Codex",
+    resultText: JSON.stringify({
+      id: "sess_wren01",
+      worker: "Wren",
+      parentId: "sess_parent",
+      status: "completed",
+      report: secret,
+      workers: [{ id: "sess_ada001", worker: "Ada", parentId: "sess_parent" }],
+    }),
+    now: 1,
+    id: "link_status",
+  });
+  assert.deepEqual(status.workerSessionIds, ["sess_wren01"]);
+  assert.equal(JSON.stringify(status).includes(secret), false);
+  let file = applyLinkRecord(emptyLinkInspect(), status);
+  assert.equal(file.callers.find((item) => item.caller === "Codex")?.workers.length, 0);
+  const read = linkCallFromObservation({
+    tool: "workhorse_read_chat",
+    ok: true,
+    callerHint: "Codex",
+    resultText: JSON.stringify({ id: "sess_wren01", title: "Wren", messages: [{ role: "assistant", text: secret }] }),
+    now: 2,
+    id: "link_read",
+  });
+  file = applyLinkRecord(file, read);
+  const listed = linkCallFromObservation({
+    tool: "workhorse_list_chats",
+    ok: true,
+    callerHint: "Codex",
+    resultText: JSON.stringify([{ id: "sess_wren01", worker: "Wren", parentId: "sess_parent", status: "completed" }]),
+    now: 3,
+    id: "link_list",
+  });
+  assert.equal(listed.workerSessionIds, undefined);
+  file = applyLinkRecord(file, listed);
+  const failed = linkCallFromObservation({
+    tool: "workhorse_delegate",
+    ok: false,
+    errorDetail: "context_required",
+    callerHint: "Codex",
+    resultText: JSON.stringify({ started: true, childSessionId: "sess_wren01", worker: "Wren" }),
+    now: 4,
+    id: "link_fail",
+  });
+  assert.equal(failed.workerSessionIds, undefined);
+  file = applyLinkRecord(file, failed);
+  const echo = linkCallFromObservation({
+    tool: "workhorse_delegate",
+    ok: true,
+    callerHint: "Codex",
+    resultText: JSON.stringify({
+      id: "sess_wren01",
+      worker: "Wren",
+      parentId: "sess_parent",
+      status: "running",
+      spawned: false,
+    }),
+    now: 5,
+    id: "link_echo",
+  });
+  assert.equal(echo.workerSessionIds, undefined);
+  file = applyLinkRecord(file, echo);
+  assert.equal(file.callers.find((item) => item.caller === "Codex")?.workers.length, 0);
+  const invoked = linkCallFromObservation({
+    tool: "workhorse_delegate",
+    ok: true,
+    callerHint: "Codex",
+    resultText: JSON.stringify({
+      started: true,
+      childSessionId: "sess_wren01",
+      worker: "Wren",
+      status: "running",
+      previousWorkerIds: ["sess_old0001"],
+      workers: [{ id: "sess_ada001", worker: "Ada", parentId: "sess_parent" }],
+    }),
+    now: 6,
+    id: "link_invoked",
+  });
+  assert.deepEqual(invoked.workerSessionIds, ["sess_wren01"]);
+  file = applyLinkRecord(file, invoked);
+  const spawned = linkCallFromObservation({
+    tool: "workhorse_spawn_agent",
+    ok: true,
+    callerHint: "Codex",
+    resultText: JSON.stringify({ completed: true, childSessionId: "sess_done01", worker: "Pip" }),
+    now: 7,
+    id: "link_spawn",
+  });
+  file = applyLinkRecord(file, spawned);
+  const continued = linkCallFromObservation({
+    tool: "workhorse_continue_mission",
+    ok: true,
+    callerHint: "Codex",
+    resultText: JSON.stringify({
+      started: true,
+      childSessionId: "sess_next01",
+      worker: "Wren",
+      previousWorkerIds: ["sess_wren01"],
+    }),
+    now: 8,
+    id: "link_continue",
+  });
+  assert.deepEqual(continued.workerSessionIds, ["sess_next01"]);
+  file = applyLinkRecord(file, continued);
+  const later = linkCallFromObservation({
+    tool: "workhorse_agent_status",
+    ok: true,
+    callerHint: "Codex",
+    resultText: JSON.stringify({ id: "sess_wren01", worker: "Wren", parentId: "sess_parent", status: "completed" }),
+    now: 9,
+    id: "link_later",
+  });
+  file = applyLinkRecord(file, later);
+  const owned = file.callers.find((item) => item.caller === "Codex")?.workers.find((item) => item.sessionId === "sess_wren01");
+  assert.equal(owned?.callCount, 2);
+  assert.equal(owned?.lastStatus, "completed");
+  assert.equal(owned?.lastTool, "workhorse_delegate");
+  assert.equal(file.callers.find((item) => item.caller === "Codex")?.workers.some((item) => item.sessionId === "sess_ada001"), false);
+  assert.equal(file.callers.find((item) => item.caller === "Codex")?.workers.some((item) => item.sessionId === "sess_old0001"), false);
+  assert.equal(file.callers.find((item) => item.caller === "Codex")?.workers.some((item) => item.sessionId === "sess_next01"), true);
+  const other = linkCallFromObservation({
+    tool: "workhorse_agent_status",
+    ok: true,
+    callerHint: "Claude",
+    resultText: JSON.stringify({ id: "sess_wren01", worker: "Wren", parentId: "sess_parent", status: "completed" }),
+    now: 10,
+    id: "link_claude_status",
+  });
+  file = applyLinkRecord(file, other);
+  assert.equal(file.callers.find((item) => item.caller === "Claude")?.workers.length, 0);
+  assert.equal(file.callers.filter((item) => item.caller === "Codex").length, 1);
+  const shared = linkCallFromObservation({
+    tool: "workhorse_ask_chat",
+    ok: true,
+    callerHint: "Claude",
+    resultText: JSON.stringify({ accepted: true, childSessionId: "sess_wren01", worker: "Wren", status: "running" }),
+    now: 11,
+    id: "link_ask",
+  });
+  file = applyLinkRecord(file, shared);
+  assert.equal(file.callers.find((item) => item.caller === "Claude")?.workers.length, 1);
+  assert.equal(file.callers.find((item) => item.caller === "Claude")?.workers[0]?.sessionId, "sess_wren01");
+  assert.equal(file.callers.find((item) => item.caller === "Codex")?.workers.filter((item) => item.sessionId === "sess_wren01").length, 1);
+  const rolled = {
+    ...file,
+    calls: file.calls.filter((call) => !callInvokesWorker(call)),
+  };
+  const restored = normalizeLinkInspect(rolled);
+  assert.equal(restored.callers.find((item) => item.caller === "Codex")?.workers.some((item) => item.sessionId === "sess_wren01"), true);
+  assert.equal(restored.callers.find((item) => item.caller === "Claude")?.workers.some((item) => item.sessionId === "sess_wren01"), true);
+  assert.equal(restored.callers.find((item) => item.caller === "Codex")?.workers.find((item) => item.sessionId === "sess_wren01")?.lastTool, "workhorse_delegate");
+  const poisoned = normalizeLinkInspect({
+    version: 2,
+    calls: [status],
+    callers: [
+      {
+        caller: "Codex",
+        callerKind: "named",
+        firstAt: 1,
+        lastAt: 1,
+        callCount: 1,
+        workers: [
+          {
+            key: "id:sess_wren01",
+            label: "Wren",
+            sessionId: "sess_wren01",
+            firstAt: 1,
+            lastAt: 1,
+            callCount: 1,
+            lastTool: "workhorse_agent_status",
+            lastStatus: "completed",
+          },
+        ],
+      },
+    ],
+  });
+  assert.equal(poisoned.callers.find((item) => item.caller === "Codex")?.workers.length, 0);
+  assert.match(linkRetentionNote(), /does not claim any other/);
+});
+
+test("a real status call does not claim a worker, and a successful delegate does", { concurrency: false }, async () => {
   const dir = mkdtempSync(path.join(tmpdir(), "wh-link-inspect-status-"));
   const statePath = path.join(dir, "workhorse-state.json");
   const secret = "sk-live-secretvalue1234567890";
@@ -339,7 +525,16 @@ test("a real status call links the worker and keeps the transcript secret out of
     ],
     agentRun: { status: "failed", error: "disk full" },
   };
-  writeFileSync(statePath, JSON.stringify({ sessions: [parent, worker, failed] }));
+  const invoked = {
+    ...worker,
+    id: "sess_invk01",
+    messages: [
+      { id: "u3", role: "user", text: "Name one fruit.", createdAt: 5 },
+      { id: "a3", role: "assistant", text: "Plum.", createdAt: 6 },
+    ],
+    agentRun: { status: "running" },
+  };
+  writeFileSync(statePath, JSON.stringify({ sessions: [parent, worker, failed, invoked] }));
   resetLinkStateCache();
   setWorkhorseDeskAsk(null);
   const previous = {
@@ -386,6 +581,50 @@ test("a real status call links the worker and keeps the transcript secret out of
       params: { name: "workhorse_agent_status", arguments: { id: "sess_missing", fromSessionId: "sess_parent" } },
     })) as { error?: { message?: string } };
     assert.match(missing.error?.message ?? "", /unknown|not running|error/i);
+    await handleWorkhorseRpc({ jsonrpc: "2.0", id: 8, method: "initialize", params: { clientInfo: { name: "Codex" } } });
+    const before = (await handleWorkhorseRpc({
+      jsonrpc: "2.0",
+      id: 9,
+      method: "tools/call",
+      params: { name: "workhorse_agent_status", arguments: { id: "sess_invk01", fromSessionId: "sess_parent" } },
+    })) as { error?: { message?: string } };
+    assert.equal(before.error, undefined);
+    setWorkhorseDeskAsk(async (body) => {
+      if (body.mode === "spawn") {
+        return {
+          text: JSON.stringify({ started: true, childSessionId: "sess_invk01", worker: "Wren", status: "running" }),
+        };
+      }
+      return { error: "Workhorse bridge is not running" };
+    });
+    const delegated = (await handleWorkhorseRpc({
+      jsonrpc: "2.0",
+      id: 10,
+      method: "tools/call",
+      params: {
+        name: "workhorse_delegate",
+        arguments: { task: "Name one fruit.", description: "Fruit", fromSessionId: "sess_parent", folder: dir },
+      },
+    })) as { result?: { content?: Array<{ text?: string }> }; error?: { message?: string } };
+    assert.equal(delegated.error, undefined, delegated.error?.message);
+    assert.match(delegated.result?.content?.[0]?.text ?? "", /"started": true/);
+    assert.match(delegated.result?.content?.[0]?.text ?? "", /sess_invk01/);
+    setWorkhorseDeskAsk(null);
+    const followed = (await handleWorkhorseRpc({
+      jsonrpc: "2.0",
+      id: 11,
+      method: "tools/call",
+      params: { name: "workhorse_agent_status", arguments: { id: "sess_invk01", fromSessionId: "sess_parent" } },
+    })) as { error?: { message?: string } };
+    assert.equal(followed.error, undefined);
+    await handleWorkhorseRpc({ jsonrpc: "2.0", id: 12, method: "initialize", params: { clientInfo: { name: "Claude" } } });
+    const borrowed = (await handleWorkhorseRpc({
+      jsonrpc: "2.0",
+      id: 13,
+      method: "tools/call",
+      params: { name: "workhorse_agent_status", arguments: { id: "sess_invk01", fromSessionId: "sess_parent" } },
+    })) as { error?: { message?: string } };
+    assert.equal(borrowed.error, undefined);
     await flushLinkHistoryWrites();
     const text = readFileSync(path.join(dir, "link-history.json"), "utf8");
     assert.equal(text.includes(secret), false);
@@ -395,19 +634,24 @@ test("a real status call links the worker and keeps the transcript secret out of
     const rows = readLinkHistoryFile(statePath);
     const stored = readLinkInspectFile(statePath);
     assert.equal(stored.version, 2);
-    assert.equal(stored.callers.find((item) => item.caller === "Codex")?.workers.some((item) => item.sessionId === "sess_wren"), true);
-    assert.equal(stored.callers.find((item) => item.caller === "Claude")?.workers.some((item) => item.sessionId === "sess_wren"), false);
+    assert.equal(stored.callers.find((item) => item.caller === "Codex")?.workers.some((item) => item.sessionId === "sess_invk01"), true);
+    assert.equal(stored.callers.find((item) => item.caller === "Codex")?.workers.some((item) => item.sessionId === "sess_wren"), false);
+    assert.equal(stored.callers.find((item) => item.caller === "Claude")?.workers.length, 0);
     assert.match(stored.retention.note, /Different caller names stay different/);
+    assert.match(stored.retention.note, /does not claim any other/);
     const tree = inspectCallers(rows);
     const codex = tree.find((item) => item.caller === "Codex");
     const claude = tree.find((item) => item.caller === "Claude");
     const unknown = tree.find((item) => item.caller === "Unknown caller");
-    assert.equal(codex?.workers.filter((item) => item.sessionId === "sess_wren").length, 1);
-    assert.equal(codex?.workers.find((item) => item.sessionId === "sess_wren")?.calls.length, 2);
-    assert.equal(claude?.workers[0]?.sessionId, "sess_redo");
-    assert.equal(claude?.workers[0]?.calls[0]?.workerStatus, "failed");
+    assert.equal(codex?.workers.filter((item) => item.sessionId === "sess_invk01").length, 1);
+    assert.equal(codex?.workers.find((item) => item.sessionId === "sess_invk01")?.calls.length, 2);
+    assert.equal(codex?.workers.some((item) => item.sessionId === "sess_wren"), false);
+    assert.equal(claude?.workers.length, 0);
     assert.equal(unknown?.callerKind, "unknown");
-    assert.equal(unknown?.workers.some((item) => item.sessionId === "sess_wren"), false);
+    assert.equal(unknown?.workers.length, 0);
+    const restarted = readLinkInspectFile(statePath);
+    assert.equal(restarted.callers.find((item) => item.caller === "Codex")?.workers.some((item) => item.sessionId === "sess_invk01"), true);
+    assert.equal(restarted.callers.find((item) => item.caller === "Claude")?.workers.some((item) => item.sessionId === "sess_invk01"), false);
   } finally {
     setWorkhorseDeskAsk(null);
     resetLinkStateCache();
@@ -430,7 +674,7 @@ test("a worker stays listed after its call leaves the 40-row log", () => {
       tool: "workhorse_delegate",
       ok: true,
       callerHint: "Codex",
-      resultText: JSON.stringify({ childSessionId: "sess_old01", worker: "Wren", status: "completed" }),
+      resultText: JSON.stringify({ started: true, childSessionId: "sess_old01", worker: "Wren", status: "completed" }),
       now: 1,
       id: "link_old",
     }),
@@ -439,10 +683,10 @@ test("a worker stays listed after its call leaves the 40-row log", () => {
     file = applyLinkRecord(
       file,
       linkCallFromObservation({
-        tool: "workhorse_list_chats",
+        tool: index === 0 ? "workhorse_delegate" : "workhorse_list_chats",
         ok: true,
         callerHint: "Claude",
-        resultText: index === 0 ? JSON.stringify({ childSessionId: "sess_new01", worker: "Ada", parentId: "sess_parent", status: "running" }) : JSON.stringify({ chats: [{ id: "sess_old01" }] }),
+        resultText: index === 0 ? JSON.stringify({ started: true, childSessionId: "sess_new01", worker: "Ada", status: "running" }) : JSON.stringify({ chats: [{ id: "sess_old01" }] }),
         now: 10 + index,
         id: `link_claude_${index}`,
       }),
@@ -478,7 +722,7 @@ test("the older-worker bound drops the quietest worker and does not merge caller
         tool: "workhorse_delegate",
         ok: true,
         callerHint: "Codex",
-        resultText: JSON.stringify({ childSessionId: sessionId, worker: "Wren", status: "completed" }),
+        resultText: JSON.stringify({ started: true, childSessionId: sessionId, worker: "Wren", status: "completed" }),
         now: index + 1,
         id: `link_codex_${index}`,
       }),
@@ -490,7 +734,7 @@ test("the older-worker bound drops the quietest worker and does not merge caller
       tool: "workhorse_delegate",
       ok: true,
       callerHint: "Claude",
-      resultText: JSON.stringify({ childSessionId: "sess_claude01", worker: "Ada", status: "completed" }),
+      resultText: JSON.stringify({ started: true, childSessionId: "sess_claude01", worker: "Ada", status: "completed" }),
       now: total + 1,
       id: "link_claude_keep",
     }),
@@ -540,12 +784,12 @@ test("two helper processes keep every caller's count, and a new process can read
       `  for (let index = 0; index < count; index += 1) {\n` +
       `    const first = index === 0;\n` +
       `    appendLinkHistoryFile(statePath, linkCallFromObservation({\n` +
-      `      tool: first ? "workhorse_agent_status" : "workhorse_list_chats",\n` +
+      `      tool: first ? "workhorse_delegate" : "workhorse_list_chats",\n` +
       `      ok: true,\n` +
       `      callerHint: caller,\n` +
       `      now: Date.now() + index,\n` +
       `      id: "link_" + caller.replace(/[^A-Za-z0-9]/g, "") + "_" + index + "_" + process.pid,\n` +
-      `      resultText: first ? JSON.stringify({ id: sessionId, worker: caller, parentId: "sess_parent", status: "completed" }) : JSON.stringify({ chats: [{ id: sessionId }] }),\n` +
+      `      resultText: first ? JSON.stringify({ started: true, childSessionId: sessionId, worker: caller, status: "running" }) : JSON.stringify({ chats: [{ id: sessionId }] }),\n` +
       `    }));\n` +
       `  }\n` +
       `  await flushLinkHistoryWrites();\n` +

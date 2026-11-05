@@ -1,5 +1,6 @@
 import {
   applyLinkRecord,
+  callInvokesWorker,
   emptyLinkInspect,
   type LinkCallRecord,
   type LinkCallerKind,
@@ -47,10 +48,11 @@ export type InspectCallerNode = {
   workers: InspectWorkerNode[];
 };
 
-function namesWorker(call: LinkCallRecord, worker: Pick<LinkIndexedWorker, "key" | "sessionId">): boolean {
+function namesWorker(call: LinkCallRecord, worker: Pick<LinkIndexedWorker, "sessionId" | "firstAt">): boolean {
   const ids = call.workerSessionIds ?? [];
-  if (worker.sessionId) return ids.includes(worker.sessionId);
-  return ids.length === 0 && worker.key === `name:${call.worker ?? ""}`;
+  if (!worker.sessionId || !ids.includes(worker.sessionId)) return false;
+  if (callInvokesWorker(call)) return true;
+  return call.at >= worker.firstAt;
 }
 
 function disambiguate(workers: InspectWorkerNode[]) {
@@ -63,8 +65,9 @@ function disambiguate(workers: InspectWorkerNode[]) {
 
 /**
  * The sidebar is the durable index. Call rows under a worker are only the ones
- * still in the log. A shared display name is not a link, and two session ids
- * stay two workers, each under the caller that named it.
+ * still in the log, from the invocation onward. A shared display name is not a
+ * link, and two session ids stay two workers. Each stays under every caller
+ * that invoked it.
  */
 export function inspectTree(file: Pick<LinkInspectFile, "calls" | "callers">): InspectCallerNode[] {
   const byCaller = new Map<string, LinkCallRecord[]>();

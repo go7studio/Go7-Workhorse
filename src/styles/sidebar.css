@@ -359,57 +359,113 @@ html.pane-dragging * {
 
 .inspect-back {
   width: 100%;
-  margin: 8px 0 4px;
-  padding: 8px 10px;
+  margin: 2px 0 10px;
+  padding: 8px 12px;
   text-align: left;
   border: 1px solid var(--line);
-  border-radius: var(--radius-10);
-  background: var(--bg-hover);
+  border-radius: var(--radius-pill);
+  background: transparent;
   color: var(--text);
   font-weight: 590;
 }
 
-.inspect-bridge {
-  margin: 4px 4px 8px;
+.inspect-back:hover {
+  background: var(--bg-hover);
 }
 
-.inspect-note {
-  margin: 0 0 14px;
-  color: var(--text-secondary);
+.inspect-listen,
+.inspect-quiet,
+.inspect-lead {
+  margin: 0;
+  color: var(--text-tertiary);
   font-size: var(--text-12);
+  line-height: 1.45;
+}
+
+.inspect-listen {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0 8px 12px;
+  min-width: 0;
+}
+
+.inspect-listen span {
+  min-width: 0;
+}
+
+.inspect-listen i,
+.inspect-state i {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  margin-top: 4px;
+  border-radius: 50%;
+  background: var(--text-tertiary);
+}
+
+.inspect-listen[data-state="on"] i,
+.inspect-state.is-done i {
+  background: #3cba7a;
+}
+
+.inspect-listen[data-state="wait"] i,
+.inspect-state.is-working i {
+  background: #d7a13a;
+}
+
+.inspect-state.is-bad i {
+  background: #e15d5d;
 }
 
 .inspect-nav {
   min-height: 0;
-  overflow: auto;
+  min-width: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding-bottom: 12px;
+  gap: 8px;
+  padding-bottom: 16px;
+}
+
+.inspect-caller {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .inspect-caller > button,
 .inspect-worker {
   width: 100%;
-  padding: 6px 8px;
+  padding: 8px 10px;
   text-align: left;
   border-radius: var(--radius-10);
 }
 
-.inspect-caller > button {
-  display: flex;
-  justify-content: space-between;
-  gap: 8px;
+.inspect-caller > button,
+.inspect-worker {
+  display: grid;
+  gap: 2px;
+}
+
+.inspect-caller > button strong,
+.inspect-worker strong {
+  font-size: var(--text-13);
+  font-weight: 600;
+  letter-spacing: -0.02em;
 }
 
 .inspect-caller > button span,
-.inspect-worker {
-  color: var(--text-secondary);
-  font-size: var(--text-12);
+.inspect-worker span {
+  color: var(--text-tertiary);
+  font-size: var(--text-11);
 }
 
 .inspect-worker {
-  padding-left: 18px;
+  margin-left: 10px;
+  width: auto;
+  min-width: 0;
 }
 
 .inspect-caller > button[aria-current="true"],
@@ -417,48 +473,142 @@ html.pane-dragging * {
   background: var(--bg-hover);
 }
 
+.inspect-more {
+  margin: 2px 8px 0;
+  color: var(--text-tertiary);
+}
+
 .inspect-main {
   overflow: auto;
-  padding: 18px 22px 32px;
+  padding: 28px 40px 48px;
 }
 
-.inspect-main h2,
-.inspect-main h3 {
-  margin: 0 0 8px;
+.inspect-head,
+.inspect-section,
+.inspect-empty,
+.inspect-about {
+  width: min(720px, 100%);
+}
+
+.inspect-empty {
+  margin-top: 12vh;
+}
+
+.inspect-empty h2,
+.inspect-head h2 {
+  margin: 0;
+  font-family: var(--display);
+  font-size: var(--text-28);
   font-weight: 620;
+  letter-spacing: -0.04em;
 }
 
-.inspect-main h3 {
-  margin-top: 18px;
-  font-size: var(--text-13);
+.inspect-empty p {
+  margin: 8px 0 0;
+  max-width: 360px;
+  color: var(--text-secondary);
+  font-size: var(--text-15);
+  line-height: 1.45;
+}
+
+.inspect-head {
+  margin-bottom: 8px;
+}
+
+.inspect-state {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0 0;
+  color: var(--text-secondary);
+  font-size: var(--text-12);
+}
+
+.inspect-state i {
+  margin-top: 0;
+}
+
+.inspect-lead {
+  margin-top: 6px;
+}
+
+.inspect-section h3 {
+  margin: 28px 0 8px;
+  font-size: var(--text-12);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
 }
 
 .inspect-call,
 .inspect-line {
   display: grid;
-  gap: 2px;
-  padding: 8px 0;
+  gap: 4px;
+  padding: 14px 0;
   border-top: 1px solid var(--line);
 }
 
-.inspect-call span,
-.inspect-line span,
-.inspect-call p,
-.inspect-line p {
-  margin: 0;
-  color: var(--text-secondary);
-  font-size: var(--text-12);
-  white-space: pre-wrap;
+.inspect-call strong {
+  font-size: var(--text-15);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.inspect-line span {
+  color: var(--text-tertiary);
+  font-size: var(--text-11);
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
 }
 
 .inspect-line p,
-.inspect-call strong {
+.inspect-call p,
+.inspect-tech p,
+.inspect-about p {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.inspect-line p {
   color: var(--text);
+  font-size: var(--text-15);
+  line-height: 1.5;
+}
+
+.inspect-line.is-thinking p {
+  color: var(--text-secondary);
+  font-size: var(--text-13);
 }
 
 .inspect-error {
-  margin: 0 0 8px;
-  color: var(--danger, var(--text));
+  color: #e15d5d;
+  font-size: var(--text-13);
+  line-height: 1.4;
+}
+
+.inspect-tech,
+.inspect-about {
+  margin-top: 8px;
+  color: var(--text-tertiary);
+  font-size: var(--text-12);
+}
+
+.inspect-tech summary,
+.inspect-about summary {
+  cursor: pointer;
+  color: var(--text-tertiary);
+}
+
+.inspect-about {
+  margin-top: 36px;
+}
+
+.inspect-about p,
+.inspect-tech p {
+  margin-top: 8px;
+  max-width: 62ch;
+  line-height: 1.5;
 }
 
 .brand-title {

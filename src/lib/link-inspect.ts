@@ -36,6 +36,7 @@ export type InspectWorkerNode = {
   label: string;
   calls: LinkCallRecord[];
   callCount: number;
+  firstAt: number;
   lastAt: number;
   lastStatus?: string;
 };
@@ -45,6 +46,7 @@ export type InspectCallerNode = {
   callerKind: LinkCallerKind;
   calls: LinkCallRecord[];
   callCount: number;
+  firstAt: number;
   workers: InspectWorkerNode[];
 };
 
@@ -56,10 +58,19 @@ function namesWorker(call: LinkCallRecord, worker: Pick<LinkIndexedWorker, "sess
 }
 
 function disambiguate(workers: InspectWorkerNode[]) {
-  const counts = new Map<string, number>();
-  for (const worker of workers) counts.set(worker.label, (counts.get(worker.label) ?? 0) + 1);
+  const groups = new Map<string, InspectWorkerNode[]>();
   for (const worker of workers) {
-    if ((counts.get(worker.label) ?? 0) > 1 && worker.sessionId) worker.label = `${worker.label} · ${worker.sessionId}`;
+    const list = groups.get(worker.label) ?? [];
+    list.push(worker);
+    groups.set(worker.label, list);
+  }
+  for (const list of groups.values()) {
+    if (list.length < 2) continue;
+    const base = list[0]?.label ?? "Worker";
+    const ordered = [...list].sort((left, right) => left.firstAt - right.firstAt || left.key.localeCompare(right.key));
+    ordered.forEach((worker, index) => {
+      if (index > 0) worker.label = `${base} ${index + 1}`;
+    });
   }
 }
 
@@ -85,6 +96,7 @@ export function inspectTree(file: Pick<LinkInspectFile, "calls" | "callers">): I
         label: worker.label,
         calls: calls.filter((call) => namesWorker(call, worker)),
         callCount: worker.callCount,
+        firstAt: worker.firstAt,
         lastAt: worker.lastAt,
         ...(worker.lastStatus ? { lastStatus: worker.lastStatus } : {}),
         ...(worker.sessionId ? { sessionId: worker.sessionId } : {}),
@@ -95,6 +107,7 @@ export function inspectTree(file: Pick<LinkInspectFile, "calls" | "callers">): I
         callerKind: caller.callerKind,
         calls,
         callCount: caller.callCount,
+        firstAt: caller.firstAt,
         workers,
       };
     });

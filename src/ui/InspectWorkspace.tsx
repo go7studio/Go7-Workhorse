@@ -14,7 +14,17 @@ import {
   type InspectCallerNode,
   type InspectWorkerNode,
 } from "../lib/link-inspect";
-import { emptyLinkInspect, linkRetentionNote, normalizeLinkInspect, type LinkCallRecord, type LinkInspectFile } from "../lib/link-history";
+import { emptyLinkInspect, linkRetentionNote, normalizeLinkInspect, type LinkInspectFile } from "../lib/link-history";
+import {
+  activityLabel,
+  activityTool,
+  callerTrafficStatus,
+  presentCallers,
+  statusTone,
+  trafficStatus,
+  trafficWhen,
+  type CallerPresentation,
+} from "../lib/link-present";
 import { useStoreSelector } from "../lib/store";
 import type { TranscriptSidecar } from "../lib/transcript-sidecar";
 import type { ChatMessage, Session } from "../lib/types";
@@ -23,44 +33,16 @@ type Selection =
   | { kind: "caller"; caller: string }
   | { kind: "worker"; caller: string; key: string };
 
-function whenLabel(at: number): string {
-  if (!Number.isFinite(at) || at <= 0) return "Unknown time";
-  const date = new Date(at);
-  if (Number.isNaN(date.getTime())) return "Unknown time";
-  return date.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
-}
-
-function statusLabel(row: LinkCallRecord): string {
-  if (row.status === "forbidden") return "Refused";
-  if (row.status === "error") return "Error";
-  if (row.workerStatus === "running" || row.workerStatus === "queued") return "Running";
-  if (row.workerStatus === "completed") return "Completed";
-  if (row.workerStatus === "failed") return "Failed";
-  if (row.workerStatus === "cancelled") return "Cancelled";
-  if (row.workerStatus === "unknown") return "Unknown";
-  return "Ok";
-}
-
-function progressLabel(status: string | undefined): string {
-  if (!status) return "No status recorded";
-  if (status === "running" || status === "queued") return "Running";
-  if (status === "completed" || status === "ok") return "Completed";
-  if (status === "failed" || status === "error") return "Failed";
-  if (status === "cancelled") return "Cancelled";
-  if (status === "forbidden") return "Refused";
-  return status;
-}
-
-function messageLabel(message: ChatMessage): string {
-  if (message.kind === "thought") return "Thought";
-  if (message.kind === "tool") return "Tool";
-  if (message.role === "user") return "Request";
-  if (message.role === "assistant") return "Result";
-  return "Note";
-}
-
 function snapshotFrom(raw: unknown): LinkInspectFile {
   return normalizeLinkInspect(raw);
+}
+
+function faceFor(faces: Map<string, CallerPresentation>, caller: string): CallerPresentation {
+  return faces.get(caller) ?? { title: "Unknown caller", reliable: false };
+}
+
+function workerStatus(worker: InspectWorkerNode): string {
+  return trafficStatus({ workerStatus: worker.lastStatus });
 }
 
 export function InspectWorkspace() {
@@ -104,8 +86,10 @@ export function InspectWorkspace() {
 
   const file = snap ?? emptyLinkInspect();
   const callers = inspectTree(file);
+  const faces = presentCallers(callers);
   const callerPage = pageNewest(callers, callerShown);
   const selectedCaller = callers.find((item) => item.caller === selection?.caller) ?? callers[0] ?? null;
+  const selectedFace = selectedCaller ? faceFor(faces, selectedCaller.caller) : null;
   const selectedWorker = selectedCaller && selection?.kind === "worker"
     ? selectedCaller.workers.find((item) => item.key === selection.key) ?? null
     : null;
@@ -114,6 +98,20 @@ export function InspectWorkspace() {
   const transcriptWorker = selectedWorker ?? latestLinkedWorker(selectedCaller);
   const remembered = selectedWorker?.callCount ?? selectedCaller?.callCount ?? 0;
   const retention = file.retention.note ? file.retention : { ...file.retention, note: linkRetentionNote() };
+  const headlineStatus = selectedWorker
+    ? workerStatus(selectedWorker)
+    : selectedCaller
+      ? callerTrafficStatus(selectedCaller)
+      : "No status yet";
+  const headlineWhen = trafficWhen(selectedWorker?.lastAt ?? selectedCaller?.calls[0]?.at ?? selectedCaller?.workers[0]?.lastAt ?? 0);
+  const listening = unavailable ? "off" : bridge === true ? "on" : snap === null ? "wait" : "off";
+  const listeningText = unavailable
+    ? "This window cannot read traffic."
+    : snap === null
+      ? "Reading traffic…"
+      : bridge
+        ? "Listening. Calls stay off the chat list."
+        : "Not listening right now.";
 
   useEffect(() => {
     setCallShown(INSPECT_CALL_PAGE);
@@ -124,7 +122,7 @@ export function InspectWorkspace() {
       <header className="titlebar">
         <span>Inspect</span>
       </header>
-      <div className="workspace" style={{ ["--sidebar" as string]: "280px" }}>
+      <div className="workspace" style={{ ["--sidebar" as string]: "300px" }}>
         <aside className="sidebar" aria-label="Inspect">
           <div className="brand">
             <button
@@ -140,26 +138,25 @@ export function InspectWorkspace() {
               <div className="brand-title">
                 <h1>Inspect</h1>
               </div>
-              <p>Link callers</p>
+              <p>Traffic</p>
             </div>
           </div>
           <button className="inspect-back" type="button" onClick={() => setInspectOpen(false)}>
             Back to desk
           </button>
-          <p className="row-meta inspect-bridge">
-            {unavailable
-              ? "Link history is unavailable in this window."
-              : bridge
-                ? "Link bridge is active. Calls stay off the chat list."
-                : "Link bridge status is not in yet."}
+          <p className="inspect-listen" data-state={listening}>
+            <i />
+            <span>{listeningText}</span>
           </p>
-          <nav className="inspect-nav" aria-label="External callers">
-            {snap === null ? <p className="row-meta">Reading Link calls…</p> : null}
-            {snap && callers.length === 0 ? <p className="row-meta">No Link calls yet.</p> : null}
+          <nav className="inspect-nav" aria-label="Callers">
+            {snap === null ? <p className="inspect-quiet">Reading traffic…</p> : null}
+            {snap && callers.length === 0 ? <p className="inspect-quiet">No calls yet.</p> : null}
             {callerPage.page.map((caller) => {
+              const face = faceFor(faces, caller.caller);
               const callerOn = selectedCaller?.caller === caller.caller && !selectedWorker;
               const shownWorkers = workerShown[caller.caller] ?? INSPECT_WORKER_PAGE;
               const workerPage = pageNewest(caller.workers, shownWorkers);
+              const summary = callerTrafficStatus(caller);
               return (
                 <div className="inspect-caller" key={caller.caller}>
                   <button
@@ -167,8 +164,8 @@ export function InspectWorkspace() {
                     aria-current={callerOn ? "true" : undefined}
                     onClick={() => setSelection({ kind: "caller", caller: caller.caller })}
                   >
-                    <strong>{caller.caller}</strong>
-                    <span>{caller.callCount} {caller.callCount === 1 ? "call" : "calls"}</span>
+                    <strong>{face.title}</strong>
+                    <span>{caller.callCount} {caller.callCount === 1 ? "call" : "calls"} · {summary}</span>
                   </button>
                   {workerPage.page.map((worker) => {
                     const workerOn = selectedWorker?.key === worker.key && selectedCaller?.caller === caller.caller;
@@ -180,63 +177,108 @@ export function InspectWorkspace() {
                         aria-current={workerOn ? "true" : undefined}
                         onClick={() => setSelection({ kind: "worker", caller: caller.caller, key: worker.key })}
                       >
-                        {worker.label}
+                        <strong>{worker.label}</strong>
+                        <span>{workerStatus(worker)}</span>
                       </button>
                     );
                   })}
                   {workerPage.earlier > 0 ? (
                     <button
                       type="button"
-                      className="tiny"
+                      className="tiny inspect-more"
                       onClick={() => setWorkerShown((current) => ({ ...current, [caller.caller]: shownWorkers + INSPECT_WORKER_PAGE }))}
                     >
-                      More workers ({workerPage.earlier})
+                      Earlier workers ({workerPage.earlier})
                     </button>
                   ) : null}
                 </div>
               );
             })}
             {callerPage.earlier > 0 ? (
-              <button type="button" className="tiny" onClick={() => setCallerShown((shown) => shown + INSPECT_NAV_PAGE)}>
+              <button type="button" className="tiny inspect-more" onClick={() => setCallerShown((shown) => shown + INSPECT_NAV_PAGE)}>
                 Earlier callers ({callerPage.earlier})
               </button>
             ) : null}
           </nav>
         </aside>
         <main className="main inspect-main">
-          <p className="inspect-note">{retention.note}</p>
-          {!selectedCaller ? <p className="row-meta">No Link calls yet.</p> : null}
-          {selectedCaller ? (
+          {snap === null ? (
+            <div className="inspect-empty">
+              <h2>Reading traffic…</h2>
+              <p>Workhorse is opening the latest calls.</p>
+            </div>
+          ) : null}
+          {snap && !selectedCaller ? (
+            <div className="inspect-empty">
+              <h2>No traffic yet</h2>
+              <p>When another app calls Workhorse, it shows up here.</p>
+            </div>
+          ) : null}
+          {selectedCaller && selectedFace ? (
             <>
-              <h2>{selectedWorker ? selectedWorker.label : selectedCaller.caller}</h2>
-              <p className="row-meta">
-                {selectedWorker
-                  ? `Called by ${selectedCaller.caller}. ${selectedWorker.sessionId ? selectedWorker.sessionId : "No session id was recorded, so this name is not tied to a transcript."}`
-                  : `${selectedCaller.caller} · ${selectedCaller.callCount} ${selectedCaller.callCount === 1 ? "call" : "calls"}`}
-              </p>
-              <section aria-label="Call history">
-                <h3>Calls</h3>
+              <header className="inspect-head">
+                <h2>{selectedWorker ? selectedWorker.label : selectedFace.title}</h2>
+                <p className={`inspect-state is-${statusTone(headlineStatus)}`}>
+                  <i />
+                  <span>{headlineStatus}</span>
+                  <span>{headlineWhen}</span>
+                </p>
+                <p className="inspect-lead">
+                  {selectedWorker
+                    ? `Called by ${selectedFace.title}.`
+                    : `${selectedCaller.callCount} ${selectedCaller.callCount === 1 ? "call" : "calls"}${transcriptWorker ? ` · latest worker ${transcriptWorker.label}` : ""}`}
+                </p>
+                {selectedFace.reportedName || selectedWorker?.sessionId || (selectedWorker && !selectedWorker.sessionId) ? (
+                  <details className="inspect-tech">
+                    <summary>Details</summary>
+                    {selectedFace.reportedName ? <p>Name this client sent: {selectedFace.reportedName}</p> : null}
+                    {selectedWorker?.sessionId ? <p>Session {selectedWorker.sessionId}</p> : null}
+                    {selectedWorker && !selectedWorker.sessionId ? <p>No session was recorded for this worker.</p> : null}
+                  </details>
+                ) : null}
+              </header>
+              <section className="inspect-section" aria-label="Call history">
+                <h3>Activity</h3>
                 {remembered > calls.length ? (
-                  <p className="row-meta">
-                    {remembered} {remembered === 1 ? "call is" : "calls are"} remembered. {calls.length} still in the latest {retention.calls} call log.
+                  <p className="inspect-quiet">
+                    {remembered} {remembered === 1 ? "call" : "calls"} in all. {calls.length} of the latest are listed here.
                   </p>
                 ) : null}
-                {callPage.page.map((row) => (
-                  <article className="inspect-call" key={row.id}>
-                    <strong>{row.tool}</strong>
-                    <span>{statusLabel(row)} · {whenLabel(row.at)}{row.worker && !selectedWorker ? ` · ${row.worker}` : ""}</span>
-                    {row.detail ? <p>{redactInspectText(row.detail)}</p> : null}
-                  </article>
-                ))}
+                {calls.length === 0 ? <p className="inspect-quiet">No calls are left in the latest list.</p> : null}
+                {callPage.page.map((row) => {
+                  const label = trafficStatus(row);
+                  return (
+                    <article className="inspect-call" key={row.id}>
+                      <strong>{activityLabel(row.tool)}</strong>
+                      <span className={`inspect-state is-${statusTone(label)}`}>
+                        <i />
+                        {label} · {trafficWhen(row.at)}{row.worker && !selectedWorker ? ` · ${row.worker}` : ""}
+                      </span>
+                      {row.detail ? <p className="inspect-error">{redactInspectText(row.detail)}</p> : null}
+                      <details className="inspect-tech">
+                        <summary>Details</summary>
+                        <p>Tool {activityTool(row.tool)}</p>
+                      </details>
+                    </article>
+                  );
+                })}
                 {callPage.earlier > 0 ? (
-                  <button type="button" className="tiny" onClick={() => setCallShown((shown) => shown + INSPECT_CALL_PAGE)}>
+                  <button type="button" className="tiny inspect-more" onClick={() => setCallShown((shown) => shown + INSPECT_CALL_PAGE)}>
                     Earlier calls ({callPage.earlier})
                   </button>
                 ) : null}
               </section>
-              <Transcript worker={transcriptWorker} callerLabel={selectedCaller.caller} showingLatest={!selectedWorker && Boolean(transcriptWorker)} />
+              <Transcript
+                worker={transcriptWorker}
+                callerTitle={selectedFace.title}
+                showingLatest={!selectedWorker && Boolean(transcriptWorker)}
+              />
             </>
           ) : null}
+          <details className="inspect-about">
+            <summary>About this list</summary>
+            <p>{retention.note}</p>
+          </details>
         </main>
       </div>
     </>
@@ -248,7 +290,15 @@ function latestLinkedWorker(caller: InspectCallerNode | null): InspectWorkerNode
   return caller.workers.find((worker) => worker.sessionId) ?? null;
 }
 
-function Transcript({ worker, callerLabel, showingLatest }: { worker: InspectWorkerNode | null; callerLabel: string; showingLatest: boolean }) {
+function messageLabel(message: ChatMessage): string {
+  if (message.kind === "thought") return "Thinking";
+  if (message.kind === "tool") return "Step";
+  if (message.role === "user") return "Request";
+  if (message.role === "assistant") return "Result";
+  return "Note";
+}
+
+function Transcript({ worker, callerTitle, showingLatest }: { worker: InspectWorkerNode | null; callerTitle: string; showingLatest: boolean }) {
   const sessionId = worker?.sessionId;
   // The desk selector returns its cached row while the store object is the
   // same, so a finder closed over the worker id keeps the previous worker.
@@ -264,7 +314,10 @@ function Transcript({ worker, callerLabel, showingLatest }: { worker: InspectWor
   const [shown, setShown] = useState(INSPECT_MESSAGE_PAGE);
   const stamp = sessionStamp(session);
   const running = session?.agentRun?.status === "running" || session?.status === "running";
-  const liveStatus = session?.agentRun?.status ?? worker?.lastStatus;
+  const liveStatus = trafficStatus({
+    workerStatus: session?.agentRun?.status ?? worker?.lastStatus,
+    status: session?.agentRun?.status ?? worker?.lastStatus,
+  });
 
   useEffect(() => {
     setShown(INSPECT_MESSAGE_PAGE);
@@ -318,35 +371,48 @@ function Transcript({ worker, callerLabel, showingLatest }: { worker: InspectWor
   }, [sessionId, stamp, running]);
 
   if (!worker) {
-    return <p className="row-meta">This caller has no linked worker transcript.</p>;
+    return (
+      <section className="inspect-section" aria-label="Transcript">
+        <h3>Transcript</h3>
+        <p className="inspect-quiet">No worker transcript for {callerTitle}.</p>
+      </section>
+    );
   }
   if (!sessionId) {
-    return <p className="row-meta">This worker was named without a session id, so its transcript is not opened.</p>;
+    return (
+      <section className="inspect-section" aria-label="Transcript">
+        <h3>Transcript</h3>
+        <p className="inspect-quiet">This worker has no transcript to open.</p>
+      </section>
+    );
   }
   const messages = inspectTranscriptRows(session, sidecar, sessionId);
   const page = pageNewest([...messages].reverse(), shown);
   const visible = [...page.page].reverse();
   const error = redactInspectText(session?.agentRun?.error?.trim() ?? "");
   return (
-    <section aria-label="Transcript">
+    <section className="inspect-section" aria-label="Transcript">
       <h3>Transcript</h3>
-      <p className="row-meta">Progress · {progressLabel(liveStatus)}{running ? " · this transcript refreshes while the run is open" : ""}</p>
-      {showingLatest ? <p className="row-meta">Latest worker linked by {callerLabel}: {worker.label}. Choose a worker in the sidebar to read another transcript.</p> : null}
-      {error ? <p className="inspect-error">Error · {error}</p> : null}
-      {!settled ? <p className="row-meta">Reading transcript…</p> : null}
-      {settled && messages.length === 0 ? <p className="row-meta">No transcript is stored for this worker.</p> : null}
+      <p className={`inspect-state is-${statusTone(liveStatus)}`}>
+        <i />
+        <span>{liveStatus}{running ? " · updates while this run is open" : ""}</span>
+      </p>
+      {showingLatest ? <p className="inspect-quiet">Showing {worker.label}, the latest worker. Pick another worker to read that transcript.</p> : null}
+      {error ? <p className="inspect-error">{error}</p> : null}
+      {!settled ? <p className="inspect-quiet">Reading transcript…</p> : null}
+      {settled && messages.length === 0 ? <p className="inspect-quiet">No transcript is stored for this worker.</p> : null}
       {visible.map((message) => {
         const text = redactInspectText(inspectMessageText(message));
         if (!text) return null;
         return (
-          <article className="inspect-line" key={message.id}>
+          <article className={`inspect-line is-${messageLabel(message).toLowerCase()}`} key={message.id}>
             <span>{messageLabel(message)}</span>
             <p>{text}</p>
           </article>
         );
       })}
       {page.earlier > 0 ? (
-        <button type="button" className="tiny" onClick={() => setShown((value) => value + INSPECT_MESSAGE_PAGE)}>
+        <button type="button" className="tiny inspect-more" onClick={() => setShown((value) => value + INSPECT_MESSAGE_PAGE)}>
           Earlier messages ({page.earlier})
         </button>
       ) : null}
@@ -362,5 +428,3 @@ function sessionStamp(session: Session | undefined): string {
     .join("|");
   return `${session.id}:${session.messages.length}:${tail}:${session.transcriptSidecar ?? ""}:${session.agentRun?.error ?? ""}:${session.agentRun?.status ?? ""}`;
 }
-
-

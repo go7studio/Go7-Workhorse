@@ -9,7 +9,16 @@ import { flushLinkHistoryWrites, readLinkHistoryFile, readLinkInspectFile } from
 import { resetLinkStateCache } from "../electron/link-state";
 import { handleWorkhorseRpc, setWorkhorseDeskAsk } from "../electron/workhorse-mcp";
 import { isDraftChat, isListedLooseChat } from "../src/lib/chats";
-import { inspectCallers, inspectTranscriptRows, pageNewest, redactInspectText } from "../src/lib/link-inspect";
+import { inspectCallers, inspectTranscriptRows, inspectTree, pageNewest, redactInspectText } from "../src/lib/link-inspect";
+import {
+  activityLabel,
+  activityTool,
+  callerTrafficStatus,
+  presentCallers,
+  reliableCallerTitle,
+  trafficStatus,
+  trafficWhen,
+} from "../src/lib/link-present";
 import { linkBridgeHostFor } from "../src/lib/link-bridge";
 import {
   LINK_HISTORY_LIMIT,
@@ -886,10 +895,10 @@ test("Inspect replaces the desk and Projects stay above Chats", () => {
   assert.match(menu, /setInspectOpen\(true\)/);
   assert.equal(menu.includes('role="dialog"'), false);
   assert.match(workspace, /Back to desk/);
-  assert.match(workspace, /aria-label="External callers"/);
+  assert.match(workspace, /aria-label="Callers"/);
   assert.match(workspace, /aria-label="Transcript"/);
   assert.match(workspace, /Earlier callers/);
-  assert.match(workspace, /Progress ·/);
+  assert.match(workspace, /updates while this run is open/);
   assert.match(workspace, /message\.text\?\.length/);
   assert.match(workspace, /\(store\) => store\.sessions/);
   assert.match(workspace, /inspectTranscriptRows\(/);
@@ -898,4 +907,130 @@ test("Inspect replaces the desk and Projects stay above Chats", () => {
   assert.match(app, /<InspectWorkspace \/>/);
   assert.match(readFileSync(path.join(root, "electron", "link-history-file.ts"), "utf8"), /openSync\(lock, "wx"\)/);
   assert.match(readFileSync(path.join(root, "electron", "main.ts"), "utf8"), /readLinkInspectFile\(statePath\(\)\)/);
+});
+
+test("Inspect names a real caller, keeps unknown clients apart, and hides protocol words", () => {
+  assert.equal(reliableCallerTitle("Codex"), "Codex");
+  assert.equal(reliableCallerTitle("codex-cli"), "Codex");
+  assert.equal(reliableCallerTitle("Claude Code"), "Claude");
+  assert.equal(reliableCallerTitle("claude-code"), "Claude");
+  assert.equal(reliableCallerTitle("Cursor"), "Cursor");
+  assert.equal(reliableCallerTitle("cursor-vscode"), "Cursor");
+  assert.equal(reliableCallerTitle("OpenClaw"), "OpenClaw");
+  assert.equal(reliableCallerTitle("Hermes"), "Hermes");
+  assert.equal(reliableCallerTitle("grok-bot"), "Grok Bot");
+  assert.equal(reliableCallerTitle("Link process"), null);
+  assert.equal(reliableCallerTitle("Link process A"), null);
+  assert.equal(reliableCallerTitle("Link process B"), null);
+  assert.equal(reliableCallerTitle("Codex process"), null);
+  assert.equal(reliableCallerTitle("not claude"), null);
+  assert.equal(reliableCallerTitle("go7-workhorse"), null);
+  const rows = [
+    linkCallFromObservation({
+      tool: "workhorse_agent_status",
+      ok: true,
+      callerHint: "Link process B",
+      resultText: JSON.stringify({ id: "sess_dex01", worker: "Dexter", parentId: "sess_parent", status: "completed" }),
+      now: 3,
+      id: "link_b",
+    }),
+    linkCallFromObservation({
+      tool: "workhorse_delegate",
+      ok: true,
+      callerHint: "Link process",
+      resultText: JSON.stringify({ started: true, childSessionId: "sess_wren01", worker: "Wren", status: "completed" }),
+      now: 2,
+      id: "link_main",
+    }),
+    linkCallFromObservation({
+      tool: "workhorse_delegate",
+      ok: true,
+      callerHint: "Codex",
+      resultText: JSON.stringify({ started: true, childSessionId: "sess_ada001", worker: "Ada", status: "running" }),
+      now: 4,
+      id: "link_codex",
+    }),
+    linkCallFromObservation({
+      tool: "workhorse_delegate",
+      ok: true,
+      callerHint: "codex-cli",
+      resultText: JSON.stringify({ started: true, childSessionId: "sess_ada002", worker: "Ada", status: "completed" }),
+      now: 5,
+      id: "link_codex_cli",
+    }),
+    linkCallFromObservation({
+      tool: "workhorse_list_chats",
+      ok: true,
+      callerHint: "Link process A",
+      now: 1,
+      id: "link_a",
+    }),
+  ];
+  let file = emptyLinkInspect();
+  for (const row of [...rows].sort((left, right) => left.at - right.at)) file = applyLinkRecord(file, row);
+  const tree = inspectTree(file);
+  assert.deepEqual(tree.map((item) => item.caller).sort(), ["Codex", "Link process", "Link process A", "Link process B", "codex-cli"].sort());
+  assert.equal(tree.find((item) => item.caller === "Link process")?.workers[0]?.sessionId, "sess_wren01");
+  assert.equal(tree.find((item) => item.caller === "Link process B")?.workers.length, 0);
+  assert.equal(tree.find((item) => item.caller === "Codex")?.workers[0]?.sessionId, "sess_ada001");
+  const faces = presentCallers(tree);
+  assert.equal(faces.get("Link process A")?.title, "Unknown caller");
+  assert.equal(faces.get("Link process")?.title, "Unknown caller 2");
+  assert.equal(faces.get("Link process B")?.title, "Unknown caller 3");
+  assert.equal(faces.get("Link process")?.reportedName, "Link process");
+  assert.equal(faces.get("Codex")?.title, "Codex");
+  assert.equal(faces.get("Codex")?.reliable, true);
+  assert.equal(faces.get("codex-cli")?.title, "Codex 2");
+  assert.equal(faces.get("codex-cli")?.reportedName, "codex-cli");
+  assert.equal(faces.get("Codex")?.title === faces.get("Link process")?.title, false);
+  assert.equal(activityLabel("workhorse_delegate"), "Started work");
+  assert.equal(activityLabel("workhorse_agent_status"), "Checked progress");
+  assert.equal(activityLabel("workhorse_not_a_thing").includes("workhorse_"), false);
+  assert.equal(activityTool("workhorse_delegate"), "workhorse_delegate");
+  assert.equal(trafficStatus({ status: "ok", workerStatus: "completed" }), "Finished");
+  assert.equal(trafficStatus({ status: "ok", workerStatus: "running" }), "Working");
+  assert.equal(trafficStatus({ status: "error" }), "Failed");
+  assert.equal(trafficStatus({ status: "forbidden" }), "Refused");
+  assert.equal(trafficStatus({ status: "ok" }), "Done");
+  assert.equal(trafficStatus({ workerStatus: "queued" }), "Working");
+  const codex = tree.find((item) => item.caller === "Codex");
+  assert.equal(codex ? callerTrafficStatus(codex) : "", "Working");
+  const noon = new Date(2026, 10, 5, 12, 7).getTime();
+  assert.match(trafficWhen(noon, noon + 60_000), /^Today,/);
+  assert.match(trafficWhen(noon - 24 * 60 * 60 * 1000, noon), /^Yesterday,/);
+  assert.equal(trafficWhen(0, noon), "Unknown time");
+  const twins = inspectCallers([
+    linkCallFromObservation({
+      tool: "workhorse_delegate",
+      ok: true,
+      callerHint: "Codex",
+      resultText: JSON.stringify({ started: true, childSessionId: "sess_one001", worker: "Wren", status: "completed" }),
+      now: 1,
+      id: "link_one",
+    }),
+    linkCallFromObservation({
+      tool: "workhorse_delegate",
+      ok: true,
+      callerHint: "Codex",
+      resultText: JSON.stringify({ started: true, childSessionId: "sess_two002", worker: "Wren", status: "completed" }),
+      now: 2,
+      id: "link_two",
+    }),
+  ]);
+  const labels = twins[0]?.workers.map((worker) => worker.label) ?? [];
+  assert.equal(labels.includes("Wren"), true);
+  assert.equal(labels.includes("Wren 2"), true);
+  assert.equal(labels.some((label) => label.includes("sess_")), false);
+  const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  const source = readFileSync(path.join(sourceRoot, "src", "ui", "InspectWorkspace.tsx"), "utf8");
+  assert.match(source, /Back to desk/);
+  assert.match(source, /setInspectOpen\(false\)/);
+  assert.match(source, /About this list/);
+  assert.match(source, /No traffic yet/);
+  assert.match(source, /Reading traffic/);
+  assert.match(source, /Not listening right now/);
+  assert.equal(source.includes("Link callers"), false);
+  assert.equal(source.includes("inspect-note"), false);
+  assert.equal(source.includes("{row.tool}"), false);
+  assert.equal(source.includes("{selectedCaller.caller}"), false);
 });

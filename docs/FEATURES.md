@@ -514,12 +514,16 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
   outside it.
 - An unnamed inbound spawn uses the Link bridge: one real parent for the
   worker, kept out of the sidebar. Inspect, on the brand menu, replaces the
-  desk with callers and their workers, and opens the stored transcript for
-  the one you select. The call log keeps the latest 40. Inspect lists a worker
-  when that caller successfully delegated, asked, or spawned it, and keeps the
-  240 most recently invoked older workers. A status or read does not claim
-  someone else's worker. Callers are not merged. A chat or project you pick
-  in Settings is still that parent.
+  desk with Workhorse traffic. A caller the desk recognizes, such as Codex,
+  Claude, or Cursor, is named. A client that does not identify itself shows
+  as Unknown caller, and separate unknown clients stay separate. Workers that
+  caller started stay nested under them, with the activity and the stored
+  transcript. Tool names, the name a client sent, session ids, and the
+  retention rules stay behind Details. The call log keeps the latest 40.
+  Inspect lists a worker when that caller successfully delegated, asked, or
+  spawned it, and keeps the 240 most recently invoked older workers. A status
+  or read does not claim someone else's worker. Callers are not merged. A
+  chat or project you pick in Settings is still that parent.
 - An explicit request to work with Workhorse delegates before direct execution,
   and blocked delegation returns the Workhorse error first.
 - Delete, rename, credentials, bot setup and project changes are refused. No

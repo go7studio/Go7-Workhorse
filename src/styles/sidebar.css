@@ -316,8 +316,76 @@ html.pane-dragging * {
 }
 
 .brand-copy {
+  position: relative;
   min-width: 0;
   flex: 1;
+}
+
+.brand-menu-btn {
+  display: block;
+  width: 100%;
+  padding: 2px 4px;
+  text-align: left;
+  border-radius: var(--radius-10);
+}
+
+.brand-menu-btn:hover,
+.brand-menu-btn[aria-expanded="true"] {
+  background: var(--bg-hover);
+}
+
+.brand-menu {
+  position: absolute;
+  z-index: 6;
+  left: 0;
+  top: calc(100% + 4px);
+  width: min(240px, 100%);
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-10);
+  background: var(--bg-sidebar);
+}
+
+.brand-menu button {
+  width: 100%;
+  padding: 6px 8px;
+  text-align: left;
+  border-radius: var(--radius-10);
+}
+
+.brand-menu button:hover {
+  background: var(--bg-hover);
+}
+
+.link-inspect {
+  display: grid;
+  gap: 4px;
+  max-height: 280px;
+  overflow: auto;
+}
+
+.link-inspect-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.link-inspect-head button {
+  width: auto;
+}
+
+.link-inspect-row {
+  display: grid;
+  gap: 2px;
+  padding: 6px 8px;
+  border-top: 1px solid var(--line);
+  font-size: var(--text-11);
+  color: var(--text-secondary);
+}
+
+.link-inspect-row strong {
+  color: var(--text);
+  font-size: var(--text-12);
 }
 
 .brand-title {

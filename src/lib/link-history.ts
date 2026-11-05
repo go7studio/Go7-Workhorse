@@ -1,0 +1,236 @@
+/**
+ * A short record of an external Workhorse Link call.
+ * Tool name, caller, and status only. No prompt, path, key, or transcript.
+ */
+export const LINK_HISTORY_LIMIT = 40;
+
+export type LinkCallStatus = "ok" | "error" | "forbidden";
+export type LinkCallerKind = "named" | "bot" | "unknown";
+
+export type LinkCallRecord = {
+  id: string;
+  at: number;
+  tool: string;
+  caller: string;
+  callerKind: LinkCallerKind;
+  status: LinkCallStatus;
+  /** A worker status the reply named, when it named one. */
+  workerStatus?: string;
+  worker?: string;
+  detail?: string;
+};
+
+const SECRET = /key|token|secret|password|passwd|authorization|credential|bearer|sk-|eyJ/i;
+const CALLER_CHARS = /^[A-Za-z0-9][A-Za-z0-9 ._+-]{0,79}$/;
+const WORKER_STATUS = new Set(["queued", "running", "completed", "failed", "cancelled", "unknown"]);
+
+export function safeCallerName(raw: unknown): string | undefined {
+  if (typeof raw !== "string") return undefined;
+  const text = raw.trim().replace(/\s+/g, " ");
+  if (!text || text.length > 80 || SECRET.test(text) || !CALLER_CHARS.test(text)) return undefined;
+  return text;
+}
+
+export function safeLinkTool(raw: unknown): string {
+  const text = typeof raw === "string" ? raw.trim() : "";
+  if (!text || text.length > 80 || !/^[A-Za-z0-9_.:-]+$/.test(text)) return "unknown";
+  return text;
+}
+
+function looksLikeBot(name: string): boolean {
+  return /\bbot\b/i.test(name) || /grok-bot/i.test(name);
+}
+
+export function publicLinkDetail(raw: unknown): string | undefined {
+  if (typeof raw !== "string") return undefined;
+  const text = raw.replace(/\s+/g, " ").trim();
+  if (!text || SECRET.test(text)) return undefined;
+  return text.length > 80 ? `${text.slice(0, 79)}…` : text;
+}
+
+function workerBit(raw: unknown): string | undefined {
+  const name = safeCallerName(raw);
+  if (!name || name.length > 40) return undefined;
+  return name;
+}
+
+function workerStatusBit(raw: unknown): string | undefined {
+  if (typeof raw !== "string") return undefined;
+  const text = raw.trim().toLowerCase();
+  return WORKER_STATUS.has(text) ? text : undefined;
+}
+
+function resultFields(text: string | undefined): { worker?: string; workerStatus?: string } {
+  if (!text) return {};
+  try {
+    const parsed = JSON.parse(text) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    const rec = parsed as Record<string, unknown>;
+    return {
+      worker: workerBit(rec.worker) ?? workerBit(rec.workerId),
+      workerStatus: workerStatusBit(rec.status),
+    };
+  } catch {
+    return {};
+  }
+}
+
+function callStatus(ok: boolean, errorDetail?: string): LinkCallStatus {
+  if (ok) return "ok";
+  if (errorDetail && /profile_forbidden/.test(errorDetail)) return "forbidden";
+  return "error";
+}
+
+/**
+ * One Inspect row from the call itself.
+ * `resultText` is read for worker and status only. Prompts and secrets are not copied.
+ */
+export function linkCallFromObservation(input: {
+  tool: string;
+  ok: boolean;
+  errorDetail?: string;
+  resultText?: string;
+  callerHint?: string;
+  origin?: unknown;
+  model?: unknown;
+  now?: number;
+  id?: string;
+}): LinkCallRecord {
+  const tool = safeLinkTool(input.tool);
+  const status = callStatus(input.ok, input.errorDetail);
+  const hinted = safeCallerName(input.callerHint);
+  const origin = input.origin === "openclaw" ? "OpenClaw" : input.origin === "hermes" ? "Hermes" : undefined;
+  const model = typeof input.model === "string" ? input.model : "";
+  const botCall = looksLikeBot(hinted ?? "") || looksLikeBot(origin ?? "") || /grok-bot/i.test(model);
+  const named = hinted ?? origin;
+  const caller = named ?? (botCall ? "Grok Bot" : "Unknown caller");
+  const callerKind: LinkCallerKind = !named && !botCall ? "unknown" : looksLikeBot(caller) || botCall ? "bot" : "named";
+  const at = typeof input.now === "number" && Number.isFinite(input.now) ? input.now : Date.now();
+  const id = input.id && /^[A-Za-z0-9_.:-]{1,80}$/.test(input.id) ? input.id : `link_${tool}_${at.toString(36)}`;
+  const found = resultFields(input.resultText);
+  const detail = status === "ok" ? undefined : publicLinkDetail(input.errorDetail);
+  return {
+    id,
+    at,
+    tool,
+    caller,
+    callerKind,
+    status,
+    ...(found.workerStatus ? { workerStatus: found.workerStatus } : {}),
+    ...(found.worker ? { worker: found.worker } : {}),
+    ...(detail ? { detail } : {}),
+  };
+}
+
+export type LinkCallDraft = {
+  id?: unknown;
+  createdAt?: unknown;
+  payload?: Record<string, unknown>;
+};
+
+/**
+ * One Inspect row from a Learning-shaped inbound draft.
+ * The draft may still hold a bounded prompt under args. This row does not.
+ */
+export function linkCallFromDraft(draft: LinkCallDraft, callerHint?: string, now = Date.now()): LinkCallRecord | null {
+  const payload = draft.payload;
+  if (!payload || payload.surface !== "workhorse-link") return null;
+  const tool = safeLinkTool(payload.tool);
+  const status: LinkCallStatus =
+    payload.status === "ok" || payload.status === "error" || payload.status === "forbidden" ? payload.status : "error";
+  const hinted = safeCallerName(callerHint);
+  const origin =
+    payload.origin === "openclaw" ? "OpenClaw" : payload.origin === "hermes" ? "Hermes" : undefined;
+  const args = payload.args && typeof payload.args === "object" ? (payload.args as Record<string, unknown>) : undefined;
+  const brain = args?.initialBrain && typeof args.initialBrain === "object" ? (args.initialBrain as Record<string, unknown>) : undefined;
+  const model = typeof args?.model === "string" ? args.model : typeof brain?.model === "string" ? brain.model : "";
+  const botCall = looksLikeBot(hinted ?? "") || looksLikeBot(origin ?? "") || /grok-bot/i.test(model);
+  const named = hinted ?? origin;
+  const caller = named ?? (botCall ? "Grok Bot" : "Unknown caller");
+  const callerKind: LinkCallerKind = !named && !botCall ? "unknown" : looksLikeBot(caller) || botCall ? "bot" : "named";
+  const at = typeof draft.createdAt === "number" && Number.isFinite(draft.createdAt) ? draft.createdAt : now;
+  const idRaw = typeof draft.id === "string" && /^[A-Za-z0-9_.:-]{1,80}$/.test(draft.id) ? draft.id : "";
+  const id = idRaw || `link_${tool}_${at.toString(36)}`;
+  const worker = workerBit(payload.worker) ?? workerBit(payload.workerId);
+  const workerStatus = workerStatusBit(payload.status === "ok" ? payload.workerStatus : undefined) ?? workerStatusBit(payload.resultStatus);
+  const detail = status === "ok" ? undefined : publicLinkDetail(payload.error);
+  return {
+    id,
+    at,
+    tool,
+    caller,
+    callerKind,
+    status,
+    ...(workerStatus ? { workerStatus } : {}),
+    ...(worker ? { worker } : {}),
+    ...(detail ? { detail } : {}),
+  };
+}
+
+/** Newest first, capped. A repeated id replaces the older row. */
+export function boundLinkHistory(rows: LinkCallRecord[], limit = LINK_HISTORY_LIMIT): LinkCallRecord[] {
+  const seen = new Set<string>();
+  const next: LinkCallRecord[] = [];
+  const sorted = [...rows].sort((left, right) => right.at - left.at);
+  for (const row of sorted) {
+    if (!row || typeof row.id !== "string" || seen.has(row.id)) continue;
+    if (!row.tool || !row.caller) continue;
+    seen.add(row.id);
+    next.push(row);
+    if (next.length >= limit) break;
+  }
+  return next;
+}
+
+export function normalizeLinkHistory(raw: unknown): LinkCallRecord[] {
+  const calls = raw && typeof raw === "object" && Array.isArray((raw as { calls?: unknown }).calls)
+    ? (raw as { calls: unknown[] }).calls
+    : Array.isArray(raw)
+      ? raw
+      : [];
+  const rows: LinkCallRecord[] = [];
+  for (const item of calls) {
+    if (!item || typeof item !== "object") continue;
+    const row = item as Partial<LinkCallRecord>;
+    const tool = safeLinkTool(row.tool);
+    const caller = row.caller === "Unknown caller" ? "Unknown caller" : safeCallerName(row.caller);
+    if (!caller) continue;
+    const status: LinkCallStatus = row.status === "ok" || row.status === "error" || row.status === "forbidden" ? row.status : "error";
+    const callerKind: LinkCallerKind =
+      row.callerKind === "named" || row.callerKind === "bot" || row.callerKind === "unknown"
+        ? row.callerKind
+        : caller === "Unknown caller"
+          ? "unknown"
+          : looksLikeBot(caller)
+            ? "bot"
+            : "named";
+    const at = typeof row.at === "number" && Number.isFinite(row.at) ? row.at : 0;
+    const id = typeof row.id === "string" && /^[A-Za-z0-9_.:-]{1,80}$/.test(row.id) ? row.id : `link_${tool}_${at.toString(36)}`;
+    const workerStatus = workerStatusBit(row.workerStatus);
+    const worker = workerBit(row.worker);
+    const detail = publicLinkDetail(row.detail);
+    rows.push({
+      id,
+      at,
+      tool,
+      caller,
+      callerKind,
+      status,
+      ...(workerStatus ? { workerStatus } : {}),
+      ...(worker ? { worker } : {}),
+      ...(detail ? { detail } : {}),
+    });
+  }
+  return boundLinkHistory(rows);
+}
+
+export function linkHistoryFile(statePath: string): string | undefined {
+  const trimmed = statePath.trim();
+  if (!trimmed) return undefined;
+  const slash = Math.max(trimmed.lastIndexOf("/"), trimmed.lastIndexOf("\\"));
+  const base = slash < 0 ? trimmed : trimmed.slice(slash + 1);
+  if (base !== "workhorse-state.json") return undefined;
+  const dir = slash < 0 ? "." : trimmed.slice(0, slash);
+  const sep = trimmed.includes("\\") && !trimmed.includes("/") ? "\\" : "/";
+  return `${dir}${sep}link-history.json`;
+}

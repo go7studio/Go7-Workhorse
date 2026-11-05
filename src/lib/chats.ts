@@ -234,9 +234,9 @@ export function deleteChatGuard(input: {
 }
 
 export function isListedLooseChat(
-  session: Pick<Session, "projectId" | "archivedAt" | "hidden" | "parentId">,
+  session: Pick<Session, "projectId" | "archivedAt" | "hidden" | "parentId" | "linkBridge">,
 ): boolean {
-  return !session.projectId && typeof session.archivedAt !== "number" && !session.hidden && !session.parentId;
+  return !session.projectId && typeof session.archivedAt !== "number" && !session.hidden && !session.parentId && !session.linkBridge;
 }
 
 export function isLooseDeleteScope(input: { scope?: string; chat?: string; chats?: string }): boolean {
@@ -412,6 +412,7 @@ type DraftFields =
   | "composerImages"
   | "parentId"
   | "hidden"
+  | "linkBridge"
   | "agentRun"
   | "transcriptSidecar"
   | "transcriptOffloaded"
@@ -427,6 +428,7 @@ type DraftFields =
  * retired worker into the new chat and dropped 102 others.
  */
 export function isDraftChat(session: Pick<Session, DraftFields>): boolean {
+  if (session.linkBridge) return false;
   if (typeof session.archivedAt === "number") return false;
   if (session.parentId || session.hidden || session.agentRun) return false;
   if (session.transcriptSidecar || session.transcriptOffloaded || session.retainedReport) return false;
@@ -455,6 +457,7 @@ export function sidebarKeepsChat(
   session: Pick<Session, DraftFields | "projectId">,
   where: { projectId: string | null; archived: boolean },
 ): boolean {
+  if (session.linkBridge) return false;
   if ((session.projectId ?? null) !== where.projectId) return false;
   if (isDraftChat(session)) return false;
   const isArchived = typeof session.archivedAt === "number";
@@ -487,13 +490,14 @@ export function listedChats(sessions: Session[]): Session[] {
 
 /** Loose Chats first, then any other visible root chat. Settings inbound parent uses this when unset. */
 export function defaultInboundParentId(
-  sessions: Array<{ id?: unknown; projectId?: unknown; hidden?: unknown; archivedAt?: unknown; parentId?: unknown }>,
+  sessions: Array<{ id?: unknown; projectId?: unknown; hidden?: unknown; linkBridge?: unknown; archivedAt?: unknown; parentId?: unknown }>,
 ): string {
   const visible = sessions.filter(
     (session) =>
       typeof session.id === "string" &&
       session.id &&
       !session.hidden &&
+      !session.linkBridge &&
       session.archivedAt == null &&
       !session.parentId,
   );

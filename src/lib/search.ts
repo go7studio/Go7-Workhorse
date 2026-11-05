@@ -35,7 +35,7 @@ export function searchChats(
   const names = new Map(projects.map((project) => [project.id, project.name]));
   const rows: ChatSearchResult[] = [];
   for (const session of sessions) {
-    if (session.hidden) continue;
+    if (session.hidden || session.linkBridge) continue;
     const project = session.projectId ? names.get(session.projectId) ?? "" : "Loose chats";
     const title = searchDisplayTitle(session);
     const header = `${title} ${session.title} ${project} ${session.provider} ${session.model}`;

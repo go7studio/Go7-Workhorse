@@ -29,8 +29,12 @@ export function buildSidebarChatIndex(sessions: Session[]): SidebarChatIndex {
   const archived = new Map<string | null, Session[]>();
   const parentsById = new Map(sessions.map((session) => [session.id, session]));
   const orderById = new Map(sessions.map((session) => [session.id, sidebarOrderAt(session)]));
+  const bridgeIds = new Set(sessions.filter((session) => session.linkBridge).map((session) => session.id));
   for (const session of sessions) {
     if (isDraftChat(session)) continue;
+    // The Link bridge is a real parent. It, and the workers that belong to it,
+    // stay in the desk and stay off this list.
+    if (session.linkBridge || (session.parentId && bridgeIds.has(session.parentId))) continue;
     if (session.hidden && !session.parentId) continue;
     const projectId = session.projectId ?? null;
     const target = typeof session.archivedAt === "number" ? archived : live;

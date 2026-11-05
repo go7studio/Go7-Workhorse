@@ -77,7 +77,7 @@ import { foldersToCount, leftInFolderNote, workerLabel } from "./worker-folders"
 import { deskPersistBodyEqual, hotSavePayload, persistDelayMs } from "./desk-persist";
 import { restoredPanel } from "./restored-panel";
 import { mergeTranscriptRows, normalizeRetentionDays, transcriptFetchPlan, transcriptStillOnDisk, transcriptTailStaysInline } from "./transcript-sidecar";
-import { autoTitleForSend, firstUserText, suggestedTitleForSession, titleAcceptsVendor, titleFromIntent } from "./titles";
+import { autoTitleForSend, firstUserText, suggestedTitleForSession, titleAcceptsVendor } from "./titles";
 import {
   applyPermissionAnswer,
   autoAllowPermission,
@@ -191,6 +191,7 @@ import { acceptInboundEnvelope, allowedExternalCandidates, formatExternalAgentRe
 import { decideDispatch } from "./dispatch";
 import { projectExternalAgentCatalog } from "./external-catalog";
 import { inboundDeskAction, inboundSpawnParent, mcpExposureProfile } from "../../electron/mcp-exposure";
+import { linkBridgeHostFor } from "./link-bridge";
 import {
   emptyTaskStore,
   envelopeForTrace,
@@ -6044,38 +6045,33 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             : deskSeat;
           let inboundHost: Session | undefined;
           if (payload.mode === "spawn" && !caller && exposure === "external-runtime") {
+            // No chat was named. The Link bridge is the parent: a real session
+            // for the worker, the lineup, and the desk's Permission. It is not
+            // a sidebar chat, and it does not take the seat of whatever chat
+            // happens to be open. A missing model does not refuse the bridge;
+            // routing still has to find a worker.
             const remembered = firstAttachedChoice(latest.settings, latest.lastModel);
-            if (!remembered) {
-              await replyAsk({ error: "context_required" });
-              return;
-            }
+            const fallbackModel = defaultModel("grok").id;
+            const choice = remembered ?? {
+              provider: "grok" as const,
+              model: fallbackModel,
+              effort: withEffort("grok", fallbackModel, "medium"),
+            };
             const project = inboundProjectId
               ? latest.projects.find((item) => item.id === inboundProjectId) ?? null
               : null;
-            const title = titleFromIntent(payload.description?.trim() || payload.message.trim());
-            const opened = openDraft(latest.sessions, {
-              id: uid("sess"),
+            inboundHost = linkBridgeHostFor({
+              sessions: latest.sessions,
               projectId: project?.id ?? null,
-              provider: remembered.provider,
-              model: remembered.model,
-              customBotId: remembered.customBotId,
-              effort: withEffort(remembered.provider, remembered.model, remembered.effort),
-              title,
-              titleLocked: false,
-              // No chat was named, so this host stands in for the desk and
-              // takes the desk's stored default. Never the visible chat's
-              // setting, and never a vendor app's own config.
-              ...inboundAccess({
-                desk: latest.settings.access,
-              }),
-              environment: { kind: "local" },
-              securityPolicy: { network: "allowed", root: "allowed" },
-              status: "idle",
-              contextUsed: 0,
-              messages: [],
-              routingMode: "manual",
+              choice: {
+                provider: choice.provider,
+                model: choice.model,
+                customBotId: remembered?.customBotId,
+                effort: withEffort(choice.provider, choice.model, choice.effort),
+              },
+              access: inboundAccess({ desk: latest.settings.access }),
+              id: uid("sess"),
             });
-            inboundHost = { ...opened.session, title, titleLocked: false };
             caller = inboundHost;
           }
           const parent = caller;
@@ -7037,6 +7033,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                     item.id === parent.id
                       ? {
                           ...item,
+                          ...(parent.linkBridge
+                            ? { linkBridge: true as const, mode: parent.mode, sandbox: parent.sandbox }
+                            : {}),
                           title: parent.title,
                           titleLocked: parent.titleLocked,
                           projectId: spawnProjectId,

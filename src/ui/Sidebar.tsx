@@ -15,6 +15,7 @@ import { useStoreReader, useStoreSelector, type Store } from "../lib/store";
 import { deskPulseLines, visibleUsageEvents } from "../lib/usage";
 import type { Project, Session } from "../lib/types";
 import { ChatRow, type ChatRowDesk } from "./ChatRow";
+import { BrandMenu } from "./LinkInspect";
 import { SplitHandle } from "./SplitHandle";
 import { SIDEBAR_PANE } from "../lib/pane";
 import { searchChats } from "../lib/search";
@@ -512,13 +513,7 @@ export function Sidebar() {
         >
           <img className="brand-mark" src={horseMark} alt="" />
         </button>
-        <div className="brand-copy">
-          <div className="brand-title">
-            <h1>Workhorse</h1>
-            <span className="brand-ver">v{APP_VERSION}</span>
-          </div>
-          <p>One desk, every agent</p>
-        </div>
+        <BrandMenu version={APP_VERSION} />
       </div>
 
       <div className="global-find">
@@ -547,7 +542,6 @@ export function Sidebar() {
       ) : null}
 
       <div className="scroll">
-        <LooseChats store={store} index={index} />
         <div className="section-label sidebar-section-head">
           <span>Projects</span>
           <button className="tiny sidebar-section-add" type="button" aria-label="New project" title="New project" onClick={() => store.openSheet("project")}>+</button>
@@ -599,6 +593,7 @@ export function Sidebar() {
               ))}
           </>
         )}
+        <LooseChats store={store} index={index} />
       </div>
       <footer className="sidebar-dock">
         <button

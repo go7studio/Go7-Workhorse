@@ -130,6 +130,7 @@ export function catalogSessions(state: LooseState, opts?: { fromSessionId?: stri
   for (const raw of state.sessions) {
     const session = asRecord(raw);
     if (typeof session.id !== "string") continue;
+    if (session.linkBridge === true) continue;
     const from = opts?.fromSessionId?.trim() ?? "";
     const crewChild = Boolean(from && sameSessionCrew(crewSessions, from, session.id));
     const parentId = typeof session.parentId === "string" && session.parentId ? session.parentId : undefined;

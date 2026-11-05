@@ -123,6 +123,8 @@ import {
 } from "../src/lib/learning-inbound";
 import { runGrokBotInboxCli } from "./grok-bot-inbox";
 import { atomicWriteJson } from "./state-persistence";
+import { appendLinkHistoryFile } from "./link-history-file";
+import { linkCallFromObservation, safeCallerName } from "../src/lib/link-history";
 import { watchWorkerCompletions } from "./link-watch";
 import type { WorkerRunRow } from "../src/lib/worker-settled";
 import { createFramedSender } from "../src/lib/link-notify";
@@ -1412,6 +1414,19 @@ async function stageContinuationAttachments(
 
 type InboundLearningSink = (draft: InboundLearningDraft) => void;
 let inboundLearningSink: InboundLearningSink | null = null;
+let linkClientLabel = "";
+
+function rememberLinkClient(params: unknown): void {
+  const info = params && typeof params === "object" ? (params as { clientInfo?: { name?: unknown } }).clientInfo : undefined;
+  linkClientLabel = safeCallerName(info?.name) ?? "";
+}
+
+function linkModelHint(args: Record<string, unknown>): string | undefined {
+  const direct = typeof args.model === "string" ? args.model : "";
+  const brain = args.initialBrain && typeof args.initialBrain === "object" ? (args.initialBrain as { model?: unknown }).model : undefined;
+  const model = direct || (typeof brain === "string" ? brain : "");
+  return /grok-bot/i.test(model) ? "grok-bot" : undefined;
+}
 
 /** In-process Learning records here. The MCP child writes a sidecar instead. */
 export function setInboundLearningSink(handler: InboundLearningSink | null): void {
@@ -4089,6 +4104,7 @@ export async function handleWorkhorseRpc(
   ctx?: { fromSessionId?: string },
 ): Promise<object | undefined> {
   if (message.method === "initialize") {
+    rememberLinkClient(message.params);
     if (message.id === undefined) return undefined;
     return {
       jsonrpc: "2.0",
@@ -4187,6 +4203,25 @@ export async function handleWorkhorseRpc(
     const capture = shouldCaptureInboundProfile(currentMcpProfile()) && Boolean(toolName.trim());
     const captureCall = (ok: boolean, resultText?: string, errorDetail?: string) => {
       if (!capture) return;
+      try {
+        const rpc = String(message.id ?? "call").replace(/[^A-Za-z0-9_.:-]/g, "").slice(0, 24);
+        const toolId = safeCallerName(toolName) ? toolName : "tool";
+        appendLinkHistoryFile(
+          process.env.WORKHORSE_STATE_PATH ?? "",
+          linkCallFromObservation({
+            tool: toolName,
+            ok,
+            errorDetail,
+            resultText,
+            callerHint: linkClientLabel,
+            origin: toolArgs.origin,
+            model: linkModelHint(toolArgs),
+            id: `link_${Date.now().toString(36)}_${rpc}_${toolId}`.slice(0, 80),
+          }),
+        );
+      } catch {
+        /* history must not fail the tool the harness called */
+      }
       emitInboundLearning(
         inboundLearningDraft({
           tool: toolName,

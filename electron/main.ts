@@ -38,6 +38,7 @@ import { fetchCustomModels } from "./custom-models";
 import type { PermissionAnswer } from "../src/lib/permissions";
 import { safeExternalUrl } from "../src/lib/open-external";
 import { startWorkhorseBridge, type PeerAskResult } from "./workhorse-bridge";
+import { readLinkHistoryFile, watchLinkHistory } from "./link-history-file";
 import { setInboundLearningSink, setWorkhorseDeskAsk } from "./workhorse-mcp";
 import { drainInboundJsonl } from "../src/lib/learning-inbound";
 import { learningInboundPath } from "../src/lib/learning-paths";
@@ -1325,8 +1326,19 @@ app.whenReady().then(async () => {
       }
     }
   };
+  let linkBridgeListening = false;
+  const publishLinkHistory = () => {
+    const rows = readLinkHistoryFile(statePath());
+    for (const window of BrowserWindow.getAllWindows()) {
+      if (!window.webContents.isDestroyed()) window.webContents.send("link:history", rows);
+    }
+  };
+  ipcMain.handle("link:history", () => readLinkHistoryFile(statePath()));
+  ipcMain.handle("link:bridge", () => ({ listening: linkBridgeListening }));
+  disposeAtQuit("link-history", watchLinkHistory(statePath(), publishLinkHistory));
   void startWorkhorseBridge(handlePeerAsk)
     .then((bridge) => {
+      linkBridgeListening = true;
       const record = writeBridgeRecord(statePath(), { url: bridge.url, token: bridge.token });
       watchPeerInbox(record.inbox, handlePeerAsk);
       process.env.WORKHORSE_BRIDGE_URL = bridge.url;

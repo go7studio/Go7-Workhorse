@@ -135,10 +135,12 @@ function LooseChats({ store, index }: { store: SidebarStore; index: SidebarChatI
     if (!active?.parentId) return;
     setOpenCrew((current) => (current[active.parentId!] ? current : { ...current, [active.parentId!]: true }));
   }, [store.activeSessionId]);
-  if (chats.length === 0 && archived.length === 0) return null;
   return (
     <div className="loose-chats">
-      <div className="section-label">Chats</div>
+      <div className="section-label sidebar-section-head">
+        <span>Chats</span>
+        <button className="tiny sidebar-section-add" type="button" aria-label="New chat" title="New chat" onClick={() => store.startSession(null)}>+</button>
+      </div>
       {chats.map((session) => (
         <div key={session.id} className="project-chat-block">
           <ChatRow
@@ -519,13 +521,6 @@ export function Sidebar() {
         </div>
       </div>
 
-      <button className="ghost open-project" type="button" onClick={() => store.openSheet("project")}>
-        New project
-      </button>
-      <button className="ghost open-project" type="button" onClick={() => store.startSession(null)}>
-        New chat
-      </button>
-
       <div className="global-find">
         <input
           value={query}
@@ -552,7 +547,11 @@ export function Sidebar() {
       ) : null}
 
       <div className="scroll">
-        <div className="section-label">Projects</div>
+        <LooseChats store={store} index={index} />
+        <div className="section-label sidebar-section-head">
+          <span>Projects</span>
+          <button className="tiny sidebar-section-add" type="button" aria-label="New project" title="New project" onClick={() => store.openSheet("project")}>+</button>
+        </div>
         {liveProjects.length === 0 && (
           <p className="row-meta" style={{ padding: "0 10px" }}>
             No projects.
@@ -600,7 +599,6 @@ export function Sidebar() {
               ))}
           </>
         )}
-        <LooseChats store={store} index={index} />
       </div>
       <footer className="sidebar-dock">
         <button

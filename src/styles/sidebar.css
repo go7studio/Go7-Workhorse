@@ -439,6 +439,24 @@ html.pane-dragging * {
   font-size: var(--text-11);
 }
 
+.sidebar .sidebar-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.sidebar-section-add {
+  width: 26px;
+  height: 26px;
+  font-size: 18px;
+  line-height: 1;
+  color: var(--text-tertiary);
+}
+
+.sidebar-section-add:hover {
+  color: var(--text);
+}
+
 .scroll {
   flex: 1 1 auto;
   min-width: 0;

@@ -178,7 +178,7 @@ test("Settings keeps seven tabs; Harnesses live under LLMs; include defaults off
   assert.match(settingsUi, /inboundParentSelectValue/);
   assert.match(settingsUi, /agentSystemsFromInboundSelect/);
   assert.match(settingsUi, /project:\$\{project.id\}/);
-  assert.match(settingsUi, />Chats</);
+  assert.match(settingsUi, /<option value="">Link bridge<\/option>/);
   assert.doesNotMatch(settingsUi, />This chat</);
   assert.doesNotMatch(settingsUi, />None</);
   assert.match(settingsUi, /<optgroup/);

@@ -1008,7 +1008,8 @@ function createWindow() {
     if (openInspect) devUrl.hash = "inspect";
     win.loadURL(devUrl.toString());
   } else {
-    win.loadFile(DESK_INDEX_FILE, openInspect ? { hash: "inspect" } : undefined);
+    if (openInspect) win.loadFile(DESK_INDEX_FILE, { hash: "inspect" });
+    else win.loadFile(DESK_INDEX_FILE);
   }
   return win;
 }

@@ -9027,6 +9027,8 @@ test("vendor model caches drive the picker so Sol is first and new slugs need no
   assert.equal(defaultModel("codex").id, "gpt-5.6-sol");
   assert.equal(defaultModel("codex").name, "GPT-5.6-Sol");
   assert.equal(advertisedCodexWindow("gpt-5.6-sol", 272_000), 1_050_000);
+  assert.equal(advertisedCodexWindow("gpt-6.1-sol", 272_000), 872_000);
+  assert.equal(contextWindowFor("codex", "gpt-6.1-sol"), 872_000);
   assert.equal(contextWindowFor("codex", "gpt-5.6-sol"), 1_050_000);
   assert.equal(defaultModel("claude").id, "claude-fable-5");
   assert.equal(contextWindowFor("claude", "claude-fable-5"), 1_000_000);

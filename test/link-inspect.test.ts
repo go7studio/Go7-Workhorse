@@ -1251,7 +1251,7 @@ test("Inspect gives the traffic and the caller list their own scroll", () => {
   assert.equal(inspectCallerStep(-1, 4, "ArrowDown"), null);
 });
 
-test("the place menu switches both ways and does not invent an Inspect mark", () => {
+test("the place menu switches both ways and keeps each mark", () => {
   assert.equal(placeMenuStep(0, "ArrowDown"), 1);
   assert.equal(placeMenuStep(1, "ArrowDown"), 0);
   assert.equal(placeMenuStep(1, "ArrowUp"), 0);
@@ -1269,14 +1269,21 @@ test("the place menu switches both ways and does not invent an Inspect mark", ()
   assert.match(menu, /aria-checked=\{current\}/);
   assert.match(menu, /"Inspect menu"/);
   assert.match(menu, /go7-workhorse-transparent\.png/);
-  assert.equal((menu.match(/\.png/g) ?? []).length, 1);
-  assert.match(menu, /const inspectMark: string \| null = null;/);
+  assert.match(menu, /go7-inspect-mark\.png/);
+  assert.match(menu, /brand-header-mark/);
+  assert.match(menu, /Lovart drew this Inspect mark/);
+  assert.equal((menu.match(/\.png/g) ?? []).length, 2);
+  assert.equal(menu.includes("const inspectMark: string | null = null"), false);
   assert.equal(menu.toLowerCase().includes("harness"), false);
+  const mark = readFileSync(path.join(root, "assets", "app-icons", "go7-inspect-mark.png"));
+  assert.equal(mark.subarray(0, 8).toString("hex"), "89504e470d0a1a0a");
+  assert.equal(mark.includes(Buffer.from("Lovart drew the Inspect mark")), true);
   assert.equal(workspace.includes("Back to desk"), false);
   assert.equal(workspace.includes("inspect-back"), false);
   assert.match(workspace, /toggleTheme\(\)/);
   assert.match(sidebar, /toggleWorkhorseTheme\(\)/);
   assert.match(sidebar, /place="desk"/);
   assert.match(css, /\.brand-menu button:focus-visible/);
+  assert.match(css, /\.brand-header-mark[\s\S]*width:\s*22px/);
   assert.equal(css.includes(".inspect-back"), false);
 });

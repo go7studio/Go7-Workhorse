@@ -696,8 +696,15 @@ html.pane-dragging * {
 
 .brand-title {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 8px;
+}
+
+.brand-header-mark {
+  width: 22px;
+  height: 22px;
+  flex: none;
+  object-fit: contain;
 }
 
 .brand h1 {

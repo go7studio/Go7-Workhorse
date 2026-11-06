@@ -1,22 +1,21 @@
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKey } from "react";
 import horseMark from "../../assets/app-icons/go7-workhorse-transparent.png";
+/**
+ * Lovart drew this Inspect mark. A later image pass removed the baked-in
+ * checkerboard, and stray edge pixels were cleared so the knot stays clean
+ * at icon size. The original horse file is never replaced.
+ */
+import inspectMark from "../../assets/app-icons/go7-inspect-mark.png";
 import { setInspectOpen } from "../lib/inspect-mode";
 import { DESK_PLACES, deskPlaceTitle, placeMenuStep, type DeskPlace } from "../lib/link-present";
-
-/**
- * A generated Inspect mark is assigned here only after its file is supplied.
- * Null keeps that row as words. The original horse file is never replaced.
- */
-const inspectMark: string | null = null;
 
 const PLACE_HINT: Record<DeskPlace, string> = {
   desk: "One desk, every agent",
   inspect: "Traffic",
 };
 
-function placeMark(place: DeskPlace): string | null {
-  if (place === "desk") return horseMark;
-  return inspectMark;
+function placeMark(place: DeskPlace): string {
+  return place === "desk" ? horseMark : inspectMark;
 }
 
 export function BrandMenu({ version, place }: { version: string; place: DeskPlace }) {
@@ -105,6 +104,7 @@ export function BrandMenu({ version, place }: { version: string; place: DeskPlac
         onKeyDown={onTriggerKey}
       >
         <div className="brand-title">
+          <img className="brand-header-mark" src={placeMark(place)} alt="" />
           <h1>{title}</h1>
           <span className="brand-ver">v{version}</span>
           <i className="brand-caret" aria-hidden="true" />

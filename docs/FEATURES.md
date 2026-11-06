@@ -514,7 +514,7 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
   outside it.
 - An unnamed inbound spawn uses the Link bridge: one real parent for the
   worker, kept out of the sidebar. The same menu on the desk and in Inspect
-  switches between them. Inspect replaces the desk with Workhorse traffic. A caller the desk recognizes, such as Codex,
+  switches between them. The Inspect header and its menu row use the Inspect mark. Workhorse keeps the original horse. Inspect replaces the desk with Workhorse traffic. A caller the desk recognizes, such as Codex,
   Claude, or Cursor, is named. A client that does not identify itself shows
   as Unknown caller, and separate unknown clients stay separate. Workers that
   caller started stay nested under them, with the activity and the stored

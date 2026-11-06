@@ -1347,7 +1347,7 @@ function AgentSystemsBlock() {
     else next.add(key);
     store.updateAgentSystems({ allowedAgents: [...next] });
   };
-  const chats = store.sessions.filter((session) => !session.hidden && !session.archivedAt);
+  const chats = store.sessions.filter((session) => !session.hidden && !session.archivedAt && !session.linkBridge && !session.parentId);
   // The picker groups chats by project, the way the sidebar does, so a chat
   // called "Full repo review" can be told apart from another with that name.
   const groups = store.projects
@@ -1482,7 +1482,7 @@ function AgentSystemsBlock() {
         <div className="settings-row-copy">
           <strong>Inbound parent</strong>
           <span>
-            Where a worker lands when an outside app names no chat.{" "}
+            Where a worker lands when an outside app names no chat. Link bridge keeps that parent off the sidebar.{" "}
             <LearnMore page="LINK.md#the-seat-a-worker-runs-under" />
           </span>
         </div>
@@ -1492,7 +1492,7 @@ function AgentSystemsBlock() {
             onChange={(event) => store.updateAgentSystems(agentSystemsFromInboundSelect(event.target.value))}
             aria-label="Inbound parent"
           >
-            <option value="">Chats</option>
+            <option value="">Link bridge</option>
             {store.projects.length > 0 ? (
               <optgroup label="Projects">
                 {store.projects.map((project) => (

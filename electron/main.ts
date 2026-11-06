@@ -38,6 +38,7 @@ import { fetchCustomModels } from "./custom-models";
 import type { PermissionAnswer } from "../src/lib/permissions";
 import { safeExternalUrl } from "../src/lib/open-external";
 import { startWorkhorseBridge, type PeerAskResult } from "./workhorse-bridge";
+import { readLinkInspectFile, watchLinkHistory } from "./link-history-file";
 import { setInboundLearningSink, setWorkhorseDeskAsk } from "./workhorse-mcp";
 import { drainInboundJsonl } from "../src/lib/learning-inbound";
 import { learningInboundPath } from "../src/lib/learning-paths";
@@ -1001,10 +1002,14 @@ function createWindow() {
   deskWindow = win;
   mainLog.record("window", `created id=${win.id}`);
 
+  const openInspect = process.env.WORKHORSE_OPEN_INSPECT === "1";
   if (process.env.VITE_DEV_SERVER_URL) {
-    win.loadURL(process.env.VITE_DEV_SERVER_URL);
+    const devUrl = new URL(process.env.VITE_DEV_SERVER_URL);
+    if (openInspect) devUrl.hash = "inspect";
+    win.loadURL(devUrl.toString());
   } else {
-    win.loadFile(DESK_INDEX_FILE);
+    if (openInspect) win.loadFile(DESK_INDEX_FILE, { hash: "inspect" });
+    else win.loadFile(DESK_INDEX_FILE);
   }
   return win;
 }
@@ -1325,8 +1330,18 @@ app.whenReady().then(async () => {
       }
     }
   };
+  let linkBridgeListening = false;
+  const publishLinkHistory = () => {
+    for (const window of BrowserWindow.getAllWindows()) {
+      if (!window.webContents.isDestroyed()) window.webContents.send("link:history");
+    }
+  };
+  ipcMain.handle("link:history", () => readLinkInspectFile(statePath()));
+  ipcMain.handle("link:bridge", () => ({ listening: linkBridgeListening }));
+  disposeAtQuit("link-history", watchLinkHistory(statePath(), publishLinkHistory));
   void startWorkhorseBridge(handlePeerAsk)
     .then((bridge) => {
+      linkBridgeListening = true;
       const record = writeBridgeRecord(statePath(), { url: bridge.url, token: bridge.token });
       watchPeerInbox(record.inbox, handlePeerAsk);
       process.env.WORKHORSE_BRIDGE_URL = bridge.url;

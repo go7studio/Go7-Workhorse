@@ -591,6 +591,12 @@ export type Session = {
   projectId: string | null;
   parentId?: string;
   hidden?: boolean;
+  /**
+   * Parent for an external Link call that named no chat.
+   * Workers, lineup, and the desk's Permission stay on this session.
+   * The sidebar does not list it.
+   */
+  linkBridge?: true;
   provider: ProviderId;
   model: string;
   customBotId?: string;

@@ -1,8 +1,10 @@
 import { useEffect } from "react";
+import { setInspectOpen, useInspectOpen } from "./lib/inspect-mode";
 import { useStoreSelector, type Store } from "./lib/store";
 import { resolvedTheme } from "./lib/theme";
 import { selectSurface, titlebarLabel } from "./lib/surface";
 import { EditContextMenu } from "./ui/EditContextMenu";
+import { InspectWorkspace } from "./ui/InspectWorkspace";
 import { NewProjectSheet } from "./ui/NewProjectSheet";
 import { PermissionCard } from "./ui/PermissionBar";
 import { ProjectHome } from "./ui/ProjectHome";
@@ -55,6 +57,11 @@ function sameAppView(left: AppView, right: AppView): boolean {
 
 export function App() {
   const view = useStoreSelector(selectAppView, sameAppView);
+  const inspect = useInspectOpen();
+
+  useEffect(() => {
+    if (window.location.hash === "#inspect") setInspectOpen(true);
+  }, []);
 
   useEffect(() => {
     const apply = () => {
@@ -70,6 +77,16 @@ export function App() {
   }, [view.theme]);
 
   if (isWorkshopSurface()) return <WorkshopBreakout />;
+
+  if (inspect) {
+    return (
+      <div className="app">
+        <InspectWorkspace />
+        <PermissionCard />
+        <EditContextMenu />
+      </div>
+    );
+  }
 
   const surface = selectSurface({
     panel: view.panel,

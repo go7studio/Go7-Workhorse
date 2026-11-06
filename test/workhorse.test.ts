@@ -5439,7 +5439,9 @@ test("sidebar nests project chats in folders; top New chat stays loose", async (
   assert.match(sidebar, /store\.selectProject\(project\.id\)/);
   assert.match(css, /\.tool-name\s*\{[\s\S]*text-overflow:\s*ellipsis/);
   assert.match(sidebar, /function LooseChats/);
-  assert.match(sidebar, /section-label">Projects[\s\S]*<LooseChats/);
+  assert.match(sidebar, /<span>Projects<\/span>[\s\S]*<LooseChats/);
+  assert.match(sidebar, /aria-label="New project"/);
+  assert.match(sidebar, /aria-label="New chat"/);
   assert.match(sidebar, /twist-folder-open/);
   assert.match(css, /\.project-head:hover \.twist::before/);
   assert.doesNotMatch(css, /\.project-head:focus-within \.twist::before/);

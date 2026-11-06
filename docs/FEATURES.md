@@ -512,8 +512,22 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
   unreadable blob.
 - Paths must sit inside the chat's project folder, so a linked app cannot read
   outside it.
-- An unnamed inbound spawn opens a new chat in Chats, or a project you pick,
-  titled from the prompt.
+- An unnamed inbound spawn uses the Link bridge: one real parent for the
+  worker, kept out of the sidebar. The same menu on the desk and in Inspect
+  switches between them. The desk header keeps one horse, on the theme button. The menu still shows that horse for Workhorse, and Inspect uses its own mark in the header and the menu. Inspect replaces the desk with Workhorse traffic. A caller the desk recognizes, such as Codex,
+  Claude, or Cursor, is named. A client that does not identify itself shows
+  as Unknown caller, and separate unknown clients stay separate. Workers that
+  caller started stay nested under them, with the activity and the stored
+  transcript. The caller list and the traffic each scroll on their own.
+  A worker shows who called, that worker's vendor and model, and the tokens
+  the desk recorded for that worker. The caller's own model and tokens stay
+  Not available, because the call does not include them. A missing count stays
+  Not available, and a recorded zero stays zero. Tool names, the name a client
+  sent, session ids, and the retention rules stay behind Details. The call log keeps the latest 40.
+  Inspect lists a worker when that caller successfully delegated, asked, or
+  spawned it, and keeps the 240 most recently invoked older workers. A status
+  or read does not claim someone else's worker. Callers are not merged. A
+  chat or project you pick in Settings is still that parent.
 - An explicit request to work with Workhorse delegates before direct execution,
   and blocked delegation returns the Workhorse error first.
 - Delete, rename, credentials, bot setup and project changes are refused. No

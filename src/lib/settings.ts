@@ -88,7 +88,7 @@ export function normalizeAgentSystems(raw: unknown): AgentSystemsSettings {
 
 const INBOUND_PROJECT_PREFIX = "project:";
 
-/** Settings select value: empty is Chats, project:id is a project, else a chat. */
+/** Settings select value: empty is the Link bridge, project:id is a project, else a chat. */
 export function inboundParentSelectValue(systems?: AgentSystemsSettings): string {
   if (systems?.inboundSessionId) return systems.inboundSessionId;
   if (systems?.inboundProjectId) return `${INBOUND_PROJECT_PREFIX}${systems.inboundProjectId}`;

@@ -111,6 +111,13 @@ contextBridge.exposeInMainWorld("workhorse", {
   installExternalMcp: (hosts?: string[]) => ipcRenderer.invoke("agentRuntime:installMcp", hosts),
   linkConfig: () => ipcRenderer.invoke("agentRuntime:linkConfig"),
   linkGrokBotOneshot: () => ipcRenderer.invoke("agentRuntime:linkGrokBotOneshot"),
+  linkHistory: () => ipcRenderer.invoke("link:history") as Promise<import("../src/lib/link-history").LinkInspectFile>,
+  linkBridge: () => ipcRenderer.invoke("link:bridge") as Promise<{ listening: boolean }>,
+  onLinkHistory: (handler: () => void) => {
+    const listener = () => handler();
+    ipcRenderer.on("link:history", listener);
+    return () => ipcRenderer.removeListener("link:history", listener);
+  },
   grokBotWakeStatus: () =>
     ipcRenderer.invoke("grokBotWake:status") as Promise<import("../src/lib/grok-bot-wake").GrokBotWakeStatus>,
   saveGrokBotWake: (input: import("../src/lib/grok-bot-wake").GrokBotWakeInput) =>

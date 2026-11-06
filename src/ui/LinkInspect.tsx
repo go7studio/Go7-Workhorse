@@ -104,7 +104,7 @@ export function BrandMenu({ version, place }: { version: string; place: DeskPlac
         onKeyDown={onTriggerKey}
       >
         <div className="brand-title">
-          <img className="brand-header-mark" src={placeMark(place)} alt="" />
+          {place === "inspect" ? <img className="brand-header-mark" src={inspectMark} alt="" /> : null}
           <h1>{title}</h1>
           <span className="brand-ver">v{version}</span>
           <i className="brand-caret" aria-hidden="true" />

@@ -1270,7 +1270,7 @@ test("the place menu switches both ways and keeps each mark", () => {
   assert.match(menu, /"Inspect menu"/);
   assert.match(menu, /go7-workhorse-transparent\.png/);
   assert.match(menu, /go7-inspect-mark\.png/);
-  assert.match(menu, /brand-header-mark/);
+  assert.match(menu, /place === "inspect" \? <img className="brand-header-mark" src=\{inspectMark\}/);
   assert.match(menu, /Lovart drew this Inspect mark/);
   assert.equal((menu.match(/\.png/g) ?? []).length, 2);
   assert.equal(menu.includes("const inspectMark: string | null = null"), false);

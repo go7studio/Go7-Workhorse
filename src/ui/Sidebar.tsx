@@ -513,7 +513,7 @@ export function Sidebar() {
         >
           <img className="brand-mark" src={horseMark} alt="" />
         </button>
-        <BrandMenu version={APP_VERSION} />
+        <BrandMenu version={APP_VERSION} place="desk" />
       </div>
 
       <div className="global-find">

@@ -287,6 +287,24 @@ export function inspectCallerStep(index: number, count: number, key: string): nu
   return null;
 }
 
+export const DESK_PLACES = ["desk", "inspect"] as const;
+export type DeskPlace = (typeof DESK_PLACES)[number];
+
+export function deskPlaceTitle(place: DeskPlace): string {
+  return place === "inspect" ? "Inspect" : "Workhorse";
+}
+
+/** Next place in the shared menu. Arrow keys wrap. Null means this key does not move. */
+export function placeMenuStep(index: number, key: string): number | null {
+  const count = DESK_PLACES.length;
+  if (!Number.isInteger(index) || index < 0 || index >= count) return null;
+  if (key === "ArrowDown") return (index + 1) % count;
+  if (key === "ArrowUp") return (index - 1 + count) % count;
+  if (key === "Home") return 0;
+  if (key === "End") return count - 1;
+  return null;
+}
+
 function tokenLine(bills: readonly UsageEvent[]): { text: string; recorded: boolean } {
   if (bills.length === 0) return { text: "Not available", recorded: false };
   const totals = rollup([...bills]);

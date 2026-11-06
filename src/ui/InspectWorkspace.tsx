@@ -1,6 +1,6 @@
 import { useEffect, useState, type KeyboardEvent } from "react";
 import horseMark from "../../assets/app-icons/go7-workhorse-transparent.png";
-import { setInspectOpen } from "../lib/inspect-mode";
+import { APP_VERSION } from "../lib/app-info";
 import {
   INSPECT_CALL_PAGE,
   INSPECT_MESSAGE_PAGE,
@@ -31,6 +31,7 @@ import {
 import { useStoreSelector } from "../lib/store";
 import type { TranscriptSidecar } from "../lib/transcript-sidecar";
 import type { ChatMessage, Session } from "../lib/types";
+import { BrandMenu } from "./LinkInspect";
 
 type Selection =
   | { kind: "caller"; caller: string }
@@ -154,16 +155,8 @@ export function InspectWorkspace() {
             >
               <img className="brand-mark" src={horseMark} alt="" />
             </button>
-            <div className="brand-copy">
-              <div className="brand-title">
-                <h1>Inspect</h1>
-              </div>
-              <p>Traffic</p>
-            </div>
+            <BrandMenu version={APP_VERSION} place="inspect" />
           </div>
-          <button className="inspect-back" type="button" onClick={() => setInspectOpen(false)}>
-            Back to desk
-          </button>
           <p className="inspect-listen" data-state={listening}>
             <i />
             <span>{listeningText}</span>

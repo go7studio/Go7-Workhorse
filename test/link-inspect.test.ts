@@ -17,6 +17,7 @@ import {
   inspectAccount,
   inspectCallerStep,
   inspectScrollTop,
+  placeMenuStep,
   presentCallers,
   reliableCallerTitle,
   trafficStatus,
@@ -893,11 +894,12 @@ test("Inspect replaces the desk and Projects stay above Chats", () => {
   assert.match(sidebar, /<span>Projects<\/span>[\s\S]*<LooseChats/);
   assert.match(sidebar, /aria-label="New project"/);
   assert.match(sidebar, /aria-label="New chat"/);
-  assert.match(sidebar, /<BrandMenu version=\{APP_VERSION\} \/>/);
-  assert.match(menu, /aria-label="Workhorse menu"/);
-  assert.match(menu, /setInspectOpen\(true\)/);
+  assert.match(sidebar, /<BrandMenu version=\{APP_VERSION\} place="desk" \/>/);
+  assert.match(menu, /aria-label=\{place === "inspect" \? "Inspect menu" : "Workhorse menu"\}/);
+  assert.match(menu, /setInspectOpen\(next === "inspect"\)/);
   assert.equal(menu.includes('role="dialog"'), false);
-  assert.match(workspace, /Back to desk/);
+  assert.match(workspace, /<BrandMenu version=\{APP_VERSION\} place="inspect" \/>/);
+  assert.equal(workspace.includes("Back to desk"), false);
   assert.match(workspace, /aria-label="Callers"/);
   assert.match(workspace, /aria-label="Transcript"/);
   assert.match(workspace, /Earlier callers/);
@@ -1026,8 +1028,8 @@ test("Inspect names a real caller, keeps unknown clients apart, and hides protoc
   assert.equal(labels.some((label) => label.includes("sess_")), false);
   const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
   const source = readFileSync(path.join(sourceRoot, "src", "ui", "InspectWorkspace.tsx"), "utf8");
-  assert.match(source, /Back to desk/);
-  assert.match(source, /setInspectOpen\(false\)/);
+  assert.match(source, /place="inspect"/);
+  assert.equal(source.includes("Back to desk"), false);
   assert.match(source, /About this list/);
   assert.match(source, /No traffic yet/);
   assert.match(source, /Reading traffic/);
@@ -1247,4 +1249,34 @@ test("Inspect gives the traffic and the caller list their own scroll", () => {
   assert.equal(inspectCallerStep(3, 4, "Home"), 0);
   assert.equal(inspectCallerStep(1, 4, "End"), 3);
   assert.equal(inspectCallerStep(-1, 4, "ArrowDown"), null);
+});
+
+test("the place menu switches both ways and does not invent an Inspect mark", () => {
+  assert.equal(placeMenuStep(0, "ArrowDown"), 1);
+  assert.equal(placeMenuStep(1, "ArrowDown"), 0);
+  assert.equal(placeMenuStep(1, "ArrowUp"), 0);
+  assert.equal(placeMenuStep(0, "ArrowUp"), 1);
+  assert.equal(placeMenuStep(1, "Home"), 0);
+  assert.equal(placeMenuStep(0, "End"), 1);
+  assert.equal(placeMenuStep(0, "Escape"), null);
+  assert.equal(placeMenuStep(-1, "ArrowDown"), null);
+  const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  const menu = readFileSync(path.join(root, "src", "ui", "LinkInspect.tsx"), "utf8");
+  const workspace = readFileSync(path.join(root, "src", "ui", "InspectWorkspace.tsx"), "utf8");
+  const sidebar = readFileSync(path.join(root, "src", "ui", "Sidebar.tsx"), "utf8");
+  const css = readFileSync(path.join(root, "src", "styles", "sidebar.css"), "utf8");
+  assert.match(menu, /role="menuitemradio"/);
+  assert.match(menu, /aria-checked=\{current\}/);
+  assert.match(menu, /"Inspect menu"/);
+  assert.match(menu, /go7-workhorse-transparent\.png/);
+  assert.equal((menu.match(/\.png/g) ?? []).length, 1);
+  assert.match(menu, /const inspectMark: string \| null = null;/);
+  assert.equal(menu.toLowerCase().includes("harness"), false);
+  assert.equal(workspace.includes("Back to desk"), false);
+  assert.equal(workspace.includes("inspect-back"), false);
+  assert.match(workspace, /toggleTheme\(\)/);
+  assert.match(sidebar, /toggleWorkhorseTheme\(\)/);
+  assert.match(sidebar, /place="desk"/);
+  assert.match(css, /\.brand-menu button:focus-visible/);
+  assert.equal(css.includes(".inspect-back"), false);
 });

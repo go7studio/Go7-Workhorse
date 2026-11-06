@@ -8,6 +8,27 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.7.10](https://github.com/go7studio/Go7-Workhorse/compare/v0.7.9...v0.7.10) (2026-11-06)
+
+
+### Features
+
+* inspect external Workhorse activity ([3e2bdb7](https://github.com/go7studio/Go7-Workhorse/commit/3e2bdb75fa45efd7fce9993dfbae321e93c3dbbf))
+* keep Inspect workers after the call log rolls off ([0f23467](https://github.com/go7studio/Go7-Workhorse/commit/0f23467417dc309cc0e408f5a948b27899e0a195))
+* open Inspect as a workspace of callers and transcripts ([3ad82ae](https://github.com/go7studio/Go7-Workhorse/commit/3ad82ae130408d46beca0cbb7dc5a5e8342d7551))
+* open Inspect from the brand and keep Link off the chat list ([b309840](https://github.com/go7studio/Go7-Workhorse/commit/b3098401fa7f13d39025a90b74eb619d2ddf947d))
+* scroll Inspect and show the worker bill ([27b5110](https://github.com/go7studio/Go7-Workhorse/commit/27b5110591ff9c224105bde00f80f1e8029613e6))
+* show the Inspect mark in the place menu ([caf47ee](https://github.com/go7studio/Go7-Workhorse/commit/caf47ee2703be0980252dd3143f6381047ed13d0))
+* speak Inspect in plain traffic language ([337a0b3](https://github.com/go7studio/Go7-Workhorse/commit/337a0b3bff60abf5ad9cb32cd9b866f8c8a3eacd))
+* switch the desk and Inspect from one menu ([f4e3e1b](https://github.com/go7studio/Go7-Workhorse/commit/f4e3e1b05d8a5b14ba20d241e35539a3321eefe8))
+
+
+### Bug Fixes
+
+* attribute Inspect workers only to real invocations ([8dabfe7](https://github.com/go7studio/Go7-Workhorse/commit/8dabfe7fec8462cbd9369405a5924b277e0ca152))
+* keep Inspect compatible with desk checks ([879c8e0](https://github.com/go7studio/Go7-Workhorse/commit/879c8e044c50f686e0c0cdd64c09219fc55df3a3))
+* keep one horse on the desk header ([40b1d57](https://github.com/go7studio/Go7-Workhorse/commit/40b1d57516581099c12521a42736ffc2bf23dec6))
+
 ## [0.7.9](https://github.com/go7studio/Go7-Workhorse/compare/v0.7.8...v0.7.9) (2026-10-27)
 
 

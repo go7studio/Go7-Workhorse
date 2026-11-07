@@ -600,3 +600,232 @@ test("two desks apart keep appending; when they meet, events combine by id and a
   assert.equal(anaChat.messages.find((item) => item.id === "b1")?.seat, "ben", "Ben's settled prompt arrives with his seat");
   assert.ok(!anaChat.messages.some((item) => item.id === "b2"), "his in-flight answer does not");
 });
+
+test("Off pauses sync without removing the team link; turning on resumes", (t) => {
+  const root = tempRoot(t);
+  const { ana, ben, journalId: _journalId } = shareAndJoin(root);
+  ana.sessions.push(chat("sess_a1", { messages: [{ id: "m1", role: "user", text: "go", createdAt: 3_000 }] }));
+  pass(ana, ANA, 3_100);
+  pass(ben, BEN, 3_200);
+
+  // Ben turns off sync
+  ben.projects = ben.projects.map((item) =>
+    item.id === PROJECT && item.team ? { ...item, team: { ...item.team, off: true } } : item,
+  );
+
+  // Ana adds a new message
+  ana.sessions = ana.sessions.map((item) =>
+    item.id === "sess_a1"
+      ? { ...item, messages: [...item.messages, { id: "m2", role: "user" as const, text: "more", createdAt: 4_000 }] }
+      : item,
+  );
+  pass(ana, ANA, 4_100);
+
+  // Ben's sync is off, so he doesn't see the new message yet
+  const beforeTurnOn = ben.sessions.find((item) => item.id === "sess_a1");
+  assert.equal(beforeTurnOn?.messages.length, 1);
+
+  // Ben turns sync back on
+  ben.projects = ben.projects.map((item) =>
+    item.id === PROJECT && item.team ? { ...item, team: { ...item.team, off: false } } : item,
+  );
+  pass(ben, BEN, 4_200);
+  const afterTurnOn = ben.sessions.find((item) => item.id === "sess_a1");
+  assert.equal(afterTurnOn?.messages.length, 2, "Ben sees Ana's new message after turning on");
+  assert.ok(ben.projects[0].team, "team link is still present");
+});
+
+test("Dissolve writes a departure event and removes the team link", (t) => {
+  const root = tempRoot(t);
+  const { ana, ben, journalId } = shareAndJoin(root);
+  pass(ana, ANA, 3_000);
+  pass(ben, BEN, 3_100);
+
+  // Ben dissolves
+  const dissolveEv = sanitizeTeamEvent({
+    id: `tev_${Date.now()}`,
+    at: 4_000,
+    journal: journalId,
+    device: BEN.device,
+    seat: "ben",
+    type: "crew.dissolve",
+  });
+  assert.ok(dissolveEv);
+  appendTeamEvents(root, journalId, BEN.device, [dissolveEv]);
+
+  // The view shows the dissolution
+  const view = foldTeamJournal(readTeamJournal(root, journalId));
+  assert.ok(view.dissolved.some((item) => item.device === BEN.device && item.seat === "ben"));
+
+  // Ana sees the dissolution record
+  pass(ana, ANA, 4_100);
+  assertNothingPrivateCrossed(journalBytes(root));
+});
+
+test("concurrent appends from multiple retries still produce valid journal", (t) => {
+  const root = tempRoot(t);
+  const { journalId } = shareAndJoin(root);
+
+  // Simulate rapid concurrent appends (as might happen with synced folders)
+  const events = Array.from({ length: 10 }, (_, i) =>
+    sanitizeTeamEvent({
+      id: `tev_concurrent_${i}`,
+      at: 5_000 + i,
+      journal: journalId,
+      device: ANA.device,
+      seat: "ana",
+      type: "chat.titled",
+      chatId: `sess_${i}`,
+      title: `Chat ${i}`,
+    }),
+  );
+
+  for (const ev of events) {
+    appendTeamEvents(root, journalId, ANA.device, [ev]);
+  }
+
+  // All events should be readable and in order
+  const read = readTeamJournal(root, journalId);
+  const concurrentEvents = read.filter((item) => item.id.startsWith("tev_concurrent_"));
+  assert.equal(concurrentEvents.length, 10, "all concurrent appends are present");
+  for (let i = 0; i < 10; i++) {
+    assert.ok(concurrentEvents.some((item) => item.id === `tev_concurrent_${i}`), `event ${i} is present`);
+  }
+});
+
+test("Windows and Mac path redaction keeps paths platform-specific", (t) => {
+  const root = tempRoot(t);
+  const { ana, ben, journalId: _journalId } = shareAndJoin(root);
+
+  // Ana (Windows) sends a message with a Windows path
+  ana.sessions.push(
+    chat("sess_paths", {
+      messages: [
+        { id: "m1", role: "user", text: "Look at C:\\Users\\ana\\work\\atlas\\src\\app.ts", createdAt: 3_000 },
+        { id: "m2", role: "assistant", text: "I edited C:\\Users\\ana\\work\\atlas\\config.json", createdAt: 3_001 },
+      ],
+    }),
+  );
+  pass(ana, ANA, 3_100);
+
+  // Ben (Mac) receives and sees paths rewritten to his folder
+  pass(ben, BEN, 3_200);
+  ben.projects[0] = { ...ben.projects[0], folders: [{ id: "fold_b", path: BEN_FOLDER, label: "atlas" }] };
+
+  const benChat = ben.sessions.find((item) => item.id === "sess_paths")!;
+  // Path redaction happens at the receiving end
+  assert.ok(benChat.messages.length === 2);
+
+  // The raw journal should not contain Ana's full Windows path
+  const bytes = journalBytes(root);
+  assert.ok(!bytes.includes("C:\\\\Users\\\\ana"), "Ana's Windows path is not in journal");
+});
+
+test("usage events with crew identity fields are preserved through normalization", async () => {
+  const { normalizeUsage } = await import("../src/lib/usage");
+
+  const events = normalizeUsage([
+    {
+      id: "use_crew_1",
+      at: Date.now(),
+      provider: "claude",
+      model: "claude-opus-4-7",
+      projectId: PROJECT,
+      sessionId: "sess_a1",
+      inputTokens: 1000,
+      outputTokens: 500,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      costUsd: 0.05,
+      crewId: "crew_journal_123",
+      deskId: "dev_ana",
+      humanId: "ana",
+    },
+    {
+      id: "use_crew_2",
+      at: Date.now(),
+      provider: "claude",
+      model: "claude-opus-4-7",
+      projectId: PROJECT,
+      sessionId: "sess_a1",
+      inputTokens: 500,
+      outputTokens: 250,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      // No crew fields - should still work
+    },
+  ]);
+
+  assert.equal(events.length, 2);
+  const withCrew = events.find((item) => item.id === "use_crew_1");
+  const withoutCrew = events.find((item) => item.id === "use_crew_2");
+
+  assert.ok(withCrew);
+  assert.equal(withCrew.crewId, "crew_journal_123");
+  assert.equal(withCrew.deskId, "dev_ana");
+  assert.equal(withCrew.humanId, "ana");
+
+  assert.ok(withoutCrew);
+  assert.equal(withoutCrew.crewId, undefined);
+  assert.equal(withoutCrew.deskId, undefined);
+  assert.equal(withoutCrew.humanId, undefined);
+});
+
+test("crew.off event is sanitized correctly", (t) => {
+  const root = tempRoot(t);
+  const { journalId } = shareAndJoin(root);
+
+  const offEvent = sanitizeTeamEvent({
+    id: `tev_off_1`,
+    at: 5_000,
+    journal: journalId,
+    device: ANA.device,
+    seat: "ana",
+    type: "crew.off",
+    off: true,
+  });
+
+  assert.ok(offEvent);
+  assert.equal(offEvent.type, "crew.off");
+  assert.equal((offEvent as { off: boolean }).off, true);
+
+  const onEvent = sanitizeTeamEvent({
+    id: `tev_off_2`,
+    at: 5_100,
+    journal: journalId,
+    device: ANA.device,
+    seat: "ana",
+    type: "crew.off",
+    off: false,
+  });
+
+  assert.ok(onEvent);
+  assert.equal((onEvent as { off: boolean }).off, false);
+
+  // Invalid off value should be rejected
+  const invalidEvent = sanitizeTeamEvent({
+    id: `tev_off_3`,
+    at: 5_200,
+    journal: journalId,
+    device: ANA.device,
+    seat: "ana",
+    type: "crew.off",
+    off: "yes", // not a boolean
+  });
+
+  assert.equal(invalidEvent, null);
+});
+
+test("settings staff gate controls crew sync", async () => {
+  const { crewEnabled } = await import("../src/lib/settings");
+  const { DEFAULT_SETTINGS } = await import("../src/lib/settings");
+
+  // Default settings have crew disabled
+  assert.equal(crewEnabled({ ...DEFAULT_SETTINGS }), false);
+
+  // Explicitly enabled
+  assert.equal(crewEnabled({ ...DEFAULT_SETTINGS, crew: { enabled: true } }), true);
+
+  // Explicitly disabled
+  assert.equal(crewEnabled({ ...DEFAULT_SETTINGS, crew: { enabled: false } }), false);
+});

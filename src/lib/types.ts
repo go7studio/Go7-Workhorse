@@ -1056,6 +1056,15 @@ export type WatchDayMark = {
 
 export type WatchDayMarks = Record<string, WatchDayMark>;
 
+/**
+ * Crew (team) settings. Core, staff-gated until dogfood passes, default off.
+ * Phase 0: pair + journal. Phase 1: home-desk execute with usage tagging.
+ */
+export type CrewSettings = {
+  /** Master switch. Off by default until staff dogfood passes. */
+  enabled: boolean;
+};
+
 export type Settings = {
   profile: Profile;
   llms: {
@@ -1089,6 +1098,8 @@ export type Settings = {
    * Off leaves the choice on each chat.
    */
   chromeAlways: boolean;
+  /** Crew (team sharing) settings. Off by default, staff-gated until dogfood. */
+  crew?: CrewSettings;
 };
 
 export type UsageRange = "today" | "week" | "month" | "all";
@@ -1157,6 +1168,12 @@ export type UsageEvent = {
   source?: UsageSource;
   /** Cursor two-pool lane. Required on new Cursor events. */
   lane?: import("./cursor-lane").CursorUsageLane;
+  /** Crew journal id when this turn ran on a team project. Phase 1+. */
+  crewId?: string;
+  /** Device id of the desk that ran this turn. Phase 1+. */
+  deskId?: string;
+  /** Seat handle of the person who prompted this turn. Phase 1+. */
+  humanId?: string;
 };
 
 export type UsageDraft = {
@@ -1173,6 +1190,12 @@ export type UsageDraft = {
   contextUsed?: number;
   source?: UsageSource;
   lane?: import("./cursor-lane").CursorUsageLane;
+  /** Crew journal id when this turn ran on a team project. Phase 1+. */
+  crewId?: string;
+  /** Device id of the desk that ran this turn. Phase 1+. */
+  deskId?: string;
+  /** Seat handle of the person who prompted this turn. Phase 1+. */
+  humanId?: string;
 };
 
 export type AppState = {

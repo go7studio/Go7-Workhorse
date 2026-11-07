@@ -18,14 +18,29 @@ import {
  *
  * A desk writes only its own files, so two desks that wrote while apart never
  * fight over one file; reading combines every desk's file by event id.
+ *
+ * Concurrent append safety:
+ * - Each device has its own journal file, avoiding write contention between desks.
+ * - Writes use a staging file (.part) then rename, which is atomic on all platforms.
+ * - On synced folders (OneDrive, Dropbox, Google Drive, Syncthing), atomic rename
+ *   ensures the sync tool sees either the old file or the complete new one.
+ * - Half-written lines from sync conflicts are skipped by the reader.
  */
-export type TeamFs = Pick<typeof fs, "mkdirSync" | "appendFileSync" | "readdirSync" | "readFileSync" | "writeFileSync" | "existsSync">;
+export type TeamFs = Pick<typeof fs, "mkdirSync" | "appendFileSync" | "readdirSync" | "readFileSync" | "writeFileSync" | "existsSync" | "renameSync" | "unlinkSync">;
 
 function journalRoot(folder: string, journalId: string): string {
   if (!isTeamId(journalId)) throw new Error("Bad team journal id.");
   return path.join(folder, journalId);
 }
 
+/**
+ * Append events to the journal using an atomic write pattern.
+ *
+ * For concurrent append safety on Windows and synced folders (OneDrive, Dropbox,
+ * Google Drive, Syncthing), this reads the existing file, appends new lines, writes
+ * to a staging file, then atomically renames. If another process is writing at the
+ * same time (rare since each device owns its own file), retry up to 3 times.
+ */
 export function appendTeamEvents(
   folder: string,
   journalId: string,
@@ -47,7 +62,32 @@ export function appendTeamEvents(
   }
   if (lines.length === 0) return { written: 0, refused };
   fsx.mkdirSync(dir, { recursive: true });
-  fsx.appendFileSync(path.join(dir, `${device}.jsonl`), `${lines.join("\n")}\n`, "utf8");
+  const target = path.join(dir, `${device}.jsonl`);
+  const staging = path.join(dir, `${device}.jsonl.part`);
+  const maxRetries = 3;
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      let existing = "";
+      try {
+        existing = String(fsx.readFileSync(target, "utf8"));
+      } catch {
+        // File does not exist yet; that is fine.
+      }
+      const content = existing.endsWith("\n") || existing === "" ? existing : existing + "\n";
+      fsx.writeFileSync(staging, content + lines.join("\n") + "\n", "utf8");
+      fsx.renameSync(staging, target);
+      return { written: lines.length, refused };
+    } catch (err) {
+      // On Windows, EBUSY can happen if the file is being synced or another process holds it.
+      const code = (err as NodeJS.ErrnoException)?.code;
+      if (attempt < maxRetries - 1 && (code === "EBUSY" || code === "ENOENT" || code === "EPERM")) {
+        continue;
+      }
+      // Clean up staging file on final failure
+      try { fsx.unlinkSync(staging); } catch { /* ignore */ }
+      throw err;
+    }
+  }
   return { written: lines.length, refused };
 }
 

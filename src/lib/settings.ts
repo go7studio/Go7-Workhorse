@@ -6,7 +6,7 @@ import { DEFAULT_WORKSHOP_SETTINGS, normalizeWorkshopSettings } from "./workshop
 import { defaultModel, withEffort, type ModelChoice } from "./models";
 import { inboundAccess } from "./permissions";
 import { isProviderId, providerById } from "./providers";
-import type { AgentSystemsSettings, BotAccessDefaults, CustomBot, CustomLlm, DeskAccess, LlmLink, ProviderId, McpServerConfig, Profile, RoutingSettings, Session, Settings, SettingsSection, SkillDiscoverySettings } from "./types";
+import type { AgentSystemsSettings, BotAccessDefaults, CrewSettings, CustomBot, CustomLlm, DeskAccess, LlmLink, ProviderId, McpServerConfig, Profile, RoutingSettings, Session, Settings, SettingsSection, SkillDiscoverySettings } from "./types";
 import { normalizeBotKnowledge } from "./bot-knowledge-rubric";
 import { migrateCustomBotRatings } from "./routing";
 import { normalizeWatch } from "./watch";
@@ -49,6 +49,24 @@ export const DEFAULT_SETTINGS: Settings = {
   workshop: structuredClone(DEFAULT_WORKSHOP_SETTINGS),
   retentionDays: RETENTION_DAYS_DEFAULT,
 };
+
+/** Crew is off by default, staff-gated until dogfood passes. */
+export const DEFAULT_CREW_SETTINGS: CrewSettings = {
+  enabled: false,
+};
+
+/** True when Crew is enabled in settings. Staff gate: `WORKHORSE_CREW=1` env var also enables it. */
+export function crewEnabled(settings: Settings): boolean {
+  if (typeof process !== "undefined" && process.env?.WORKHORSE_CREW === "1") return true;
+  return settings.crew?.enabled === true;
+}
+
+export function normalizeCrew(raw: unknown): CrewSettings | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const record = raw as Partial<CrewSettings>;
+  if (record.enabled !== true) return undefined;
+  return { enabled: true };
+}
 
 export function normalizeRouting(raw: unknown): RoutingSettings {
   if (!raw || typeof raw !== "object") return { ...DEFAULT_SETTINGS.routing };
@@ -451,6 +469,10 @@ export function normalizeSettings(raw: unknown): Settings {
     localCompute: normalizeLocalComputeSettings((record as { localCompute?: unknown }).localCompute),
     workshop: normalizeWorkshopSettings((record as { workshop?: unknown }).workshop),
     retentionDays: normalizeRetentionDays((record as { retentionDays?: unknown }).retentionDays),
+    ...((): { crew?: CrewSettings } => {
+      const crew = normalizeCrew((record as { crew?: unknown }).crew);
+      return crew ? { crew } : {};
+    })(),
   };
 }
 

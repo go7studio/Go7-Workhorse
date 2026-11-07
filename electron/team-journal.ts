@@ -91,11 +91,29 @@ export function appendTeamEvents(
   return { written: lines.length, refused };
 }
 
+/**
+ * Checks if a filename is a sync conflict copy that should be ignored.
+ * Common patterns from OneDrive, Dropbox, Google Drive, and Syncthing.
+ */
+function isConflictCopy(name: string): boolean {
+  // OneDrive: "file (conflicted copy).jsonl", "file (Ana's conflicted copy 2024-01-01).jsonl"
+  if (/\(.*conflicted.*\)/i.test(name)) return true;
+  // Dropbox: "file (1).jsonl", "file (2).jsonl"
+  if (/\(\d+\)\.jsonl$/.test(name)) return true;
+  // Generic conflict marker
+  if (name.includes(".conflict")) return true;
+  // Windows machine name suffix: "file-DESKTOP-ABC123.jsonl"
+  if (/-[A-Z0-9]{8,}\.jsonl$/.test(name) && !name.match(/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}\.jsonl$/)) return true;
+  return false;
+}
+
 export function readTeamJournal(folder: string, journalId: string, fsx: TeamFs = fs): TeamEvent[] {
   const dir = path.join(journalRoot(folder, journalId), "journal");
   if (!fsx.existsSync(dir)) return [];
   const lists: TeamEvent[][] = [];
   for (const name of fsx.readdirSync(dir) as string[]) {
+    // Skip sync conflict copies
+    if (isConflictCopy(name)) continue;
     const device = name.endsWith(".jsonl") ? name.slice(0, -".jsonl".length) : "";
     if (!isTeamId(device)) continue;
     let text = "";
@@ -105,7 +123,8 @@ export function readTeamJournal(folder: string, journalId: string, fsx: TeamFs =
       continue;
     }
     const rows: TeamEvent[] = [];
-    for (const line of text.split("\n")) {
+    // Handle both LF and CRLF line endings
+    for (const line of text.split(/\r?\n/)) {
       if (!line.trim()) continue;
       try {
         const clean = sanitizeTeamEvent(JSON.parse(line));

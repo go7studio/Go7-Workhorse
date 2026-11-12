@@ -1,8 +1,9 @@
+import { CHROME_ACCESS_QUESTION } from "../lib/browser-access";
 import { useStore } from "../lib/store";
 
 /**
  * In-chat Chrome access prompt for browser tools.
- * Allow uses Piper's Chrome path. Decline starts a headless desk-owned session.
+ * Allow launches installed Chrome on a desk-owned profile. Decline starts the headless session.
  * Not a Settings tab.
  */
 export function ChromeAccessCard() {
@@ -17,9 +18,9 @@ export function ChromeAccessCard() {
         <div className="session-who">
           <span className="eyebrow">Browser · Chrome access</span>
         </div>
-        <strong>{label} wants Chrome access</strong>
+        <strong>{CHROME_ACCESS_QUESTION}</strong>
         <span className="permission-detail">
-          Allow uses installed Chrome in a desk-owned profile. Decline starts a headless background browser for this chat — not your login session, and not a desktop takeover.
+          {label} asked for a browser. Allow controls installed Chrome with navigate, snapshot, click, fill, screenshot, and console, in a profile under Workhorse. Your Chrome profile is used only when this chat explicitly asks for it. Decline keeps a headless browser for this chat. Always permission does not attach your Chrome profile.
         </span>
         <div className="actions">
           <button

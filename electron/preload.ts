@@ -109,6 +109,10 @@ contextBridge.exposeInMainWorld("workhorse", {
     url?: string;
     preferHeadless?: boolean;
     helperCommand?: string;
+    permissionMode?: import("../src/lib/types").PermissionMode;
+    sandbox?: import("../src/lib/types").SandboxProfile;
+    attachRealProfile?: boolean;
+    realProfileDir?: string;
   }) =>
     ipcRenderer.invoke("backgroundBrowser:ensure", input) as Promise<
       import("./background-browser-host").BackgroundBrowserStartResult
@@ -119,6 +123,10 @@ contextBridge.exposeInMainWorld("workhorse", {
     url?: string;
     preferHeadless?: boolean;
     helperCommand?: string;
+    permissionMode?: import("../src/lib/types").PermissionMode;
+    sandbox?: import("../src/lib/types").SandboxProfile;
+    attachRealProfile?: boolean;
+    realProfileDir?: string;
   }) =>
     ipcRenderer.invoke("backgroundBrowser:start", input) as Promise<
       import("./background-browser-host").BackgroundBrowserStartResult

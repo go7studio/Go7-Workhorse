@@ -16,6 +16,8 @@ import {
 import type { PermissionGrant, PermissionMode, SandboxProfile } from "../src/lib/types";
 import type { CustomHttpTool } from "./custom-http";
 import { handleWorkhorseRpc } from "./workhorse-mcp";
+import { CHROME_DESK_TOOLS, classifyChromeTool } from "../src/lib/browser-access";
+import { attachedChromeTools } from "./chrome-host";
 
 export type CustomToolUse = {
   id: string;
@@ -167,6 +169,7 @@ const WORKSPACE_TOOLS: { name: string; description: string; input_schema: Record
       required: ["command"],
     },
   },
+  ...CHROME_DESK_TOOLS,
 ];
 
 const DESK_TOOLS: { name: string; description: string; input_schema: Record<string, unknown> }[] = [
@@ -820,6 +823,28 @@ export async function executeCustomTool(
   const sandbox = policy.sandbox ?? "off";
   const role = policy.role ?? deskRoleOf({ parentId: policy.parentId, hidden: policy.hidden });
   try {
+    const chromeInput = use.input ?? {};
+    const chrome = classifyChromeTool(name, typeof chromeInput.action === "string" ? chromeInput.action : undefined);
+    if (chrome.kind === "evaluate") {
+      return { id: use.id, name, content: chrome.message, isError: true };
+    }
+    if (chrome.kind === "allow") {
+      if (!customToolOffered(name, role)) {
+        return { id: use.id, name, content: customToolNotOffered(name, role), isError: true };
+      }
+      const run = attachedChromeTools();
+      if (!run) return { id: use.id, name, content: "Chrome is not attached.", isError: true };
+      const result = await run({
+        sessionId: policy.sessionId ?? "",
+        tool: name,
+        args: chromeInput,
+        permissionMode: policy.mode,
+        sandbox: policy.sandbox,
+        attachRealProfile: chromeInput.attachRealProfile === true,
+        realProfileDir: typeof chromeInput.realProfileDir === "string" ? chromeInput.realProfileDir : undefined,
+      });
+      return { id: use.id, name, content: result.ok ? result.content : result.message, isError: !result.ok };
+    }
     if (!customToolOffered(name, role)) {
       return { id: use.id, name, content: customToolNotOffered(name, role), isError: true };
     }

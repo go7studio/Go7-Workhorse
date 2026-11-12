@@ -144,6 +144,7 @@ export class ClaudeSessionHost {
           role: input.role ?? (input.parentId || input.hidden ? "worker" : "orchestrator"),
           crewMode: input.crewModes,
           spawnNames: input.spawnNames,
+          priorUserTexts: input.priorUserTexts,
         }, input.visibleText);
         const result = await slot.agent.prompt(text, this.handlersFor(input, forward), input.images ?? []);
         if (result.stopReason !== "cancelled") clearClaudeCredentialRejection(spec.credential.fingerprint);

@@ -162,6 +162,7 @@ export class CodexSessionHost {
       role: input.role ?? (input.parentId || input.hidden ? "worker" : "orchestrator"),
       crewMode: input.crewModes,
       spawnNames: input.spawnNames,
+      priorUserTexts: input.priorUserTexts,
     }, input.visibleText);
 
     try {

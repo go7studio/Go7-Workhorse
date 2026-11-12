@@ -133,6 +133,7 @@ export class CursorSessionHost {
       role: input.role ?? (input.parentId || input.hidden ? "worker" : "orchestrator"),
       crewMode: input.crewModes,
       spawnNames: input.spawnNames,
+      priorUserTexts: input.priorUserTexts,
     }, input.visibleText);
     try {
       if (this.stoppedWhileStarting.delete(input.sessionId)) return stoppedBeforePrompt(input.sessionId, slot.agent, emit);

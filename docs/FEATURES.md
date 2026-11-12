@@ -332,9 +332,11 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
   the moment it is asked for workers, and opens lighter for not carrying them.
 - If the ask is phrased in a way the desk does not read as a request for
   workers, the chat says the desk can put workers on it and waits for you,
-  rather than hiring one under no rules. A bare yes after that wait is not a
-  request for workers, so the desk refuses it again: pin the chat to
-  Orchestrate or Mission, or ask again in spawn, worker, bot or agent words.
+  rather than hiring one under no rules. Confirm continues that ask, and so
+  does a later note that the work is incomplete or not working: the same
+  assignment resumes without a second confirmation. A bare yes with no earlier
+  ask is still refused: pin the chat to Orchestrate or Mission, or ask again
+  in spawn, worker, bot or agent words.
 - One assignment is one worker, or a
   named continuation on this parent for the same topic; a bare spawn still
   starts clear-headed.

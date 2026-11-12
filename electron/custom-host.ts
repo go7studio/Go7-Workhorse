@@ -394,6 +394,7 @@ export class CustomSessionHost {
     const history = (input.history ?? [])
       .filter((item) => item.role === "user" || item.role === "assistant")
       .map((item) => hydrateHistoryMessage(item));
+    const priorUserTexts = history.filter((item) => item.role === "user").map((item) => item.text ?? "");
     let mode = input.mode ?? "ask";
     let sandbox = input.sandbox ?? "off";
     const computer = input.computer === "on" ? "on" : "off";
@@ -405,7 +406,7 @@ export class CustomSessionHost {
         text: withCrewModeHint(
           withLooseDeleteHint(
             withCustomPeerHint(
-              withSpawnHint(withPermissionHint(withWriteLimitHint(input.text, mode, sandbox), role), role),
+              withSpawnHint(withPermissionHint(withWriteLimitHint(input.text, mode, sandbox), role), role, priorUserTexts),
               role,
             ),
             role,

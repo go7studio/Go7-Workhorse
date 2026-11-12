@@ -3710,6 +3710,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           role: deskRoleOf(session),
           crewModes: session.crewModes,
           spawnNames: spawnAllowlistNames(session.spawnAllowlist, stateRef.current.settings),
+          priorUserTexts: spawnTurnOf({ messages: working, queue: session.queue }).priorTexts,
           mcpServers: mcpServersForSession(stateRef.current.settings.mcpServers, session),
           contextWindow: session.contextWindow,
           preface: withPortableHistory(buildSessionPreface({
@@ -4719,6 +4720,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             contextWindow: session.contextWindow,
             crewModes: session.crewModes,
             spawnNames: spawnAllowlistNames(session.spawnAllowlist, snapshot.settings),
+            priorUserTexts: spawnTurnOf(session).priorTexts,
             restartRuntime,
           };
           if (live === "preview") throw new Error(`${providerById(session.provider).name} is not connected yet`);

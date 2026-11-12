@@ -47,6 +47,8 @@ export type GrokPromptInput = GrokSessionOpenInput & {
   images?: import("../src/lib/types").ChatImage[];
   crewModes?: CrewMode[];
   spawnNames?: string[];
+  /** User turns before this one. A continuation of an earlier ask carries the spawn law. */
+  priorUserTexts?: readonly string[];
 };
 
 export type GrokCompactInput = GrokSessionOpenInput & {
@@ -233,6 +235,7 @@ export class GrokSessionHost {
       role: input.role ?? (input.parentId || input.hidden ? "worker" : "orchestrator"),
       crewMode: input.crewModes,
       spawnNames: input.spawnNames,
+      priorUserTexts: input.priorUserTexts,
     }, input.visibleText);
 
     try {

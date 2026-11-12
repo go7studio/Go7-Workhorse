@@ -104,7 +104,8 @@ export const DESK_SPAWN_LAW =
   // the same opening text both forbade the call and ordered it. It is an
   // answer to a bot that narrates a spawn it never made, and only a turn that
   // may spawn can act on it, which is this block and no other.
-  "If you did not call that tool this turn, you did not spawn anyone. Spawn only for a new authorized assignment; a report join, completed slice, cancelled assignment, or failed checker report does not authorize another worker.";
+  "If you did not call that tool this turn, you did not spawn anyone. Spawn only for a new authorized assignment; a report join, completed slice, cancelled assignment, or failed checker report does not authorize another worker. " +
+  "When this chat already asked for workers, a later turn that says confirm, resume, continue, incomplete, or not working is that same assignment: resume it without asking the user to confirm again.";
 
 /**
  * What every desk chat opens with. Desk tools, permissions, files, and the
@@ -240,10 +241,22 @@ const SPAWN_ASK = new RegExp(
  * asks again on every follow-up.
  */
 const SPAWN_CONFIRMATION =
-  /\b(?:you have my confirmation|i am confirming|i'm confirming|i already (?:told|asked|gave) you|already given you the instruction|should(?:n't| not) need to confirm|do(?:n't| not) need (?:my |a )?confirm)\b/i;
+  /(?:^\s*confirm\b|\b(?:you have my confirmation|i am confirming|i'm confirming|i already (?:told|asked|gave) you|already given you the instruction|should(?:n't| not) need to confirm|ened to confirm|do(?:n't| not) need (?:my |a )?confirm)\b)/i;
+
+/**
+ * A follow-up on work this chat already assigned. It does not hire anyone on
+ * its own. It only keeps an earlier ask alive, so an unfinished lane resumes
+ * without a second confirmation.
+ */
+const SPAWN_RESUME =
+  /\b(?:resume|continue|keep going|not working|isn'?t working|incomplete|didn'?t (?:finish|work)|did not (?:finish|work)|fix that)\b/i;
 
 export function looksLikeSpawnConfirmation(text: string): boolean {
   return SPAWN_CONFIRMATION.test(text);
+}
+
+export function looksLikeSpawnContinuation(text: string): boolean {
+  return looksLikeSpawnConfirmation(text) || SPAWN_RESUME.test(text);
 }
 
 export function looksLikeWorkerBrief(text: string): boolean {
@@ -283,6 +296,8 @@ export function looksLikeSpawnRequest(text: string): boolean {
  */
 export function turnCarriesSpawnLaw(input: {
   text: string;
+  /** Earlier user turns on this chat. A continuation only counts after one of them asked. */
+  priorTexts?: readonly string[];
   crewMode?: CrewMode | CrewMode[];
   role?: DeskRole;
 }): boolean {
@@ -291,11 +306,15 @@ export function turnCarriesSpawnLaw(input: {
   if (looksLikeWorkerBrief(text)) return false;
   if (orchestrationEnabled(input.crewMode)) return true;
   if (looksLikeSpawnConfirmation(text)) return true;
-  return looksLikeSpawnRequest(text);
+  if (looksLikeSpawnRequest(text)) return true;
+  const alreadyAsked = (input.priorTexts ?? []).some(
+    (prior) => looksLikeSpawnRequest(prior) || looksLikeSpawnConfirmation(prior),
+  );
+  return alreadyAsked && looksLikeSpawnContinuation(text);
 }
 
-export function withSpawnHint(text: string, role?: DeskRole): string {
-  if (!turnCarriesSpawnLaw({ text, role })) return text;
+export function withSpawnHint(text: string, role?: DeskRole, priorTexts?: readonly string[]): string {
+  if (!turnCarriesSpawnLaw({ text, role, priorTexts })) return text;
   return `${SPAWN_TURN_HINT}\n\n${text}`;
 }
 

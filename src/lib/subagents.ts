@@ -1927,7 +1927,12 @@ export function formatWorkerPrompt(input: WorkerBriefInput): string {
  * this chat's pins, which together decide whether DESK_SPAWN_LAW was injected.
  * Both are already on the caller session, so nothing new has to be persisted.
  */
-export type SpawnTurn = { text: string; crewModes?: readonly string[] | null };
+export type SpawnTurn = {
+  text: string;
+  /** User turns before this one, oldest first. A continuation reads them. */
+  priorTexts?: readonly string[];
+  crewModes?: readonly string[] | null;
+};
 
 /**
  * That turn, read off the caller session. Both doors call this rather than
@@ -1947,15 +1952,14 @@ export function spawnTurnOf(
 ): SpawnTurn {
   const messages = session?.messages ?? [];
   const queued = new Set((session?.queue ?? []).map((item) => item.userMessageId).filter(Boolean));
-  let text = "";
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const message = messages[index];
+  const userTexts: string[] = [];
+  for (const message of messages) {
     if (message?.role !== "user") continue;
     if (message.id && queued.has(message.id)) continue;
-    text = message.text ?? "";
-    break;
+    userTexts.push(message.text ?? "");
   }
-  return { text, crewModes: session?.crewModes ?? undefined };
+  const text = userTexts.length > 0 ? userTexts[userTexts.length - 1]! : "";
+  return { text, priorTexts: userTexts.slice(0, -1), crewModes: session?.crewModes ?? undefined };
 }
 
 export type SpawnAdmissionInput = {
@@ -2006,7 +2010,7 @@ export function admitSpawn(input: SpawnAdmissionInput): SpawnAdmission {
   // and admitted the same model calling workhorse_delegate one line later.
   if (parentRole === "orchestrator" && !input.deskLoop) {
     const turn = input.turn ?? { text: "" };
-    if (!turnCarriesSpawnLaw({ text: turn.text, crewMode: normalizeCrewModes(turn.crewModes) })) {
+    if (!turnCarriesSpawnLaw({ text: turn.text, priorTexts: turn.priorTexts, crewMode: normalizeCrewModes(turn.crewModes) })) {
       return { ok: false, error: SPAWN_LAW_MISSING_ERROR };
     }
   }

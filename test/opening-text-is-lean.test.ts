@@ -37,7 +37,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { handleWorkhorseRpc, setWorkhorseDeskAsk } from "../electron/workhorse-mcp";
-import { admitSpawn } from "../src/lib/subagents";
+import { admitSpawn, spawnTurnOf } from "../src/lib/subagents";
 import type { CrewMode } from "../src/lib/types";
 import {
   AUDITOR_SESSION_RULES,
@@ -281,6 +281,33 @@ test("a chat that never got the spawn law is refused at the door", () => {
   assert.equal(spawn({ text: "I already told you to hand this to agents." }).ok, true);
   assert.equal(spawn({ text: "Repair the blockers with new agents." }).ok, true);
   assert.equal(spawn({ text: "get a reviewer on this" }).ok, false);
+  assert.equal(spawn({ text: "confirm and also fix that, I should nto ened to confirm" }).ok, true);
+  const resumed = admitSpawn({
+    parent: { parentId: null },
+    prompt: "finish the lane",
+    folder: "/proj",
+    turn: {
+      text: "the lane is incomplete and not working, resume it",
+      priorTexts: ["Spawn two agents to review this."],
+    },
+  });
+  assert.equal(resumed.ok, true);
+  const unfinishedAlone = admitSpawn({
+    parent: { parentId: null },
+    prompt: "finish the lane",
+    folder: "/proj",
+    turn: { text: "the lane is incomplete and not working, resume it" },
+  });
+  assert.equal(unfinishedAlone.ok, false);
+  const heard = spawnTurnOf({
+    messages: [
+      { role: "user", text: "Spawn two agents to review this." },
+      { role: "assistant", text: "The desk can put workers on this." },
+      { role: "user", text: "the lane is incomplete and not working, resume it" },
+    ],
+  });
+  assert.equal(heard.text, "the lane is incomplete and not working, resume it");
+  assert.deepEqual(heard.priorTexts, ["Spawn two agents to review this."]);
 
   // A door that hands over no turn at all is refused, and that is the point of
   // the inversion. While the law was something a door opted into, the doors
@@ -340,11 +367,19 @@ test("one predicate decides who gets the law and who may spawn", () => {
   // The injector and the refusal read the same function. Two of these
   // disagreeing means a chat is handed the law and then turned away, or
   // spawns having never seen it.
-  const cases: Array<{ text: string; crewMode?: CrewMode[]; role?: DeskRole; carried: boolean }> = [
+  const cases: Array<{ text: string; priorTexts?: string[]; crewMode?: CrewMode[]; role?: DeskRole; carried: boolean }> = [
     { text: "Read the config and tell me what it sets.", carried: false },
     { text: "hire two reviewers", carried: false },
     { text: "Spawn two agents to review this.", carried: true },
     { text: "You have my confirmation that you can do it.", carried: true },
+    { text: "confirm and also fix that, I should nto ened to confirm", carried: true },
+    { text: "the lane is incomplete and not working, resume it", carried: false },
+    {
+      text: "the lane is incomplete and not working, resume it",
+      priorTexts: ["Spawn two agents to review this."],
+      carried: true,
+    },
+    { text: "yes", priorTexts: ["Spawn two agents to review this."], carried: false },
     { text: "Repair the blockers with new agents.", carried: true },
     { text: "get a reviewer on this", carried: false },
     { text: "Read the config.", crewMode: ["orchestrate"], carried: true },
@@ -354,12 +389,12 @@ test("one predicate decides who gets the law and who may spawn", () => {
   ];
   for (const item of cases) {
     assert.equal(
-      turnCarriesSpawnLaw({ text: item.text, crewMode: item.crewMode, role: item.role }),
+      turnCarriesSpawnLaw({ text: item.text, priorTexts: item.priorTexts, crewMode: item.crewMode, role: item.role }),
       item.carried,
       `turnCarriesSpawnLaw disagrees about: ${item.text}`,
     );
     const injected =
-      withSpawnHint(item.text, item.role).includes(DESK_SPAWN_LAW) ||
+      withSpawnHint(item.text, item.role, item.priorTexts).includes(DESK_SPAWN_LAW) ||
       withCrewModeHint(item.text, item.crewMode, item.role).includes(DESK_SPAWN_LAW);
     assert.equal(injected, item.carried, `the injectors disagree about: ${item.text}`);
   }
@@ -566,7 +601,7 @@ test("the opening text stays under its ceiling for every role", () => {
     WORKHORSE_SESSION_RULES: 6500,
     CUSTOM_HTTP_SESSION_RULES: 6500,
     CURSOR_SESSION_RULES: 6500,
-    SPAWN_TURN_HINT: 4200,
+    SPAWN_TURN_HINT: 4500,
     WORKER_SESSION_RULES: 900,
     AUDITOR_SESSION_RULES: 600,
     HELPER_SESSION_RULES: 500,

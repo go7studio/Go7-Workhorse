@@ -9,6 +9,9 @@ import { withDeskToolEnv, withoutWorkhorsePrivateEnv } from "./desk-path";
 import { grokSpawnArgs, largestAdvertisedWindow, matchContextWindowValue, parseWindowLabel, type GrokLaunchSpec } from "./grok-launch";
 import { titleFromRecord } from "./grok-title";
 import type { PermissionAnswer } from "../src/lib/permissions";
+import { vendorGuiShellBlock } from "../src/lib/computer-seat";
+import type { ComputerSeat } from "../src/lib/computer-seat";
+import type { PermissionMode, SandboxProfile } from "../src/lib/types";
 import { hydrateChatImages } from "./attachment-store";
 import { buildAcpPrompt } from "../src/lib/images";
 import { describePeerTool, prettyToolTitle } from "../src/lib/tool-labels";
@@ -1381,6 +1384,9 @@ export class GrokAgent {
    */
   private readonly askTag = `acp-${randomUUID()}`;
   private handlers: GrokAgentHandlers = {};
+  private computer: ComputerSeat = "off";
+  private seatMode: PermissionMode = "ask";
+  private seatSandbox: SandboxProfile = "off";
   /** Options from the last session/new or session/load, so a warm slot can be told a new window. */
   private configOptions: unknown;
   /** Last size this process actually handed the session, so a repeat pick does not ask again. */
@@ -1784,6 +1790,13 @@ export class GrokAgent {
     return compact;
   }
 
+  /** The chat seat for this turn. Computer stays off until the person turns it on. */
+  noteSeat(input: { computer?: ComputerSeat; mode?: PermissionMode; sandbox?: SandboxProfile }): void {
+    this.computer = input.computer === "on" ? "on" : "off";
+    if (input.mode) this.seatMode = input.mode;
+    if (input.sandbox) this.seatSandbox = input.sandbox;
+  }
+
   answerPermission(requestId: string, answer: PermissionAnswer): boolean {
     const waiter = this.permissionWaiters.get(requestId);
     if (!waiter) return false;
@@ -1955,6 +1968,29 @@ export class GrokAgent {
       detail: toolDetail(params),
       path: toolPath(params),
     };
+    const guiBlock = vendorGuiShellBlock({
+      tool: ask.tool,
+      detail: ask.detail,
+      computer: this.computer,
+      mode: this.seatMode,
+      sandbox: this.seatSandbox,
+      platform: process.platform,
+    });
+    if (guiBlock) {
+      this.handlers.onTool?.({
+        toolCallId: requestId,
+        title: ask.tool,
+        status: "failed",
+        detail: guiBlock,
+      });
+      const optionId = pickPermissionOptionId(options, "deny");
+      this.write({
+        jsonrpc: "2.0",
+        id,
+        result: { outcome: { outcome: "selected", optionId } },
+      });
+      return;
+    }
     this.handlers.onPermission?.(ask);
     const answer = await new Promise<PermissionAnswer>((resolve) => {
       this.permissionWaiters.set(requestId, resolve);

@@ -16,6 +16,7 @@ type GrokPromptBridgeInput = {
   cwd: string;
   vendorSessionId?: string;
   sandbox?: import("./lib/types").SandboxProfile;
+  computer?: "off" | "on";
   mcpServers?: import("./lib/types").McpServerConfig[];
   preface?: string;
   crewModes?: import("./lib/types").CrewMode[];
@@ -278,6 +279,7 @@ type WorkhorseBridge = {
     cwd: string;
     mode?: import("./lib/types").PermissionMode;
     sandbox?: import("./lib/types").SandboxProfile;
+    computer?: "off" | "on";
     preface?: string;
     history?: { role: "user" | "assistant"; text: string }[];
     mcpServers?: import("./lib/types").McpServerConfig[];

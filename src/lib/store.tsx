@@ -108,6 +108,8 @@ import {
   workerAccess,
   workerGrant,
 } from "./permissions";
+import { computerForSpawnedWorker } from "./computer-seat";
+import type { ComputerSeat } from "./computer-seat";
 import {
   applyDeleteCustomBot,
   applyInstallCustomBot,
@@ -604,6 +606,7 @@ export type Store = AppState & {
   setMode: (mode: PermissionMode) => void;
   setDeskAccess: (patch: Partial<DeskAccess>) => void;
   setSandbox: (sandbox: SandboxProfile) => void;
+  setComputer: (computer: ComputerSeat) => void;
   setChatPreset: (id: "blender", on: boolean) => void;
   setSecurityPolicy: (patch: Partial<SessionSecurityPolicy>) => void;
   setMcpServers: (servers: McpServerConfig[]) => Promise<void>;
@@ -2385,6 +2388,21 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }));
   }, []);
 
+  const setComputer = useCallback((computer: ComputerSeat) => {
+    const next = computer === "on" ? "on" : "off";
+    setState((current) => {
+      const live = current.sessions.find((item) => item.id === current.activeSessionId);
+      if (!live) return current;
+      if ((live.computer === "on" ? "on" : "off") === next) return current;
+      return {
+        ...current,
+        sessions: current.sessions.map((item) =>
+          item.id === live.id ? { ...item, computer: next === "on" ? "on" : undefined } : item,
+        ),
+      };
+    });
+  }, []);
+
   const setSandbox = useCallback((sandbox: SandboxProfile) => {
     const session = stateRef.current.sessions.find((item) => item.id === stateRef.current.activeSessionId);
     if (session && session.sandbox !== sandbox) {
@@ -3640,6 +3658,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           cwd,
           vendorSessionId,
           sandbox: session.sandbox,
+          computer: session.computer,
           securityPolicy: session.securityPolicy,
           parentId: session.parentId,
           hidden: session.hidden,
@@ -3655,6 +3674,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             references: project?.references ?? [],
             mode: session.mode,
             sandbox: session.sandbox,
+            computer: session.computer,
             surface: session.provider === "custom" ? "http" : session.provider === "cursor" ? "cursor" : "mcp",
             role: deskRoleOf(session),
             desk: {
@@ -3705,6 +3725,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             cwd,
             mode: vendorLaunchMode(session),
             sandbox: session.sandbox,
+            computer: session.computer,
             preface: promptInput.preface,
             history,
             mcpServers: mcpServersForSession(stateRef.current.settings.mcpServers, session),
@@ -4626,6 +4647,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             references: project?.references ?? [],
             mode: session.mode,
             sandbox: session.sandbox,
+            computer: session.computer,
             surface: session.provider === "custom" ? "http" : session.provider === "cursor" ? "cursor" : "mcp",
             role,
           });
@@ -4643,6 +4665,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             cwd,
             vendorSessionId: vendorSessionForSend(session),
             sandbox: session.sandbox,
+            computer: session.computer,
             mcpServers: runtimeMcpServers,
             preface,
             parentId: session.parentId,
@@ -4672,6 +4695,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               cwd,
               mode: vendorLaunchMode(session),
               sandbox: session.sandbox,
+              computer: session.computer,
               preface,
               // A custom bot has no session of its own, so the conversation
               // has to travel with every request. This used to be [] — which
@@ -7014,6 +7038,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 owned: assignedPaths.length > 0,
                 prior: priorWorker,
               }),
+              computer: computerForSpawnedWorker(priorWorker?.computer),
               securityPolicy: parent.securityPolicy,
               environment,
               status: "running",
@@ -10142,6 +10167,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       setMode,
       setDeskAccess,
       setSandbox,
+      setComputer,
       setChatPreset,
       setSecurityPolicy,
       setMcpServers,
@@ -10301,6 +10327,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       setMode,
       setDeskAccess,
       setSandbox,
+      setComputer,
       setChatPreset,
       setSecurityPolicy,
       setMcpServers,

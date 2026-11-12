@@ -1,3 +1,5 @@
+import type { ComputerSeat } from "./computer-seat";
+import { computerLine } from "./computer-seat";
 import type { CrewMode, LinkedReference, PermissionMode, SandboxProfile, SessionEnvironment } from "./types";
 import { collapsePreviewLabel } from "./session-bridge";
 import { sessionEnvironmentKind } from "./session-environment";
@@ -38,6 +40,7 @@ export type PrefaceInput = {
   desk?: DeskContext;
   mode?: PermissionMode;
   sandbox?: SandboxProfile;
+  computer?: ComputerSeat;
   /** mcp = Grok/Codex/Claude with Workhorse tools. http = custom HTTP. cursor = Cursor Agent ACP. */
   surface?: "mcp" | "http" | "cursor";
   role?: DeskRole;
@@ -115,7 +118,7 @@ export function machineLine(platform: string): string {
 }
 
 export function buildPolicyContext(
-  input: Pick<PrefaceInput, "mode" | "sandbox"> & { platform?: string },
+  input: Pick<PrefaceInput, "mode" | "sandbox" | "computer"> & { platform?: string },
 ): string {
   const mode = input.mode ?? "ask";
   const sandbox = input.sandbox ?? "off";
@@ -139,6 +142,7 @@ export function buildPolicyContext(
     "This chat’s live desk limits for THIS turn (already enforced — do not probe them). These override any earlier message in this chat about what you can do:",
     `- Permission: ${permission}`,
     `- Sandbox: ${box}`,
+    `- Computer: ${computerLine(input.computer)}`,
   ];
   if (input.platform) lines.push(machineLine(input.platform));
   if (writesAreBlocked(mode, sandbox)) {
@@ -208,6 +212,7 @@ export function composeVendorPrompt(
   limits?: {
     mode?: PermissionMode;
     sandbox?: SandboxProfile;
+    computer?: ComputerSeat;
     role?: DeskRole;
     crewMode?: CrewMode | CrewMode[];
     spawnNames?: string[];

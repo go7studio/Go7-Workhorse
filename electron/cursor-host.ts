@@ -130,6 +130,7 @@ export class CursorSessionHost {
     const text = composeVendorPrompt(input.text, input.preface, slot.agent.opened, {
       mode: input.mode,
       sandbox: input.sandbox,
+      computer: input.computer,
       role: input.role ?? (input.parentId || input.hidden ? "worker" : "orchestrator"),
       crewMode: input.crewModes,
       spawnNames: input.spawnNames,
@@ -203,7 +204,10 @@ export class CursorSessionHost {
       nextKey: key,
       restartRuntime: input.restartRuntime,
     });
-    if (action === "reuse" && slot) return;
+    if (action === "reuse" && slot) {
+      slot.agent.noteSeat(input);
+      return;
+    }
     slot?.agent.dispose();
     const spec = buildCursorLaunchSpec({
       sessionId: input.sessionId,
@@ -217,6 +221,7 @@ export class CursorSessionHost {
       mcpServers: input.mcpServers,
     });
     const agent = new GrokAgent({ ...spec, agentLabel: "Cursor" }, (launchSpec) => this.spawn(launchSpec as typeof spec));
+    agent.noteSeat(input);
     this.starting.add(input.sessionId);
     try {
       const started = await agent.start({

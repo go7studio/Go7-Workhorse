@@ -625,6 +625,11 @@ export type Session = {
   titleLocked?: boolean;
   mode: PermissionMode;
   sandbox: SandboxProfile;
+  /**
+   * Desktop control for this chat. Missing means off. Spawn does not copy it
+   * onto a worker.
+   */
+  computer?: "off" | "on";
   /** Controls that are independent from the filesystem sandbox. */
   securityPolicy?: SessionSecurityPolicy;
   /** Where this chat executes. Missing on older saves means the project's local folder. */

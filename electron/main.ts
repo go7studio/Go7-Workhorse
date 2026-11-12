@@ -12,6 +12,7 @@ import { AgySessionHost } from "./agy-host";
 import { detectAgyLogin } from "./agy-login";
 import { readAgyPlan, readAgyUsageStdout } from "./agy-plan";
 import { CustomSessionHost, type CustomPromptInput } from "./custom-host";
+import { bindDefaultComputerIo } from "./computer-host";
 import { observedMcpServer, probeMcpServer } from "./mcp-tool-bridge";
 import { mcpInventorySnapshot } from "./mcp-inventory";
 import { boundLinkRead } from "../src/lib/link-read";
@@ -1094,6 +1095,7 @@ app.whenReady().then(async () => {
     /* rg copy is best-effort */
   }
   debugStartup("ripgrep ready");
+  void bindDefaultComputerIo();
 
   process.env.WORKHORSE_STATE_PATH = statePath();
   jobEngine = new DurableJobEngine(path.join(app.getPath("userData"), "workhorse-jobs.json"), (events) => {

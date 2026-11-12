@@ -2017,7 +2017,8 @@ function probeRuntime(): string {
       },
       ios: { available: ios.available },
       mcp: enabledMcpServers.map((server) => server.name),
-      computerUse: enabledMcpServers.some((server) => /computer|desktop|screen/i.test(server.name)),
+      // A server named computer, desktop, or screen is not this chat's Computer seat.
+      computerUse: false,
     },
     null,
     2,

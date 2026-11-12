@@ -22,6 +22,8 @@ export type GrokSessionOpenInput = {
   cwd: string;
   vendorSessionId?: string;
   sandbox?: SandboxProfile;
+  /** Desktop control for this chat. Missing means off. */
+  computer?: "off" | "on";
   securityPolicy?: SessionSecurityPolicy;
   mcpServers?: McpServerConfig[];
   preface?: string;
@@ -227,6 +229,7 @@ export class GrokSessionHost {
     const text = composeVendorPrompt(input.text, input.preface, slot.agent.opened, {
       mode: input.mode,
       sandbox: input.sandbox,
+      computer: input.computer,
       role: input.role ?? (input.parentId || input.hidden ? "worker" : "orchestrator"),
       crewMode: input.crewModes,
       spawnNames: input.spawnNames,
@@ -365,6 +368,7 @@ export class GrokSessionHost {
       restartRuntime: input.restartRuntime,
     });
     if (action === "reuse" && slot) {
+      slot.agent.noteSeat(input);
       await slot.agent.preferContextWindow(input.contextWindow);
       return;
     }
@@ -383,6 +387,7 @@ export class GrokSessionHost {
       contextWindow: input.contextWindow,
     });
     const agent = new GrokAgent(spec, this.spawn);
+    agent.noteSeat(input);
     this.starting.add(input.sessionId);
     try {
       const started = await agent.start({

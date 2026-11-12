@@ -502,7 +502,6 @@ export function runInProcessGroup(
     env: options.env ?? groupRunEnv(),
     shell: options.shell ?? false,
     stdio: ["ignore", "pipe", "pipe"],
-    windowsHide: true,
     ...groupSpawnOptions(),
   });
   trackProcessGroup(child, options.sessionId ?? "");

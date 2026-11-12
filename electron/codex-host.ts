@@ -108,7 +108,6 @@ export function spawnCodexProcess(spec: ReturnType<typeof buildCodexLaunchSpec>)
     cwd: spawnCwd(cwd),
     env,
     stdio: ["pipe", "pipe", "pipe"],
-    windowsHide: true,
     // The CLI leads its own group, so a stop reaches what the CLI started too.
     ...groupSpawnOptions(),
   }) as ChildProcessWithoutNullStreams;

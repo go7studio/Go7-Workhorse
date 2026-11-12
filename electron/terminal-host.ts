@@ -47,7 +47,6 @@ export class TerminalHost {
         // into Workhorse.
         env: withDeskToolEnv(withoutWorkhorsePrivateEnv(process.env)),
         stdio: ["pipe", "pipe", "pipe"],
-        windowsHide: true,
         // An interactive shell is the shortest route to a runaway on this desk:
         // whatever the person types starts under it. It leads its own group.
         ...groupSpawnOptions(),

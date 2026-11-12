@@ -401,7 +401,6 @@ export class BackgroundBrowserHost {
       env,
       shell: false,
       ...groupSpawnOptions(this.platform),
-      windowsHide: true,
     };
 
     try {

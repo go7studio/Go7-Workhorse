@@ -2,10 +2,12 @@
  * Chat-owned background browser sessions.
  *
  * Separate from the person's real Chrome profile and from any desktop
- * takeover. When Chrome access is granted, Piper's headed Chrome channel
- * path is used. When it is declined or unset after a refuse, the desk
- * starts a Chromium/Playwright session under Workhorse userData.
+ * takeover. Granted Chrome is Piper's launcher on a desk-owned profile.
+ * Decline starts a headless session under Workhorse userData. Unset asks
+ * in the chat before anything launches.
  */
+
+import { toolNameKey } from "./tool-labels";
 
 export type ChromeAccessState = "unset" | "granted" | "declined";
 
@@ -59,12 +61,32 @@ export function refusesDesktopScreenshotClickFallback(): true {
   return true;
 }
 
+/** Tool names that need a browser. A sentence that merely says "browser" does not. */
+const BROWSER_TOOL_TOKENS = new Set(["browser", "playwright", "chromium"]);
+
+export function requestsBackgroundBrowser(tool: string): boolean {
+  const raw = tool.trim();
+  if (!raw) return false;
+  const tokens = toolNameKey(raw).split("_").filter(Boolean);
+  if (!tokens.some((token) => BROWSER_TOOL_TOKENS.has(token))) return false;
+  // browser_navigate, mcp__playwright__browser_click
+  if (/[_\-.]/.test(raw)) return true;
+  // "Browser" or "Browser Navigate". Not "Read the browser docs".
+  const first = raw.split(/\s+/, 1)[0]?.toLowerCase().replace(/[^a-z]/g, "") ?? "";
+  return BROWSER_TOOL_TOKENS.has(first);
+}
+
+/** Unset Chrome access plus a browser tool is the in-chat Allow/Decline card. */
+export function chromeAccessPromptForBrowserTool(tool: string, access: ChromeAccessState | undefined): boolean {
+  return (access ?? "unset") === "unset" && requestsBackgroundBrowser(tool);
+}
+
 export function resolveBackgroundBrowserMode(
   chromeAccess: ChromeAccessState,
   options: { preferHeadless?: boolean; chromeDeclinedHeadless?: boolean } = {},
 ): BackgroundBrowserMode {
   if (chromeAccess === "granted") return "chrome";
-  // Declined or still unset after the person refused the prompt → desk-owned.
+  // Decline is a desk-owned headless session. Unset is not a launch.
   if (options.preferHeadless !== false && (chromeAccess === "declined" || options.chromeDeclinedHeadless)) {
     return "background-headless";
   }

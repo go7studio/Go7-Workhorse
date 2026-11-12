@@ -2,18 +2,23 @@ import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import path from "node:path";
 import test from "node:test";
+import type { ChildProcess, SpawnOptions } from "node:child_process";
 import {
   BackgroundBrowserHost,
+  defaultBackgroundBrowserLauncher,
   type BackgroundBrowserEvent,
   type BackgroundBrowserLauncher,
+  type BackgroundBrowserLaunchRequest,
 } from "../electron/background-browser-host";
 import { groupSpawnOptions } from "../electron/process-registry";
 import {
   applyBackgroundBrowserSession,
   chatHasRunningBackgroundBrowser,
+  chromeAccessPromptForBrowserTool,
   refusesDesktopInput,
   refusesDesktopScreenshotClickFallback,
   refusesDoubleFork,
+  requestsBackgroundBrowser,
   resolveBackgroundBrowserMode,
   type BackgroundBrowserSession,
 } from "../src/lib/background-browser";
@@ -54,17 +59,177 @@ test("double-fork helpers and desktop input helpers are refused", () => {
 });
 
 test("ensureBrowser asks for Chrome when access is unset", async () => {
+  const events: BackgroundBrowserEvent[] = [];
   const host = new BackgroundBrowserHost({
     userData: path.join("/tmp", "workhorse-bb-test-unset"),
     launcher: recordingLauncher(),
     mkdir: () => undefined,
   });
-  const result = await host.ensureBrowser({ sessionId: "chat-1" }, () => undefined);
+  const result = await host.ensureBrowser({ sessionId: "chat-1", name: "browser_navigate" }, (event) => events.push(event));
   assert.equal(result.ok, false);
   if (!result.ok) {
     assert.equal(result.access, "unset");
     assert.match(result.message, /Chrome access has not been decided/);
   }
+  const prompt = events.find((event) => event.type === "chrome-prompt");
+  assert.ok(prompt && prompt.type === "chrome-prompt");
+  if (prompt.type === "chrome-prompt") {
+    assert.equal(prompt.sessionId, "chat-1");
+    assert.equal(prompt.name, "browser_navigate");
+  }
+  assert.equal(host.list("chat-1").some((row) => row.status === "running"), false);
+});
+
+test("a browser tool name asks for Chrome access and a search does not", () => {
+  assert.equal(requestsBackgroundBrowser("browser_navigate"), true);
+  assert.equal(requestsBackgroundBrowser("Browser Navigate"), true);
+  assert.equal(requestsBackgroundBrowser("mcp__playwright__browser_click"), true);
+  assert.equal(requestsBackgroundBrowser("web_search"), false);
+  assert.equal(requestsBackgroundBrowser("Read the browser docs"), false);
+  assert.equal(requestsBackgroundBrowser("Open the browser"), false);
+  assert.equal(chromeAccessPromptForBrowserTool("browser_navigate", undefined), true);
+  assert.equal(chromeAccessPromptForBrowserTool("browser_navigate", "unset"), true);
+  assert.equal(chromeAccessPromptForBrowserTool("browser_navigate", "declined"), false);
+  assert.equal(chromeAccessPromptForBrowserTool("browser_navigate", "granted"), false);
+});
+
+function launchRequest(mode: BackgroundBrowserLaunchRequest["mode"], windowsHide: boolean): BackgroundBrowserLaunchRequest {
+  return {
+    mode,
+    userDataDir: path.join("/tmp", "workhorse-bb-test-launch", "background-browser", "chat", "bb"),
+    url: "about:blank",
+    headless: mode !== "chrome",
+    env: {},
+    spawnOptions: { ...groupSpawnOptions("win32"), windowsHide },
+  };
+}
+
+test("a missing Playwright driver fails before any process exists", async () => {
+  let spawned = 0;
+  const host = new BackgroundBrowserHost({
+    userData: path.join("/tmp", "workhorse-bb-test-missing"),
+    launcher: (request) =>
+      defaultBackgroundBrowserLauncher(
+        request,
+        (() => {
+          spawned += 1;
+          throw new Error("spawned");
+        }) as typeof import("node:child_process").spawn,
+        {
+          loadDriver: async () => {
+            throw new Error("Cannot find module 'playwright'");
+          },
+        },
+      ),
+    mkdir: () => undefined,
+  });
+  host.setChromeAccess("chat-missing", "declined");
+  const result = await host.ensureBrowser({ sessionId: "chat-missing" }, () => undefined);
+  assert.equal(result.ok, false);
+  if (!result.ok) assert.match(result.message, /Playwright is not available/);
+  assert.equal(spawned, 0);
+  assert.equal(host.list("chat-missing").some((row) => row.status === "running"), false);
+  assert.equal(host.list("chat-missing").every((row) => row.status === "failed"), true);
+});
+
+test("start while Chrome is unset asks and does not launch", async () => {
+  let launched = 0;
+  const events: BackgroundBrowserEvent[] = [];
+  const host = new BackgroundBrowserHost({
+    userData: path.join("/tmp", "workhorse-bb-test-start-unset"),
+    launcher: async () => {
+      launched += 1;
+      return { child: fakeChild() as unknown as ChildProcess };
+    },
+    mkdir: () => undefined,
+  });
+  const result = await host.start({ sessionId: "chat-unset", name: "browser_snapshot" }, (event) => events.push(event));
+  assert.equal(result.ok, false);
+  if (!result.ok) assert.equal(result.access, "unset");
+  assert.equal(launched, 0);
+  assert.equal(events.some((event) => event.type === "chrome-prompt"), true);
+});
+
+test("granted Chrome is a hook and does not spawn the default profile", async () => {
+  let spawned = 0;
+  await assert.rejects(
+    () =>
+      defaultBackgroundBrowserLauncher(
+        launchRequest("chrome", true),
+        (() => {
+          spawned += 1;
+          return fakeChild();
+        }) as typeof import("node:child_process").spawn,
+      ),
+    /default Chrome profile/,
+  );
+  assert.equal(spawned, 0);
+});
+
+test("decline spawns a desk-owned headless browser with the console hidden", async () => {
+  const spawned: Array<{ command: string; args: readonly string[]; options: SpawnOptions }> = [];
+  let stopped = 0;
+  const child = fakeChild(99_001);
+  const request = launchRequest("background-headless", false);
+  const result = await defaultBackgroundBrowserLauncher(
+    request,
+    ((command: string, args: readonly string[], options: SpawnOptions) => {
+      spawned.push({ command, args, options });
+      return child;
+    }) as typeof import("node:child_process").spawn,
+    {
+      loadDriver: async () => ({
+        executablePath: () => "workhorse-chromium-test",
+        connectOverCDP: async (endpoint: string) => {
+          assert.equal(endpoint, "http://127.0.0.1:9333");
+          return { close: async () => undefined };
+        },
+      }),
+      readDebuggingPort: async (dir: string) => {
+        assert.equal(dir, path.resolve(request.userDataDir));
+        return "9333";
+      },
+      stop: () => {
+        stopped += 1;
+      },
+    },
+  );
+  assert.equal(spawned.length, 1);
+  assert.equal(spawned[0]?.command, "workhorse-chromium-test");
+  assert.equal(spawned[0]?.options.windowsHide, true);
+  assert.equal(spawned[0]?.options.shell, false);
+  assert.equal(spawned[0]?.options.detached, false);
+  const args = spawned[0]?.args ?? [];
+  assert.ok(args.includes(`--user-data-dir=${path.resolve(request.userDataDir)}`));
+  assert.ok(args.includes("--headless=new"));
+  assert.equal(args.some((arg) => /google chrome|screencapture|robotjs|desktopCapturer/i.test(arg)), false);
+  assert.equal(result.child, child);
+  assert.equal(stopped, 0);
+});
+
+test("a driver that cannot attach is stopped and is not returned as a session", async () => {
+  let stopped = 0;
+  await assert.rejects(
+    () =>
+      defaultBackgroundBrowserLauncher(
+        launchRequest("background-headless", true),
+        (() => fakeChild(99_002)) as typeof import("node:child_process").spawn,
+        {
+          loadDriver: async () => ({
+            executablePath: () => "workhorse-chromium-test",
+            connectOverCDP: async () => {
+              throw new Error("cdp refused");
+            },
+          }),
+          readDebuggingPort: async () => "9334",
+          stop: () => {
+            stopped += 1;
+          },
+        },
+      ),
+    /cdp refused/,
+  );
+  assert.equal(stopped, 1);
 });
 
 test("decline then ensure starts a headless desk-owned session", async () => {

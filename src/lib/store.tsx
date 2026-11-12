@@ -255,7 +255,7 @@ import {
   setPlanStepStatus,
   startPlanRun,
 } from "./plan";
-import { applyBackgroundBrowserSession } from "./background-browser";
+import { applyBackgroundBrowserSession, chromeAccessPromptForBrowserTool } from "./background-browser";
 import { applyVendorBackgroundTask } from "./vendor-tasks";
 import {
   applyCompactUsage,
@@ -2604,7 +2604,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const answerChromeAccess = useCallback((sessionId: string, access: "granted" | "declined") => {
     const id = sessionId.trim();
     if (!id) return;
-    void window.workhorse?.backgroundBrowserSetChromeAccess?.(id, access);
     setState((current) => ({
       ...current,
       chromeAccessPrompt: current.chromeAccessPrompt?.sessionId === id ? null : current.chromeAccessPrompt,
@@ -2612,13 +2611,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         session.id === id ? { ...session, chromeAccess: access } : session,
       ),
     }));
-    if (access === "declined") {
-      void window.workhorse?.backgroundBrowserStart?.({
+    void (async () => {
+      const recorded = await window.workhorse?.backgroundBrowserSetChromeAccess?.(id, access);
+      if (access !== "declined" || recorded !== "declined") return;
+      await window.workhorse?.backgroundBrowserStart?.({
         sessionId: id,
         name: "Background browser",
         preferHeadless: true,
       });
-    }
+    })();
   }, []);
 
   const answerPermission = useCallback((id: string, answer: "once" | "session" | "deny") => {
@@ -7853,6 +7854,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if (!pendingIdleClose.current[sessionId] && !canRevive) return;
       armTurnIdle(sessionId, TURN_IDLE_AFTER_TRAILING_MS);
     };
+    const raiseBrowserAccess = (sessionId: string, tool: string) => {
+      const owner = stateRef.current.sessions.find((item) => item.id === sessionId);
+      if (!chromeAccessPromptForBrowserTool(tool, owner?.chromeAccess)) return;
+      if (stateRef.current.chromeAccessPrompt?.sessionId === sessionId) return;
+      promptChromeAccess(sessionId, tool);
+      void window.workhorse?.backgroundBrowserEnsure?.({ sessionId, name: tool });
+    };
     const apply = (event: GrokBridgeEvent) => {
       try {
       const redirectedId = redirectedAssistant.current[event.sessionId];
@@ -7988,6 +7996,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       }
       if (event.type === "tool") {
         noteTrailingTurnActivity(event.sessionId);
+        raiseBrowserAccess(event.sessionId, event.title);
         const owner = stateRef.current.sessions.find((item) => item.id === event.sessionId);
         const turn = learningTurns.current[event.sessionId];
         if (turn && event.toolCallId && !turn.toolIds.includes(event.toolCallId)) turn.toolIds.push(event.toolCallId);
@@ -8134,6 +8143,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         return;
       }
       if (event.type === "permission") {
+        raiseBrowserAccess(event.sessionId, event.tool);
+        if (event.rawTool) raiseBrowserAccess(event.sessionId, event.rawTool);
         const owner = stateRef.current.sessions.find((item) => item.id === event.sessionId);
         const provider =
           owner?.provider === "codex" ||
@@ -8907,6 +8918,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const offGemini = window.workhorse?.onGeminiEvent?.(apply);
     const offCustom = window.workhorse?.onCustomEvent?.(apply);
     const offBrowser = window.workhorse?.onBackgroundBrowserEvent?.((event) => {
+      if (event.type === "chrome-prompt") {
+        promptChromeAccess(event.sessionId, event.name);
+        return;
+      }
       if (event.type === "chrome-access") {
         setState((current) => ({
           ...current,

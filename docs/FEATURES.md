@@ -188,13 +188,13 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
 - **Chrome access prompt** — tools that need a browser first ask for Chrome
   access in the chat (Allow or Decline). Allow uses installed Chrome in a
   desk-owned profile (Piper's path), never the person's default profile.
-- **Background browser session** — on Decline, or when Chrome is not
-  authorized, the chat owns a Chromium/Playwright session under Workhorse
-  userData (headless when declined). A small strip shows name, elapsed time,
-  and running/killed; Stop kills the process tree. No mouse or keyboard is
-  posted into the person's login session, and a blank window never falls back
-  to screenshot-and-click on the real desktop. Helpers that double-fork onto
-  launchd or systemd are refused.
+- **Background browser session** — on Decline, the chat owns a headless
+  Chromium session under Workhorse userData. A missing Playwright driver fails
+  that start instead of leaving a running session. A small strip shows name,
+  elapsed time, and running/killed; Stop kills the process tree. No mouse or
+  keyboard is posted into the person's login session, and a blank window never
+  falls back to screenshot-and-click on the real desktop. Helpers that
+  double-fork onto launchd or systemd are refused.
 - **Attach** takes files or a folder. You can drag them onto the window or paste
   them in.
   - **Images** png, jpg, jpeg, webp, gif, bmp

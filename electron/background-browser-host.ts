@@ -17,7 +17,8 @@ import { groupSpawnOptions, stopProcessTree, trackProcessGroup } from "./process
 
 export type BackgroundBrowserEvent =
   | { type: "session"; session: BackgroundBrowserSession }
-  | { type: "chrome-access"; sessionId: string; access: ChromeAccessState };
+  | { type: "chrome-access"; sessionId: string; access: ChromeAccessState }
+  | { type: "chrome-prompt"; sessionId: string; name?: string };
 
 export type BackgroundBrowserStartInput = {
   sessionId: string;
@@ -56,10 +57,31 @@ export type BackgroundBrowserLauncher = (request: BackgroundBrowserLaunchRequest
   close?: () => Promise<void> | void;
 }>;
 
+/**
+ * Piper attaches installed Chrome here, on a desk-owned profile.
+ * Unset means this desk will not launch Chrome at all.
+ */
+export type GrantedChromeLauncher = BackgroundBrowserLauncher;
+
+export type BackgroundBrowserDriver = {
+  executablePath: () => string;
+  connectOverCDP: (endpoint: string) => Promise<{ close: () => Promise<void> }>;
+};
+
+export type BackgroundBrowserLauncherDeps = {
+  loadDriver?: () => Promise<BackgroundBrowserDriver>;
+  readDebuggingPort?: (userDataDir: string) => Promise<string>;
+  stop?: (child: ChildProcess) => void;
+  /** Piper's installed-Chrome launch. The default refuses the person's profile. */
+  grantedChrome?: GrantedChromeLauncher;
+};
+
 export type BackgroundBrowserHostOptions = {
   userData: string;
   spawnImpl?: typeof spawn;
   launcher?: BackgroundBrowserLauncher;
+  /** Piper's hook. Leave unset so Allow does not open the default Chrome profile. */
+  grantedChromeLauncher?: GrantedChromeLauncher;
   now?: () => number;
   mkdir?: (dir: string) => void;
   platform?: NodeJS.Platform;
@@ -79,86 +101,148 @@ function mintId(now: number): string {
   return `bb_${now.toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
+const DRIVER_PORT_WAIT_MS = 15_000;
+
+function driverFailure(error: unknown): Error {
+  const reason = error instanceof Error ? error.message : String(error);
+  return new Error(`Playwright is not available for the background browser. ${reason}`.trim());
+}
+
+function refusesDefaultChromeExecutable(file: string): boolean {
+  const normalized = file.replaceAll("\\", "/");
+  return /google chrome/i.test(normalized) || /\/Google\/Chrome\//i.test(normalized);
+}
+
+/** Playwright is a devDependency. A packaged desk that cannot load it must fail before any process exists. */
+async function loadPlaywrightDriver(): Promise<BackgroundBrowserDriver> {
+  try {
+    const playwright = (await import("playwright")) as {
+      chromium: {
+        executablePath: () => string;
+        connectOverCDP: (endpoint: string) => Promise<{ close: () => Promise<void> }>;
+      };
+    };
+    return {
+      executablePath: () => playwright.chromium.executablePath(),
+      connectOverCDP: (endpoint) => playwright.chromium.connectOverCDP(endpoint),
+    };
+  } catch (error) {
+    throw driverFailure(error);
+  }
+}
+
+async function readDevToolsActivePort(
+  userDataDir: string,
+  failed: () => Error | undefined,
+  timeoutMs = DRIVER_PORT_WAIT_MS,
+): Promise<string> {
+  const file = path.join(userDataDir, "DevToolsActivePort");
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const error = failed();
+    if (error) throw error;
+    try {
+      const port = fs.readFileSync(file, "utf8").split(/\r?\n/, 1)[0]?.trim() ?? "";
+      if (/^[1-9]\d*$/.test(port)) return port;
+    } catch {
+      /* Chromium has not written the port yet. */
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  const error = failed();
+  if (error) throw error;
+  throw new Error("Background browser did not open a debugging port.");
+}
+
+function chromiumLaunchArgs(userDataDir: string, request: BackgroundBrowserLaunchRequest): string[] {
+  const args = [
+    `--user-data-dir=${userDataDir}`,
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--disable-extensions",
+    "--remote-debugging-port=0",
+  ];
+  if (request.headless || request.mode === "background-headless") args.push("--headless=new");
+  const url = request.url.trim();
+  if (url && url !== "about:blank") args.push(url);
+  return args;
+}
+
 /**
- * Default launcher: Chromium/Playwright under a desk-owned profile.
- * Never the person's default Chrome profile. Never a desktop robot.
+ * Default launcher: Chromium under a desk-owned profile.
+ * A missing Playwright driver throws. It does not spawn a stand-in process.
+ * Granted Chrome is Piper's hook. This function does not open the default profile.
  */
 export async function defaultBackgroundBrowserLauncher(
   request: BackgroundBrowserLaunchRequest,
   spawnImpl: typeof spawn = spawn,
+  deps: BackgroundBrowserLauncherDeps = {},
 ): Promise<{ child: ChildProcess; close?: () => Promise<void> | void }> {
-  let playwright: { chromium: { launch: (opts: Record<string, unknown>) => Promise<{
-    close: () => Promise<void>;
-    newPage: () => Promise<{ goto: (url: string) => Promise<unknown> }>;
-    process: () => ChildProcess | null;
-  }> } };
-  try {
-    playwright = await import("playwright");
-  } catch {
-    throw new Error("Playwright is not available for the background browser.");
-  }
-
-  const headless = request.headless || request.mode === "background-headless";
-  const channel = request.mode === "chrome" ? "chrome" : undefined;
-  const browser = await playwright.chromium.launch({
-    headless,
-    ...(channel ? { channel } : {}),
-    args: [
-      `--user-data-dir=${request.userDataDir}`,
-      "--no-first-run",
-      "--no-default-browser-check",
-      // Never steal focus from the person's login session.
-      "--no-startup-window",
-    ],
-    // Chromium child must follow the same group rules as every vendor CLI.
-    handleSIGINT: false,
-    handleSIGTERM: false,
-    handleSIGHUP: false,
-  });
-
-  const page = await browser.newPage();
-  if (request.url) {
-    try {
-      await page.goto(request.url);
-    } catch {
-      /* about:blank / offline start is fine; tools navigate later */
+  if (request.mode === "chrome") {
+    if (!deps.grantedChrome) {
+      throw new Error("Installed Chrome is not attached. The desk does not open the default Chrome profile.");
     }
+    return deps.grantedChrome(request);
   }
 
-  const child = browser.process();
-  if (!child) {
-    // Playwright owns a browser with no process handle (unlikely). Fall back
-    // to a tracked placeholder spawn so cancel still has a group to reap.
-    const placeholder = spawnImpl(process.execPath, ["-e", "setInterval(()=>{}, 1e9)"], {
-      stdio: "ignore",
-      env: request.env,
-      windowsHide: true,
-      ...groupSpawnOptions(),
-      ...request.spawnOptions,
-    });
+  const loadDriver = deps.loadDriver ?? loadPlaywrightDriver;
+  let driver: BackgroundBrowserDriver;
+  try {
+    driver = await loadDriver();
+  } catch (error) {
+    throw error instanceof Error && error.message.startsWith("Playwright is not available")
+      ? error
+      : driverFailure(error);
+  }
+
+  let executable = "";
+  try {
+    executable = driver.executablePath();
+  } catch (error) {
+    throw driverFailure(error);
+  }
+  if (!executable.trim() || refusesDefaultChromeExecutable(executable)) {
+    throw new Error("Playwright is not available for the background browser. The desk does not open the default Chrome profile.");
+  }
+
+  const userDataDir = path.resolve(request.userDataDir);
+  const spawnOptions: SpawnOptions = {
+    env: request.env,
+    ...request.spawnOptions,
+    // Last, so a caller cannot drop the console hide or route the launch through cmd.exe.
+    shell: false,
+    stdio: "ignore",
+    windowsHide: true,
+  };
+  const child = spawnImpl(executable, chromiumLaunchArgs(userDataDir, request), spawnOptions);
+  let spawnError: Error | undefined;
+  child.once("error", (error) => {
+    spawnError = error instanceof Error ? error : new Error(String(error));
+  });
+  const stop = deps.stop ?? ((target: ChildProcess) => stopProcessTree(target));
+  const readPort = deps.readDebuggingPort ?? ((dir: string) => readDevToolsActivePort(dir, () => spawnError));
+  try {
+    const port = await readPort(userDataDir);
+    if (spawnError) throw spawnError;
+    const browser = await driver.connectOverCDP(`http://127.0.0.1:${port}`);
     return {
-      child: placeholder,
+      child,
       close: async () => {
         try {
           await browser.close();
         } catch {
           /* already closed */
         }
-        stopProcessTree(placeholder);
       },
     };
+  } catch (error) {
+    try {
+      stop(child);
+    } catch {
+      /* already gone */
+    }
+    throw error instanceof Error ? error : new Error(String(error));
   }
-
-  return {
-    child,
-    close: async () => {
-      try {
-        await browser.close();
-      } catch {
-        /* already closed */
-      }
-    },
-  };
 }
 
 /**
@@ -178,7 +262,12 @@ export class BackgroundBrowserHost {
   constructor(options: BackgroundBrowserHostOptions) {
     this.userData = options.userData;
     this.spawnImpl = options.spawnImpl ?? spawn;
-    this.launcher = options.launcher ?? ((request) => defaultBackgroundBrowserLauncher(request, this.spawnImpl));
+    this.launcher =
+      options.launcher ??
+      ((request) =>
+        defaultBackgroundBrowserLauncher(request, this.spawnImpl, {
+          grantedChrome: options.grantedChromeLauncher,
+        }));
     this.now = options.now ?? Date.now;
     this.mkdir = options.mkdir ?? ((dir) => fs.mkdirSync(dir, { recursive: true }));
     this.platform = options.platform ?? process.platform;
@@ -233,6 +322,11 @@ export class BackgroundBrowserHost {
 
     const access = this.getChromeAccess(sessionId);
     if (access === "unset") {
+      emit({
+        type: "chrome-prompt",
+        sessionId,
+        ...(input.name?.trim() ? { name: input.name.trim() } : {}),
+      });
       return {
         ok: false,
         message: "Chrome access has not been decided. Prompt for Chrome access, or decline to start a background session.",
@@ -266,6 +360,18 @@ export class BackgroundBrowserHost {
     void refusesDesktopScreenshotClickFallback();
 
     const access = this.getChromeAccess(sessionId);
+    if (access === "unset") {
+      emit({
+        type: "chrome-prompt",
+        sessionId,
+        ...(input.name?.trim() ? { name: input.name.trim() } : {}),
+      });
+      return {
+        ok: false,
+        message: "Chrome access has not been decided. Prompt for Chrome access, or decline to start a background session.",
+        access: "unset",
+      };
+    }
     const mode = resolveBackgroundBrowserMode(access, {
       preferHeadless: input.preferHeadless,
       chromeDeclinedHeadless: access === "declined",
@@ -293,8 +399,9 @@ export class BackgroundBrowserHost {
     const spawnOptions: SpawnOptions = {
       stdio: "ignore",
       env,
-      windowsHide: true,
+      shell: false,
       ...groupSpawnOptions(this.platform),
+      windowsHide: true,
     };
 
     try {

@@ -108,6 +108,7 @@ export function ChatRow({
         provider: session.provider,
         model: session.model,
         effort: session.effort,
+        fastMode: session.fastMode,
         mode: session.mode,
         botName: bot?.name ?? stockLink?.name,
         routingMode: session.routingMode,

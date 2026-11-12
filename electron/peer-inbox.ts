@@ -49,6 +49,8 @@ export type PeerAsk = {
   description?: string;
   chat?: string;
   effort?: string;
+  /** Fast call option when the vendor/model offers it. */
+  fast?: boolean;
   timeoutSeconds?: number;
   tokenBudget?: number;
   isolation?: "worktree" | "shared";

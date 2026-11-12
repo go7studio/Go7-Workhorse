@@ -135,16 +135,18 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
 
 - A project is a name. Folders and references are optional, added later.
 - Chats belong to a project. Rename, archive, delete, or drag one to another.
-- Vendor, model and thinking effort are set per chat, not per app.
-- Changing This chat's model or effort drops the previous vendor session, so a
-  resend to Grok 4.6 High actually goes there. The thinking timer starts over.
+- Vendor, model, thinking effort, and Fast (where the model offers it) are set
+  per chat, not per app. Fast is on Grok, Claude, and Cursor.
+- Changing This chat's model, effort, or Fast drops the previous vendor session,
+  so a resend to Grok 4.6 High actually goes there. The thinking timer starts over.
 - A vendor session opens with your own prompt, so the vendor titles the chat
   from the task. A vendor that echoes the private context is rejected.
 - Fork a chat to try another model on the same history, in a managed worktree
   when the project has a Git folder.
 - Rewind to an earlier turn.
-- While a turn runs, Enter queues the next prompt on Next. Steer interrupts and
-  sends now, and the chat never says Stopped.
+- While a turn runs, Enter queues the next prompt on Next. Edit puts it back in
+  the composer. Steer interrupts and sends now. × drops it. The chat never says
+  Stopped.
 - A finished turn stays finished. Trailing thought after the vendor returns does
   not walk the horse again.
 - A long transcript opens on the latest turns and pages older windows without
@@ -345,6 +347,9 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
 - The crew tray shows direct workers, their model, effort and latest activity.
 - Expand it to stop a worker or the crew, preview a worker chat, queue a
   follow-up, or open the full chat. Drafts stay local while you type.
+- Hand a named worker a different vendor or model and the desk cancels any live
+  turn, drops the old vendor session, and restarts that worker on the new brain
+  with the same desk transcript.
 - Cancelling one worker stops that worker only, and the wave is not called
   finished while others run.
 - **Subagents** get lifecycle records, cascading cancellation, changed-file

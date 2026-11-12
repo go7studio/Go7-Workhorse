@@ -606,7 +606,11 @@ export type Session = {
    * Missing means the model's own default. A number the model does not offer is ignored.
    */
   contextWindow?: number;
-  /** Claude Code's Fast mode. Applied as a session config option. */
+  /**
+   * Fast call option when the vendor offers it. Grok and Claude send it as the
+   * ACP session config `fast` on/off. Cursor picks a `-fast` launch slug.
+   * Missing means off (the vendor's ordinary speed).
+   */
   fastMode?: boolean;
   /** Claude Code main-thread agent persona, or null for the standard one. */
   agentName?: string | null;

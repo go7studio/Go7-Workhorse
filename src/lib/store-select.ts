@@ -65,6 +65,7 @@ export function sameComposerSession(left: Session | null, right: Session | null)
     left.model === right.model &&
     left.customBotId === right.customBotId &&
     left.effort === right.effort &&
+    Boolean(left.fastMode) === Boolean(right.fastMode) &&
     left.mode === right.mode &&
     left.routingMode === right.routingMode &&
     (left.crewModes ?? []).join() === (right.crewModes ?? []).join() &&

@@ -217,6 +217,11 @@ const DESK_TOOLS: { name: string; description: string; input_schema: Record<stri
         files: { type: "array", items: { type: "string" }, description: "Files to attach to the worker" },
         chat: { type: "string", description: "Optional existing chat or vendor name to copy" },
         effort: { type: "string", description: "Optional override. Omit to keep a reused worker's thinking level; otherwise derived from quick, balanced, or deep" },
+        fast: {
+          type: "boolean",
+          description:
+            "Fast call option when Grok, Claude, or Cursor offers it. Omit to keep a reused worker's Fast setting.",
+        },
         timeoutSeconds: { type: "number", description: "Ignored. The desk does not stop a worker on a runtime limit. The worker runs until it finishes or is cancelled." },
         tokenBudget: {
           type: "number",

@@ -399,6 +399,23 @@ export const Composer = memo(function Composer({
     };
   }, [dropRoot]);
 
+  const editQueuedPrompt = (id: string) => {
+    if (!sessionId) return;
+    const item = queue.find((row) => row.id === id);
+    if (!item) return;
+    const text = item.text;
+    const nextImages = item.images ?? [];
+    setValue(text);
+    setImages(nextImages);
+    setComposerDraft(sessionId, text, nextImages, true);
+    dropQueued(id);
+    requestAnimationFrame(() => {
+      const el = field.current;
+      el?.focus();
+      el?.setSelectionRange(el.value.length, el.value.length);
+    });
+  };
+
   const submit = (text = value, mode?: "queue" | "steer") => {
     if (open && matches[active]) {
       pick(matches[active]);
@@ -463,7 +480,22 @@ export const Composer = memo(function Composer({
             {queue.filter((item) => item.hideUser !== true).map((item, index) => (
               <li key={item.id} className="prompt-queue-item">
                 <span className="prompt-queue-when">{index === 0 ? "Next" : `Then ${index + 1}`}</span>
-                <span className="prompt-queue-text">{item.text.trim() || "(image)"}</span>
+                <button
+                  type="button"
+                  className="prompt-queue-text"
+                  title="Edit queued prompt"
+                  onClick={() => editQueuedPrompt(item.id)}
+                >
+                  {item.text.trim() || "(image)"}
+                </button>
+                <button
+                  type="button"
+                  className="prompt-queue-edit"
+                  aria-label="Edit queued prompt"
+                  onClick={() => editQueuedPrompt(item.id)}
+                >
+                  Edit
+                </button>
                 {running ? (
                   <button type="button" className="prompt-queue-steer" onClick={() => steerQueued(item.id)}>
                     Steer
@@ -925,6 +957,7 @@ export const Composer = memo(function Composer({
                 provider: session.provider,
                 model: session.model,
                 effort: session.effort,
+                fastMode: session.fastMode,
                 mode: session.mode,
                 routingMode: session.routingMode,
                 worker: session.hidden === true,

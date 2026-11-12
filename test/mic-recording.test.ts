@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import { Writable } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
+import { pauseMacDictation, startMacDictation, stopMacDictation } from "../electron/mac-dictation";
 import type { LocalArtifact, LocalJob } from "../src/lib/local-capability-contract";
 import type { LocalComputeHostSettings } from "../src/lib/types";
 import {
@@ -132,6 +135,22 @@ test("mac granted status does not open settings and does not read the real disk"
   });
   assert.deepEqual(result, { status: "granted", granted: true });
   assert.deepEqual(seen, []);
+});
+
+test("a grant already given in this app run does not ask again", async () => {
+  const result = await requestMicrophoneAccess({
+    platform: "darwin",
+    existsSync: () => false,
+    getMediaAccessStatus: () => "not-determined",
+    askForMediaAccess: async () => {
+      throw new Error("must not prompt after this run was already allowed");
+    },
+    openExternal: () => {
+      throw new Error("must not open settings after this run was already allowed");
+    },
+    sessionGranted: true,
+  });
+  assert.deepEqual(result, { status: "granted", granted: true });
 });
 
 test("mac denied opens System Settings only when the injected existsSync says the app is there", async () => {
@@ -456,7 +475,14 @@ test("a live mic fills the text area from on-device lines and says Listening unt
   assert.deepEqual(listenBarScales(2), listenBarScales(1));
   assert.equal(MAC_SPEECH_PRIVACY_URL.includes("Privacy_SpeechRecognition"), true);
   assert.match(read("src/ui/Composer.tsx"), /LISTENING_PLACEHOLDER|composerFieldPlaceholder/);
-  assert.match(read("electron/mac-dictation.swift"), /shouldReportPartialResults = true/);
+  const swift = read("electron/mac-dictation.swift");
+  assert.match(swift, /shouldReportPartialResults = true/);
+  assert.match(swift, /authorizationStatus\(\)/);
+  assert.match(swift, /status == \.authorized/);
+  assert.match(swift, /status != \.notDetermined/);
+  assert.match(swift, /recordPermission/);
+  assert.match(swift, /case \.granted/);
+  assert.match(swift, /command == "stop"/);
 });
 
 test("the packaged app declares mic usage strings and the hardened-runtime audio entitlement", () => {
@@ -487,10 +513,53 @@ test("main, preload, and composer wire the mic control after the tools spacer", 
   assert.match(composer, /micDictateStart/);
   assert.match(read("electron/preload.ts"), /micDictateStart/);
   assert.match(read("electron/main.ts"), /mic:dictate-start/);
+  assert.match(main, /pauseMacDictation\(\)/);
+  assert.match(main, /sessionGranted: microphoneGrantedThisRun/);
   assert.match(css, /\.composer\.listening \.composer-listen/);
   assert.match(composer, /listenBarScales/);
   assert.match(composer, /composerEscapeAction/);
   assert.match(composer, /preserveVoiceDraft/);
   assert.match(css, /\.composer-mic \{[\s\S]*?height:\s*32px/);
   assert.match(css, /\.composer-mic\.recording/);
+});
+
+test("a second mic tap reuses the helper instead of starting another one", () => {
+  stopMacDictation();
+  const writes: string[] = [];
+  let spawns = 0;
+  const child = new EventEmitter() as EventEmitter & {
+    stdin: Writable;
+    stdout: EventEmitter;
+    stderr: EventEmitter;
+    exitCode: number | null;
+    killed: boolean;
+  };
+  child.stdout = new EventEmitter();
+  child.stderr = new EventEmitter();
+  child.exitCode = null;
+  child.killed = false;
+  child.stdin = new Writable({
+    write(chunk, _encoding, done) {
+      writes.push(String(chunk));
+      done();
+    },
+  });
+  const spawnImpl = (() => {
+    spawns += 1;
+    return child;
+  }) as unknown as NonNullable<Parameters<typeof startMacDictation>[0]["spawnImpl"]>;
+  const input = {
+    platform: "darwin" as const,
+    resourcesPath: ROOT,
+    appPath: ROOT,
+    existsSync: (file: string) => file.endsWith(`${path.sep}mac-dictation.swift`) || file === "/usr/bin/swift",
+    spawnImpl,
+    onLine: () => undefined,
+  };
+  assert.equal(startMacDictation(input).ok, true);
+  pauseMacDictation();
+  assert.equal(startMacDictation(input).ok, true);
+  assert.equal(spawns, 1);
+  assert.deepEqual(writes, ["start\n", "stop\n", "start\n"]);
+  stopMacDictation();
 });

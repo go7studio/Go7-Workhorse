@@ -18,6 +18,8 @@ final class DeskDictation {
   private var task: SFSpeechRecognitionTask?
   private var committed = ""
   private var listening = false
+  private var paused = false
+  private var tapped = false
   private var lastLevel = Date.distantPast
 
   init(recognizer: SFSpeechRecognizer) {
@@ -25,6 +27,8 @@ final class DeskDictation {
   }
 
   func start() throws {
+    paused = false
+    if engine.isRunning { return }
     let input = engine.inputNode
     let format = input.outputFormat(forBus: 0)
     guard format.sampleRate > 0, format.channelCount > 0 else {
@@ -34,15 +38,33 @@ final class DeskDictation {
         userInfo: [NSLocalizedDescriptionKey: "The microphone has no audio format."]
       )
     }
-    input.removeTap(onBus: 0)
+    if tapped {
+      input.removeTap(onBus: 0)
+      tapped = false
+    }
     input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
       self?.request?.append(buffer)
       self?.emitLevel(buffer)
     }
+    tapped = true
     engine.prepare()
     try engine.start()
     listen()
     emit(["type": "ready"])
+  }
+
+  func pause() {
+    paused = true
+    listening = false
+    task?.cancel()
+    task = nil
+    request?.endAudio()
+    request = nil
+    if engine.isRunning { engine.stop() }
+    if tapped {
+      engine.inputNode.removeTap(onBus: 0)
+      tapped = false
+    }
   }
 
   private func listen() {
@@ -84,6 +106,7 @@ final class DeskDictation {
 
   private func scheduleRestart() {
     queue.asyncAfter(deadline: .now() + 0.2) {
+      if self.paused { return }
       self.listening = false
       self.task = nil
       self.request = nil
@@ -123,14 +146,42 @@ guard let recognizer, recognizer.isAvailable else {
   exit(1)
 }
 
-let auth = DispatchSemaphore(value: 0)
-var speechAllowed = false
-SFSpeechRecognizer.requestAuthorization { status in
-  speechAllowed = status == .authorized
-  auth.signal()
+func speechIsAllowed() -> Bool {
+  let status = SFSpeechRecognizer.authorizationStatus()
+  if status == .authorized { return true }
+  if status != .notDetermined { return false }
+  let auth = DispatchSemaphore(value: 0)
+  var allowed = false
+  SFSpeechRecognizer.requestAuthorization { next in
+    allowed = next == .authorized
+    auth.signal()
+  }
+  auth.wait()
+  return allowed
 }
-auth.wait()
-guard speechAllowed else {
+
+func microphoneIsAllowed() -> Bool {
+  guard #available(macOS 14, *) else { return true }
+  switch AVAudioApplication.shared.recordPermission {
+  case .granted:
+    return true
+  case .denied:
+    return false
+  case .undetermined:
+    let mic = DispatchSemaphore(value: 0)
+    var allowed = false
+    AVAudioApplication.requestRecordPermission { granted in
+      allowed = granted
+      mic.signal()
+    }
+    mic.wait()
+    return allowed
+  @unknown default:
+    return false
+  }
+}
+
+guard speechIsAllowed() else {
   emit([
     "type": "error",
     "message": "Speech recognition is off. Allow it in System Settings, then try the mic again.",
@@ -138,20 +189,7 @@ guard speechAllowed else {
   ])
   exit(2)
 }
-
-let mic = DispatchSemaphore(value: 0)
-var micAllowed = false
-if #available(macOS 14, *) {
-  AVAudioApplication.requestRecordPermission { granted in
-    micAllowed = granted
-    mic.signal()
-  }
-} else {
-  micAllowed = true
-  mic.signal()
-}
-mic.wait()
-guard micAllowed else {
+guard microphoneIsAllowed() else {
   emit([
     "type": "error",
     "message": "The microphone is off. Allow it in System Settings, then try the mic again.",
@@ -161,10 +199,22 @@ guard micAllowed else {
 }
 
 let desk = DeskDictation(recognizer: recognizer)
-do {
-  try desk.start()
-} catch {
-  emit(["type": "error", "message": error.localizedDescription])
-  exit(1)
+DispatchQueue.global(qos: .userInitiated).async {
+  while let line = readLine() {
+    let command = line.trimmingCharacters(in: .whitespacesAndNewlines)
+    if command == "start" {
+      DispatchQueue.main.async {
+        do {
+          try desk.start()
+        } catch {
+          emit(["type": "error", "message": error.localizedDescription])
+        }
+      }
+    } else if command == "stop" {
+      DispatchQueue.main.async {
+        desk.pause()
+      }
+    }
+  }
 }
 dispatchMain()

@@ -56,6 +56,8 @@ export type MicAccessDeps = {
   getMediaAccessStatus: (mediaType: "microphone") => string;
   askForMediaAccess: (mediaType: "microphone") => Promise<boolean>;
   openExternal: (url: string) => Promise<void> | void;
+  /** Set after this app run has already been told yes, so a later tap does not ask again. */
+  sessionGranted?: boolean;
 };
 
 export type MediaPermissionDetails = {
@@ -139,6 +141,7 @@ export function getMicrophoneAccessStatus(deps: Pick<MicAccessDeps, "platform" |
 }
 
 export async function requestMicrophoneAccess(deps: MicAccessDeps): Promise<MicAccessResult> {
+  if (deps.sessionGranted) return { status: "granted", granted: true };
   if (deps.platform === "win32") {
     const current = mapMediaAccessStatus(deps.getMediaAccessStatus("microphone"));
     if (current === "denied" || current === "restricted") {

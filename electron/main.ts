@@ -55,7 +55,7 @@ import {
   requestMicrophoneAccess,
   transcribeLocalSpeech,
 } from "./mic-host";
-import { startMacDictation, stopMacDictation } from "./mac-dictation";
+import { pauseMacDictation, startMacDictation, stopMacDictation } from "./mac-dictation";
 import { LocalCapabilityHostClient } from "./local-capability-host";
 
 import { displaySrcForHref, openableMediaPath, resolveMediaProtocolFile, safeLocalPath } from "./media-src";
@@ -1669,8 +1669,9 @@ app.whenReady().then(async () => {
     return result.filePaths[0];
   });
 
-  ipcMain.handle("mic:request-access", () =>
-    requestMicrophoneAccess({
+  let microphoneGrantedThisRun = false;
+  ipcMain.handle("mic:request-access", async () => {
+    const result = await requestMicrophoneAccess({
       platform: process.platform,
       existsSync: (file) => fs.existsSync(file),
       getMediaAccessStatus: (mediaType) =>
@@ -1682,8 +1683,11 @@ app.whenReady().then(async () => {
         return systemPreferences.askForMediaAccess(mediaType);
       },
       openExternal: (url) => shell.openExternal(url),
-    }),
-  );
+      sessionGranted: microphoneGrantedThisRun,
+    });
+    if (result.granted) microphoneGrantedThisRun = true;
+    return result;
+  });
   ipcMain.handle("mic:get-status", () =>
     getMicrophoneAccessStatus({
       platform: process.platform,
@@ -1704,7 +1708,7 @@ app.whenReady().then(async () => {
     }),
   );
   ipcMain.handle("mic:dictate-stop", () => {
-    stopMacDictation();
+    pauseMacDictation();
     return true;
   });
   ipcMain.handle("mic:transcribe", async (_event, raw: unknown) => {

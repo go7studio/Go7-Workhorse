@@ -27,15 +27,27 @@ export function macDictationCommand(input: {
 type DictationHandle = {
   child: ChildProcess;
   stop: () => void;
+  onLine: (line: DictationLine) => void;
 };
 
 let active: DictationHandle | null = null;
+
+function helperIsLive(handle: DictationHandle | null): handle is DictationHandle {
+  if (!handle) return false;
+  return handle.child.exitCode == null && !handle.child.killed;
+}
 
 export function stopMacDictation(): void {
   const current = active;
   active = null;
   if (!current) return;
   current.stop();
+}
+
+/** Leave the helper running so the next tap does not ask for the microphone again. */
+export function pauseMacDictation(): void {
+  if (!helperIsLive(active)) return;
+  active.child.stdin?.write("stop\n");
 }
 
 export function startMacDictation(input: {
@@ -46,6 +58,11 @@ export function startMacDictation(input: {
   spawnImpl?: typeof spawn;
   onLine: (line: DictationLine) => void;
 }): { ok: true } | { ok: false; reason: string } {
+  if (helperIsLive(active)) {
+    active.onLine = input.onLine;
+    active.child.stdin?.write("start\n");
+    return { ok: true };
+  }
   stopMacDictation();
   const existsSync = input.existsSync ?? ((file: string) => fs.existsSync(file));
   const launch = macDictationCommand({
@@ -58,21 +75,28 @@ export function startMacDictation(input: {
   const spawnImpl = input.spawnImpl ?? spawn;
   const child = spawnImpl(launch.command, launch.args, {
     shell: false,
-    stdio: ["ignore", "pipe", "pipe"],
+    stdio: ["pipe", "pipe", "pipe"],
     ...groupSpawnOptions(input.platform ?? process.platform),
   });
   let stopped = false;
   let reported = false;
+  const handle: DictationHandle = {
+    child,
+    stop: () => undefined,
+    onLine: input.onLine,
+  };
   const report = (line: DictationLine) => {
     if (line.type === "error") reported = true;
-    input.onLine(line);
+    handle.onLine(line);
   };
   const stop = () => {
     if (stopped) return;
     stopped = true;
     stopProcessTree(child);
   };
-  active = { child, stop };
+  handle.stop = stop;
+  active = handle;
+  child.stdin?.write("start\n");
   let buffer = "";
   child.stdout?.on("data", (chunk: Buffer | string) => {
     buffer += chunk.toString();

@@ -337,7 +337,8 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
   assignment resumes without a second confirmation. A bare yes with no earlier
   ask is still refused: pin the chat to Orchestrate or Mission, or ask again
   in spawn, worker, bot or agent words. Starting a named worker on a vendor,
-  or a note that says prove orchestration, counts as that ask.
+  or a note that says prove orchestration, counts as that ask. You do not send
+  another word for a handoff that already names the lanes.
 - One assignment is one worker, or a
   named continuation on this parent for the same topic; a bare spawn still
   starts clear-headed.
@@ -378,7 +379,10 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
   follow-up, or open the full chat. Drafts stay local while you type.
 - Hand a named worker a different vendor or model and the desk cancels any live
   turn, drops the old vendor session, and restarts that worker on the new brain
-  with the same desk transcript.
+  with the same desk transcript. A fresh start on that same name reopens the
+  free worker. A plan that is still running stays open after a cancel, and the
+  desk picks the unfinished lane back up without a new message. A paused plan
+  refuses the next assignment until it is resumed.
 - Cancelling one worker stops that worker only, and the wave is not called
   finished while others run.
 - **Subagents** get lifecycle records, cascading cancellation, changed-file

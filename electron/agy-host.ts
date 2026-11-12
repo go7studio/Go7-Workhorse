@@ -191,6 +191,7 @@ export class AgySessionHost {
         crewMode: input.crewModes,
         spawnNames: input.spawnNames,
         priorUserTexts: input.priorUserTexts,
+        planOpen: input.planOpen,
       },
       input.visibleText,
     );

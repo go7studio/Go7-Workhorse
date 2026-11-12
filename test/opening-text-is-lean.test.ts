@@ -367,7 +367,7 @@ test("one predicate decides who gets the law and who may spawn", () => {
   // The injector and the refusal read the same function. Two of these
   // disagreeing means a chat is handed the law and then turned away, or
   // spawns having never seen it.
-  const cases: Array<{ text: string; priorTexts?: string[]; crewMode?: CrewMode[]; role?: DeskRole; carried: boolean }> = [
+  const cases: Array<{ text: string; priorTexts?: string[]; crewMode?: CrewMode[]; role?: DeskRole; planOpen?: boolean; carried: boolean }> = [
     { text: "Read the config and tell me what it sets.", carried: false },
     { text: "hire two reviewers", carried: false },
     { text: "Spawn two agents to review this.", carried: true },
@@ -388,15 +388,16 @@ test("one predicate decides who gets the law and who may spawn", () => {
     { text: "Read the config.", crewMode: ["mission"], carried: true },
     { text: "Spawn two agents to review this.", role: "worker", carried: false },
     { text: "Read the config.", crewMode: ["orchestrate"], role: "helper", carried: false },
+    { text: "Give me a handoff that explains what failed.", planOpen: true, carried: true },
   ];
   for (const item of cases) {
     assert.equal(
-      turnCarriesSpawnLaw({ text: item.text, priorTexts: item.priorTexts, crewMode: item.crewMode, role: item.role }),
+      turnCarriesSpawnLaw({ text: item.text, priorTexts: item.priorTexts, crewMode: item.crewMode, role: item.role, planOpen: item.planOpen }),
       item.carried,
       `turnCarriesSpawnLaw disagrees about: ${item.text}`,
     );
     const injected =
-      withSpawnHint(item.text, item.role, item.priorTexts).includes(DESK_SPAWN_LAW) ||
+      withSpawnHint(item.text, item.role, item.priorTexts, item.planOpen).includes(DESK_SPAWN_LAW) ||
       withCrewModeHint(item.text, item.crewMode, item.role).includes(DESK_SPAWN_LAW);
     assert.equal(injected, item.carried, `the injectors disagree about: ${item.text}`);
   }

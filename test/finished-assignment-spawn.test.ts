@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { finishedAssignmentSpawnError, lineupJoinPrompt } from "../src/lib/lineup";
+import { finishedAssignmentSpawnError, lineupJoinPrompt, queueOpenPlanResume } from "../src/lib/lineup";
 import type { Session } from "../src/lib/types";
 
 const parent = (patch: Partial<Session> = {}) => ({
@@ -93,4 +93,32 @@ test("a live orchestrator can cancel Astra workers and spawn replacements in one
   assert.equal(finishedAssignmentSpawnError(session), undefined);
   session.lineup!.notifiedAt = 12;
   assert.match(finishedAssignmentSpawnError(session)!, /new user request/);
+});
+
+test("a running plan stays open after a cancelled lane, and a paused plan refuses the next hire", () => {
+  const running = parent({
+    planRun: { status: "running" } as Session["planRun"],
+  });
+  running.lineup!.rows[0]!.status = "cancelled";
+  assert.equal(finishedAssignmentSpawnError(running), undefined);
+  const paused = parent({
+    planRun: { status: "paused" } as Session["planRun"],
+  });
+  paused.lineup!.rows[0]!.status = "cancelled";
+  assert.match(finishedAssignmentSpawnError(paused)!, /while the plan is running/);
+});
+
+test("an idle chat with a running plan and a cancelled lane is resumed once", () => {
+  const session = parent({
+    status: "idle",
+    planRun: { status: "running" } as Session["planRun"],
+  });
+  session.lineup!.rows[0]!.status = "cancelled";
+  const once = queueOpenPlanResume([session], 20);
+  assert.equal(once[0]?.queue?.length, 1);
+  assert.match(once[0]!.queue![0]!.text, /cancelled lane/);
+  assert.equal(once[0]?.queue?.[0]?.hideUser, true);
+  assert.equal(once[0]?.lineup?.openResumeAt, 20);
+  const twice = queueOpenPlanResume(once, 30);
+  assert.equal(twice[0]?.queue?.length, 1);
 });

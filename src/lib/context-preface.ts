@@ -217,6 +217,7 @@ export function composeVendorPrompt(
     crewMode?: CrewMode | CrewMode[];
     spawnNames?: string[];
     priorUserTexts?: readonly string[];
+    planOpen?: boolean;
   },
   visibleText?: string,
 ): string {
@@ -224,7 +225,7 @@ export function composeVendorPrompt(
     withCrewStatusHint(
       withLooseDeleteHint(
         withCrewModeHint(
-          withSpawnHint(withPermissionHint(withPreviewHint(withDeskBotHint(text)), limits?.role), limits?.role, limits?.priorUserTexts),
+          withSpawnHint(withPermissionHint(withPreviewHint(withDeskBotHint(text)), limits?.role), limits?.role, limits?.priorUserTexts, limits?.planOpen),
           limits?.crewMode,
           limits?.role,
           limits?.spawnNames,

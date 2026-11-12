@@ -305,10 +305,13 @@ export function turnCarriesSpawnLaw(input: {
   priorTexts?: readonly string[];
   crewMode?: CrewMode | CrewMode[];
   role?: DeskRole;
+  /** A plan that is still running is the assignment already given. */
+  planOpen?: boolean;
 }): boolean {
   const { role, text } = input;
   if (role === "worker" || role === "auditor" || role === "helper") return false;
   if (looksLikeWorkerBrief(text)) return false;
+  if (input.planOpen) return true;
   if (orchestrationEnabled(input.crewMode)) return true;
   if (looksLikeSpawnConfirmation(text)) return true;
   if (looksLikeSpawnRequest(text)) return true;
@@ -318,8 +321,13 @@ export function turnCarriesSpawnLaw(input: {
   return alreadyAsked && looksLikeSpawnContinuation(text);
 }
 
-export function withSpawnHint(text: string, role?: DeskRole, priorTexts?: readonly string[]): string {
-  if (!turnCarriesSpawnLaw({ text, role, priorTexts })) return text;
+export function withSpawnHint(
+  text: string,
+  role?: DeskRole,
+  priorTexts?: readonly string[],
+  planOpen?: boolean,
+): string {
+  if (!turnCarriesSpawnLaw({ text, role, priorTexts, planOpen })) return text;
   return `${SPAWN_TURN_HINT}\n\n${text}`;
 }
 

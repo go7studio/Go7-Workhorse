@@ -319,6 +319,8 @@ export type DeskLineup = {
   joinOwner?: "desk" | "external-runtime";
   /** Original user sentence that started this wave. Desk-owned; not a model paraphrase. */
   userText?: string;
+  /** Set once when a still-running plan is handed back to the same ask after a cancel. */
+  openResumeAt?: number;
   /** Desk-owned campaign state for the current adaptive pass. */
   mission?: MissionIteration;
 };

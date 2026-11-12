@@ -49,6 +49,8 @@ export type GrokPromptInput = GrokSessionOpenInput & {
   spawnNames?: string[];
   /** User turns before this one. A continuation of an earlier ask carries the spawn law. */
   priorUserTexts?: readonly string[];
+  /** The chat's plan is still running, so this ask is already open. */
+  planOpen?: boolean;
 };
 
 export type GrokCompactInput = GrokSessionOpenInput & {
@@ -236,6 +238,7 @@ export class GrokSessionHost {
       crewMode: input.crewModes,
       spawnNames: input.spawnNames,
       priorUserTexts: input.priorUserTexts,
+      planOpen: input.planOpen,
     }, input.visibleText);
 
     try {

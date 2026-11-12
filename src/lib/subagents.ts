@@ -416,6 +416,16 @@ export function resolveNamedWorker(
   }
   if (want.seed === "fresh") {
     const holder = namedWorkerOnParent(workers, scope.parentId, asked);
+    // A fresh start on a name this chat already has is that worker again,
+    // with the old vendor session dropped by the caller. Refusing it made a
+    // model change look like the name was taken.
+    if (
+      holder &&
+      workerIsFree(holder) &&
+      (holder.projectId == null || holder.projectId === scope.projectId)
+    ) {
+      return { ok: true, worker: holder };
+    }
     if (holder) return { ok: false, error: WORKER_BOUND_ELSEWHERE_ERROR };
     return { ok: true, worker: null, createName: asked };
   }
@@ -1932,6 +1942,8 @@ export type SpawnTurn = {
   /** User turns before this one, oldest first. A continuation reads them. */
   priorTexts?: readonly string[];
   crewModes?: readonly string[] | null;
+  /** The chat's plan is still running, so this ask is already open. */
+  planOpen?: boolean;
 };
 
 /**
@@ -1946,6 +1958,7 @@ export function spawnTurnOf(
         messages?: ReadonlyArray<{ id?: string; role?: string; text?: string }> | null;
         queue?: ReadonlyArray<{ userMessageId?: string }> | null;
         crewModes?: readonly string[] | null;
+        planRun?: { status?: string } | null;
       }
     | null
     | undefined,
@@ -1959,7 +1972,12 @@ export function spawnTurnOf(
     userTexts.push(message.text ?? "");
   }
   const text = userTexts.length > 0 ? userTexts[userTexts.length - 1]! : "";
-  return { text, priorTexts: userTexts.slice(0, -1), crewModes: session?.crewModes ?? undefined };
+  return {
+    text,
+    priorTexts: userTexts.slice(0, -1),
+    crewModes: session?.crewModes ?? undefined,
+    planOpen: session?.planRun?.status === "running",
+  };
 }
 
 export type SpawnAdmissionInput = {
@@ -2010,7 +2028,7 @@ export function admitSpawn(input: SpawnAdmissionInput): SpawnAdmission {
   // and admitted the same model calling workhorse_delegate one line later.
   if (parentRole === "orchestrator" && !input.deskLoop) {
     const turn = input.turn ?? { text: "" };
-    if (!turnCarriesSpawnLaw({ text: turn.text, priorTexts: turn.priorTexts, crewMode: normalizeCrewModes(turn.crewModes) })) {
+    if (!turnCarriesSpawnLaw({ text: turn.text, priorTexts: turn.priorTexts, crewMode: normalizeCrewModes(turn.crewModes), planOpen: turn.planOpen })) {
       return { ok: false, error: SPAWN_LAW_MISSING_ERROR };
     }
   }

@@ -134,6 +134,7 @@ export class CursorSessionHost {
       crewMode: input.crewModes,
       spawnNames: input.spawnNames,
       priorUserTexts: input.priorUserTexts,
+      planOpen: input.planOpen,
     }, input.visibleText);
     try {
       if (this.stoppedWhileStarting.delete(input.sessionId)) return stoppedBeforePrompt(input.sessionId, slot.agent, emit);

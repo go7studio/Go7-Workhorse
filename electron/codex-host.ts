@@ -163,6 +163,7 @@ export class CodexSessionHost {
       crewMode: input.crewModes,
       spawnNames: input.spawnNames,
       priorUserTexts: input.priorUserTexts,
+      planOpen: input.planOpen,
     }, input.visibleText);
 
     try {

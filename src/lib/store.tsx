@@ -308,6 +308,7 @@ import {
   reconcilePersistedLineups,
   setLineupRowStatus,
   stampLineupUserText,
+  queueOpenPlanResume,
 } from "./lineup";
 import { boundLinkReply, linkLabel } from "./link-reply";
 import { applyPlanAuditorSpawn, joinAndAdmit } from "./plan-admission";
@@ -1027,7 +1028,7 @@ function hydrate(value: unknown, liveRunIds?: ReadonlySet<string>): AppState {
   const restored = rehomeCustomUsage(normalizeUsage(record.usage), settings.customBots, normalizedSessions);
   const usage = [...backfillCursorUsage(normalizedSessions, restored), ...restored];
   const rawSessions = reconcilePersistedLineups(normalizedSessions, Date.now(), usage);
-  const sessions = listedChats(
+  const sessions = queueOpenPlanResume(listedChats(
     applyUsageContext(rawSessions, usage).map((session) => {
       // Local intent titles only for defaults / old prompt slices. Do not rewrite
       // unlocked vendor, manual, or already-reduced titles on launch.
@@ -1036,7 +1037,7 @@ function hydrate(value: unknown, liveRunIds?: ReadonlySet<string>): AppState {
       const lineup = reconcileLineupOnRestart(titled.lineup);
       return lineup ? { ...titled, lineup } : titled;
     }),
-  );
+  ));
   const activeSessionId =
     typeof record.activeSessionId === "string" && sessions.some((session) => session.id === record.activeSessionId)
       ? record.activeSessionId
@@ -3711,6 +3712,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           crewModes: session.crewModes,
           spawnNames: spawnAllowlistNames(session.spawnAllowlist, stateRef.current.settings),
           priorUserTexts: spawnTurnOf({ messages: working, queue: session.queue }).priorTexts,
+          planOpen: session.planRun?.status === "running",
           mcpServers: mcpServersForSession(stateRef.current.settings.mcpServers, session),
           contextWindow: session.contextWindow,
           preface: withPortableHistory(buildSessionPreface({
@@ -4721,6 +4723,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             crewModes: session.crewModes,
             spawnNames: spawnAllowlistNames(session.spawnAllowlist, snapshot.settings),
             priorUserTexts: spawnTurnOf(session).priorTexts,
+            planOpen: session.planRun?.status === "running",
             restartRuntime,
           };
           if (live === "preview") throw new Error(`${providerById(session.provider).name} is not connected yet`);

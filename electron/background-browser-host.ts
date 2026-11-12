@@ -12,6 +12,15 @@ import {
   type BackgroundBrowserStatus,
   type ChromeAccessState,
 } from "../src/lib/background-browser";
+import {
+  browserControlRefusal,
+  classifyChromeTool,
+  performChromeTool,
+  type ChromeToolClient,
+  type ChromeToolRequest,
+  type ChromeToolResponse,
+} from "../src/lib/browser-access";
+import type { PermissionMode, SandboxProfile } from "../src/lib/types";
 import { deskToolEnv } from "./desk-path";
 import { groupSpawnOptions, stopProcessTree, trackProcessGroup } from "./process-registry";
 
@@ -36,6 +45,11 @@ export type BackgroundBrowserStartInput = {
    * launchd/systemd or posts input into the person's login session.
    */
   helperCommand?: string;
+  permissionMode?: PermissionMode;
+  sandbox?: SandboxProfile;
+  /** Explicit request for the person's Chrome profile. Permission Always does not set this. */
+  attachRealProfile?: boolean;
+  realProfileDir?: string;
 };
 
 export type BackgroundBrowserStartResult =
@@ -49,12 +63,21 @@ export type BackgroundBrowserLaunchRequest = {
   headless: boolean;
   env: NodeJS.ProcessEnv;
   spawnOptions: SpawnOptions;
+  deskUserDataDir?: string;
+  workhorseUserData?: string;
+  chromeAccess?: ChromeAccessState;
+  permissionMode?: PermissionMode;
+  sandbox?: SandboxProfile;
+  attachRealProfile?: boolean;
+  realProfileDir?: string;
 };
 
 export type BackgroundBrowserLauncher = (request: BackgroundBrowserLaunchRequest) => Promise<{
   child: ChildProcess;
   /** Optional Playwright-like closer when the child is owned elsewhere. */
   close?: () => Promise<void> | void;
+  tools?: ChromeToolClient;
+  profile?: "desk" | "real";
 }>;
 
 /**
@@ -91,6 +114,8 @@ type Slot = {
   session: BackgroundBrowserSession;
   child?: ChildProcess;
   close?: () => Promise<void> | void;
+  tools?: ChromeToolClient;
+  profile?: "desk" | "real";
 };
 
 function profileDir(userData: string, sessionId: string, browserId: string): string {
@@ -303,6 +328,8 @@ export class BackgroundBrowserHost {
   ): Promise<BackgroundBrowserStartResult> {
     const sessionId = input.sessionId.trim();
     if (!sessionId) return { ok: false, message: "Background browser needs a chat." };
+    const refusal = browserControlRefusal(input);
+    if (refusal) return { ok: false, message: refusal };
 
     const helper = input.helperCommand?.trim() ?? "";
     if (helper && refusesDoubleFork(helper)) {
@@ -343,6 +370,8 @@ export class BackgroundBrowserHost {
   ): Promise<BackgroundBrowserStartResult> {
     const sessionId = input.sessionId.trim();
     if (!sessionId) return { ok: false, message: "Background browser needs a chat." };
+    const refusal = browserControlRefusal(input);
+    if (refusal) return { ok: false, message: refusal };
 
     const helper = input.helperCommand?.trim() ?? "";
     if (helper && refusesDoubleFork(helper)) {
@@ -408,13 +437,26 @@ export class BackgroundBrowserHost {
       const launched = await this.launcher({
         mode,
         userDataDir,
+        deskUserDataDir: userDataDir,
+        workhorseUserData: this.userData,
         url: input.url?.trim() || "about:blank",
         headless: mode === "chrome" ? false : headless,
         env,
         spawnOptions,
+        chromeAccess: access,
+        permissionMode: input.permissionMode,
+        sandbox: input.sandbox,
+        attachRealProfile: input.attachRealProfile === true,
+        realProfileDir: input.realProfileDir,
       });
       trackProcessGroup(launched.child, sessionId, this.now, "tree");
-      const slot: Slot = { session, child: launched.child, close: launched.close };
+      const slot: Slot = {
+        session,
+        child: launched.child,
+        close: launched.close,
+        tools: launched.tools,
+        profile: launched.profile ?? "desk",
+      };
       this.slots.set(id, slot);
       launched.child.once("exit", () => {
         const current = this.slots.get(id);
@@ -434,6 +476,77 @@ export class BackgroundBrowserHost {
       emit({ type: "session", session: failed });
       return { ok: false, message: failed.detail ?? "Background browser failed to start." };
     }
+  }
+
+  /**
+   * Desk-mediated Chrome tools. Decline does not run this allowlist.
+   * The person's profile is used only when the call sets attachRealProfile.
+   */
+  async runChromeTool(
+    input: ChromeToolRequest,
+    emit?: (event: BackgroundBrowserEvent) => void,
+  ): Promise<ChromeToolResponse> {
+    const refusal = browserControlRefusal(input);
+    if (refusal) return { ok: false, message: refusal };
+    const classified = classifyChromeTool(
+      input.tool,
+      typeof input.args.action === "string" ? input.args.action : undefined,
+    );
+    if (classified.kind === "evaluate") return { ok: false, message: classified.message };
+    if (classified.kind !== "allow") return { ok: false, message: "That is not a Chrome tool." };
+    const sessionId = input.sessionId.trim();
+    if (!sessionId) return { ok: false, message: "Chrome needs a chat." };
+    const access = this.getChromeAccess(sessionId);
+    if (access === "unset") {
+      emit?.({ type: "chrome-prompt", sessionId, name: input.tool });
+      return {
+        ok: false,
+        message: "Chrome access has not been decided. Prompt for Chrome access, or decline to start a background session.",
+        access: "unset",
+      };
+    }
+    if (access === "declined") {
+      return {
+        ok: false,
+        message: "This chat declined Chrome. The headless background browser stays the chat-owned session.",
+        access: "declined",
+      };
+    }
+    let slot = this.runningChrome(sessionId);
+    if (slot && input.attachRealProfile === true && slot.profile !== "real") {
+      return {
+        ok: false,
+        message: "This chat's Chrome is the desk-owned profile. Stop it before attaching the real Chrome profile.",
+      };
+    }
+    if (!slot) {
+      const started = await this.start(
+        {
+          sessionId,
+          name: "Chrome",
+          url: classified.action === "navigate" && typeof input.args.url === "string" ? input.args.url : undefined,
+          preferHeadless: false,
+          permissionMode: input.permissionMode,
+          sandbox: input.sandbox,
+          attachRealProfile: input.attachRealProfile,
+          realProfileDir: input.realProfileDir,
+        },
+        emit ?? (() => undefined),
+      );
+      if (!started.ok) return { ok: false, message: started.message, access: started.access };
+      slot = this.slots.get(started.session.id);
+    }
+    if (!slot?.tools) return { ok: false, message: "Chrome launched without a tool client." };
+    return performChromeTool(slot.tools, classified.action, input.args);
+  }
+
+  private runningChrome(sessionId: string): Slot | undefined {
+    let found: Slot | undefined;
+    for (const slot of this.slots.values()) {
+      if (slot.session.sessionId !== sessionId || slot.session.mode !== "chrome" || slot.session.status !== "running") continue;
+      if (!found || slot.session.startedAt >= found.session.startedAt) found = slot;
+    }
+    return found;
   }
 
   stop(browserId: string, emit?: (event: BackgroundBrowserEvent) => void): boolean {

@@ -62,7 +62,7 @@ export function refusesDesktopScreenshotClickFallback(): true {
 }
 
 /** Tool names that need a browser. A sentence that merely says "browser" does not. */
-const BROWSER_TOOL_TOKENS = new Set(["browser", "playwright", "chromium"]);
+const BROWSER_TOOL_TOKENS = new Set(["browser", "playwright", "chromium", "chrome"]);
 
 export function requestsBackgroundBrowser(tool: string): boolean {
   const raw = tool.trim();

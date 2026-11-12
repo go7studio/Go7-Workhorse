@@ -2991,6 +2991,7 @@ test("session bridge lists, finds, and reads chats for peer tools", async () => 
     "workhorse_delete_reference",
     "workhorse_list_skills",
     "workhorse_read_skill",
+    "workhorse_chrome",
     "workhorse_delete_bot",
   ]);
   const rpcPlan = ((listedTools as { result?: { tools?: { name: string; inputSchema?: unknown }[] } })?.result?.tools ?? [])

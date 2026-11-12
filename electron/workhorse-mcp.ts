@@ -27,6 +27,7 @@ import { normalizeSettings } from "../src/lib/settings";
 import { applyVendorCatalog, resetVendorCatalog } from "../src/lib/models";
 import { retiredAutoModelError } from "../src/lib/routing";
 import { passGrantedAccess } from "../src/lib/permissions";
+import { attachedChromeTools } from "./chrome-host";
 import type { AttachmentKind, ChatImage, CustomLlm, MissionCaps, MissionIteration, Session, SessionEnvironment, UsageEvent, WatchDayMarks, WatchPermits } from "../src/lib/types";
 import {
   attachmentKind,
@@ -1029,6 +1030,24 @@ const TOOLS = [
       type: "object",
       properties: { skill: { type: "string", description: "Skill name, or grok:pdf" } },
       required: ["skill"],
+    },
+  },
+  {
+    name: "workhorse_chrome",
+    description:
+      "Control this chat's installed Chrome. action is navigate, snapshot, click, fill, screenshot, or console. No page script. The profile stays under Workhorse unless attachRealProfile is explicitly true after the chat allowed Chrome. Permission Always does not attach the person's profile. Plan, read-only, and strict refuse.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        action: { type: "string", description: "navigate, snapshot, click, fill, screenshot, or console" },
+        url: { type: "string" },
+        selector: { type: "string" },
+        value: { type: "string" },
+        attachRealProfile: { type: "boolean", description: "Use the person's Chrome profile. Never implied by Permission Always." },
+        realProfileDir: { type: "string", description: "Profile directory for an explicit real-profile request." },
+      },
+      required: ["action"],
+      additionalProperties: false,
     },
   },
   {
@@ -3490,7 +3509,43 @@ async function callMutatingTool(name: string, args: Record<string, unknown>, fro
 }
 
 /** Everything else: reads, and the desk-only tools an orchestrator or the desk itself may call. */
+function chromeSeat(sessionId: string): {
+  permissionMode?: "ask" | "accept-edits" | "always-approve" | "plan";
+  sandbox?: "off" | "workspace" | "read-only" | "strict";
+} {
+  const raw = readState();
+  const sessions = Array.isArray(raw.sessions) ? raw.sessions : [];
+  const session = sessions.find((item) => item && typeof item === "object" && (item as { id?: unknown }).id === sessionId) as {
+    mode?: unknown;
+    sandbox?: unknown;
+  } | undefined;
+  const mode = session?.mode;
+  const sandbox = session?.sandbox;
+  return {
+    permissionMode: mode === "ask" || mode === "accept-edits" || mode === "always-approve" || mode === "plan" ? mode : undefined,
+    sandbox: sandbox === "off" || sandbox === "workspace" || sandbox === "read-only" || sandbox === "strict" ? sandbox : undefined,
+  };
+}
+
 async function callDeskTool(name: string, args: Record<string, unknown>, from?: string, localDiscovery: LocalRuntimeDiscovery | null = null): Promise<string> {
+  if (name === "workhorse_chrome") {
+    const sessionId = from?.trim() ?? "";
+    if (!sessionId) throw new Error("Chrome needs a chat.");
+    const run = attachedChromeTools();
+    if (!run) throw new Error("Chrome is not attached.");
+    const seat = chromeSeat(sessionId);
+    const result = await run({
+      sessionId,
+      tool: name,
+      args,
+      permissionMode: seat.permissionMode,
+      sandbox: seat.sandbox,
+      attachRealProfile: args.attachRealProfile === true,
+      realProfileDir: typeof args.realProfileDir === "string" ? args.realProfileDir : undefined,
+    });
+    if (!result.ok) throw new Error(result.message);
+    return result.content;
+  }
   if (name === "workhorse_local_hosts") {
     return JSON.stringify({ hosts: publicLocalHosts(localDiscovery!) }, null, 2);
   }

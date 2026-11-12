@@ -665,6 +665,7 @@ export const WORKER_DESK_TOOLS = [
   "workhorse_list_references",
   "workhorse_list_skills",
   "workhorse_read_skill",
+  "workhorse_chrome",
   "workhorse_probe_runtime",
   // Local Compute is still fail closed here: these static names are visible
   // only when the product registry grants this worker a healthy capability.

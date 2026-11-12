@@ -185,9 +185,13 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
 - **Computer seat** — an agent may use a Computer seat for on-screen work when
   that seat is granted on the chat. It is not a desktop takeover of the login
   session by default.
-- **Chrome access prompt** — tools that need a browser first ask for Chrome
-  access in the chat (Allow or Decline). Allow uses installed Chrome in a
-  desk-owned profile (Piper's path), never the person's default profile.
+- **Chrome access prompt** — before a chat uses Chrome, it asks "Allow this
+  chat to access your Chrome?" Allow controls installed Chrome through
+  navigate, snapshot, click, fill, screenshot, and console. There is no page
+  script in this version. The profile stays under Workhorse userData unless
+  the chat explicitly attaches the person’s Chrome profile. Permission Always
+  does not attach that profile. Plan, read-only, and strict refuse browser
+  control.
 - **Background browser session** — on Decline, the chat owns a headless
   Chromium session under Workhorse userData. A missing Playwright driver fails
   that start instead of leaving a running session. A small strip shows name,

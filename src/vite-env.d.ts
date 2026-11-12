@@ -181,6 +181,10 @@ type WorkhorseBridge = {
     url?: string;
     preferHeadless?: boolean;
     helperCommand?: string;
+    permissionMode?: import("./lib/types").PermissionMode;
+    sandbox?: import("./lib/types").SandboxProfile;
+    attachRealProfile?: boolean;
+    realProfileDir?: string;
   }) => Promise<import("../electron/background-browser-host").BackgroundBrowserStartResult>;
   backgroundBrowserStart?: (input: {
     sessionId: string;
@@ -188,6 +192,10 @@ type WorkhorseBridge = {
     url?: string;
     preferHeadless?: boolean;
     helperCommand?: string;
+    permissionMode?: import("./lib/types").PermissionMode;
+    sandbox?: import("./lib/types").SandboxProfile;
+    attachRealProfile?: boolean;
+    realProfileDir?: string;
   }) => Promise<import("../electron/background-browser-host").BackgroundBrowserStartResult>;
   backgroundBrowserStop?: (browserId: string) => Promise<boolean>;
   backgroundBrowserStopSession?: (sessionId: string) => Promise<number>;

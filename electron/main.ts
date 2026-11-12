@@ -54,6 +54,8 @@ import { pathToMediaUrl } from "../src/lib/media-display";
 import { findSourceFile, listGitChanges, readEditStatsAsync, readFileDiff, readGitHead, readSourceText, recordFileInstance } from "./project-diff";
 import { TerminalHost, type TerminalEvent } from "./terminal-host";
 import { BackgroundBrowserHost, type BackgroundBrowserEvent } from "./background-browser-host";
+import { attachChromeTools, createGrantedChromeLauncher } from "./chrome-host";
+import { defaultRealChromeProfile } from "../src/lib/browser-access";
 import {
   deleteDeskSkill,
   exportChatToFolder,
@@ -1024,7 +1026,12 @@ const terminalHost = new TerminalHost();
  * Wren mic + Dexter Computer seat hook into the same quit list / preload
  * surface nearby — do not invent a Settings tab for any of these.
  */
-const backgroundBrowserHost = new BackgroundBrowserHost({ userData: app.getPath("userData") });
+const backgroundBrowserHost = new BackgroundBrowserHost({
+  userData: app.getPath("userData"),
+  grantedChromeLauncher: createGrantedChromeLauncher({
+    resolveRealProfile: () => defaultRealChromeProfile(process.platform, app.getPath("home")),
+  }),
+});
 
 /*
  * Quit used to name three hosts and miss three. Claude, Cursor and the custom
@@ -1769,6 +1776,32 @@ app.whenReady().then(async () => {
   const emitBackgroundBrowser = (event: Electron.IpcMainInvokeEvent, payload: BackgroundBrowserEvent) => {
     sendToDesk(event.sender, "background-browser:event", payload);
   };
+  const browserLaunchInput = (raw: unknown) => {
+    const input = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+    const permissionMode = input.permissionMode;
+    const sandbox = input.sandbox;
+    return {
+      sessionId: typeof input.sessionId === "string" ? input.sessionId : "",
+      name: typeof input.name === "string" ? input.name : undefined,
+      url: typeof input.url === "string" ? input.url : undefined,
+      preferHeadless: typeof input.preferHeadless === "boolean" ? input.preferHeadless : undefined,
+      helperCommand: typeof input.helperCommand === "string" ? input.helperCommand : undefined,
+      permissionMode:
+        permissionMode === "ask" || permissionMode === "accept-edits" || permissionMode === "always-approve" || permissionMode === "plan"
+          ? permissionMode
+          : undefined,
+      sandbox: sandbox === "off" || sandbox === "workspace" || sandbox === "read-only" || sandbox === "strict" ? sandbox : undefined,
+      // Explicit only. Permission Always is not a request for the person's Chrome profile.
+      attachRealProfile: input.attachRealProfile === true,
+      realProfileDir: typeof input.realProfileDir === "string" ? input.realProfileDir : undefined,
+    };
+  };
+  attachChromeTools((input) =>
+    backgroundBrowserHost.runChromeTool(input, (payload) => {
+      const desk = liveDeskWindow();
+      if (desk) sendToDesk(desk.webContents, "background-browser:event", payload);
+    }),
+  );
   ipcMain.handle("backgroundBrowser:setChromeAccess", (event, sessionId: unknown, access: unknown) => {
     if (typeof sessionId !== "string" || (access !== "granted" && access !== "declined" && access !== "unset")) {
       return "unset";
@@ -1776,36 +1809,10 @@ app.whenReady().then(async () => {
     return backgroundBrowserHost.setChromeAccess(sessionId, access, (payload) => emitBackgroundBrowser(event, payload));
   });
   ipcMain.handle("backgroundBrowser:ensure", async (event, raw: unknown) => {
-    const input =
-      raw && typeof raw === "object"
-        ? (raw as { sessionId?: string; name?: string; url?: string; preferHeadless?: boolean; helperCommand?: string })
-        : {};
-    return backgroundBrowserHost.ensureBrowser(
-      {
-        sessionId: typeof input.sessionId === "string" ? input.sessionId : "",
-        name: typeof input.name === "string" ? input.name : undefined,
-        url: typeof input.url === "string" ? input.url : undefined,
-        preferHeadless: input.preferHeadless,
-        helperCommand: typeof input.helperCommand === "string" ? input.helperCommand : undefined,
-      },
-      (payload) => emitBackgroundBrowser(event, payload),
-    );
+    return backgroundBrowserHost.ensureBrowser(browserLaunchInput(raw), (payload) => emitBackgroundBrowser(event, payload));
   });
   ipcMain.handle("backgroundBrowser:start", async (event, raw: unknown) => {
-    const input =
-      raw && typeof raw === "object"
-        ? (raw as { sessionId?: string; name?: string; url?: string; preferHeadless?: boolean; helperCommand?: string })
-        : {};
-    return backgroundBrowserHost.start(
-      {
-        sessionId: typeof input.sessionId === "string" ? input.sessionId : "",
-        name: typeof input.name === "string" ? input.name : undefined,
-        url: typeof input.url === "string" ? input.url : undefined,
-        preferHeadless: input.preferHeadless,
-        helperCommand: typeof input.helperCommand === "string" ? input.helperCommand : undefined,
-      },
-      (payload) => emitBackgroundBrowser(event, payload),
-    );
+    return backgroundBrowserHost.start(browserLaunchInput(raw), (payload) => emitBackgroundBrowser(event, payload));
   });
   ipcMain.handle("backgroundBrowser:stop", (_event, browserId: unknown) => {
     if (typeof browserId !== "string") return false;

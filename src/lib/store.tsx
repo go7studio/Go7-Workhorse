@@ -256,6 +256,7 @@ import {
   startPlanRun,
 } from "./plan";
 import { applyBackgroundBrowserSession, chromeAccessPromptForBrowserTool } from "./background-browser";
+import { browserControlRefusal } from "./browser-access";
 import { applyVendorBackgroundTask } from "./vendor-tasks";
 import {
   applyCompactUsage,
@@ -2613,11 +2614,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }));
     void (async () => {
       const recorded = await window.workhorse?.backgroundBrowserSetChromeAccess?.(id, access);
-      if (access !== "declined" || recorded !== "declined") return;
+      if (recorded !== access) return;
+      const session = stateRef.current.sessions.find((item) => item.id === id);
+      if (browserControlRefusal({ permissionMode: session?.mode, sandbox: session?.sandbox })) return;
       await window.workhorse?.backgroundBrowserStart?.({
         sessionId: id,
-        name: "Background browser",
-        preferHeadless: true,
+        name: access === "granted" ? "Chrome" : "Background browser",
+        preferHeadless: access !== "granted",
+        permissionMode: session?.mode,
+        sandbox: session?.sandbox,
       });
     })();
   }, []);
@@ -7856,10 +7861,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     };
     const raiseBrowserAccess = (sessionId: string, tool: string) => {
       const owner = stateRef.current.sessions.find((item) => item.id === sessionId);
+      if (browserControlRefusal({ permissionMode: owner?.mode, sandbox: owner?.sandbox })) return;
       if (!chromeAccessPromptForBrowserTool(tool, owner?.chromeAccess)) return;
       if (stateRef.current.chromeAccessPrompt?.sessionId === sessionId) return;
       promptChromeAccess(sessionId, tool);
-      void window.workhorse?.backgroundBrowserEnsure?.({ sessionId, name: tool });
+      void window.workhorse?.backgroundBrowserEnsure?.({
+        sessionId,
+        name: tool,
+        permissionMode: owner?.mode,
+        sandbox: owner?.sandbox,
+      });
     };
     const apply = (event: GrokBridgeEvent) => {
       try {

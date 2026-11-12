@@ -93,6 +93,44 @@ contextBridge.exposeInMainWorld("workhorse", {
     ipcRenderer.on("terminal:event", listener);
     return () => ipcRenderer.removeListener("terminal:event", listener);
   },
+  /* Browser seat — Piper Chrome grant + background fallback. Wren mic / Dexter Computer sit beside this. */
+  backgroundBrowserSetChromeAccess: (sessionId: string, access: import("../src/lib/background-browser").ChromeAccessState) =>
+    ipcRenderer.invoke("backgroundBrowser:setChromeAccess", sessionId, access) as Promise<
+      import("../src/lib/background-browser").ChromeAccessState
+    >,
+  backgroundBrowserEnsure: (input: {
+    sessionId: string;
+    name?: string;
+    url?: string;
+    preferHeadless?: boolean;
+    helperCommand?: string;
+  }) =>
+    ipcRenderer.invoke("backgroundBrowser:ensure", input) as Promise<
+      import("./background-browser-host").BackgroundBrowserStartResult
+    >,
+  backgroundBrowserStart: (input: {
+    sessionId: string;
+    name?: string;
+    url?: string;
+    preferHeadless?: boolean;
+    helperCommand?: string;
+  }) =>
+    ipcRenderer.invoke("backgroundBrowser:start", input) as Promise<
+      import("./background-browser-host").BackgroundBrowserStartResult
+    >,
+  backgroundBrowserStop: (browserId: string) => ipcRenderer.invoke("backgroundBrowser:stop", browserId) as Promise<boolean>,
+  backgroundBrowserStopSession: (sessionId: string) =>
+    ipcRenderer.invoke("backgroundBrowser:stopSession", sessionId) as Promise<number>,
+  backgroundBrowserList: (sessionId?: string) =>
+    ipcRenderer.invoke("backgroundBrowser:list", sessionId) as Promise<
+      import("../src/lib/background-browser").BackgroundBrowserSession[]
+    >,
+  onBackgroundBrowserEvent: (handler: (event: import("./background-browser-host").BackgroundBrowserEvent) => void) => {
+    const listener = (_event: IpcRendererEvent, payload: import("./background-browser-host").BackgroundBrowserEvent) =>
+      handler(payload);
+    ipcRenderer.on("background-browser:event", listener);
+    return () => ipcRenderer.removeListener("background-browser:event", listener);
+  },
   loadState: () => ipcRenderer.invoke("state:load") as Promise<Record<string, unknown>>,
   liveRunIds: () => ipcRenderer.invoke("runs:live") as Promise<string[]>,
   saveState: (state: Record<string, unknown>) => ipcRenderer.invoke("state:save", state),

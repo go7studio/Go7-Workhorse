@@ -53,6 +53,7 @@ import { createViewerHost, viewerSession, resolveViewerWatchFolder } from "./vie
 import { pathToMediaUrl } from "../src/lib/media-display";
 import { findSourceFile, listGitChanges, readEditStatsAsync, readFileDiff, readGitHead, readSourceText, recordFileInstance } from "./project-diff";
 import { TerminalHost, type TerminalEvent } from "./terminal-host";
+import { BackgroundBrowserHost, type BackgroundBrowserEvent } from "./background-browser-host";
 import {
   deleteDeskSkill,
   exportChatToFolder,
@@ -1017,6 +1018,13 @@ function createWindow() {
 const grokHost = new GrokSessionHost();
 const codexHost = new CodexSessionHost();
 const terminalHost = new TerminalHost();
+/*
+ * Chat-owned background browser (Playwright/Chromium under userData).
+ * Piper Chrome grant: setChromeAccess("granted"). Decline → headless.
+ * Wren mic + Dexter Computer seat hook into the same quit list / preload
+ * surface nearby — do not invent a Settings tab for any of these.
+ */
+const backgroundBrowserHost = new BackgroundBrowserHost({ userData: app.getPath("userData") });
 
 /*
  * Quit used to name three hosts and miss three. Claude, Cursor and the custom
@@ -1034,6 +1042,7 @@ function disposeAtQuit(name: string, close: () => void): void {
 disposeAtQuit("grok", () => grokHost.disposeAll());
 disposeAtQuit("codex", () => codexHost.disposeAll());
 disposeAtQuit("terminal", () => terminalHost.disposeAll());
+disposeAtQuit("background-browser", () => backgroundBrowserHost.disposeAll());
 disposeAtQuit("file-instances", () => fileInstanceWrites.flush());
 const peerWaiters = new Map<string, (result: PeerAskResult) => void>();
 
@@ -1753,6 +1762,68 @@ app.whenReady().then(async () => {
   ipcMain.handle("terminal:stop", (_event, sessionId: unknown) => {
     if (typeof sessionId === "string") terminalHost.stop(sessionId);
   });
+
+  /* ---- browser seat (Piper Chrome grant + background fallback) ----
+   * Mic recording (Wren) and Computer seat (Dexter) register beside this block.
+   */
+  const emitBackgroundBrowser = (event: Electron.IpcMainInvokeEvent, payload: BackgroundBrowserEvent) => {
+    sendToDesk(event.sender, "background-browser:event", payload);
+  };
+  ipcMain.handle("backgroundBrowser:setChromeAccess", (event, sessionId: unknown, access: unknown) => {
+    if (typeof sessionId !== "string" || (access !== "granted" && access !== "declined" && access !== "unset")) {
+      return "unset";
+    }
+    return backgroundBrowserHost.setChromeAccess(sessionId, access, (payload) => emitBackgroundBrowser(event, payload));
+  });
+  ipcMain.handle("backgroundBrowser:ensure", async (event, raw: unknown) => {
+    const input =
+      raw && typeof raw === "object"
+        ? (raw as { sessionId?: string; name?: string; url?: string; preferHeadless?: boolean; helperCommand?: string })
+        : {};
+    return backgroundBrowserHost.ensureBrowser(
+      {
+        sessionId: typeof input.sessionId === "string" ? input.sessionId : "",
+        name: typeof input.name === "string" ? input.name : undefined,
+        url: typeof input.url === "string" ? input.url : undefined,
+        preferHeadless: input.preferHeadless,
+        helperCommand: typeof input.helperCommand === "string" ? input.helperCommand : undefined,
+      },
+      (payload) => emitBackgroundBrowser(event, payload),
+    );
+  });
+  ipcMain.handle("backgroundBrowser:start", async (event, raw: unknown) => {
+    const input =
+      raw && typeof raw === "object"
+        ? (raw as { sessionId?: string; name?: string; url?: string; preferHeadless?: boolean; helperCommand?: string })
+        : {};
+    return backgroundBrowserHost.start(
+      {
+        sessionId: typeof input.sessionId === "string" ? input.sessionId : "",
+        name: typeof input.name === "string" ? input.name : undefined,
+        url: typeof input.url === "string" ? input.url : undefined,
+        preferHeadless: input.preferHeadless,
+        helperCommand: typeof input.helperCommand === "string" ? input.helperCommand : undefined,
+      },
+      (payload) => emitBackgroundBrowser(event, payload),
+    );
+  });
+  ipcMain.handle("backgroundBrowser:stop", (_event, browserId: unknown) => {
+    if (typeof browserId !== "string") return false;
+    return backgroundBrowserHost.stop(browserId, (payload) => {
+      const desk = liveDeskWindow();
+      if (desk) sendToDesk(desk.webContents, "background-browser:event", payload);
+    });
+  });
+  ipcMain.handle("backgroundBrowser:stopSession", (_event, sessionId: unknown) => {
+    if (typeof sessionId !== "string") return 0;
+    return backgroundBrowserHost.stopSession(sessionId, (payload) => {
+      const desk = liveDeskWindow();
+      if (desk) sendToDesk(desk.webContents, "background-browser:event", payload);
+    });
+  });
+  ipcMain.handle("backgroundBrowser:list", (_event, sessionId: unknown) =>
+    backgroundBrowserHost.list(typeof sessionId === "string" ? sessionId : undefined),
+  );
 
   ipcMain.handle("project:resolve-file", (_event, filePath: unknown, roots: unknown) => {
     if (typeof filePath !== "string" || !filePath.trim()) return null;

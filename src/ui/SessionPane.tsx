@@ -30,6 +30,7 @@ import { GoalBar } from "./GoalBar";
 import { CrewTray } from "./CrewTray";
 import { ChatPresence } from "./TeamBlock";
 import { WatchBanners } from "./WatchNotices";
+import { BackgroundBrowserStrip } from "./BackgroundBrowserStrip";
 import { VendorTasksStrip } from "./VendorTasksStrip";
 import { ChatSpend } from "./ChatSpend";
 import { ContextMeter } from "./ContextMeter";
@@ -743,6 +744,12 @@ export function SessionPane() {
       ) : null}
       <div className="session-notices">
         <VendorTasksStrip tasks={session.vendorTasks} />
+        <BackgroundBrowserStrip
+          sessions={session.backgroundBrowsers}
+          onStop={(id) => {
+            void window.workhorse?.backgroundBrowserStop?.(id);
+          }}
+        />
         <ChatPresence session={session} />
         <CrewTray key={session.id} />
         <GoalBar />

@@ -79,10 +79,14 @@ export type ProcRecord = {
  * POSIX: the child leads a new process group, so one signal reaches it and
  * everything it starts. Windows has no group a signal can address — the tree
  * comes down by pid with `taskkill /T /F`, and `detached` there would only
- * open a console window on the owner's screen.
+ * open a console window on the owner's screen. `windowsHide` stays on for
+ * every platform so a Win32 spawn never flashes a console (Chromium helpers
+ * and vendor CLIs included).
  */
-export function groupSpawnOptions(platform: NodeJS.Platform = process.platform): { detached: boolean } {
-  return { detached: platform !== "win32" };
+export function groupSpawnOptions(
+  platform: NodeJS.Platform = process.platform,
+): { detached: boolean; windowsHide: true } {
+  return { detached: platform !== "win32", windowsHide: true };
 }
 
 export type KillIo = {

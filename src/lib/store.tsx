@@ -255,6 +255,7 @@ import {
   setPlanStepStatus,
   startPlanRun,
 } from "./plan";
+import { applyBackgroundBrowserSession } from "./background-browser";
 import { applyVendorBackgroundTask } from "./vendor-tasks";
 import {
   applyCompactUsage,
@@ -523,6 +524,7 @@ const EMPTY: AppState = {
   activeProjectId: null,
   activeSessionId: null,
   pending: [],
+  chromeAccessPrompt: null,
   leases: [],
   dismissedAttention: [],
   sheet: null,
@@ -613,6 +615,10 @@ export type Store = AppState & {
   cycleTheme: () => void;
   toggleWorkhorseTheme: () => void;
   answerPermission: (id: string, answer: "once" | "session" | "deny") => void;
+  /** Show the in-chat Chrome access prompt for browser tools (not a Settings tab). */
+  promptChromeAccess: (sessionId: string, name?: string) => void;
+  /** Allow → Piper Chrome path; Decline → start headless background browser. */
+  answerChromeAccess: (sessionId: string, access: "granted" | "declined") => void;
   demoPermission: () => void;
   recordUsage: (draft: UsageDraft) => void;
   openSettings: (section?: SettingsSection) => void;
@@ -1172,6 +1178,8 @@ function cancelVendorSession(session: Pick<Session, "id" | "provider" | "agentRu
   else if (session.provider === "gemini") void window.workhorse?.geminiCancel?.(session.id);
   else if (session.provider === "custom") void window.workhorse?.customCancel?.(session.id);
   else void window.workhorse?.grokCancel?.(session.id);
+  // Stop kills the background browser process tree with the chat.
+  void window.workhorse?.backgroundBrowserStopSession?.(session.id);
 }
 
 function stopDeletedWorkerSessions(before: Session[], after: Session[]) {
@@ -2583,6 +2591,35 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const elevatePeerReply = useRef<Map<string, (result: { text?: string; error?: string }) => void>>(new Map());
+
+  const promptChromeAccess = useCallback((sessionId: string, name?: string) => {
+    const id = sessionId.trim();
+    if (!id) return;
+    setState((current) => ({
+      ...current,
+      chromeAccessPrompt: { sessionId: id, ...(name?.trim() ? { name: name.trim() } : {}) },
+    }));
+  }, []);
+
+  const answerChromeAccess = useCallback((sessionId: string, access: "granted" | "declined") => {
+    const id = sessionId.trim();
+    if (!id) return;
+    void window.workhorse?.backgroundBrowserSetChromeAccess?.(id, access);
+    setState((current) => ({
+      ...current,
+      chromeAccessPrompt: current.chromeAccessPrompt?.sessionId === id ? null : current.chromeAccessPrompt,
+      sessions: current.sessions.map((session) =>
+        session.id === id ? { ...session, chromeAccess: access } : session,
+      ),
+    }));
+    if (access === "declined") {
+      void window.workhorse?.backgroundBrowserStart?.({
+        sessionId: id,
+        name: "Background browser",
+        preferHeadless: true,
+      });
+    }
+  }, []);
 
   const answerPermission = useCallback((id: string, answer: "once" | "session" | "deny") => {
     const pending = stateRef.current.pending.find((item) => item.id === id);
@@ -8869,6 +8906,29 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const offCursor = window.workhorse?.onCursorEvent?.(apply);
     const offGemini = window.workhorse?.onGeminiEvent?.(apply);
     const offCustom = window.workhorse?.onCustomEvent?.(apply);
+    const offBrowser = window.workhorse?.onBackgroundBrowserEvent?.((event) => {
+      if (event.type === "chrome-access") {
+        setState((current) => ({
+          ...current,
+          sessions: current.sessions.map((session) =>
+            session.id === event.sessionId ? { ...session, chromeAccess: event.access } : session,
+          ),
+          chromeAccessPrompt: current.chromeAccessPrompt?.sessionId === event.sessionId ? null : current.chromeAccessPrompt,
+        }));
+        return;
+      }
+      if (event.type === "session") {
+        const row = event.session;
+        setState((current) => ({
+          ...current,
+          sessions: current.sessions.map((session) =>
+            session.id === row.sessionId
+              ? { ...session, backgroundBrowsers: applyBackgroundBrowserSession(session.backgroundBrowsers, row) }
+              : session,
+          ),
+        }));
+      }
+    });
     return () => {
       streamCommits.stop();
       for (const handle of Object.values(turnIdleTimer.current)) window.clearTimeout(handle);
@@ -8881,6 +8941,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       offCursor?.();
       offGemini?.();
       offCustom?.();
+      offBrowser?.();
     };
   }, [recordUsage]);
 
@@ -10098,6 +10159,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       cycleTheme,
       toggleWorkhorseTheme,
       answerPermission,
+      promptChromeAccess,
+      answerChromeAccess,
       demoPermission,
       recordUsage,
       openSettings,
@@ -10256,6 +10319,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       cycleTheme,
       toggleWorkhorseTheme,
       answerPermission,
+      promptChromeAccess,
+      answerChromeAccess,
       demoPermission,
       recordUsage,
       openSettings,

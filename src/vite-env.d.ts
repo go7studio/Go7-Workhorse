@@ -171,6 +171,32 @@ type WorkhorseBridge = {
   terminalWrite?: (sessionId: string, text: string) => Promise<{ ok: boolean; message?: string }>;
   terminalStop?: (sessionId: string) => Promise<void>;
   onTerminalEvent?: (handler: (event: import("../electron/terminal-host").TerminalEvent) => void) => () => void;
+  backgroundBrowserSetChromeAccess?: (
+    sessionId: string,
+    access: import("./lib/background-browser").ChromeAccessState,
+  ) => Promise<import("./lib/background-browser").ChromeAccessState>;
+  backgroundBrowserEnsure?: (input: {
+    sessionId: string;
+    name?: string;
+    url?: string;
+    preferHeadless?: boolean;
+    helperCommand?: string;
+  }) => Promise<import("../electron/background-browser-host").BackgroundBrowserStartResult>;
+  backgroundBrowserStart?: (input: {
+    sessionId: string;
+    name?: string;
+    url?: string;
+    preferHeadless?: boolean;
+    helperCommand?: string;
+  }) => Promise<import("../electron/background-browser-host").BackgroundBrowserStartResult>;
+  backgroundBrowserStop?: (browserId: string) => Promise<boolean>;
+  backgroundBrowserStopSession?: (sessionId: string) => Promise<number>;
+  backgroundBrowserList?: (
+    sessionId?: string,
+  ) => Promise<import("./lib/background-browser").BackgroundBrowserSession[]>;
+  onBackgroundBrowserEvent?: (
+    handler: (event: import("../electron/background-browser-host").BackgroundBrowserEvent) => void,
+  ) => () => void;
   loadState: () => Promise<Record<string, unknown>>;
   liveRunIds: () => Promise<string[]>;
   /** `written: true` only when this exact snapshot was written and the write landed; superseded, refused, or failed saves answer false. `reset` means the main process had no desk to fold a partial save onto, so the next save must carry every chat. */

@@ -206,10 +206,11 @@ test("the shared helper owns the spawn options, so five hosts cannot drift", () 
       `${host} must take its spawn options from electron/process-registry.ts, not its own copy`,
     );
   }
-  assert.deepEqual(groupSpawnOptions("darwin"), { detached: true });
-  assert.deepEqual(groupSpawnOptions("linux"), { detached: true });
+  assert.deepEqual(groupSpawnOptions("darwin"), { detached: true, windowsHide: true });
+  assert.deepEqual(groupSpawnOptions("linux"), { detached: true, windowsHide: true });
   // Windows has no group a signal can address; the tree comes down by taskkill.
-  assert.deepEqual(groupSpawnOptions("win32"), { detached: false });
+  // windowsHide keeps the console from flashing when Chromium or a CLI starts.
+  assert.deepEqual(groupSpawnOptions("win32"), { detached: false, windowsHide: true });
 });
 
 test("killProcessGroup signals the group on POSIX and the tree on Windows", () => {

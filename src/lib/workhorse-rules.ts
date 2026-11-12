@@ -235,6 +235,9 @@ const SPAWN_ASK = new RegExp(
     // "start the workers" is a thread pool. "Start Quinn on Cursor" is a lane.
     `|start\\s+(?!the\\b|a\\b|an\\b|all\\b|some\\b|every\\b)[a-z][a-z]+\\s+on\\s+(?:cursor|composer|grok|claude|codex|gemini)` +
     `|queue\\s+(?!the\\b|a\\b|an\\b|all\\b|some\\b)[a-z][a-z]+\\s+to\\s+start` +
+    // "assign the work out" is the desk being told to hand the slices off.
+    // The article is optional, and a one-word typo in front of "work" still counts.
+    `|assign\\s+\\S*\\s*work\\s+out` +
   ")\\b",
   "i",
 );
@@ -246,7 +249,7 @@ const SPAWN_ASK = new RegExp(
  * asks again on every follow-up.
  */
 const SPAWN_CONFIRMATION =
-  /(?:^\s*confirm\b|\b(?:you have my confirmation|i am confirming|i'm confirming|i already (?:told|asked|gave) you|already given you the instruction|should(?:n't| not) need to confirm|ened to confirm|do(?:n't| not) need (?:my |a )?confirm)\b)/i;
+  /(?:^\s*confirm\b|\byes confirmed\b|\b(?:you have my confirmation|i am confirming|i'm confirming|i already (?:told|asked|gave) you|already given you the instruction|should(?:n't| not) need to confirm|ened to confirm|do(?:n't| not) need (?:my |a )?confirm)\b)/i;
 
 /**
  * A follow-up on work this chat already assigned. It does not hire anyone on
@@ -254,7 +257,7 @@ const SPAWN_CONFIRMATION =
  * without a second confirmation.
  */
 const SPAWN_RESUME =
-  /\b(?:resume|continue|keep going|not working|isn'?t working|incomplete|didn'?t (?:finish|work)|did not (?:finish|work)|fix that)\b/i;
+  /\b(?:resume|continue|keep going|not working|isn'?t working|incomplete|didn'?t (?:finish|work)|did not (?:finish|work)|fix that|hate repeating|repeating myself)\b/i;
 
 export function looksLikeSpawnConfirmation(text: string): boolean {
   return SPAWN_CONFIRMATION.test(text);

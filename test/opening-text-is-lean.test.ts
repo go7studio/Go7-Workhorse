@@ -372,6 +372,15 @@ test("one predicate decides who gets the law and who may spawn", () => {
     { text: "hire two reviewers", carried: false },
     { text: "Spawn two agents to review this.", carried: true },
     { text: "You have my confirmation that you can do it.", carried: true },
+    { text: "yes confirmed... goddamn we need this fixed in the new version I hate repeating myself so much", carried: true },
+    { text: "Complete the rest please, assign hte work out", carried: true },
+    { text: "assign the work out", carried: true },
+    { text: "I hate repeating myself", carried: false },
+    {
+      text: "I hate repeating myself",
+      priorTexts: ["assign the work out"],
+      carried: true,
+    },
     { text: "confirm and also fix that, I should nto ened to confirm", carried: true },
     { text: "the lane is incomplete and not working, resume it", carried: false },
     {

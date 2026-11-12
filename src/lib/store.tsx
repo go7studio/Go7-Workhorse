@@ -435,6 +435,7 @@ import {
 import { clampPaneWidth, SIDEBAR_PANE, THREAD_PANE } from "./pane";
 import {
   assistantHasVisibleReply,
+  isCursorAuthRefusal,
   isVendorRateLimitError,
   isDeskAssistantNotice,
   keepStreamedAssistantText,
@@ -8745,11 +8746,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         }
         const turn = learningTurns.current[event.sessionId];
         const assistantId = grokAssistantId.current[event.sessionId];
+        const cursorAuthFailed = session?.provider === "cursor" && isCursorAuthRefusal(
+          session.messages.find((message) => message.id === assistantId)?.text,
+        );
+        if (cursorAuthFailed) refreshCursorLogin();
         if (turn && session && assistantId) {
           const evidence = agentTurnEvidence({
-            messages: finishOpenToolMessages(session.messages, safetyPaused ? "failed" : "completed"),
+            messages: finishOpenToolMessages(session.messages, safetyPaused || cursorAuthFailed ? "failed" : "completed"),
             assistantId,
-            outcome: safetyPaused ? "safety-paused" : "completed",
+            outcome: safetyPaused ? "safety-paused" : cursorAuthFailed ? "failed" : "completed",
             queuedText: grokChunkQueue.current[event.sessionId],
             stopReason: event.stopReason,
             workedMs: Math.max(0, Date.now() - (session.messages.find((message) => message.id === assistantId)?.createdAt ?? Date.now())),
@@ -8827,9 +8832,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                       return session.messages.map((message) => {
                         if (message.id !== assistantId) return message;
                         const body = message.text ?? "";
-                        const text = session.provider === "gemini"
+                        const raw = session.provider === "gemini"
                           ? (body.trim() ? body : queued)
                           : body.trim() || queued.trim();
+                        const authFailed = session.provider === "cursor" && isCursorAuthRefusal(raw);
+                        const text = authFailed
+                          ? vendorFailedMessage("cursor", "Authentication required")
+                          : raw;
                         return {
                           ...message,
                           text: (session.provider === "gemini" ? Boolean(text.trim()) : assistantHasVisibleReply(text))
@@ -8849,7 +8858,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               safetyPaused ? "failed" : "completed",
             );
             const reportedBlocked = Boolean(session.parentId) && workerReportedBlocked(childReportText({ messages }));
-            const failed = safetyPaused || reportedBlocked;
+            const authFailed = session.provider === "cursor" && isCursorAuthRefusal(
+              messages.find((message) => message.id === assistantId)?.text,
+            );
+            const failed = safetyPaused || reportedBlocked || authFailed;
             return applyVendorTurnIdle({
               ...session,
               scheduledRuns: (session.scheduledRuns ?? []).map((run) =>
@@ -8862,7 +8874,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           });
           const finishedTurn = sessions.find((session) => session.id === event.sessionId);
           const reportedBlocked = Boolean(finishedTurn?.parentId) && workerReportedBlocked(childReportText(finishedTurn));
-          const failed = safetyPaused || reportedBlocked;
+          const authFailed = finishedTurn?.provider === "cursor" && isCursorAuthRefusal(
+            finishedTurn.messages.find((message) => message.id === assistantId)?.text,
+          );
+          const failed = safetyPaused || reportedBlocked || authFailed;
           sessions = withFinishedTurnSubagentStatus(
             sessions,
             event.sessionId,
@@ -8947,6 +8962,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         const pending = grokUsagePending.current[event.sessionId];
         delete grokUsagePending.current[event.sessionId];
         const failedSession = stateRef.current.sessions.find((item) => item.id === event.sessionId);
+        if (failedSession?.provider === "cursor" && (
+          isCursorAuthRefusal(event.message) ||
+          isCursorAuthRefusal(failedSession.messages.find((message) => message.id === grokAssistantId.current[event.sessionId])?.text)
+        )) refreshCursorLogin();
         const settled = settleTurnUsage({
           pending: pending ?? [],
           provider: failedSession?.provider ?? "grok",
@@ -9006,16 +9025,23 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                       run.status === "running" ? { ...run, status: "failed" as const } : run,
                     ),
                     messages: finishOpenToolMessages(
-                      session.messages.map((message) =>
-                        message.id === assistantId && !message.text
-                          ? isJoinAssistantTurn(session.messages, assistantId ?? "")
-                            ? message
-                            : {
-                                ...message,
-                                text: vendorFailedMessage(session.provider, event.message),
-                              }
-                          : message,
-                      ),
+                      session.messages.map((message) => {
+                        if (message.id !== assistantId) return message;
+                        const authFailed = session.provider === "cursor" && (
+                          isCursorAuthRefusal(message.text) || isCursorAuthRefusal(event.message)
+                        );
+                        if (!message.text || authFailed) {
+                          if (isJoinAssistantTurn(session.messages, assistantId ?? "")) return message;
+                          return {
+                            ...message,
+                            text: vendorFailedMessage(
+                              session.provider,
+                              authFailed ? "Authentication required" : event.message,
+                            ),
+                          };
+                        }
+                        return message;
+                      }),
                       "failed",
                       event.message,
                     ),

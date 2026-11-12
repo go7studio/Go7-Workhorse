@@ -173,7 +173,13 @@ test("vendorFailedMessage prefixes Cursor, never Preview only", () => {
   assert.doesNotMatch(rejected, /Available models|hundreds-more/);
   assert.equal(isVendorFailureReply(rejected), true);
   assert.equal(isVendorFailureReply("Cursor agent failed: connection closed"), true);
+  assert.equal(isVendorFailureReply("Authentication required"), true);
+  assert.equal(isVendorFailureReply("Cursor agent failed: Authentication required"), true);
   assert.equal(isVendorFailureReply("Cursor inspected the failure and fixed it."), false);
+  const store = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
+  assert.match(store, /isCursorAuthRefusal/);
+  assert.match(store, /vendorFailedMessage\("cursor", "Authentication required"\)/);
+  assert.match(store, /if \(cursorAuthFailed\) refreshCursorLogin\(\)/);
 });
 
 test("buildCursorLaunchSpec never spawns grok or Cursor.app", () => {

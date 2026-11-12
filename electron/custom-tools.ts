@@ -4,6 +4,9 @@ import path from "node:path";
 import { withDeskToolEnv, withoutWorkhorsePrivateEnv } from "./desk-path";
 import { groupSpawnOptions, stopProcessGroup, trackProcessGroup } from "./process-registry";
 import { permissionPolicyAnswer, looksLikeWriteTool, autoAllowPermission, type PermissionAnswer } from "../src/lib/permissions";
+import { judgeComputerTool } from "../src/lib/computer-seat";
+import type { ComputerSeat } from "../src/lib/computer-seat";
+import { runComputerAction, shellGuiBlock, type ComputerIo } from "./computer-host";
 import {
   deskRoleOf,
   toolsForDeskRole,
@@ -13,6 +16,8 @@ import {
 import type { PermissionGrant, PermissionMode, SandboxProfile } from "../src/lib/types";
 import type { CustomHttpTool } from "./custom-http";
 import { handleWorkhorseRpc } from "./workhorse-mcp";
+import { CHROME_DESK_TOOLS, classifyChromeTool } from "../src/lib/browser-access";
+import { attachedChromeTools } from "./chrome-host";
 
 export type CustomToolUse = {
   id: string;
@@ -80,6 +85,10 @@ const RUN_COMMAND_TIMEOUT_MS = 30_000;
 export type CustomToolPolicy = {
   mode?: PermissionMode;
   sandbox?: SandboxProfile;
+  computer?: ComputerSeat;
+  /** Injected in tests. Production uses the IO Electron main bound. */
+  computerIo?: ComputerIo;
+  platform?: NodeJS.Platform;
   grants?: PermissionGrant[];
   cwd?: string;
   folders?: string[];
@@ -130,6 +139,25 @@ const WORKSPACE_TOOLS: { name: string; description: string; input_schema: Record
     },
   },
   {
+    name: "computer",
+    description:
+      "Drive a desktop app on this Mac or Windows machine. Actions: frontmost, screenshot, click, type, key, scroll. Runs only when this chat's Computer switch is on and Sandbox is Off. Plan, Read-only, and Strict refuse. The first use of an app asks on the permission card. Browsers, the Workhorse window, and typing into a terminal or IDE are refused.",
+    input_schema: {
+      type: "object",
+      properties: {
+        action: { type: "string", description: "frontmost, screenshot, click, type, key, or scroll" },
+        app: { type: "string", description: "Application name, such as Finder or Explorer" },
+        x: { type: "number" },
+        y: { type: "number" },
+        text: { type: "string" },
+        key: { type: "string" },
+        dx: { type: "number" },
+        dy: { type: "number" },
+      },
+      required: ["action"],
+    },
+  },
+  {
     name: "run_command",
     description: "Run a shell command in the linked working directory and return stdout/stderr.",
     input_schema: {
@@ -141,6 +169,7 @@ const WORKSPACE_TOOLS: { name: string; description: string; input_schema: Record
       required: ["command"],
     },
   },
+  ...CHROME_DESK_TOOLS,
 ];
 
 const DESK_TOOLS: { name: string; description: string; input_schema: Record<string, unknown> }[] = [
@@ -217,6 +246,11 @@ const DESK_TOOLS: { name: string; description: string; input_schema: Record<stri
         files: { type: "array", items: { type: "string" }, description: "Files to attach to the worker" },
         chat: { type: "string", description: "Optional existing chat or vendor name to copy" },
         effort: { type: "string", description: "Optional override. Omit to keep a reused worker's thinking level; otherwise derived from quick, balanced, or deep" },
+        fast: {
+          type: "boolean",
+          description:
+            "Fast call option when Grok, Claude, or Cursor offers it. Omit to keep a reused worker's Fast setting.",
+        },
         timeoutSeconds: { type: "number", description: "Ignored. The desk does not stop a worker on a runtime limit. The worker runs until it finishes or is cancelled." },
         tokenBudget: {
           type: "number",
@@ -554,6 +588,12 @@ export function toolDetail(use: CustomToolUse): { detail: string; path?: string 
     const command = typeof input.command === "string" ? input.command : "";
     return { detail: command || "run command", path: typeof input.cwd === "string" ? input.cwd : undefined };
   }
+  if (name === "computer") {
+    const action = typeof input.action === "string" ? input.action : "computer";
+    const app = typeof input.app === "string" ? input.app.trim() : "";
+    // The card and the 24h grant are per app. The key is computer:<app>.
+    return { detail: app || action };
+  }
   if (name === "workhorse_spawn_agent") {
     const provider = typeof input.provider === "string" ? input.provider.trim() : "";
     const chat = typeof input.chat === "string" ? input.chat.trim() : "";
@@ -575,6 +615,17 @@ export function customToolPolicy(
 ): PermissionAnswer | "ask" {
   const name = normalizeCustomToolName(use.name);
   const { detail, path: filePath } = toolDetail({ ...use, name });
+  if (name === "computer") {
+    const verdict = judgeComputerTool(use.input, {
+      computer: policy.computer,
+      mode: policy.mode,
+      sandbox: policy.sandbox,
+      grants: policy.grants,
+    });
+    if (verdict.kind === "block") return "deny";
+    if (verdict.kind === "ask") return "ask";
+    return "once";
+  }
   const forced = permissionPolicyAnswer({
     mode: policy.mode ?? "ask",
     sandbox: policy.sandbox ?? "off",
@@ -772,6 +823,28 @@ export async function executeCustomTool(
   const sandbox = policy.sandbox ?? "off";
   const role = policy.role ?? deskRoleOf({ parentId: policy.parentId, hidden: policy.hidden });
   try {
+    const chromeInput = use.input ?? {};
+    const chrome = classifyChromeTool(name, typeof chromeInput.action === "string" ? chromeInput.action : undefined);
+    if (chrome.kind === "evaluate") {
+      return { id: use.id, name, content: chrome.message, isError: true };
+    }
+    if (chrome.kind === "allow") {
+      if (!customToolOffered(name, role)) {
+        return { id: use.id, name, content: customToolNotOffered(name, role), isError: true };
+      }
+      const run = attachedChromeTools();
+      if (!run) return { id: use.id, name, content: "Chrome is not attached.", isError: true };
+      const result = await run({
+        sessionId: policy.sessionId ?? "",
+        tool: name,
+        args: chromeInput,
+        permissionMode: policy.mode,
+        sandbox: policy.sandbox,
+        attachRealProfile: chromeInput.attachRealProfile === true,
+        realProfileDir: typeof chromeInput.realProfileDir === "string" ? chromeInput.realProfileDir : undefined,
+      });
+      return { id: use.id, name, content: result.ok ? result.content : result.message, isError: !result.ok };
+    }
     if (!customToolOffered(name, role)) {
       return { id: use.id, name, content: customToolNotOffered(name, role), isError: true };
     }
@@ -821,9 +894,38 @@ export async function executeCustomTool(
       else writeWithoutFollowing(filePath, content);
       return { id: use.id, name, content: `Wrote ${filePath} (${content.length} chars)` };
     }
+    if (name === "computer") {
+      const raw = use.input ?? {};
+      const result = await runComputerAction(
+        {
+          action: typeof raw.action === "string" ? raw.action : "",
+          app: typeof raw.app === "string" ? raw.app : undefined,
+          x: typeof raw.x === "number" ? raw.x : undefined,
+          y: typeof raw.y === "number" ? raw.y : undefined,
+          text: typeof raw.text === "string" ? raw.text : undefined,
+          key: typeof raw.key === "string" ? raw.key : undefined,
+          dx: typeof raw.dx === "number" ? raw.dx : undefined,
+          dy: typeof raw.dy === "number" ? raw.dy : undefined,
+          computer: policy.computer,
+          mode: policy.mode,
+          sandbox: policy.sandbox,
+          allowed: true,
+        },
+        policy.computerIo,
+      );
+      return { id: use.id, name, content: result.message, isError: !result.ok };
+    }
     if (name === "run_command") {
       const command = typeof use.input.command === "string" ? use.input.command : "";
       if (!command.trim()) throw new Error("command is required");
+      const refusal = shellGuiBlock({
+        command,
+        computer: policy.computer,
+        mode: policy.mode,
+        sandbox: policy.sandbox,
+        platform: policy.platform,
+      });
+      if (refusal) return { id: use.id, name, content: refusal, isError: true };
       const runCwd = resolveWorkspacePath(typeof use.input.cwd === "string" ? use.input.cwd : cwd, cwd, folders, sandbox);
       return await new Promise<CustomToolResult>((resolve) => {
         /*
@@ -846,7 +948,6 @@ export async function executeCustomTool(
           // vendor login in its vault. With no `env` at all it inherited the
           // lot, and `printenv WORKHORSE_BRIDGE_TOKEN` was a valid command.
           env: withDeskToolEnv(withoutWorkhorsePrivateEnv(process.env)),
-          windowsHide: true,
           stdio: ["ignore", "pipe", "pipe"],
           ...groupSpawnOptions(),
         });

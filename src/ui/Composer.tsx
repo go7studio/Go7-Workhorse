@@ -26,6 +26,49 @@ import { useStoreSelector } from "../lib/store";
 import { sameComposerDesk, selectComposerDesk } from "../lib/store-select";
 import type { ChatImage, CrewMode } from "../lib/types";
 import { crewModeLabel, hasCrewMode, orderedCrewModes, toggleCrewMode } from "../lib/workhorse-rules";
+import {
+  composerEscapeAction,
+  composerFieldPlaceholder,
+  joinVoiceDraft,
+  listenBarScales,
+  LOCAL_SPEECH_CAPABILITY,
+  MAC_SPEECH_PRIVACY_URL,
+  osSpeechGaveUp,
+  pickLocalSpeechHost,
+  pickSpeechEngine,
+  speechEngineAfterOsStartFailure,
+} from "../../electron/mic-host";
+
+type SpeechRec = {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  onresult: ((event: {
+    resultIndex: number;
+    results: ArrayLike<{ isFinal: boolean; 0: { transcript: string } }>;
+  }) => void) | null;
+  onerror: ((event: { error?: string }) => void) | null;
+  onend: (() => void) | null;
+  start(): void;
+  stop(): void;
+};
+
+function speechRecognitionCtor(): (new () => SpeechRec) | null {
+  const w = window as Window & {
+    SpeechRecognition?: new () => SpeechRec;
+    webkitSpeechRecognition?: new () => SpeechRec;
+  };
+  return w.SpeechRecognition ?? w.webkitSpeechRecognition ?? null;
+}
+
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = "";
+  const step = 0x8000;
+  for (let i = 0; i < bytes.length; i += step) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + step));
+  }
+  return btoa(binary);
+}
 
 export function isEditableKeyTarget(el: EventTarget | null): boolean {
   if (!(el instanceof Element)) return false;
@@ -153,8 +196,20 @@ export const Composer = memo(function Composer({
   const [crewOpen, setCrewOpen] = useState(false);
   const [crewWidth, setCrewWidth] = useState(0);
   const [shownCrew, setShownCrew] = useState<CrewMode[]>([]);
+  const [recording, setRecording] = useState(false);
+  const [listenStatus, setListenStatus] = useState("");
+  const [listenLevel, setListenLevel] = useState(0);
+  const [preserveVoiceDraft, setPreserveVoiceDraft] = useState(false);
   const field = useRef<HTMLTextAreaElement>(null);
   const stagedId = useRef<number | null>(null);
+  const recognitionRef = useRef<SpeechRec | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+  const baseDraftRef = useRef("");
+  const finalSpeechRef = useRef("");
+  const recordingRef = useRef(false);
+  const dictationRef = useRef(false);
   const filePicker = useRef<HTMLInputElement>(null);
   const wrap = useRef<HTMLDivElement>(null);
   const crewInner = useRef<HTMLDivElement>(null);
@@ -325,6 +380,27 @@ export const Composer = memo(function Composer({
   useEffect(() => {
     setPlusOpen(false);
     setSpawnOpen(false);
+    setPreserveVoiceDraft(false);
+    recordingRef.current = false;
+    dictationRef.current = false;
+    setRecording(false);
+    setListenStatus("");
+    setListenLevel(0);
+    void window.workhorse?.micDictateStop?.();
+    try {
+      recognitionRef.current?.stop();
+    } catch {
+      /* closed */
+    }
+    recognitionRef.current = null;
+    try {
+      recorderRef.current?.stop();
+    } catch {
+      /* closed */
+    }
+    recorderRef.current = null;
+    streamRef.current?.getTracks().forEach((track) => track.stop());
+    streamRef.current = null;
   }, [sessionId]);
 
   const openSpawnPicker = () => {
@@ -399,15 +475,225 @@ export const Composer = memo(function Composer({
     };
   }, [dropRoot]);
 
+  const editQueuedPrompt = (id: string) => {
+    if (!sessionId) return;
+    const item = queue.find((row) => row.id === id);
+    if (!item) return;
+    const text = item.text;
+    const nextImages = item.images ?? [];
+    setValue(text);
+    setImages(nextImages);
+    setComposerDraft(sessionId, text, nextImages, true);
+    dropQueued(id);
+    requestAnimationFrame(() => {
+      const el = field.current;
+      el?.focus();
+      el?.setSelectionRange(el.value.length, el.value.length);
+    });
+  };
+
+  const releaseMic = () => {
+    streamRef.current?.getTracks().forEach((track) => track.stop());
+    streamRef.current = null;
+  };
+
+  const stopMic = async () => {
+    if (!recordingRef.current && !dictationRef.current && !recognitionRef.current && !recorderRef.current) return;
+    recordingRef.current = false;
+    dictationRef.current = false;
+    setRecording(false);
+    setListenLevel(0);
+    void window.workhorse?.micDictateStop?.();
+    const rec = recognitionRef.current;
+    recognitionRef.current = null;
+    if (rec) {
+      rec.onend = null;
+      try {
+        rec.stop();
+      } catch {
+        /* already stopped */
+      }
+    }
+    const recorder = recorderRef.current;
+    recorderRef.current = null;
+    const chunks = chunksRef.current;
+    chunksRef.current = [];
+    const spoken = finalSpeechRef.current;
+    if (spoken.trim()) {
+      setValue(joinVoiceDraft(baseDraftRef.current, spoken));
+      setPreserveVoiceDraft(true);
+    }
+    if (recorder && recorder.state !== "inactive") {
+      await new Promise<void>((resolve) => {
+        recorder.onstop = () => resolve();
+        try {
+          recorder.stop();
+        } catch {
+          resolve();
+        }
+      });
+    }
+    releaseMic();
+    if (chunks.length === 0) return;
+    const transcribe = window.workhorse?.micTranscribeLocal;
+    if (!transcribe) return;
+    const blob = new Blob(chunks, { type: recorder?.mimeType || "audio/webm" });
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    const result = await transcribe({
+      audioBase64: bytesToBase64(bytes),
+      mimeType: blob.type || "audio/webm",
+    });
+    if (result.ok && result.text.trim()) {
+      setValue(joinVoiceDraft(baseDraftRef.current, result.text));
+      setPreserveVoiceDraft(true);
+    }
+  };
+
+  const resolveGrantedLocalSpeechHost = async (): Promise<string | null> => {
+    const hosts = settings.localCompute?.hosts ?? [];
+    const granted = hosts.some(
+      (row) =>
+        row.enabled &&
+        row.allowedCallerRoles.includes("desk") &&
+        row.allowedCapabilities.includes(LOCAL_SPEECH_CAPABILITY),
+    );
+    if (!granted) return null;
+    const probes = (await window.workhorse?.probeLocalCompute?.(hosts)) ?? [];
+    return pickLocalSpeechHost(hosts, probes);
+  };
+
+  useEffect(() => {
+    return window.workhorse?.onMicDictation?.((event) => {
+      if (!dictationRef.current && !recordingRef.current) return;
+      if (event.type === "partial" || event.type === "final") {
+        finalSpeechRef.current = event.text;
+        setListenStatus("");
+        setValue(joinVoiceDraft(baseDraftRef.current, event.text));
+        if (event.type === "final") setPreserveVoiceDraft(true);
+        return;
+      }
+      if (event.type === "level") {
+        setListenLevel(event.value);
+        return;
+      }
+      if (event.type === "error") {
+        setListenStatus(event.message);
+        if (event.openSettings) void window.workhorse?.openExternal?.(MAC_SPEECH_PRIVACY_URL);
+      }
+    });
+  }, []);
+
+  const startMic = async () => {
+    if (recordingRef.current) return;
+    const access = await window.workhorse?.micRequestAccess?.();
+    if (access && !access.granted) return;
+    const dictate = window.workhorse?.micDictateStart;
+    if (dictate) {
+      baseDraftRef.current = valueRef.current;
+      finalSpeechRef.current = "";
+      setListenStatus("");
+      setListenLevel(0.08);
+      dictationRef.current = true;
+      const started = await dictate();
+      if (started.ok) {
+        recordingRef.current = true;
+        setRecording(true);
+        return;
+      }
+      dictationRef.current = false;
+    }
+    const Ctor = speechRecognitionCtor();
+    const localHostId = Ctor ? null : await resolveGrantedLocalSpeechHost();
+    if (pickSpeechEngine(Boolean(Ctor), localHostId) === "none") return;
+    let stream: MediaStream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+    } catch {
+      return;
+    }
+    streamRef.current = stream;
+    baseDraftRef.current = valueRef.current;
+    finalSpeechRef.current = "";
+    recordingRef.current = true;
+    setRecording(true);
+    if (Ctor) {
+      const rec = new Ctor();
+      rec.continuous = true;
+      rec.interimResults = true;
+      rec.lang = navigator.language || "en-US";
+      rec.onerror = (event) => {
+        if (!recordingRef.current || !osSpeechGaveUp(event.error)) return;
+        setListenStatus("Speech recognition didn't return words. Tap the mic to stop.");
+      };
+      rec.onresult = (event) => {
+        let interim = "";
+        for (let i = event.resultIndex; i < event.results.length; i += 1) {
+          const piece = event.results[i]![0]?.transcript ?? "";
+          if (event.results[i]!.isFinal) finalSpeechRef.current = joinVoiceDraft(finalSpeechRef.current, piece);
+          else interim += piece;
+        }
+        setListenStatus("");
+        setValue(joinVoiceDraft(baseDraftRef.current, joinVoiceDraft(finalSpeechRef.current, interim)));
+      };
+      rec.onend = () => {
+        if (!recordingRef.current) return;
+        try {
+          rec.start();
+        } catch {
+          /* engine ended */
+        }
+      };
+      recognitionRef.current = rec;
+      const engine = await speechEngineAfterOsStartFailure(
+        () => rec.start(),
+        async () => {
+          recognitionRef.current = null;
+          rec.onend = null;
+          rec.onresult = null;
+          try {
+            rec.stop();
+          } catch {
+            /* start never began */
+          }
+          return resolveGrantedLocalSpeechHost();
+        },
+      );
+      if (engine === "os") return;
+      recognitionRef.current = null;
+      rec.onend = null;
+      if (engine !== "local-compute") {
+        recordingRef.current = false;
+        setRecording(false);
+        releaseMic();
+        return;
+      }
+    }
+    const mime = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+      ? "audio/webm;codecs=opus"
+      : MediaRecorder.isTypeSupported("audio/webm")
+        ? "audio/webm"
+        : "";
+    const recorder = mime ? new MediaRecorder(stream, { mimeType: mime }) : new MediaRecorder(stream);
+    chunksRef.current = [];
+    recorder.ondataavailable = (event) => {
+      if (event.data.size > 0) chunksRef.current.push(event.data);
+    };
+    recorderRef.current = recorder;
+    recorder.start(250);
+  };
+
   const submit = (text = value, mode?: "queue" | "steer") => {
     if (open && matches[active]) {
       pick(matches[active]);
       return;
     }
-    if (!text.trim() && images.length === 0) return;
-    send(text, { images, steer: running && mode === "steer" });
+    const spoken = recordingRef.current ? joinVoiceDraft(baseDraftRef.current, finalSpeechRef.current) : text;
+    if (recordingRef.current) void stopMic();
+    if (!spoken.trim() && images.length === 0) return;
+    send(spoken, { images, steer: running && mode === "steer" });
     setValue("");
     setImages([]);
+    setPreserveVoiceDraft(false);
     if (sessionId) setComposerDraft(sessionId, "", [], true);
   };
 
@@ -463,7 +749,22 @@ export const Composer = memo(function Composer({
             {queue.filter((item) => item.hideUser !== true).map((item, index) => (
               <li key={item.id} className="prompt-queue-item">
                 <span className="prompt-queue-when">{index === 0 ? "Next" : `Then ${index + 1}`}</span>
-                <span className="prompt-queue-text">{item.text.trim() || "(image)"}</span>
+                <button
+                  type="button"
+                  className="prompt-queue-text"
+                  title="Edit queued prompt"
+                  onClick={() => editQueuedPrompt(item.id)}
+                >
+                  {item.text.trim() || "(image)"}
+                </button>
+                <button
+                  type="button"
+                  className="prompt-queue-edit"
+                  aria-label="Edit queued prompt"
+                  onClick={() => editQueuedPrompt(item.id)}
+                >
+                  Edit
+                </button>
                 {running ? (
                   <button type="button" className="prompt-queue-steer" onClick={() => steerQueued(item.id)}>
                     Steer
@@ -563,7 +864,7 @@ export const Composer = memo(function Composer({
           </ul>
         )}
         <form
-          className="composer"
+          className={`composer${recording ? " listening" : ""}`}
           onSubmit={(event) => {
             event.preventDefault();
             submit();
@@ -574,13 +875,13 @@ export const Composer = memo(function Composer({
           data-composer-field="true"
           rows={1}
           value={value}
-          placeholder={
-            over
-              ? "Drop files or folders"
-              : running
-                ? "Queue for next, or Steer to redirect"
-                : "Message, drop a file or folder, or type /"
-          }
+          readOnly={recording}
+          placeholder={composerFieldPlaceholder({
+            recording,
+            dropping: over,
+            running,
+            status: listenStatus,
+          })}
           onPaste={(event) => {
             const files = filesFromClipboard(event.clipboardData);
             if (files.length === 0) return;
@@ -621,9 +922,23 @@ export const Composer = memo(function Composer({
               submit(value, running && (event.altKey || event.metaKey) ? "steer" : "queue");
             }
             if (event.key === "Escape") {
-              if (plusOpen) {
+              const action = composerEscapeAction({
+                recording: recordingRef.current,
+                plusOpen,
+                preserveVoiceDraft,
+              });
+              if (action === "stop-recording") {
+                event.preventDefault();
+                void stopMic();
+                return;
+              }
+              if (action === "close-menu") {
                 event.preventDefault();
                 setPlusOpen(false);
+                return;
+              }
+              if (action === "keep-draft") {
+                event.preventDefault();
                 return;
               }
               setValue("");
@@ -925,6 +1240,7 @@ export const Composer = memo(function Composer({
                 provider: session.provider,
                 model: session.model,
                 effort: session.effort,
+                fastMode: session.fastMode,
                 mode: session.mode,
                 routingMode: session.routingMode,
                 worker: session.hidden === true,
@@ -934,6 +1250,32 @@ export const Composer = memo(function Composer({
           </button>
         )}
         <span className="composer-tools-spacer" aria-hidden="true" />
+        <span className="composer-listen" aria-hidden="true">
+          {listenBarScales(recording ? listenLevel : 0).map((scale, index) => (
+            <span key={index} style={{ transform: `scaleY(${scale})` }} />
+          ))}
+        </span>
+        <button
+          className={`composer-mic${recording ? " recording" : ""}`}
+          type="button"
+          aria-label={recording ? "Stop recording" : "Record voice"}
+          aria-pressed={recording}
+          title={recording ? "Stop recording" : "Record voice"}
+          onClick={() => {
+            if (recordingRef.current) void stopMic();
+            else void startMic();
+          }}
+        >
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <rect x="5.5" y="2.2" width="5" height="7.6" rx="2.5" stroke="currentColor" strokeWidth="1.55" />
+            <path
+              d="M3.4 8.4a4.6 4.6 0 0 0 9.2 0M8 13v1.4"
+              stroke="currentColor"
+              strokeWidth="1.55"
+              strokeLinecap="round"
+            />
+          </svg>
+        </button>
         {running && canSend ? (
           <button
             className="send-steer"

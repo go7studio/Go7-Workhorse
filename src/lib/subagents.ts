@@ -34,6 +34,7 @@ import type {
 } from "./types";
 import { sessionSpend } from "./usage";
 import { beginAssignmentBudget } from "./worker-budget";
+import { isTerminalRunStatus } from "./worker-settled";
 import {
   looksLikeWorkerBrief,
   normalizeCrewModes,
@@ -415,6 +416,16 @@ export function resolveNamedWorker(
   }
   if (want.seed === "fresh") {
     const holder = namedWorkerOnParent(workers, scope.parentId, asked);
+    // A fresh start on a name this chat already has is that worker again,
+    // with the old vendor session dropped by the caller. Refusing it made a
+    // model change look like the name was taken.
+    if (
+      holder &&
+      workerIsFree(holder) &&
+      (holder.projectId == null || holder.projectId === scope.projectId)
+    ) {
+      return { ok: true, worker: holder };
+    }
     if (holder) return { ok: false, error: WORKER_BOUND_ELSEWHERE_ERROR };
     return { ok: true, worker: null, createName: asked };
   }
@@ -622,22 +633,33 @@ export function afterBriefFor(
       ? `${report.slice(0, AFTER_REPORT_CHARS)}${report.length > AFTER_REPORT_CHARS ? "…" : ""}`
       : "no report";
     const changed = item.changedFiles?.length ? ` Changed: ${item.changedFiles.slice(0, 12).join(", ")}.` : "";
-    lines.push(`- ${item.name} (${item.status}).${changed} Report: ${said}`);
+    const cancelledNote = item.status === "cancelled" ? " Cancelled." : "";
+    lines.push(`- ${item.name} (${item.status}).${cancelledNote}${changed} Report: ${said}`);
   }
   return lines.join("\n");
 }
 
 /**
- * Why a waiting worker never started: one it waited on ended without
- * finishing its work. Starting anyway would spend a run on a slice whose
- * ground was never laid.
+ * Why a waiting worker never started: one it waited on failed, or ended
+ * some way other than completed or cancelled. A cancel is not a failed
+ * ground. The follower starts, and the after brief names who was cancelled.
+ * Failed still blocks.
  */
 export function afterBlockedReason(
   finished: Array<{ name: string; status: string }>,
 ): string | undefined {
-  const broken = finished.filter((item) => item.status !== "completed");
+  const broken = finished.filter((item) => item.status !== "completed" && item.status !== "cancelled");
   if (broken.length === 0) return undefined;
   return `Did not start: ${broken.map((item) => `${item.name} ${item.status}`).join(", ")}, and this slice was to come after ${broken.length === 1 ? "it" : "them"}.`;
+}
+
+/**
+ * Keep waiting while a predecessor is still at work. Cancelled is an end.
+ * Running, including a session that was cancelled and started again, is not.
+ */
+export function predecessorStillWaiting(status: string | undefined): boolean {
+  if (status === "cancelled") return false;
+  return !isTerminalRunStatus(status);
 }
 
 /**
@@ -665,6 +687,7 @@ export const WORKER_DESK_TOOLS = [
   "workhorse_list_references",
   "workhorse_list_skills",
   "workhorse_read_skill",
+  "workhorse_chrome",
   "workhorse_probe_runtime",
   // Local Compute is still fail closed here: these static names are visible
   // only when the product registry grants this worker a healthy capability.
@@ -894,8 +917,10 @@ function namedSpawnPick(value: unknown): boolean {
  * When a chat hands out work, the desk ranks the slice unless the
  * orchestrator named a model or a sidebar chat. This is the desk's own
  * routing — Settings → Routing, on unless the person turns it off. A named
- * vendor without a model still ranks that vendor's models. Nothing is pinned
- * to catalog-first. A person's own chat still routes only when they set
+ * vendor without a model still ranks that vendor's models. An explicit
+ * provider with a model is a lock. Cursor Grok in the person's ask locks
+ * Cursor. grok-4.7 with no vendor still competes. Nothing is pinned to
+ * catalog-first. A person's own chat still routes only when they set
  * that chat to Auto.
  */
 export function shouldAutoRouteSpawn(input: {
@@ -914,18 +939,28 @@ export function shouldAutoRouteSpawn(input: {
   }
   if (!input.routingEnabled) return false;
   if (namedSpawnPick(input.chat) || namedSpawnPick(input.customBotId)) return false;
+  if (lockedCursorGrokSpawn(input.userLockedModel)) return false;
+  const provider = parseProviderId(typeof input.provider === "string" ? input.provider : undefined);
+  // An explicit provider with a model is that spawn's lock. A vendor alone
+  // still ranks its own models.
+  if (provider && namedSpawnPick(input.model)) return false;
   if (namedSpawnPick(input.model)) {
     const locked = namedSpawnPick(input.userLockedModel);
     if (input.coordinatorModel && !locked) return true;
     const family = spawnModelFamilyKey(input.model);
-    const provider = parseProviderId(typeof input.provider === "string" ? input.provider : undefined);
-    // grok-4.7 without a vendor is a family, not a Grok Build lock. Cursor
-    // Grok and ACP Grok still compete on leftover. A named vendor keeps
-    // Auto inside that login.
+    // grok-4.7 with no vendor and no Cursor phrase still competes.
     if (family && !provider) return true;
     return false;
   }
   return true;
+}
+
+/** The person's "Cursor Grok" phrase, including "cursor grok 4.7". */
+export function lockedCursorGrokSpawn(model: unknown): { provider: "cursor"; model: string } | null {
+  if (typeof model !== "string") return null;
+  const folded = model.trim().toLowerCase().replace(/[\s_]+/g, "-");
+  if (folded !== "cursor-grok-4.7") return null;
+  return { provider: "cursor", model: "grok-4.7-high" };
 }
 
 /** Model name the user explicitly assigned in their ask (not the orchestrator's spawn field). */
@@ -936,6 +971,9 @@ export function userLockedSpawnModel(
   const lastUser = [...messages].reverse().find((item) => item.role === "user" && !item.hideUser && item.text?.trim());
   const text = lastUser?.text?.trim() ?? "";
   if (!text) return undefined;
+  // "Cursor Grok" and "cursor grok 4.7" name Cursor's model. grok-4.7
+  // with a hyphen and no Cursor word does not, and may still compete.
+  if (/\bcursor[\s-]+grok\b/i.test(text)) return "cursor-grok-4.7";
   const lower = text.toLowerCase();
   const useModel =
     text.match(/\buse\s+([a-z0-9][a-z0-9._:/-]{2,})\b/i)?.[1] ??
@@ -1899,7 +1937,14 @@ export function formatWorkerPrompt(input: WorkerBriefInput): string {
  * this chat's pins, which together decide whether DESK_SPAWN_LAW was injected.
  * Both are already on the caller session, so nothing new has to be persisted.
  */
-export type SpawnTurn = { text: string; crewModes?: readonly string[] | null };
+export type SpawnTurn = {
+  text: string;
+  /** User turns before this one, oldest first. A continuation reads them. */
+  priorTexts?: readonly string[];
+  crewModes?: readonly string[] | null;
+  /** The chat's plan is still running, so this ask is already open. */
+  planOpen?: boolean;
+};
 
 /**
  * That turn, read off the caller session. Both doors call this rather than
@@ -1913,21 +1958,26 @@ export function spawnTurnOf(
         messages?: ReadonlyArray<{ id?: string; role?: string; text?: string }> | null;
         queue?: ReadonlyArray<{ userMessageId?: string }> | null;
         crewModes?: readonly string[] | null;
+        planRun?: { status?: string } | null;
       }
     | null
     | undefined,
 ): SpawnTurn {
   const messages = session?.messages ?? [];
   const queued = new Set((session?.queue ?? []).map((item) => item.userMessageId).filter(Boolean));
-  let text = "";
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const message = messages[index];
+  const userTexts: string[] = [];
+  for (const message of messages) {
     if (message?.role !== "user") continue;
     if (message.id && queued.has(message.id)) continue;
-    text = message.text ?? "";
-    break;
+    userTexts.push(message.text ?? "");
   }
-  return { text, crewModes: session?.crewModes ?? undefined };
+  const text = userTexts.length > 0 ? userTexts[userTexts.length - 1]! : "";
+  return {
+    text,
+    priorTexts: userTexts.slice(0, -1),
+    crewModes: session?.crewModes ?? undefined,
+    planOpen: session?.planRun?.status === "running",
+  };
 }
 
 export type SpawnAdmissionInput = {
@@ -1978,7 +2028,7 @@ export function admitSpawn(input: SpawnAdmissionInput): SpawnAdmission {
   // and admitted the same model calling workhorse_delegate one line later.
   if (parentRole === "orchestrator" && !input.deskLoop) {
     const turn = input.turn ?? { text: "" };
-    if (!turnCarriesSpawnLaw({ text: turn.text, crewMode: normalizeCrewModes(turn.crewModes) })) {
+    if (!turnCarriesSpawnLaw({ text: turn.text, priorTexts: turn.priorTexts, crewMode: normalizeCrewModes(turn.crewModes), planOpen: turn.planOpen })) {
       return { ok: false, error: SPAWN_LAW_MISSING_ERROR };
     }
   }
@@ -3281,20 +3331,35 @@ export function claimSharedFiles(input: {
   sandbox?: SandboxProfile;
   files: Array<{ path: string; fingerprint: string }>;
   now?: number;
-}): { ok: true; leases: FileLease[] } | { ok: false; error: string; conflicts: string[] } {
+  /**
+   * Sessions this spawn is waiting on. When every conflicting lease is
+   * theirs, the queue is accepted and the claim is taken when the waiter starts.
+   */
+  deferTo?: readonly string[];
+}): { ok: true; leases: FileLease[]; deferred?: boolean } | { ok: false; error: string; conflicts: string[] } {
   if (!workerMayWrite(input.role, input.sandbox)) {
     return { ok: false, error: "This worker's sandbox is read-only, so it cannot write.", conflicts: input.files.map((file) => file.path) };
   }
   const now = input.now ?? Date.now();
   const next = [...input.leases];
   const conflicts: string[] = [];
+  const holderIds = new Set<string>();
+  const deferTo = new Set(
+    (input.deferTo ?? []).filter((id) => typeof id === "string" && id.trim()).map((id) => id.trim()),
+  );
   for (const file of input.files) {
     const path = normalizeLeasePath(file.path);
     const key = path.toLowerCase();
-    const held = input.leases.find((lease) => lease.sessionId !== input.sessionId && normalizeLeasePath(lease.path).toLowerCase() === key);
-    if (held) conflicts.push(file.path);
+    const held = input.leases.filter(
+      (lease) => lease.sessionId !== input.sessionId && normalizeLeasePath(lease.path).toLowerCase() === key,
+    );
+    if (held.length === 0) continue;
+    conflicts.push(file.path);
+    for (const lease of held) holderIds.add(lease.sessionId);
   }
   if (conflicts.length) {
+    const waitingHoldsAll = holderIds.size > 0 && [...holderIds].every((id) => deferTo.has(id));
+    if (waitingHoldsAll) return { ok: true, leases: input.leases, deferred: true };
     return {
       ok: false,
       error: `Shared-folder claim blocked: ${conflicts.join(", ")} already leased.`,

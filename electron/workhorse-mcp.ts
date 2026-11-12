@@ -27,6 +27,7 @@ import { normalizeSettings } from "../src/lib/settings";
 import { applyVendorCatalog, resetVendorCatalog } from "../src/lib/models";
 import { retiredAutoModelError } from "../src/lib/routing";
 import { passGrantedAccess } from "../src/lib/permissions";
+import { attachedChromeTools } from "./chrome-host";
 import type { AttachmentKind, ChatImage, CustomLlm, MissionCaps, MissionIteration, Session, SessionEnvironment, UsageEvent, WatchDayMarks, WatchPermits } from "../src/lib/types";
 import {
   attachmentKind,
@@ -641,6 +642,11 @@ const TOOLS = [
         },
         files: { type: "array", items: { type: "string" }, description: "Files to attach to the worker" },
         effort: { type: "string", description: "Explicit user override only. Omit to keep a reused worker's thinking level; otherwise the desk derives it from task depth" },
+        fast: {
+          type: "boolean",
+          description:
+            "Fast call option when Grok, Claude, or Cursor offers it. Omit to keep a reused worker's Fast setting; otherwise the desk leaves Fast off.",
+        },
         timeoutSeconds: { type: "number", description: "Ignored. The desk does not stop a worker on a runtime limit. The worker runs until it finishes or is cancelled." },
         tokenBudget: { type: "number", description: "Ignored. The desk does not stop a worker on a token ceiling. This chat's billed spend is on the meter." },
         isolation: { type: "string", description: "worktree or shared. Omit to inherit this chat's workspace: isolated worktree stays a worktree, local folder stays the local folder. Nested helpers are always shared." },
@@ -1029,6 +1035,44 @@ const TOOLS = [
       type: "object",
       properties: { skill: { type: "string", description: "Skill name, or grok:pdf" } },
       required: ["skill"],
+    },
+  },
+  {
+    name: "workhorse_chrome",
+    description:
+      "Control this chat's installed Chrome. action is navigate, snapshot, click, fill, screenshot, or console. No page script. The profile stays under Workhorse unless attachRealProfile is explicitly true after the chat allowed Chrome. Permission Always does not attach the person's profile. Plan, read-only, and strict refuse.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        action: { type: "string", description: "navigate, snapshot, click, fill, screenshot, or console" },
+        url: { type: "string" },
+        selector: { type: "string" },
+        value: { type: "string" },
+        attachRealProfile: { type: "boolean", description: "Use the person's Chrome profile. Never implied by Permission Always." },
+        realProfileDir: { type: "string", description: "Profile directory for an explicit real-profile request." },
+      },
+      required: ["action"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "workhorse_computer",
+    description:
+      "Drive a desktop app from this chat. action is frontmost, screenshot, click, type, key, or scroll. Runs only when this chat's Computer switch is on and Sandbox is Off. Plan, Read-only, and Strict refuse. The first use of an app asks on the permission card. The Workhorse window, browsers, and typing into a terminal or IDE stay out.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        action: { type: "string", description: "frontmost, screenshot, click, type, key, or scroll" },
+        app: { type: "string", description: "Application name, such as Finder or Explorer" },
+        x: { type: "number" },
+        y: { type: "number" },
+        text: { type: "string" },
+        key: { type: "string" },
+        dx: { type: "number" },
+        dy: { type: "number" },
+      },
+      required: ["action"],
+      additionalProperties: false,
     },
   },
   {
@@ -2012,7 +2056,8 @@ function probeRuntime(): string {
       },
       ios: { available: ios.available },
       mcp: enabledMcpServers.map((server) => server.name),
-      computerUse: enabledMcpServers.some((server) => /computer|desktop|screen/i.test(server.name)),
+      // A server named computer, desktop, or screen is not this chat's Computer seat.
+      computerUse: false,
     },
     null,
     2,
@@ -2413,6 +2458,7 @@ async function spawnAgent(
     chat?: string;
     worker?: string;
     effort?: string;
+    fast?: boolean;
     /** The seat this call asks for the child; the desk caps both at its default. */
     permission?: string;
     sandbox?: string;
@@ -2587,6 +2633,7 @@ async function spawnAgent(
     chat: spawnInput.chat,
     worker: spawnInput.worker,
     effort: spawnInput.effort,
+    ...(typeof spawnInput.fast === "boolean" ? { fast: spawnInput.fast } : {}),
     permission: spawnInput.permission,
     sandbox: spawnInput.sandbox,
     continuedAccess: spawnInput.continuedAccess,
@@ -2632,6 +2679,7 @@ async function spawnAgent(
       chat: spawnInput.chat,
       worker: spawnInput.worker,
       effort: spawnInput.effort,
+      ...(typeof spawnInput.fast === "boolean" ? { fast: spawnInput.fast } : {}),
       permission: spawnInput.permission,
       sandbox: spawnInput.sandbox,
       continuedAccess: spawnInput.continuedAccess,
@@ -3490,7 +3538,67 @@ async function callMutatingTool(name: string, args: Record<string, unknown>, fro
 }
 
 /** Everything else: reads, and the desk-only tools an orchestrator or the desk itself may call. */
+function chromeSeat(sessionId: string): {
+  permissionMode?: "ask" | "accept-edits" | "always-approve" | "plan";
+  sandbox?: "off" | "workspace" | "read-only" | "strict";
+} {
+  const raw = readState();
+  const sessions = Array.isArray(raw.sessions) ? raw.sessions : [];
+  const session = sessions.find((item) => item && typeof item === "object" && (item as { id?: unknown }).id === sessionId) as {
+    mode?: unknown;
+    sandbox?: unknown;
+  } | undefined;
+  const mode = session?.mode;
+  const sandbox = session?.sandbox;
+  return {
+    permissionMode: mode === "ask" || mode === "accept-edits" || mode === "always-approve" || mode === "plan" ? mode : undefined,
+    sandbox: sandbox === "off" || sandbox === "workspace" || sandbox === "read-only" || sandbox === "strict" ? sandbox : undefined,
+  };
+}
+
 async function callDeskTool(name: string, args: Record<string, unknown>, from?: string, localDiscovery: LocalRuntimeDiscovery | null = null): Promise<string> {
+  if (name === "workhorse_computer") {
+    const sessionId = from?.trim() ?? "";
+    if (!sessionId) throw new Error("Computer needs a chat.");
+    return postBridge(
+      "/bots",
+      botsAsk(
+        {
+          action: "computer",
+          message: JSON.stringify({
+            action: args.action,
+            app: args.app,
+            x: args.x,
+            y: args.y,
+            text: args.text,
+            key: args.key,
+            dx: args.dx,
+            dy: args.dy,
+          }),
+        },
+        sessionId,
+      ),
+      { timeoutMs: 20_000, inbox: false },
+    );
+  }
+  if (name === "workhorse_chrome") {
+    const sessionId = from?.trim() ?? "";
+    if (!sessionId) throw new Error("Chrome needs a chat.");
+    const run = attachedChromeTools();
+    if (!run) throw new Error("Chrome is not attached.");
+    const seat = chromeSeat(sessionId);
+    const result = await run({
+      sessionId,
+      tool: name,
+      args,
+      permissionMode: seat.permissionMode,
+      sandbox: seat.sandbox,
+      attachRealProfile: args.attachRealProfile === true,
+      realProfileDir: typeof args.realProfileDir === "string" ? args.realProfileDir : undefined,
+    });
+    if (!result.ok) throw new Error(result.message);
+    return result.content;
+  }
   if (name === "workhorse_local_hosts") {
     return JSON.stringify({ hosts: publicLocalHosts(localDiscovery!) }, null, 2);
   }
@@ -3583,6 +3691,7 @@ async function callDeskTool(name: string, args: Record<string, unknown>, from?: 
         chat: typeof args.chat === "string" ? args.chat : undefined,
         worker: typeof args.worker === "string" ? args.worker : undefined,
         effort: typeof args.effort === "string" ? args.effort : undefined,
+        fast: typeof args.fast === "boolean" ? args.fast : undefined,
         permission: typeof args.permission === "string" ? args.permission : undefined,
         sandbox: typeof args.sandbox === "string" ? args.sandbox : undefined,
         timeoutSeconds: typeof args.timeoutSeconds === "number" ? args.timeoutSeconds : undefined,

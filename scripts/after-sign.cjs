@@ -1,4 +1,5 @@
 const { spawnSync } = require("node:child_process");
+const fs = require("node:fs");
 const path = require("node:path");
 const { requiresStableIdentity } = require("./after-pack.cjs");
 
@@ -46,6 +47,17 @@ async function afterSign(context) {
   if (!requiresStableIdentity()) return;
   const appPath = path.join(context.appOutDir, `${context.packager.appInfo.productFilename}.app`);
   const authority = assertDeveloperIdSignature(appPath);
+  const helper = path.join(appPath, "Contents", "Resources", "mac-dictation");
+  if (fs.existsSync(helper)) {
+    const signed = spawnSync(
+      "/usr/bin/codesign",
+      ["--force", "--sign", authority, "--entitlements", path.join(__dirname, "..", "build", "entitlements.mac.plist"), helper],
+      { encoding: "utf8" },
+    );
+    if (signed.status !== 0) {
+      throw new Error(`Could not sign the dictation helper.\n${signed.stdout ?? ""}${signed.stderr ?? ""}`);
+    }
+  }
   console.log(`  • signed by ${authority}`);
 }
 

@@ -10,10 +10,13 @@ type GrokPromptBridgeInput = {
   effort: import("./lib/types").EffortLevel | null;
   /** Window this chat picked, when the model offers more than one. */
   contextWindow?: number;
+  /** Fast call option for Grok, Claude, and Cursor when the model offers it. */
+  fastMode?: boolean;
   mode: import("./lib/types").PermissionMode;
   cwd: string;
   vendorSessionId?: string;
   sandbox?: import("./lib/types").SandboxProfile;
+  computer?: "off" | "on";
   mcpServers?: import("./lib/types").McpServerConfig[];
   preface?: string;
   crewModes?: import("./lib/types").CrewMode[];
@@ -123,6 +126,15 @@ type WorkhorseBridge = {
   ) => Promise<{ written: number; refused: number }>;
   teamPresence?: (folder: string, journalId: string, beat: import("./lib/team").PresenceBeat) => Promise<boolean>;
   pickAttach?: () => Promise<string[]>;
+  micRequestAccess?: () => Promise<import("../electron/mic-host").MicAccessResult>;
+  micGetStatus?: () => Promise<import("../electron/mic-host").MicAccessStatus>;
+  micTranscribeLocal?: (input: {
+    audioBase64: string;
+    mimeType: string;
+  }) => Promise<import("../electron/mic-host").MicTranscriptResult>;
+  micDictateStart?: () => Promise<{ ok: true } | { ok: false; reason: string }>;
+  micDictateStop?: () => Promise<boolean>;
+  onMicDictation?: (handler: (event: import("../electron/mic-host").DictationLine) => void) => () => void;
   pickLocalComputeTokenFile?: () => Promise<string | null>;
   mediaSrc: (href: string, cwd?: string, vendorSessionId?: string) => Promise<string | null>;
   pathForFile: (file: File) => string;
@@ -171,6 +183,40 @@ type WorkhorseBridge = {
   terminalWrite?: (sessionId: string, text: string) => Promise<{ ok: boolean; message?: string }>;
   terminalStop?: (sessionId: string) => Promise<void>;
   onTerminalEvent?: (handler: (event: import("../electron/terminal-host").TerminalEvent) => void) => () => void;
+  backgroundBrowserSetChromeAccess?: (
+    sessionId: string,
+    access: import("./lib/background-browser").ChromeAccessState,
+  ) => Promise<import("./lib/background-browser").ChromeAccessState>;
+  backgroundBrowserEnsure?: (input: {
+    sessionId: string;
+    name?: string;
+    url?: string;
+    preferHeadless?: boolean;
+    helperCommand?: string;
+    permissionMode?: import("./lib/types").PermissionMode;
+    sandbox?: import("./lib/types").SandboxProfile;
+    attachRealProfile?: boolean;
+    realProfileDir?: string;
+  }) => Promise<import("../electron/background-browser-host").BackgroundBrowserStartResult>;
+  backgroundBrowserStart?: (input: {
+    sessionId: string;
+    name?: string;
+    url?: string;
+    preferHeadless?: boolean;
+    helperCommand?: string;
+    permissionMode?: import("./lib/types").PermissionMode;
+    sandbox?: import("./lib/types").SandboxProfile;
+    attachRealProfile?: boolean;
+    realProfileDir?: string;
+  }) => Promise<import("../electron/background-browser-host").BackgroundBrowserStartResult>;
+  backgroundBrowserStop?: (browserId: string) => Promise<boolean>;
+  backgroundBrowserStopSession?: (sessionId: string) => Promise<number>;
+  backgroundBrowserList?: (
+    sessionId?: string,
+  ) => Promise<import("./lib/background-browser").BackgroundBrowserSession[]>;
+  onBackgroundBrowserEvent?: (
+    handler: (event: import("../electron/background-browser-host").BackgroundBrowserEvent) => void,
+  ) => () => void;
   loadState: () => Promise<Record<string, unknown>>;
   liveRunIds: () => Promise<string[]>;
   /** `written: true` only when this exact snapshot was written and the write landed; superseded, refused, or failed saves answer false. `reset` means the main process had no desk to fold a partial save onto, so the next save must carry every chat. */
@@ -270,6 +316,7 @@ type WorkhorseBridge = {
     cwd: string;
     mode?: import("./lib/types").PermissionMode;
     sandbox?: import("./lib/types").SandboxProfile;
+    computer?: "off" | "on";
     preface?: string;
     history?: { role: "user" | "assistant"; text: string }[];
     mcpServers?: import("./lib/types").McpServerConfig[];

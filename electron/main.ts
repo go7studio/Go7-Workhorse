@@ -1,4 +1,4 @@
-import { app, BrowserWindow, crashReporter, dialog, ipcMain, nativeImage, nativeTheme, net, protocol, safeStorage, shell } from "electron";
+import { app, BrowserWindow, crashReporter, dialog, ipcMain, nativeImage, nativeTheme, net, protocol, safeStorage, session, shell, systemPreferences } from "electron";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -12,6 +12,7 @@ import { AgySessionHost } from "./agy-host";
 import { detectAgyLogin } from "./agy-login";
 import { readAgyPlan, readAgyUsageStdout } from "./agy-plan";
 import { CustomSessionHost, type CustomPromptInput } from "./custom-host";
+import { bindDefaultComputerIo, deskComputerAnswer } from "./computer-host";
 import { observedMcpServer, probeMcpServer } from "./mcp-tool-bridge";
 import { mcpInventorySnapshot } from "./mcp-inventory";
 import { boundLinkRead } from "../src/lib/link-read";
@@ -36,6 +37,7 @@ import { fetchCursorPlanUsage, fetchCursorLedgerEvents } from "./cursor-plan";
 import { fetchCustomPlanUsage, grokBotLeftoverPath } from "./custom-plan";
 import { fetchCustomModels } from "./custom-models";
 import type { PermissionAnswer } from "../src/lib/permissions";
+import type { PermissionMode, SandboxProfile } from "../src/lib/types";
 import { safeExternalUrl } from "../src/lib/open-external";
 import { startWorkhorseBridge, type PeerAskResult } from "./workhorse-bridge";
 import { readLinkInspectFile, watchLinkHistory } from "./link-history-file";
@@ -46,6 +48,15 @@ import { peerAskTimeoutMs, watchPeerInbox, writeBridgeRecord, type PeerAsk } fro
 import { existingPeerReply } from "../src/lib/session-bridge";
 import { listDropFiles } from "./drop-files";
 import { attachDialogProperties, attachDialogTitle, windowsNeedsAttachChoice } from "./attach-pick";
+import {
+  getMicrophoneAccessStatus,
+  installDeskMediaPermissions,
+  pickLocalSpeechHost,
+  requestMicrophoneAccess,
+  transcribeLocalSpeech,
+} from "./mic-host";
+import { pauseMacDictation, startMacDictation, stopMacDictation } from "./mac-dictation";
+import { LocalCapabilityHostClient } from "./local-capability-host";
 
 import { displaySrcForHref, openableMediaPath, resolveMediaProtocolFile, safeLocalPath } from "./media-src";
 import { watchViewerFolder } from "./viewer-watch";
@@ -53,6 +64,9 @@ import { createViewerHost, viewerSession, resolveViewerWatchFolder } from "./vie
 import { pathToMediaUrl } from "../src/lib/media-display";
 import { findSourceFile, listGitChanges, readEditStatsAsync, readFileDiff, readGitHead, readSourceText, recordFileInstance } from "./project-diff";
 import { TerminalHost, type TerminalEvent } from "./terminal-host";
+import { BackgroundBrowserHost, type BackgroundBrowserEvent, type BackgroundBrowserStartInput } from "./background-browser-host";
+import { attachChromeTools, createGrantedChromeLauncher } from "./chrome-host";
+import { defaultRealChromeProfile } from "../src/lib/browser-access";
 import {
   deleteDeskSkill,
   exportChatToFolder,
@@ -981,6 +995,7 @@ function createWindow() {
     },
   });
 
+  installDeskMediaPermissions(win.webContents.session, isDeskAppUrl);
   win.setMenu(null);
   win.once("ready-to-show", () => {
     win.show();
@@ -1017,6 +1032,18 @@ function createWindow() {
 const grokHost = new GrokSessionHost();
 const codexHost = new CodexSessionHost();
 const terminalHost = new TerminalHost();
+/*
+ * Chat-owned background browser (Playwright/Chromium under userData).
+ * Piper Chrome grant: setChromeAccess("granted"). Decline → headless.
+ * Wren mic + Dexter Computer seat hook into the same quit list / preload
+ * surface nearby — do not invent a Settings tab for any of these.
+ */
+const backgroundBrowserHost = new BackgroundBrowserHost({
+  userData: app.getPath("userData"),
+  grantedChromeLauncher: createGrantedChromeLauncher({
+    resolveRealProfile: () => defaultRealChromeProfile(process.platform, app.getPath("home")),
+  }),
+});
 
 /*
  * Quit used to name three hosts and miss three. Claude, Cursor and the custom
@@ -1034,6 +1061,7 @@ function disposeAtQuit(name: string, close: () => void): void {
 disposeAtQuit("grok", () => grokHost.disposeAll());
 disposeAtQuit("codex", () => codexHost.disposeAll());
 disposeAtQuit("terminal", () => terminalHost.disposeAll());
+disposeAtQuit("background-browser", () => backgroundBrowserHost.disposeAll());
 disposeAtQuit("file-instances", () => fileInstanceWrites.flush());
 const peerWaiters = new Map<string, (result: PeerAskResult) => void>();
 
@@ -1058,6 +1086,7 @@ app.whenReady().then(async () => {
   // the eleven learning channels, registered from their own module, answered
   // any frame at all while the test that guards the order read only main.ts.
   guardIpcSender(ipcMain, process.env.VITE_DEV_SERVER_URL, DESK_INDEX_FILE);
+  installDeskMediaPermissions(session.defaultSession, isDeskAppUrl);
   app.on("child-process-gone", (_event, details) => {
     mainLog.record(
       "child-process-gone",
@@ -1084,6 +1113,7 @@ app.whenReady().then(async () => {
     /* rg copy is best-effort */
   }
   debugStartup("ripgrep ready");
+  void bindDefaultComputerIo();
 
   process.env.WORKHORSE_STATE_PATH = statePath();
   jobEngine = new DurableJobEngine(path.join(app.getPath("userData"), "workhorse-jobs.json"), (events) => {
@@ -1284,6 +1314,22 @@ app.whenReady().then(async () => {
     const win = liveDeskWindow();
     if (!win || win.webContents.isDestroyed()) return { error: "Workhorse window is closed" };
     if (ask.action === "viewer") return viewerHost.handle(ask);
+    if (ask.action === "computer") {
+      let raw: Record<string, unknown> = {};
+      try {
+        const parsed = JSON.parse(ask.message) as unknown;
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) raw = parsed as Record<string, unknown>;
+      } catch {
+        raw = {};
+      }
+      const sessions = readState().sessions;
+      const list = Array.isArray(sessions) ? sessions : [];
+      const session =
+        list.find((item): item is { id?: string; computer?: "off" | "on"; mode?: "ask" | "accept-edits" | "always-approve" | "plan"; sandbox?: "off" | "workspace" | "read-only" | "strict"; permissionGrants?: Array<{ key: string; expiresAt?: number }> } => {
+          return Boolean(item) && typeof item === "object" && (item as { id?: unknown }).id === ask.fromSessionId;
+        }) ?? null;
+      return { text: await deskComputerAnswer(session, raw) };
+    }
     if (ask.mode === "bots" && ask.action === "link-read" && ask.name === "mcp") {
       return boundLinkRead(JSON.stringify(mcpInventorySnapshot(readViewerState(), ask.message.trim(), ask.fromSessionId ?? "", true, observedMcpServer)));
     }
@@ -1639,6 +1685,73 @@ app.whenReady().then(async () => {
     return result.filePaths[0];
   });
 
+  let microphoneGrantedThisRun = false;
+  ipcMain.handle("mic:request-access", async () => {
+    const result = await requestMicrophoneAccess({
+      platform: process.platform,
+      existsSync: (file) => fs.existsSync(file),
+      getMediaAccessStatus: (mediaType) =>
+        process.platform === "darwin" || process.platform === "win32"
+          ? systemPreferences.getMediaAccessStatus(mediaType)
+          : "granted",
+      askForMediaAccess: async (mediaType) => {
+        if (process.platform !== "darwin") return true;
+        return systemPreferences.askForMediaAccess(mediaType);
+      },
+      openExternal: (url) => shell.openExternal(url),
+      sessionGranted: microphoneGrantedThisRun,
+    });
+    if (result.granted) microphoneGrantedThisRun = true;
+    return result;
+  });
+  ipcMain.handle("mic:get-status", () =>
+    getMicrophoneAccessStatus({
+      platform: process.platform,
+      getMediaAccessStatus: (mediaType) =>
+        process.platform === "darwin" || process.platform === "win32"
+          ? systemPreferences.getMediaAccessStatus(mediaType)
+          : "granted",
+    }),
+  );
+  ipcMain.handle("mic:dictate-start", (event) =>
+    startMacDictation({
+      resourcesPath: process.resourcesPath,
+      appPath: app.getAppPath(),
+      onLine: (line) => {
+        if (event.sender.isDestroyed()) return;
+        event.sender.send("mic:dictation", line);
+      },
+    }),
+  );
+  ipcMain.handle("mic:dictate-stop", () => {
+    pauseMacDictation();
+    return true;
+  });
+  ipcMain.handle("mic:transcribe", async (_event, raw: unknown) => {
+    const hosts = liveSettings.localCompute?.hosts ?? [];
+    const audioBase64 =
+      raw && typeof raw === "object" && typeof (raw as { audioBase64?: unknown }).audioBase64 === "string"
+        ? (raw as { audioBase64: string }).audioBase64
+        : "";
+    const mimeType =
+      raw && typeof raw === "object" && typeof (raw as { mimeType?: unknown }).mimeType === "string"
+        ? (raw as { mimeType: string }).mimeType
+        : "audio/webm";
+    const probes = await probeLocalComputeHosts(hosts);
+    const hostId = pickLocalSpeechHost(hosts, probes);
+    const host = hostId ? hosts.find((row) => row.id === hostId) : undefined;
+    if (!hostId || !host) return { ok: false as const, reason: "No granted local speech host." };
+    try {
+      const client = new LocalCapabilityHostClient({
+        hosts: [{ id: host.id, baseUrl: host.baseUrl, tokenFile: host.tokenFile }],
+        stateDir: app.getPath("userData"),
+      });
+      return await transcribeLocalSpeech({ hosts, probes, audioBase64, mimeType, client });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Local speech failed.";
+      return { ok: false as const, reason: message };
+    }
+  });
   ipcMain.handle("attach:pick", async () => {
     let kind: "files" | "folder" | "mixed" = "mixed";
     if (windowsNeedsAttachChoice(process.platform)) {
@@ -1753,6 +1866,71 @@ app.whenReady().then(async () => {
   ipcMain.handle("terminal:stop", (_event, sessionId: unknown) => {
     if (typeof sessionId === "string") terminalHost.stop(sessionId);
   });
+
+  /* ---- browser seat (Piper Chrome grant + background fallback) ----
+   * Mic recording (Wren) and Computer seat (Dexter) register beside this block.
+   */
+  const emitBackgroundBrowser = (event: Electron.IpcMainInvokeEvent, payload: BackgroundBrowserEvent) => {
+    sendToDesk(event.sender, "background-browser:event", payload);
+  };
+  const browserLaunchInput = (raw: unknown): BackgroundBrowserStartInput => {
+    const input = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+    const permissionMode = input.permissionMode;
+    const sandbox = input.sandbox;
+    const mode: PermissionMode | undefined =
+      permissionMode === "ask" || permissionMode === "accept-edits" || permissionMode === "always-approve" || permissionMode === "plan"
+        ? permissionMode
+        : undefined;
+    const sandboxProfile: SandboxProfile | undefined =
+      sandbox === "off" || sandbox === "workspace" || sandbox === "read-only" || sandbox === "strict" ? sandbox : undefined;
+    return {
+      sessionId: typeof input.sessionId === "string" ? input.sessionId : "",
+      name: typeof input.name === "string" ? input.name : undefined,
+      url: typeof input.url === "string" ? input.url : undefined,
+      preferHeadless: typeof input.preferHeadless === "boolean" ? input.preferHeadless : undefined,
+      helperCommand: typeof input.helperCommand === "string" ? input.helperCommand : undefined,
+      permissionMode: mode,
+      sandbox: sandboxProfile,
+      // Explicit only. Permission Always is not a request for the person's Chrome profile.
+      attachRealProfile: input.attachRealProfile === true,
+      realProfileDir: typeof input.realProfileDir === "string" ? input.realProfileDir : undefined,
+    };
+  };
+  attachChromeTools((input) =>
+    backgroundBrowserHost.runChromeTool(input, (payload) => {
+      const desk = liveDeskWindow();
+      if (desk) sendToDesk(desk.webContents, "background-browser:event", payload);
+    }),
+  );
+  ipcMain.handle("backgroundBrowser:setChromeAccess", (event, sessionId: unknown, access: unknown) => {
+    if (typeof sessionId !== "string" || (access !== "granted" && access !== "declined" && access !== "unset")) {
+      return "unset";
+    }
+    return backgroundBrowserHost.setChromeAccess(sessionId, access, (payload) => emitBackgroundBrowser(event, payload));
+  });
+  ipcMain.handle("backgroundBrowser:ensure", async (event, raw: unknown) => {
+    return backgroundBrowserHost.ensureBrowser(browserLaunchInput(raw), (payload) => emitBackgroundBrowser(event, payload));
+  });
+  ipcMain.handle("backgroundBrowser:start", async (event, raw: unknown) => {
+    return backgroundBrowserHost.start(browserLaunchInput(raw), (payload) => emitBackgroundBrowser(event, payload));
+  });
+  ipcMain.handle("backgroundBrowser:stop", (_event, browserId: unknown) => {
+    if (typeof browserId !== "string") return false;
+    return backgroundBrowserHost.stop(browserId, (payload) => {
+      const desk = liveDeskWindow();
+      if (desk) sendToDesk(desk.webContents, "background-browser:event", payload);
+    });
+  });
+  ipcMain.handle("backgroundBrowser:stopSession", (_event, sessionId: unknown) => {
+    if (typeof sessionId !== "string") return 0;
+    return backgroundBrowserHost.stopSession(sessionId, (payload) => {
+      const desk = liveDeskWindow();
+      if (desk) sendToDesk(desk.webContents, "background-browser:event", payload);
+    });
+  });
+  ipcMain.handle("backgroundBrowser:list", (_event, sessionId: unknown) =>
+    backgroundBrowserHost.list(typeof sessionId === "string" ? sessionId : undefined),
+  );
 
   ipcMain.handle("project:resolve-file", (_event, filePath: unknown, roots: unknown) => {
     if (typeof filePath !== "string" || !filePath.trim()) return null;
@@ -2863,6 +3041,7 @@ app.on("before-quit", (event) => {
   // through, and so does a second Cmd-Q while the first drain is still going.
   if (quitDrained) return;
   quitDrained = true;
+  stopMacDictation();
   learningCloser?.pause();
   learningCloser?.close();
   // Every host that registered itself, in the order it was built. One that

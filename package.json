@@ -75,6 +75,7 @@
     "@agentclientprotocol/claude-agent-acp": "^0.66.0",
     "@agentclientprotocol/codex-acp": "^1.2.0",
     "hyparquet": "^1.31.1",
+    "playwright": "^1.62.1",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
     "three": "^0.172.0"
@@ -87,7 +88,6 @@
     "@vitejs/plugin-react": "^5.0.2",
     "electron": "^43.7.5",
     "electron-builder": "^26.15.3",
-    "playwright": "^1.62.1",
     "tsx": "^4.23.12",
     "typescript": "^5.9.2",
     "vite": "^7.1.3",
@@ -127,6 +127,14 @@
       {
         "from": "skills",
         "to": "skills"
+      },
+      {
+        "from": "electron/mac-dictation.swift",
+        "to": "mac-dictation.swift"
+      },
+      {
+        "from": "build/mac-dictation",
+        "to": "mac-dictation"
       }
     ],
     "win": {
@@ -168,6 +176,8 @@
       "entitlements": "build/entitlements.mac.plist",
       "entitlementsInherit": "build/entitlements.mac.inherit.plist",
       "extendInfo": {
+        "NSMicrophoneUsageDescription": "Workhorse records from the microphone so your words can be typed into the unsent draft.",
+        "NSSpeechRecognitionUsageDescription": "Workhorse uses speech recognition on this Mac to type what you say into the unsent draft.",
         "NSDocumentsFolderUsageDescription": "Workhorse and the agents in this chat read and write the project folders you link.",
         "NSDesktopFolderUsageDescription": "Workhorse uses Desktop folders you link as a project workspace.",
         "NSDownloadsFolderUsageDescription": "Workhorse uses Downloads folders you link as a project workspace.",

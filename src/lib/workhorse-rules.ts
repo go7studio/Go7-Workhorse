@@ -104,7 +104,8 @@ export const DESK_SPAWN_LAW =
   // the same opening text both forbade the call and ordered it. It is an
   // answer to a bot that narrates a spawn it never made, and only a turn that
   // may spawn can act on it, which is this block and no other.
-  "If you did not call that tool this turn, you did not spawn anyone. Spawn only for a new authorized assignment; a report join, completed slice, cancelled assignment, or failed checker report does not authorize another worker.";
+  "If you did not call that tool this turn, you did not spawn anyone. Spawn only for a new authorized assignment; a report join, completed slice, cancelled assignment, or failed checker report does not authorize another worker. " +
+  "When this chat already asked for workers, a later turn that says confirm, resume, continue, incomplete, or not working is that same assignment: resume it without asking the user to confirm again.";
 
 /**
  * What every desk chat opens with. Desk tools, permissions, files, and the
@@ -228,9 +229,43 @@ const SPAWN_ASK = new RegExp(
     `|(?:assign|create|drive|deploy|dispatch|send|put|have|get|use|call|spin\\s+up)\\s+` +
     `(?:a|an|the|some|several|multiple|more|\\d+)?\\s*${SPAWN_TARGET}` +
     `|multiple\\s+${SPAWN_TARGET}` +
+    `|new\\s+${SPAWN_TARGET}` +
+    `|prove\\s+orchestration` +
+    `|orchestration\\s+proof` +
+    // "start the workers" is a thread pool. "Start Quinn on Cursor" is a lane.
+    `|start\\s+(?!the\\b|a\\b|an\\b|all\\b|some\\b|every\\b)[a-z][a-z]+\\s+on\\s+(?:cursor|composer|grok|claude|codex|gemini)` +
+    `|queue\\s+(?!the\\b|a\\b|an\\b|all\\b|some\\b)[a-z][a-z]+\\s+to\\s+start` +
+    // "assign the work out" is the desk being told to hand the slices off.
+    // The article is optional, and a one-word typo in front of "work" still counts.
+    `|assign\\s+\\S*\\s*work\\s+out` +
   ")\\b",
   "i",
 );
+
+/**
+ * The desk asks for a confirmation when a turn did not carry the spawn law.
+ * The answer to that question is itself the authorization. "You have my
+ * confirmation" and "I already told you" must carry the law, or the chat
+ * asks again on every follow-up.
+ */
+const SPAWN_CONFIRMATION =
+  /(?:^\s*confirm\b|\byes confirmed\b|\b(?:you have my confirmation|i am confirming|i'm confirming|i already (?:told|asked|gave) you|already given you the instruction|should(?:n't| not) need to confirm|ened to confirm|do(?:n't| not) need (?:my |a )?confirm)\b)/i;
+
+/**
+ * A follow-up on work this chat already assigned. It does not hire anyone on
+ * its own. It only keeps an earlier ask alive, so an unfinished lane resumes
+ * without a second confirmation.
+ */
+const SPAWN_RESUME =
+  /\b(?:resume|continue|keep going|not working|isn'?t working|incomplete|didn'?t (?:finish|work)|did not (?:finish|work)|fix that|hate repeating|repeating myself)\b/i;
+
+export function looksLikeSpawnConfirmation(text: string): boolean {
+  return SPAWN_CONFIRMATION.test(text);
+}
+
+export function looksLikeSpawnContinuation(text: string): boolean {
+  return looksLikeSpawnConfirmation(text) || SPAWN_RESUME.test(text);
+}
 
 export function looksLikeWorkerBrief(text: string): boolean {
   const value = text.trim();
@@ -269,18 +304,33 @@ export function looksLikeSpawnRequest(text: string): boolean {
  */
 export function turnCarriesSpawnLaw(input: {
   text: string;
+  /** Earlier user turns on this chat. A continuation only counts after one of them asked. */
+  priorTexts?: readonly string[];
   crewMode?: CrewMode | CrewMode[];
   role?: DeskRole;
+  /** A plan that is still running is the assignment already given. */
+  planOpen?: boolean;
 }): boolean {
   const { role, text } = input;
   if (role === "worker" || role === "auditor" || role === "helper") return false;
   if (looksLikeWorkerBrief(text)) return false;
+  if (input.planOpen) return true;
   if (orchestrationEnabled(input.crewMode)) return true;
-  return looksLikeSpawnRequest(text);
+  if (looksLikeSpawnConfirmation(text)) return true;
+  if (looksLikeSpawnRequest(text)) return true;
+  const alreadyAsked = (input.priorTexts ?? []).some(
+    (prior) => looksLikeSpawnRequest(prior) || looksLikeSpawnConfirmation(prior),
+  );
+  return alreadyAsked && looksLikeSpawnContinuation(text);
 }
 
-export function withSpawnHint(text: string, role?: DeskRole): string {
-  if (!turnCarriesSpawnLaw({ text, role })) return text;
+export function withSpawnHint(
+  text: string,
+  role?: DeskRole,
+  priorTexts?: readonly string[],
+  planOpen?: boolean,
+): string {
+  if (!turnCarriesSpawnLaw({ text, role, priorTexts, planOpen })) return text;
   return `${SPAWN_TURN_HINT}\n\n${text}`;
 }
 

@@ -30,6 +30,8 @@ export type CursorLaunchInput = {
   detect?: CursorLoginDetectInput;
   /** Which rules the CLI is launched with. A worker gets worker rules. */
   role?: DeskRole;
+  /** Prefer a Cursor `-fast` launch slug when the family lists one. */
+  fastMode?: boolean;
 };
 
 const DEFAULT_MODEL = "composer-2.5";
@@ -37,6 +39,7 @@ const DEFAULT_MODEL = "composer-2.5";
 export function resolveCursorModel(
   model: string | null | undefined,
   effort?: EffortLevel | string | null,
+  options?: { fast?: boolean },
 ): string {
   const trimmed = model?.trim() || DEFAULT_MODEL;
   const normalized = normalizeModelId("cursor", trimmed);
@@ -48,7 +51,7 @@ export function resolveCursorModel(
     global.provider !== "grok" &&
     (global.provider === "cursor" || cursorUsageLane(global.model) === "other-models");
   const id = onCursor?.model ?? (hosted ? global!.model : null) ?? normalized;
-  return cursorSlugForEffort(id, effort ?? null);
+  return cursorSlugForEffort(id, effort ?? null, { fast: options?.fast === true });
 }
 
 export function resolveCursorEffort(effort: EffortLevel | string | null | undefined): string {
@@ -83,7 +86,7 @@ export function buildCursorLaunchSpec(input: CursorLaunchInput): GrokLaunchSpec 
   if (command && (isCursorAppCommand(command) || isGrokCommand(command))) command = "";
   const prefixArgs = command ? resolveCursorPrefixArgs(input.detect, command) : [];
   const effort = resolveCursorEffort(input.effort);
-  const model = resolveCursorModel(input.model, effort);
+  const model = resolveCursorModel(input.model, effort, { fast: input.fastMode === true });
   const permissionMode = resolveCursorPermissionMode(input.mode);
   const argv = [...prefixArgs, "--model", model, "acp"];
   const builtIn = workhorseMcpServer(input.sessionId);

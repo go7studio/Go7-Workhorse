@@ -151,7 +151,7 @@ test("quit waits for the save chain, bounded, and flushes the file", () => {
   assert.match(main, /event\.preventDefault\(\)/, "quit has to be held open or the wait is theatre");
   assert.match(
     main,
-    /if \(quitDrained\) return;\s*\n\s*quitDrained = true;\s*\n\s*learningCloser\?\.pause\(\)/,
+    /if \(quitDrained\) return;\s*\n\s*quitDrained = true;\s*\n\s*stopMacDictation\(\);\s*\n\s*learningCloser\?\.pause\(\)/,
     "the drain quits again, so every disposal below must be behind the guard",
   );
   assert.match(main, /void drainStateForQuit\(\)\.finally\(\(\) => app\.quit\(\)\)/);

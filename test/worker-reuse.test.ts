@@ -263,6 +263,17 @@ test("a named worker bound to another project is worker_bound_elsewhere, not Wre
   assert.notEqual(nextWorkerName(["Wren"]), "Wren", "the suffix path is what we refuse");
 });
 
+test("a fresh start on a free named worker reopens that worker", () => {
+  const idle = worker({ workerName: "Quinn", status: "idle", agentRun: { status: "cancelled" } });
+  const again = resolveNamedWorker({ name: "Quinn", seed: "fresh" }, [idle], scope);
+  assert.equal(again.ok, true);
+  if (again.ok) assert.equal(again.worker?.id, "w1");
+  const busy = worker({ workerName: "Quinn", status: "running" });
+  const held = resolveNamedWorker({ name: "Quinn", seed: "fresh" }, [busy], scope);
+  assert.equal(held.ok, false);
+  if (!held.ok) assert.equal(held.error, WORKER_BOUND_ELSEWHERE_ERROR);
+});
+
 test("an explicit new name is kept; the desk does not swap it for Wren", () => {
   const named = resolveNamedWorker({ name: "Dexter" }, [], scope);
   assert.equal(named.ok, true);

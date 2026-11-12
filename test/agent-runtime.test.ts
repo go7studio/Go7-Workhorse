@@ -188,7 +188,11 @@ test("Settings keeps seven tabs; Harnesses live under LLMs; include defaults off
   assert.match(routingUi, /Include harnesses/);
   const grant = readFileSync(path.join(ROOT, "src", "ui", "GoalBar.tsx"), "utf8");
   assert.match(grant, /Allow selected harnesses/);
+  assert.match(grant, /aria-label="Drop plan"/);
+  assert.match(grant, /store\.dropPlan\(session\.id\)/);
   const store = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
+  assert.match(store, /dropPlan,/);
+  assert.match(store, /planRun: undefined/);
   assert.match(store, /allowedExternalCandidates/);
   assert.match(store, /caller\.planRun\?\.externalGrant/);
   assert.match(store, /exposure !== "external-runtime"/);

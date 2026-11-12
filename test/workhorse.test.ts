@@ -1005,11 +1005,13 @@ test("dropped images become ACP image blocks and stay on the user turn", () => {
   assert.equal(message?.images?.[0]?.name, "shot.png");
 
   const composer = readFileSync(path.join(ROOT, "src", "ui", "Composer.tsx"), "utf8");
+  const mic = readFileSync(path.join(ROOT, "electron", "mic-host.ts"), "utf8");
   assert.match(composer, /collectDroppedFiles/);
   assert.match(composer, /filesFromClipboard/);
   assert.match(composer, /readChatAttachment/);
   assert.match(composer, /collectDroppedFiles/);
-  assert.match(composer, /Drop files or folders/);
+  assert.match(composer, /composerFieldPlaceholder/);
+  assert.match(mic, /if \(input\.dropping\) return "Drop files or folders"/);
   assert.equal(shouldSkipDropDir("node_modules"), true);
   assert.equal(shouldSkipDropDir(".git"), true);
   assert.equal(shouldSkipDropDir("src"), false);
@@ -2991,6 +2993,8 @@ test("session bridge lists, finds, and reads chats for peer tools", async () => 
     "workhorse_delete_reference",
     "workhorse_list_skills",
     "workhorse_read_skill",
+    "workhorse_chrome",
+    "workhorse_computer",
     "workhorse_delete_bot",
   ]);
   const rpcPlan = ((listedTools as { result?: { tools?: { name: string; inputSchema?: unknown }[] } })?.result?.tools ?? [])
@@ -5223,6 +5227,8 @@ test("empty chats stay drafts until the first send names them", () => {
   assert.equal(flushed?.sessions[0]?.queue?.length ?? 0, 0);
   const composer = readFileSync(path.join(ROOT, "src", "ui", "Composer.tsx"), "utf8");
   assert.match(composer, /Steer/);
+  assert.match(composer, /editQueuedPrompt/);
+  assert.match(composer, /prompt-queue-edit/);
   assert.match(composer, /Queue for next/);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "SessionPane.tsx"), "utf8"), /omitQueuedUserMessages/);
   assert.match(composer, /fitComposerField/);

@@ -40,11 +40,21 @@ export function vendorFailedMessage(provider: ProviderId, message: string): stri
   return `${vendorAgentLabel(provider)} agent failed: ${message}`;
 }
 
+/**
+ * Cursor sometimes ends a turn with only "Authentication required" and no
+ * error event. That is a refused login, whether or not the desk has already
+ * prefixed it.
+ */
+export function isCursorAuthRefusal(text: string | undefined | null): boolean {
+  return /^(?:cursor agent failed:\s*)?authentication required\.?$/i.test((text ?? "").trim());
+}
+
 /** A visible assistant bubble written by Workhorse because the vendor call failed. */
 export function isVendorFailureReply(text: string | undefined | null): boolean {
   const value = (text ?? "").trim();
   if (!value) return false;
   return (
+    isCursorAuthRefusal(value) ||
     /^(?:Grok|Codex|Claude|Cursor|Gemini|Custom) agent failed:/i.test(value) ||
     /^(?:Grok|Codex|Claude|Cursor|Gemini|Custom) hit a request rate limit\b/i.test(value) ||
     /^Cursor cannot use “.+”\. Choose another model\.$/i.test(value)

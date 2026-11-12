@@ -2,7 +2,7 @@ import { modeLabel, shortModeLabel } from "./commands";
 import { normalizeQueuedPrompt } from "./chats";
 import { collapseToolText } from "./grok-events";
 import { normalizeImages } from "./images";
-import { defaultModel, effortLabel, modelName, normalizeModelId, withEffort } from "./models";
+import { defaultModel, effortLabel, modelName, normalizeModelId, supportsFastMode, withEffort } from "./models";
 import { isProviderId } from "./providers";
 import { applyGoalIdleAndQueue, grokGoalAfterTurnIdle, normalizeGoal } from "./goal";
 import { normalizePresets } from "./environment-presets";
@@ -73,6 +73,7 @@ export function formatChatSidebar(input: {
   botName?: string;
   routingMode?: string;
   worker?: boolean;
+  fastMode?: boolean;
 }): string {
   const parsed = parsePermissionMode(input.mode ?? "") ?? "always-approve";
   const mode = input.worker
@@ -80,15 +81,16 @@ export function formatChatSidebar(input: {
     : parsed === "always-approve"
       ? ""
       : modeLabel(parsed);
+  const fast = input.fastMode === true ? "Fast" : "";
   if (input.routingMode === "auto") {
-    return [input.worker ? "Worker" : "", "Auto", effortLabel((input.effort as EffortLevel | null) ?? null), mode]
+    return [input.worker ? "Worker" : "", "Auto", effortLabel((input.effort as EffortLevel | null) ?? null), fast, mode]
       .filter(Boolean)
       .join(" · ");
   }
   const provider = asProviderId(input.provider);
   const name = input.botName?.trim() || modelName(provider, input.model);
   const effort = effortLabel((input.effort as EffortLevel | null) ?? null);
-  return [input.worker ? "Worker" : "", name, effort, mode].filter(Boolean).join(" · ");
+  return [input.worker ? "Worker" : "", name, effort, fast, mode].filter(Boolean).join(" · ");
 }
 
 export function applySessionPolicyChange(
@@ -148,14 +150,43 @@ export function applyStandingGrant(
   };
 }
 
+/** True when the next brain cannot keep talking to the previous vendor session. */
+export function vendorBrainChanged(
+  prior: Pick<Session, "provider" | "model" | "effort" | "customBotId" | "fastMode">,
+  next: Pick<Session, "provider" | "model" | "effort" | "customBotId" | "fastMode">,
+): boolean {
+  return (
+    prior.provider !== next.provider ||
+    (prior.customBotId || undefined) !== (next.customBotId || undefined) ||
+    prior.model !== next.model ||
+    prior.effort !== next.effort ||
+    Boolean(prior.fastMode) !== Boolean(next.fastMode)
+  );
+}
+
 export function applySessionModelChange(
   session: Session,
-  next: { provider: ProviderId; model: string; effort: EffortLevel | null; customBotId?: string },
+  next: {
+    provider: ProviderId;
+    model: string;
+    effort: EffortLevel | null;
+    customBotId?: string;
+    fastMode?: boolean;
+  },
 ): Session {
   const providerChanged =
     session.provider !== next.provider || (session.customBotId || undefined) !== (next.customBotId || undefined);
-  const switched =
-    providerChanged || session.model !== next.model || session.effort !== next.effort;
+  const nextFast =
+    next.fastMode !== undefined
+      ? next.fastMode === true
+      : supportsFastMode(next.provider, next.model) && session.fastMode === true;
+  const switched = vendorBrainChanged(session, {
+    provider: next.provider,
+    model: next.model,
+    effort: next.effort,
+    customBotId: next.customBotId,
+    fastMode: nextFast,
+  });
   // Landing on Gemini sets always-approve. Headless agy cannot ask.
   // A model change while the chat is already on Gemini keeps a later choice.
   const landingOnGemini = next.provider === "gemini" && session.provider !== "gemini";
@@ -164,6 +195,7 @@ export function applySessionModelChange(
     provider: next.provider,
     model: next.model,
     effort: next.effort,
+    fastMode: nextFast || undefined,
     mode: landingOnGemini ? "always-approve" : session.mode,
     customBotId: next.customBotId,
     vendorSessionId: switched ? undefined : session.vendorSessionId,
@@ -285,10 +317,12 @@ export function normalizeSession(raw: unknown, liveRunIds?: ReadonlySet<string>)
     ...(typeof record.contextWindow === "number" && Number.isFinite(record.contextWindow) && record.contextWindow > 0
       ? { contextWindow: Math.round(record.contextWindow) }
       : {}),
+    ...(record.fastMode === true ? { fastMode: true as const } : {}),
     title: typeof record.title === "string" ? record.title : "New chat",
     titleLocked: record.titleLocked === true,
     mode,
     sandbox: normalizeSandbox(record.sandbox),
+    ...(record.computer === "on" ? { computer: "on" as const } : {}),
     securityPolicy: normalizeSessionSecurityPolicy(record.securityPolicy),
     environment: normalizeSessionEnvironment(record.environment),
     ...(normalizePresets(record.presets) ? { presets: normalizePresets(record.presets) } : {}),

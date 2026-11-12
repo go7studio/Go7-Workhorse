@@ -67,7 +67,6 @@ export function spawnClaudeProcess(spec: ReturnType<typeof buildClaudeLaunchSpec
     cwd: spawnCwd(cwd),
     env,
     stdio: ["pipe", "pipe", "pipe"],
-    windowsHide: true,
     // The CLI leads its own group, so a stop reaches what the CLI started too.
     ...groupSpawnOptions(),
   }) as ChildProcessWithoutNullStreams;
@@ -141,9 +140,12 @@ export class ClaudeSessionHost {
         const text = composeVendorPrompt(input.text, input.preface, slot.agent.opened, {
           mode: input.mode,
           sandbox: input.sandbox,
+          computer: input.computer,
           role: input.role ?? (input.parentId || input.hidden ? "worker" : "orchestrator"),
           crewMode: input.crewModes,
           spawnNames: input.spawnNames,
+          priorUserTexts: input.priorUserTexts,
+          planOpen: input.planOpen,
         }, input.visibleText);
         const result = await slot.agent.prompt(text, this.handlersFor(input, forward), input.images ?? []);
         if (result.stopReason !== "cancelled") clearClaudeCredentialRejection(spec.credential.fingerprint);
@@ -226,9 +228,13 @@ export class ClaudeSessionHost {
       nextKey: key,
       restartRuntime: input.restartRuntime,
     });
-    if (action === "reuse" && slot) return;
+    if (action === "reuse" && slot) {
+      slot.agent.noteSeat(input);
+      return;
+    }
     slot?.agent.dispose();
     const agent = new GrokAgent(spec, (launchSpec) => this.spawn(launchSpec as typeof spec));
+    agent.noteSeat(input);
     this.starting.add(input.sessionId);
     try {
       const started = await agent.start({

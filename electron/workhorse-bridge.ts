@@ -166,7 +166,8 @@ export async function startWorkhorseBridge(
             raw.action === "list-agents" ||
             raw.action === "list-external-agents" ||
             raw.action === "viewer" ||
-            raw.action === "find-bots"
+            raw.action === "find-bots" ||
+            raw.action === "computer"
               ? raw.action
               : bots
                 ? "list"

@@ -31,6 +31,10 @@ export type GrokLaunchInput = {
    * out of the launch key so a change does not drop the native transcript.
    */
   contextWindow?: number;
+  /** ACP session config `fast` on/off when the model advertises it. */
+  fastMode?: boolean;
+  /** ACP agent persona when the session lists one. */
+  agentName?: string | null;
 };
 
 export type GrokMcpEnvVar = { name: string; value: string };
@@ -316,6 +320,8 @@ export function buildGrokLaunchSpec(input: GrokLaunchInput): GrokLaunchSpec {
     cwd: input.cwd,
     model,
     effort,
+    ...(typeof input.fastMode === "boolean" ? { fastMode: input.fastMode } : {}),
+    ...(input.agentName !== undefined ? { agentName: input.agentName } : {}),
     ...(contextWindow ? { contextWindow } : {}),
     alwaysApprove,
     sandbox,

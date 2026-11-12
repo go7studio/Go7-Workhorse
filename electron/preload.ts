@@ -52,6 +52,19 @@ contextBridge.exposeInMainWorld("workhorse", {
     ipcRenderer.invoke("team:presence", folder, journalId, beat) as Promise<boolean>,
   pickFile: () => ipcRenderer.invoke("file:pick") as Promise<string | null>,
   pickAttach: () => ipcRenderer.invoke("attach:pick") as Promise<string[]>,
+  micRequestAccess: () =>
+    ipcRenderer.invoke("mic:request-access") as Promise<import("./mic-host").MicAccessResult>,
+  micGetStatus: () => ipcRenderer.invoke("mic:get-status") as Promise<import("./mic-host").MicAccessStatus>,
+  micTranscribeLocal: (input: { audioBase64: string; mimeType: string }) =>
+    ipcRenderer.invoke("mic:transcribe", input) as Promise<import("./mic-host").MicTranscriptResult>,
+  micDictateStart: () =>
+    ipcRenderer.invoke("mic:dictate-start") as Promise<{ ok: true } | { ok: false; reason: string }>,
+  micDictateStop: () => ipcRenderer.invoke("mic:dictate-stop") as Promise<boolean>,
+  onMicDictation: (handler: (event: import("./mic-host").DictationLine) => void) => {
+    const listener = (_event: IpcRendererEvent, payload: import("./mic-host").DictationLine) => handler(payload);
+    ipcRenderer.on("mic:dictation", listener);
+    return () => ipcRenderer.removeListener("mic:dictation", listener);
+  },
   pickLocalComputeTokenFile: () => ipcRenderer.invoke("localCompute:pickTokenFile") as Promise<string | null>,
   mediaSrc: (href: string, cwd?: string, vendorSessionId?: string) =>
     ipcRenderer.invoke("media:src", href, cwd, vendorSessionId) as Promise<string | null>,
@@ -92,6 +105,52 @@ contextBridge.exposeInMainWorld("workhorse", {
     const listener = (_event: IpcRendererEvent, payload: import("./terminal-host").TerminalEvent) => handler(payload);
     ipcRenderer.on("terminal:event", listener);
     return () => ipcRenderer.removeListener("terminal:event", listener);
+  },
+  /* Browser seat — Piper Chrome grant + background fallback. Wren mic / Dexter Computer sit beside this. */
+  backgroundBrowserSetChromeAccess: (sessionId: string, access: import("../src/lib/background-browser").ChromeAccessState) =>
+    ipcRenderer.invoke("backgroundBrowser:setChromeAccess", sessionId, access) as Promise<
+      import("../src/lib/background-browser").ChromeAccessState
+    >,
+  backgroundBrowserEnsure: (input: {
+    sessionId: string;
+    name?: string;
+    url?: string;
+    preferHeadless?: boolean;
+    helperCommand?: string;
+    permissionMode?: import("../src/lib/types").PermissionMode;
+    sandbox?: import("../src/lib/types").SandboxProfile;
+    attachRealProfile?: boolean;
+    realProfileDir?: string;
+  }) =>
+    ipcRenderer.invoke("backgroundBrowser:ensure", input) as Promise<
+      import("./background-browser-host").BackgroundBrowserStartResult
+    >,
+  backgroundBrowserStart: (input: {
+    sessionId: string;
+    name?: string;
+    url?: string;
+    preferHeadless?: boolean;
+    helperCommand?: string;
+    permissionMode?: import("../src/lib/types").PermissionMode;
+    sandbox?: import("../src/lib/types").SandboxProfile;
+    attachRealProfile?: boolean;
+    realProfileDir?: string;
+  }) =>
+    ipcRenderer.invoke("backgroundBrowser:start", input) as Promise<
+      import("./background-browser-host").BackgroundBrowserStartResult
+    >,
+  backgroundBrowserStop: (browserId: string) => ipcRenderer.invoke("backgroundBrowser:stop", browserId) as Promise<boolean>,
+  backgroundBrowserStopSession: (sessionId: string) =>
+    ipcRenderer.invoke("backgroundBrowser:stopSession", sessionId) as Promise<number>,
+  backgroundBrowserList: (sessionId?: string) =>
+    ipcRenderer.invoke("backgroundBrowser:list", sessionId) as Promise<
+      import("../src/lib/background-browser").BackgroundBrowserSession[]
+    >,
+  onBackgroundBrowserEvent: (handler: (event: import("./background-browser-host").BackgroundBrowserEvent) => void) => {
+    const listener = (_event: IpcRendererEvent, payload: import("./background-browser-host").BackgroundBrowserEvent) =>
+      handler(payload);
+    ipcRenderer.on("background-browser:event", listener);
+    return () => ipcRenderer.removeListener("background-browser:event", listener);
   },
   loadState: () => ipcRenderer.invoke("state:load") as Promise<Record<string, unknown>>,
   liveRunIds: () => ipcRenderer.invoke("runs:live") as Promise<string[]>,

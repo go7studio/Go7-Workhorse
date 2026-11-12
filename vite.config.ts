@@ -27,7 +27,7 @@ export default defineConfig({
         vite: {
           build: {
             rollupOptions: {
-              external: ["node:sqlite"],
+              external: ["node:sqlite", "playwright", "playwright-core"],
             },
           },
         },
@@ -41,6 +41,13 @@ export default defineConfig({
     electronMcp({
       entry: ["electron/workhorse-mcp.ts", "electron/grok-bot-shim-host.ts"],
       onstart() {},
+      vite: {
+        build: {
+          rollupOptions: {
+            external: ["playwright", "playwright-core"],
+          },
+        },
+      },
     }),
   ],
 });

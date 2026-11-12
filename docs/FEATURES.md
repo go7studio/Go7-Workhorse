@@ -135,16 +135,18 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
 
 - A project is a name. Folders and references are optional, added later.
 - Chats belong to a project. Rename, archive, delete, or drag one to another.
-- Vendor, model and thinking effort are set per chat, not per app.
-- Changing This chat's model or effort drops the previous vendor session, so a
-  resend to Grok 4.6 High actually goes there. The thinking timer starts over.
+- Vendor, model, thinking effort, and Fast (where the model offers it) are set
+  per chat, not per app. Fast is on Grok, Claude, and Cursor.
+- Changing This chat's model, effort, or Fast drops the previous vendor session,
+  so a resend to Grok 4.6 High actually goes there. The thinking timer starts over.
 - A vendor session opens with your own prompt, so the vendor titles the chat
   from the task. A vendor that echoes the private context is rejected.
 - Fork a chat to try another model on the same history, in a managed worktree
   when the project has a Git folder.
 - Rewind to an earlier turn.
-- While a turn runs, Enter queues the next prompt on Next. Steer interrupts and
-  sends now, and the chat never says Stopped.
+- While a turn runs, Enter queues the next prompt on Next. Edit puts it back in
+  the composer. Steer interrupts and sends now. × drops it. The chat never says
+  Stopped.
 - A finished turn stays finished. Trailing thought after the vendor returns does
   not walk the horse again.
 - A long transcript opens on the latest turns and pages older windows without
@@ -159,6 +161,7 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
   keyboard or the selection is on it, and keeps their space at rest.
 - A crew chip in the composer shortens its name with an ellipsis rather than
   cutting it off at a narrow window.
+- The composer microphone shows Listening in the text area, a level while you speak, and types the words into the unsent draft. You still send. On a Mac this is on-device speech recognition. A yes is remembered for the rest of that time the app is open, so the next tap does not ask again. A newly packed Dev app is a new signature, so macOS asks once for that build.
 - A chat that ran a wave says who called it and how it went, such as
   `OpenClaw · Working…`, or nothing once every worker finished clean.
 - Failure is the only word in red. Interrupted and timed-out work is unfinished,
@@ -180,6 +183,25 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
   agent started) stay on the chat as a small strip: name, elapsed time, and
   whether they are still running or were killed. That is the Grok ACP session,
   not Settings → Watch leftover pools. Other vendors do not report this yet.
+- **Mic recording** — a chat can record from the microphone for voice input
+  when the person allows it. OS permission deep-links stay platform-specific.
+- **Computer seat** — an agent may use a Computer seat for on-screen work when
+  that seat is granted on the chat. It is not a desktop takeover of the login
+  session by default.
+- **Chrome access prompt** — before a chat uses Chrome, it asks "Allow this
+  chat to access your Chrome?" Allow controls installed Chrome through
+  navigate, snapshot, click, fill, screenshot, and console. There is no page
+  script in this version. The profile stays under Workhorse userData unless
+  the chat explicitly attaches the person’s Chrome profile. Permission Always
+  does not attach that profile. Plan, read-only, and strict refuse browser
+  control.
+- **Background browser session** — on Decline, the chat owns a headless
+  Chromium session under Workhorse userData. A missing Playwright driver fails
+  that start instead of leaving a running session. A small strip shows name,
+  elapsed time, and running/killed; Stop kills the process tree. No mouse or
+  keyboard is posted into the person's login session, and a blank window never
+  falls back to screenshot-and-click on the real desktop. Helpers that
+  double-fork onto launchd or systemd are refused.
 - **Attach** takes files or a folder. You can drag them onto the window or paste
   them in.
   - **Images** png, jpg, jpeg, webp, gif, bmp
@@ -192,6 +214,13 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
 - A chat reads media the agent wrote, so a generated image shows in the
   transcript, not a path.
 - **Permission modes** ask, accept-edits, always-approve, plan.
+- **Computer** is a per-chat switch beside Permission and Sandbox. It ships off.
+  Spawn does not copy it onto a worker and cannot turn it on. It runs only
+  with Sandbox off. Plan, read-only, and strict refuse it. The first use of an
+  app asks on the permission card. A desk chat calls it with the computer
+  tool, and Electron main runs the click. Finder, Explorer, and System
+  Settings can be driven. The Workhorse window, browsers, and typing into
+  terminals or IDEs stay out.
 - **Sandbox profiles** off, workspace, read-only, strict. Read-only still reads:
   gh, git and the search tools. Anything that writes or sends stops, and so does
   every interpreter, because a script cannot be read for what it will do.
@@ -304,9 +333,13 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
   the moment it is asked for workers, and opens lighter for not carrying them.
 - If the ask is phrased in a way the desk does not read as a request for
   workers, the chat says the desk can put workers on it and waits for you,
-  rather than hiring one under no rules. A bare yes after that wait is not a
-  request for workers, so the desk refuses it again: pin the chat to
-  Orchestrate or Mission, or ask again in spawn, worker, bot or agent words.
+  rather than hiring one under no rules. Confirm continues that ask, and so
+  does a later note that the work is incomplete or not working: the same
+  assignment resumes without a second confirmation. A bare yes with no earlier
+  ask is still refused: pin the chat to Orchestrate or Mission, or ask again
+  in spawn, worker, bot or agent words. Starting a named worker on a vendor,
+  or a note that says prove orchestration, counts as that ask. You do not send
+  another word for a handoff that already names the lanes.
 - One assignment is one worker, or a
   named continuation on this parent for the same topic; a bare spawn still
   starts clear-headed.
@@ -345,6 +378,13 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
 - The crew tray shows direct workers, their model, effort and latest activity.
 - Expand it to stop a worker or the crew, preview a worker chat, queue a
   follow-up, or open the full chat. Drafts stay local while you type.
+- Hand a named worker a different vendor or model and the desk cancels any live
+  turn, drops the old vendor session, and restarts that worker on the new brain
+  with the same desk transcript. A fresh start on that same name reopens the
+  free worker. A plan that is still running stays open after a cancel, and the
+  desk picks the unfinished lane back up without a new message. Drop on the plan
+  bar removes that plan. A paused plan
+  refuses the next assignment until it is resumed.
 - Cancelling one worker stops that worker only, and the wave is not called
   finished while others run.
 - **Subagents** get lifecycle records, cascading cancellation, changed-file

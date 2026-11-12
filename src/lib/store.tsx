@@ -72,7 +72,7 @@ import {
   shiftQueuedPrompt,
   sidebarKeepsChat,
 } from "./chats";
-import { isTerminalRunStatus, settledWorkers, workerJustSettled } from "./worker-settled";
+import { settledWorkers, workerJustSettled } from "./worker-settled";
 import { foldersToCount, leftInFolderNote, workerLabel } from "./worker-folders";
 import { deskPersistBodyEqual, hotSavePayload, persistDelayMs } from "./desk-persist";
 import { restoredPanel } from "./restored-panel";
@@ -108,6 +108,8 @@ import {
   workerAccess,
   workerGrant,
 } from "./permissions";
+import { computerForSpawnedWorker } from "./computer-seat";
+import type { ComputerSeat } from "./computer-seat";
 import {
   applyDeleteCustomBot,
   applyInstallCustomBot,
@@ -135,6 +137,7 @@ import {
   normalizeModelId,
   parseEffort,
   parseEffortFromText,
+  supportsFastMode,
   withEffort,
 } from "./models";
 import { applyStreamQueues, createStreamCommitScheduler, mergeStreamChunk } from "./stream-commit";
@@ -255,6 +258,8 @@ import {
   setPlanStepStatus,
   startPlanRun,
 } from "./plan";
+import { applyBackgroundBrowserSession, chromeAccessPromptForBrowserTool } from "./background-browser";
+import { browserControlRefusal } from "./browser-access";
 import { applyVendorBackgroundTask } from "./vendor-tasks";
 import {
   applyCompactUsage,
@@ -303,6 +308,7 @@ import {
   reconcilePersistedLineups,
   setLineupRowStatus,
   stampLineupUserText,
+  queueOpenPlanResume,
 } from "./lineup";
 import { boundLinkReply, linkLabel } from "./link-reply";
 import { applyPlanAuditorSpawn, joinAndAdmit } from "./plan-admission";
@@ -362,6 +368,8 @@ import {
   shouldAutoRouteSpawn,
   parseProviderId,
   userLockedSpawnModel,
+  lockedCursorGrokSpawn,
+  predecessorStillWaiting,
   routingDecisionMatchesSpawn,
   constrainRouteCandidatesForSpawn,
   spawnContinuationHowToUse,
@@ -390,6 +398,8 @@ import {
   normalizeSession,
   parsePermissionMode,
   parseSandbox,
+  stampUnstampedMessages,
+  vendorBrainChanged,
   vendorSessionForSend,
   applyStandingGrant,
 } from "./session";
@@ -425,6 +435,7 @@ import {
 import { clampPaneWidth, SIDEBAR_PANE, THREAD_PANE } from "./pane";
 import {
   assistantHasVisibleReply,
+  isCursorAuthRefusal,
   isVendorRateLimitError,
   isDeskAssistantNotice,
   keepStreamedAssistantText,
@@ -523,6 +534,7 @@ const EMPTY: AppState = {
   activeProjectId: null,
   activeSessionId: null,
   pending: [],
+  chromeAccessPrompt: null,
   leases: [],
   dismissedAttention: [],
   sheet: null,
@@ -575,6 +587,7 @@ export type Store = AppState & {
   /** Re-read the desk catalog. A custom host's freshly read model list lands here. */
   refreshVendorModels: () => void;
   setSessionEffort: (effort: EffortLevel) => void;
+  setSessionFastMode: (on: boolean) => void;
   setSessionContextWindow: (tokens: number) => void;
   setSessionEnvironment: (kind: "local" | "worktree") => Promise<{ ok: boolean; message: string }>;
   selectSession: (id: string) => void;
@@ -600,6 +613,7 @@ export type Store = AppState & {
   setMode: (mode: PermissionMode) => void;
   setDeskAccess: (patch: Partial<DeskAccess>) => void;
   setSandbox: (sandbox: SandboxProfile) => void;
+  setComputer: (computer: ComputerSeat) => void;
   setChatPreset: (id: "blender", on: boolean) => void;
   setSecurityPolicy: (patch: Partial<SessionSecurityPolicy>) => void;
   setMcpServers: (servers: McpServerConfig[]) => Promise<void>;
@@ -613,6 +627,10 @@ export type Store = AppState & {
   cycleTheme: () => void;
   toggleWorkhorseTheme: () => void;
   answerPermission: (id: string, answer: "once" | "session" | "deny") => void;
+  /** Show the in-chat Chrome access prompt for browser tools (not a Settings tab). */
+  promptChromeAccess: (sessionId: string, name?: string) => void;
+  /** Allow → Piper Chrome path; Decline → start headless background browser. */
+  answerChromeAccess: (sessionId: string, access: "granted" | "declined") => void;
   demoPermission: () => void;
   recordUsage: (draft: UsageDraft) => void;
   openSettings: (section?: SettingsSection) => void;
@@ -670,6 +688,8 @@ export type Store = AppState & {
   /** Uninstall, yank, or a forced off: the add-on leaves every chat immediately. */
   dropWorkshopPackFromChats: (packId: string) => void;
   grantPlanExternalAgents: (sessionId: string, allow: boolean) => void;
+  /** Take the plan off this chat. The bar goes away, and a cancelled lane is not picked back up. */
+  dropPlan: (sessionId: string) => void;
   /** Public leaderboard scores the desk holds (LMArena), and the last check. Null outside the desktop app. */
   botScores: BotScoresView | null;
   /** Check the leaderboard now; download it if it moved. */
@@ -1011,7 +1031,7 @@ function hydrate(value: unknown, liveRunIds?: ReadonlySet<string>): AppState {
   const restored = rehomeCustomUsage(normalizeUsage(record.usage), settings.customBots, normalizedSessions);
   const usage = [...backfillCursorUsage(normalizedSessions, restored), ...restored];
   const rawSessions = reconcilePersistedLineups(normalizedSessions, Date.now(), usage);
-  const sessions = listedChats(
+  const sessions = queueOpenPlanResume(listedChats(
     applyUsageContext(rawSessions, usage).map((session) => {
       // Local intent titles only for defaults / old prompt slices. Do not rewrite
       // unlocked vendor, manual, or already-reduced titles on launch.
@@ -1020,7 +1040,7 @@ function hydrate(value: unknown, liveRunIds?: ReadonlySet<string>): AppState {
       const lineup = reconcileLineupOnRestart(titled.lineup);
       return lineup ? { ...titled, lineup } : titled;
     }),
-  );
+  ));
   const activeSessionId =
     typeof record.activeSessionId === "string" && sessions.some((session) => session.id === record.activeSessionId)
       ? record.activeSessionId
@@ -1172,6 +1192,8 @@ function cancelVendorSession(session: Pick<Session, "id" | "provider" | "agentRu
   else if (session.provider === "gemini") void window.workhorse?.geminiCancel?.(session.id);
   else if (session.provider === "custom") void window.workhorse?.customCancel?.(session.id);
   else void window.workhorse?.grokCancel?.(session.id);
+  // Stop kills the background browser process tree with the chat.
+  void window.workhorse?.backgroundBrowserStopSession?.(session.id);
 }
 
 function stopDeletedWorkerSessions(before: Session[], after: Session[]) {
@@ -2134,6 +2156,30 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  const setSessionFastMode = useCallback((on: boolean) => {
+    const current = stateRef.current;
+    const session = current.sessions.find((item) => item.id === current.activeSessionId);
+    if (!session || !supportsFastMode(session.provider, session.model)) return;
+    const nextFast = on === true;
+    if (Boolean(session.fastMode) === nextFast) return;
+    cancelVendorSession(session);
+    setState((latest) => {
+      const live = latest.sessions.find((item) => item.id === latest.activeSessionId);
+      if (!live || !supportsFastMode(live.provider, live.model)) return latest;
+      const next = applySessionModelChange(live, {
+        provider: live.provider,
+        model: live.model,
+        effort: live.effort,
+        customBotId: live.customBotId,
+        fastMode: nextFast,
+      });
+      return {
+        ...latest,
+        sessions: latest.sessions.map((item) => (item.id === live.id ? next : item)),
+      };
+    });
+  }, []);
+
   const setSessionContextWindow = useCallback((tokens: number) => {
     setState((current) => {
       const session = current.sessions.find((item) => item.id === current.activeSessionId);
@@ -2355,6 +2401,21 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           : item,
       ),
     }));
+  }, []);
+
+  const setComputer = useCallback((computer: ComputerSeat) => {
+    const next = computer === "on" ? "on" : "off";
+    setState((current) => {
+      const live = current.sessions.find((item) => item.id === current.activeSessionId);
+      if (!live) return current;
+      if ((live.computer === "on" ? "on" : "off") === next) return current;
+      return {
+        ...current,
+        sessions: current.sessions.map((item) =>
+          item.id === live.id ? { ...item, computer: next === "on" ? "on" : undefined } : item,
+        ),
+      };
+    });
   }, []);
 
   const setSandbox = useCallback((sandbox: SandboxProfile) => {
@@ -2583,6 +2644,40 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const elevatePeerReply = useRef<Map<string, (result: { text?: string; error?: string }) => void>>(new Map());
+
+  const promptChromeAccess = useCallback((sessionId: string, name?: string) => {
+    const id = sessionId.trim();
+    if (!id) return;
+    setState((current) => ({
+      ...current,
+      chromeAccessPrompt: { sessionId: id, ...(name?.trim() ? { name: name.trim() } : {}) },
+    }));
+  }, []);
+
+  const answerChromeAccess = useCallback((sessionId: string, access: "granted" | "declined") => {
+    const id = sessionId.trim();
+    if (!id) return;
+    setState((current) => ({
+      ...current,
+      chromeAccessPrompt: current.chromeAccessPrompt?.sessionId === id ? null : current.chromeAccessPrompt,
+      sessions: current.sessions.map((session) =>
+        session.id === id ? { ...session, chromeAccess: access } : session,
+      ),
+    }));
+    void (async () => {
+      const recorded = await window.workhorse?.backgroundBrowserSetChromeAccess?.(id, access);
+      if (recorded !== access) return;
+      const session = stateRef.current.sessions.find((item) => item.id === id);
+      if (browserControlRefusal({ permissionMode: session?.mode, sandbox: session?.sandbox })) return;
+      await window.workhorse?.backgroundBrowserStart?.({
+        sessionId: id,
+        name: access === "granted" ? "Chrome" : "Background browser",
+        preferHeadless: access !== "granted",
+        permissionMode: session?.mode,
+        sandbox: session?.sandbox,
+      });
+    })();
+  }, []);
 
   const answerPermission = useCallback((id: string, answer: "once" | "session" | "deny") => {
     const pending = stateRef.current.pending.find((item) => item.id === id);
@@ -3605,16 +3700,22 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           images,
           model: session.model,
           effort: session.effort,
+          ...(supportsFastMode(session.provider, session.model) && session.fastMode === true
+            ? { fastMode: true as const }
+            : {}),
           mode: vendorLaunchMode(session),
           cwd,
           vendorSessionId,
           sandbox: session.sandbox,
+          computer: session.computer,
           securityPolicy: session.securityPolicy,
           parentId: session.parentId,
           hidden: session.hidden,
           role: deskRoleOf(session),
           crewModes: session.crewModes,
           spawnNames: spawnAllowlistNames(session.spawnAllowlist, stateRef.current.settings),
+          priorUserTexts: spawnTurnOf({ messages: working, queue: session.queue }).priorTexts,
+          planOpen: session.planRun?.status === "running",
           mcpServers: mcpServersForSession(stateRef.current.settings.mcpServers, session),
           contextWindow: session.contextWindow,
           preface: withPortableHistory(buildSessionPreface({
@@ -3624,6 +3725,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             references: project?.references ?? [],
             mode: session.mode,
             sandbox: session.sandbox,
+            computer: session.computer,
             surface: session.provider === "custom" ? "http" : session.provider === "cursor" ? "cursor" : "mcp",
             role: deskRoleOf(session),
             desk: {
@@ -3633,6 +3735,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 provider: session.provider,
                 model: session.model,
                 effort: session.effort,
+                fastMode: session.fastMode,
                 mode: session.mode,
                 botName: customBotForSession(stateRef.current.settings.customBots, session)?.name,
               }),
@@ -3673,6 +3776,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             cwd,
             mode: vendorLaunchMode(session),
             sandbox: session.sandbox,
+            computer: session.computer,
             preface: promptInput.preface,
             history,
             mcpServers: mcpServersForSession(stateRef.current.settings.mcpServers, session),
@@ -4594,6 +4698,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             references: project?.references ?? [],
             mode: session.mode,
             sandbox: session.sandbox,
+            computer: session.computer,
             surface: session.provider === "custom" ? "http" : session.provider === "cursor" ? "cursor" : "mcp",
             role,
           });
@@ -4604,10 +4709,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             images,
             model: session.model,
             effort: session.effort,
+            ...(supportsFastMode(session.provider, session.model) && session.fastMode === true
+              ? { fastMode: true as const }
+              : {}),
             mode: vendorLaunchMode(session),
             cwd,
             vendorSessionId: vendorSessionForSend(session),
             sandbox: session.sandbox,
+            computer: session.computer,
             mcpServers: runtimeMcpServers,
             preface,
             parentId: session.parentId,
@@ -4616,6 +4725,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             contextWindow: session.contextWindow,
             crewModes: session.crewModes,
             spawnNames: spawnAllowlistNames(session.spawnAllowlist, snapshot.settings),
+            priorUserTexts: spawnTurnOf(session).priorTexts,
+            planOpen: session.planRun?.status === "running",
             restartRuntime,
           };
           if (live === "preview") throw new Error(`${providerById(session.provider).name} is not connected yet`);
@@ -4637,6 +4748,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               cwd,
               mode: vendorLaunchMode(session),
               sandbox: session.sandbox,
+              computer: session.computer,
               preface,
               // A custom bot has no session of its own, so the conversation
               // has to travel with every request. This used to be [] — which
@@ -6298,6 +6410,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             const effectiveExclusions = spawnExclusions(caller, payload.exclude, isNested);
             const orchestrationBench = orchestrationEnabled(caller.crewModes);
             const userLockedModel = userLockedSpawnModel(caller.messages);
+            const cursorGrokLock = lockedCursorGrokSpawn(userLockedModel);
             const coordinatorModel = typeof payload.model === "string" && Boolean(payload.model.trim());
             const routeSpawn = shouldAutoRouteSpawn({
               routingEnabled: latest.settings.routing.enabled,
@@ -6438,8 +6551,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               });
               return;
             }
-            const spawnProvider = routeDecision?.provider ?? payload.provider;
-            const spawnModel = routeDecision?.model ?? payload.model;
+            const spawnProvider = cursorGrokLock?.provider ?? routeDecision?.provider ?? payload.provider;
+            const spawnModel = cursorGrokLock?.model ?? routeDecision?.model ?? payload.model;
             const selectedTier =
               routeDecision?.taskTier ??
               routeTier ??
@@ -6669,7 +6782,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             const waitingOn = spawnAfter.waitFor.filter((item) => item.id !== childId);
             const waitingAtStart = waitingOn.some((item) => {
               const earlier = latest.sessions.find((session) => session.id === item.id);
-              return Boolean(earlier) && !isTerminalRunStatus(earlier?.agentRun?.status);
+              return Boolean(earlier) && predecessorStillWaiting(earlier?.agentRun?.status);
             });
             // The caller learns its child's seat from the spawn result, not
             // from a card the person has to answer. `log` is the main-log line
@@ -6801,6 +6914,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             }
             const childCwd = sessionExecutionCwd(environment, root);
             let claimedLeases = releaseSessionLeases(pathLeasesRef.current, childId);
+            let deferredPathClaim = false;
             if (assignedPaths.length > 0) {
               if (!childCwd || !window.workhorse?.readSourceFile) {
                 await replyAsk({ error: "Path ownership is unavailable for this worker folder." });
@@ -6824,12 +6938,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 // not the label on its role.
                 sandbox: callAccess.granted.sandbox,
                 files,
+                // A path leased only by someone this spawn is waiting on does not
+                // reject the queue. The claim is taken when this worker starts.
+                deferTo: waitingOn.map((item) => item.id),
               });
               if (!claim.ok) {
                 await replyAsk({ error: claim.error });
                 return;
               }
               claimedLeases = claim.leases;
+              deferredPathClaim = claim.deferred === true;
             }
             // Folder/lease preparation awaited I/O. Cancellation may have
             // closed the assignment while this request was preparing.
@@ -6926,11 +7044,25 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 : undefined,
             });
             const childMission = spawnMission;
+            const spawnFastMode =
+              typeof (payload as { fast?: unknown }).fast === "boolean"
+                ? (payload as { fast: boolean }).fast === true
+                : priorWorker?.fastMode === true;
+            const nextBrain = {
+              provider: spec.provider,
+              model: spec.model,
+              effort: spec.effort,
+              customBotId: spec.customBotId,
+              fastMode: spawnFastMode || undefined,
+            };
+            // Continuity keeps vendorSessionId only when the brain is the same.
+            // A named Wren handed Composer → Cursor Grok must cancel and reopen,
+            // not fail against the old ACP session.
+            const brainChanged = priorWorker ? vendorBrainChanged(priorWorker, nextBrain) : false;
+            if (priorWorker && brainChanged) cancelVendorSession(priorWorker);
             const child: Session = {
-              // A reused worker keeps everything it already is — most of all
-              // vendorSessionId, which IS its memory of the last slice. Only
-              // the run and the new message are fresh. Slice spend starts at
-              // zero on this assignment; billed usage for the chat stays on the meter.
+              // A reused worker keeps the desk transcript and folder. The vendor
+              // session is continuity only when provider/model/effort/fast match.
               ...(priorWorker ?? {}),
               // The pointer belongs to the transcript that was retired, and the
               // new run's messages start from that transcript already merged
@@ -6949,6 +7081,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               model: spec.model,
               customBotId: spec.customBotId,
               effort: spec.effort,
+              ...(supportsFastMode(spec.provider, spec.model) && spawnFastMode
+                ? { fastMode: true as const }
+                : { fastMode: undefined }),
               title: workerTaskTitle(workerName, spec.title),
               titleLocked: true,
               // Two dials. The vendor session is the first: a path-owned worker
@@ -6962,6 +7097,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 owned: assignedPaths.length > 0,
                 prior: priorWorker,
               }),
+              computer: computerForSpawnedWorker(priorWorker?.computer),
               securityPolicy: parent.securityPolicy,
               environment,
               status: "running",
@@ -6990,10 +7126,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               ...(routedWorkerIsRouted
                 ? { routingMode: "auto" as const, routingDecision: routeDecision ?? undefined }
                 : { routingMode: "manual" as const }),
-              ...(spawnSeed === "fresh" ? { vendorSessionId: undefined, vendorProvider: undefined } : {}),
+              ...(spawnSeed === "fresh" || brainChanged
+                ? { vendorSessionId: undefined, vendorProvider: undefined }
+                : {}),
               messages: workerStartMessages({
                 seed: spawnSeed,
-                priorMessages,
+                priorMessages: brainChanged && priorMessages
+                  ? stampUnstampedMessages(priorMessages, brainStamp(priorWorker!))
+                  : priorMessages,
                 userId: uid("msg"),
                 assistantId,
                 fromTitle: parent.title?.trim() || "another agent",
@@ -7274,34 +7414,58 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             };
             /*
              * A slice that comes after others starts when they have all ended.
-             * If one of them did not finish its work, this one never starts:
-             * its ground was never laid, and a run on it is spent for nothing.
-             * The head reads why in the join. A worker the person or the head
-             * stopped while it waited stays stopped.
+             * Failed still blocks the follower: its ground was never laid.
+             * Cancelled does not. If that same session is running again, keep
+             * waiting. If it stays cancelled, start and put the cancellation
+             * in the after brief. A worker stopped while it waited stays stopped.
              */
+            const claimDeferredPaths = async (): Promise<string | undefined> => {
+              if (!deferredPathClaim) return undefined;
+              if (!childCwd || !window.workhorse?.readSourceFile) return "Path ownership is unavailable for this worker folder.";
+              const fresh: Array<{ path: string; fingerprint: string }> = [];
+              for (const ownedPath of assignedPaths) {
+                const source = await window.workhorse.readSourceFile(ownedPath, [childCwd]);
+                if (!source || source.directory || source.unreadable) return `Cannot lease path: ${ownedPath}.`;
+                fresh.push({ path: ownedPath, fingerprint: fileContentsFingerprint(source.text) });
+              }
+              const taken = claimSharedFiles({
+                leases: releaseSessionLeases(pathLeasesRef.current, childId),
+                sessionId: childId,
+                isolation,
+                role: spawnRole,
+                sandbox: callAccess.granted.sandbox,
+                files: fresh,
+              });
+              if (!taken.ok) return taken.error;
+              flushSync(() => {
+                pathLeasesRef.current = taken.leases;
+                setState((current) => ({ ...current, leases: taken.leases }));
+              });
+              return undefined;
+            };
             const startWhenReady = async (): Promise<string> => {
+              let finished: Array<{ name: string; status: string; report: string; changedFiles?: string[] }> = [];
               if (waitingOn.length > 0) {
                 const deadline = Date.now() + AFTER_WAIT_MS;
-                const stillOpen = () =>
-                  waitingOn.filter((item) => {
-                    const earlier = stateRef.current.sessions.find((session) => session.id === item.id);
-                    return Boolean(earlier) && !isTerminalRunStatus(earlier?.agentRun?.status);
+                const readFinished = () => {
+                  const sessionsNow = stateRef.current.sessions;
+                  const rows = sessionsNow.find((session) => session.id === parent.id)?.lineup?.rows ?? [];
+                  return waitingOn.map((item) => {
+                    const earlier = sessionsNow.find((session) => session.id === item.id);
+                    return {
+                      name: item.name,
+                      status: earlier ? (earlier.agentRun?.status ?? "") : "completed",
+                      report: rows.find((row) => row.childId === item.id)?.report ?? childReportText(earlier) ?? "",
+                      ...(earlier?.agentRun?.changedFiles?.length ? { changedFiles: earlier.agentRun.changedFiles } : {}),
+                    };
                   });
-                while (stillOpen().length > 0 && Date.now() < deadline) {
+                };
+                finished = readFinished();
+                while (finished.some((item) => predecessorStillWaiting(item.status)) && Date.now() < deadline) {
                   await new Promise((resolve) => setTimeout(resolve, AFTER_POLL_MS));
+                  finished = readFinished();
                 }
-                const sessionsNow = stateRef.current.sessions;
-                const rows = sessionsNow.find((session) => session.id === parent.id)?.lineup?.rows ?? [];
-                const finished = waitingOn.map((item) => {
-                  const earlier = sessionsNow.find((session) => session.id === item.id);
-                  return {
-                    name: item.name,
-                    status: earlier?.agentRun?.status ?? "completed",
-                    report: rows.find((row) => row.childId === item.id)?.report ?? childReportText(earlier) ?? "",
-                    ...(earlier?.agentRun?.changedFiles?.length ? { changedFiles: earlier.agentRun.changedFiles } : {}),
-                  };
-                });
-                const open = stillOpen();
+                const open = finished.filter((item) => predecessorStillWaiting(item.status));
                 notStarted = open.length > 0
                   ? `Did not start: ${open.map((item) => item.name).join(", ")} had not finished after ${Math.round(AFTER_WAIT_MS / 3_600_000)} hours.`
                   : afterBlockedReason(finished);
@@ -7310,6 +7474,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                   return "";
                 }
                 if (stateRef.current.sessions.find((session) => session.id === childId)?.agentRun?.status !== "running") return "";
+              }
+              const claimError = await claimDeferredPaths();
+              if (claimError) {
+                notStarted = claimError;
+                markChildFailure(new Error(claimError));
+                return "";
+              }
+              if (waitingOn.length > 0) {
                 afterNote = afterBriefFor(finished);
                 setState((current) => ({
                   ...current,
@@ -7816,6 +7988,19 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if (!pendingIdleClose.current[sessionId] && !canRevive) return;
       armTurnIdle(sessionId, TURN_IDLE_AFTER_TRAILING_MS);
     };
+    const raiseBrowserAccess = (sessionId: string, tool: string) => {
+      const owner = stateRef.current.sessions.find((item) => item.id === sessionId);
+      if (browserControlRefusal({ permissionMode: owner?.mode, sandbox: owner?.sandbox })) return;
+      if (!chromeAccessPromptForBrowserTool(tool, owner?.chromeAccess)) return;
+      if (stateRef.current.chromeAccessPrompt?.sessionId === sessionId) return;
+      promptChromeAccess(sessionId, tool);
+      void window.workhorse?.backgroundBrowserEnsure?.({
+        sessionId,
+        name: tool,
+        permissionMode: owner?.mode,
+        sandbox: owner?.sandbox,
+      });
+    };
     const apply = (event: GrokBridgeEvent) => {
       try {
       const redirectedId = redirectedAssistant.current[event.sessionId];
@@ -7951,6 +8136,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       }
       if (event.type === "tool") {
         noteTrailingTurnActivity(event.sessionId);
+        raiseBrowserAccess(event.sessionId, event.title);
         const owner = stateRef.current.sessions.find((item) => item.id === event.sessionId);
         const turn = learningTurns.current[event.sessionId];
         if (turn && event.toolCallId && !turn.toolIds.includes(event.toolCallId)) turn.toolIds.push(event.toolCallId);
@@ -8097,6 +8283,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         return;
       }
       if (event.type === "permission") {
+        raiseBrowserAccess(event.sessionId, event.tool);
+        if (event.rawTool) raiseBrowserAccess(event.sessionId, event.rawTool);
         const owner = stateRef.current.sessions.find((item) => item.id === event.sessionId);
         const provider =
           owner?.provider === "codex" ||
@@ -8558,11 +8746,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         }
         const turn = learningTurns.current[event.sessionId];
         const assistantId = grokAssistantId.current[event.sessionId];
+        const cursorAuthFailed = session?.provider === "cursor" && isCursorAuthRefusal(
+          session.messages.find((message) => message.id === assistantId)?.text,
+        );
+        if (cursorAuthFailed) refreshCursorLogin();
         if (turn && session && assistantId) {
           const evidence = agentTurnEvidence({
-            messages: finishOpenToolMessages(session.messages, safetyPaused ? "failed" : "completed"),
+            messages: finishOpenToolMessages(session.messages, safetyPaused || cursorAuthFailed ? "failed" : "completed"),
             assistantId,
-            outcome: safetyPaused ? "safety-paused" : "completed",
+            outcome: safetyPaused ? "safety-paused" : cursorAuthFailed ? "failed" : "completed",
             queuedText: grokChunkQueue.current[event.sessionId],
             stopReason: event.stopReason,
             workedMs: Math.max(0, Date.now() - (session.messages.find((message) => message.id === assistantId)?.createdAt ?? Date.now())),
@@ -8640,9 +8832,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                       return session.messages.map((message) => {
                         if (message.id !== assistantId) return message;
                         const body = message.text ?? "";
-                        const text = session.provider === "gemini"
+                        const raw = session.provider === "gemini"
                           ? (body.trim() ? body : queued)
                           : body.trim() || queued.trim();
+                        const authFailed = session.provider === "cursor" && isCursorAuthRefusal(raw);
+                        const text = authFailed
+                          ? vendorFailedMessage("cursor", "Authentication required")
+                          : raw;
                         return {
                           ...message,
                           text: (session.provider === "gemini" ? Boolean(text.trim()) : assistantHasVisibleReply(text))
@@ -8662,7 +8858,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               safetyPaused ? "failed" : "completed",
             );
             const reportedBlocked = Boolean(session.parentId) && workerReportedBlocked(childReportText({ messages }));
-            const failed = safetyPaused || reportedBlocked;
+            const authFailed = session.provider === "cursor" && isCursorAuthRefusal(
+              messages.find((message) => message.id === assistantId)?.text,
+            );
+            const failed = safetyPaused || reportedBlocked || authFailed;
             return applyVendorTurnIdle({
               ...session,
               scheduledRuns: (session.scheduledRuns ?? []).map((run) =>
@@ -8675,7 +8874,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           });
           const finishedTurn = sessions.find((session) => session.id === event.sessionId);
           const reportedBlocked = Boolean(finishedTurn?.parentId) && workerReportedBlocked(childReportText(finishedTurn));
-          const failed = safetyPaused || reportedBlocked;
+          const authFailed = finishedTurn?.provider === "cursor" && isCursorAuthRefusal(
+            finishedTurn.messages.find((message) => message.id === assistantId)?.text,
+          );
+          const failed = safetyPaused || reportedBlocked || authFailed;
           sessions = withFinishedTurnSubagentStatus(
             sessions,
             event.sessionId,
@@ -8760,6 +8962,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         const pending = grokUsagePending.current[event.sessionId];
         delete grokUsagePending.current[event.sessionId];
         const failedSession = stateRef.current.sessions.find((item) => item.id === event.sessionId);
+        if (failedSession?.provider === "cursor" && (
+          isCursorAuthRefusal(event.message) ||
+          isCursorAuthRefusal(failedSession.messages.find((message) => message.id === grokAssistantId.current[event.sessionId])?.text)
+        )) refreshCursorLogin();
         const settled = settleTurnUsage({
           pending: pending ?? [],
           provider: failedSession?.provider ?? "grok",
@@ -8819,16 +9025,23 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                       run.status === "running" ? { ...run, status: "failed" as const } : run,
                     ),
                     messages: finishOpenToolMessages(
-                      session.messages.map((message) =>
-                        message.id === assistantId && !message.text
-                          ? isJoinAssistantTurn(session.messages, assistantId ?? "")
-                            ? message
-                            : {
-                                ...message,
-                                text: vendorFailedMessage(session.provider, event.message),
-                              }
-                          : message,
-                      ),
+                      session.messages.map((message) => {
+                        if (message.id !== assistantId) return message;
+                        const authFailed = session.provider === "cursor" && (
+                          isCursorAuthRefusal(message.text) || isCursorAuthRefusal(event.message)
+                        );
+                        if (!message.text || authFailed) {
+                          if (isJoinAssistantTurn(session.messages, assistantId ?? "")) return message;
+                          return {
+                            ...message,
+                            text: vendorFailedMessage(
+                              session.provider,
+                              authFailed ? "Authentication required" : event.message,
+                            ),
+                          };
+                        }
+                        return message;
+                      }),
                       "failed",
                       event.message,
                     ),
@@ -8869,6 +9082,33 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const offCursor = window.workhorse?.onCursorEvent?.(apply);
     const offGemini = window.workhorse?.onGeminiEvent?.(apply);
     const offCustom = window.workhorse?.onCustomEvent?.(apply);
+    const offBrowser = window.workhorse?.onBackgroundBrowserEvent?.((event) => {
+      if (event.type === "chrome-prompt") {
+        promptChromeAccess(event.sessionId, event.name);
+        return;
+      }
+      if (event.type === "chrome-access") {
+        setState((current) => ({
+          ...current,
+          sessions: current.sessions.map((session) =>
+            session.id === event.sessionId ? { ...session, chromeAccess: event.access } : session,
+          ),
+          chromeAccessPrompt: current.chromeAccessPrompt?.sessionId === event.sessionId ? null : current.chromeAccessPrompt,
+        }));
+        return;
+      }
+      if (event.type === "session") {
+        const row = event.session;
+        setState((current) => ({
+          ...current,
+          sessions: current.sessions.map((session) =>
+            session.id === row.sessionId
+              ? { ...session, backgroundBrowsers: applyBackgroundBrowserSession(session.backgroundBrowsers, row) }
+              : session,
+          ),
+        }));
+      }
+    });
     return () => {
       streamCommits.stop();
       for (const handle of Object.values(turnIdleTimer.current)) window.clearTimeout(handle);
@@ -8881,6 +9121,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       offCursor?.();
       offGemini?.();
       offCustom?.();
+      offBrowser?.();
     };
   }, [recordUsage]);
 
@@ -9736,6 +9977,20 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     setState(next);
   }, []);
 
+  const dropPlan = useCallback((sessionId: string) => {
+    const current = stateRef.current;
+    let changed = false;
+    const sessions = current.sessions.map((session) => {
+      if (session.id !== sessionId || !session.planRun) return session;
+      changed = true;
+      return { ...session, planRun: undefined };
+    });
+    if (!changed) return;
+    const next = { ...current, sessions };
+    stateRef.current = next;
+    setState(next);
+  }, []);
+
   const grantPlanExternalAgents = useCallback((sessionId: string, allow: boolean) => {
     setState((current) => ({
       ...current,
@@ -10062,6 +10317,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       probeCustomBot,
       refreshVendorModels,
       setSessionEffort,
+      setSessionFastMode,
       setSessionContextWindow,
       setSessionEnvironment,
       selectSession,
@@ -10085,6 +10341,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       setMode,
       setDeskAccess,
       setSandbox,
+      setComputer,
       setChatPreset,
       setSecurityPolicy,
       setMcpServers,
@@ -10098,6 +10355,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       cycleTheme,
       toggleWorkhorseTheme,
       answerPermission,
+      promptChromeAccess,
+      answerChromeAccess,
       demoPermission,
       recordUsage,
       openSettings,
@@ -10139,6 +10398,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       updateWorkshop,
       setSessionWorkshopPacks,
       dropWorkshopPackFromChats,
+      dropPlan,
       grantPlanExternalAgents,
       botScores,
       refreshBotScores,
@@ -10220,6 +10480,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       probeCustomBot,
       refreshVendorModels,
       setSessionEffort,
+      setSessionFastMode,
       setSessionContextWindow,
       setSessionEnvironment,
       selectSession,
@@ -10243,6 +10504,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       setMode,
       setDeskAccess,
       setSandbox,
+      setComputer,
       setChatPreset,
       setSecurityPolicy,
       setMcpServers,
@@ -10256,6 +10518,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       cycleTheme,
       toggleWorkhorseTheme,
       answerPermission,
+      promptChromeAccess,
+      answerChromeAccess,
       demoPermission,
       recordUsage,
       openSettings,
@@ -10295,6 +10559,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       updateWorkshop,
       setSessionWorkshopPacks,
       dropWorkshopPackFromChats,
+      dropPlan,
       grantPlanExternalAgents,
       botScores,
       refreshBotScores,

@@ -21,6 +21,49 @@
   color: var(--text);
 }
 
+.composer-mic {
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  padding: 0;
+  border-radius: var(--radius-10);
+}
+
+.composer-mic:hover {
+  color: var(--text);
+}
+
+.composer-mic.recording {
+  color: var(--danger);
+}
+
+.composer-listen {
+  display: none;
+  align-items: center;
+  gap: 2px;
+  height: 16px;
+  flex-shrink: 0;
+}
+
+.composer.listening .composer-listen {
+  display: flex;
+}
+
+.composer-listen > span {
+  display: block;
+  width: 2px;
+  height: 16px;
+  transform-origin: center;
+  background: var(--danger);
+  border-radius: var(--radius-pill);
+  opacity: 0.85;
+}
+
 .composer-plus-menu {
   position: absolute;
   left: 0;

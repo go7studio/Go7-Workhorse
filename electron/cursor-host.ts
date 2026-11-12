@@ -26,17 +26,18 @@ export type CursorEventSink = GrokEventSink;
 type CursorSpawnFn = (spec: ReturnType<typeof buildCursorLaunchSpec>) => ChildProcessWithoutNullStreams;
 
 export function cursorLaunchKey(
-  input: Pick<GrokSessionOpenInput, "model" | "effort" | "mode" | "cwd" | "sandbox" | "mcpServers">,
+  input: Pick<GrokSessionOpenInput, "model" | "effort" | "fastMode" | "mode" | "cwd" | "sandbox" | "mcpServers">,
 ): string {
   const spec = buildCursorLaunchSpec({
     model: input.model,
     effort: input.effort,
+    fastMode: input.fastMode,
     cwd: input.cwd,
     mode: input.mode,
     sandbox: input.sandbox,
     mcpServers: input.mcpServers,
   });
-  return `${spec.command}\0${spec.argv.join("\0")}\0${spec.cwd}\0${JSON.stringify(spec.sessionParams.mcpServers)}\0${spec.model}\0${spec.effort}\0${spec.sandbox}\0${input.mode}`;
+  return `${spec.command}\0${spec.argv.join("\0")}\0${spec.cwd}\0${JSON.stringify(spec.sessionParams.mcpServers)}\0${spec.model}\0${spec.effort}\0${spec.sandbox}\0${input.mode}\0${input.fastMode === true ? "fast" : "normal"}`;
 }
 
 /** A failed `cursor-agent models` read should not re-stall every launch. */
@@ -78,7 +79,6 @@ export function spawnCursorProcess(spec: ReturnType<typeof buildCursorLaunchSpec
     cwd: spawnCwd(cwd),
     env,
     stdio: ["pipe", "pipe", "pipe"],
-    windowsHide: true,
     // The CLI leads its own group, so a stop reaches what the CLI started too.
     ...groupSpawnOptions(),
   }) as ChildProcessWithoutNullStreams;
@@ -129,9 +129,12 @@ export class CursorSessionHost {
     const text = composeVendorPrompt(input.text, input.preface, slot.agent.opened, {
       mode: input.mode,
       sandbox: input.sandbox,
+      computer: input.computer,
       role: input.role ?? (input.parentId || input.hidden ? "worker" : "orchestrator"),
       crewMode: input.crewModes,
       spawnNames: input.spawnNames,
+      priorUserTexts: input.priorUserTexts,
+      planOpen: input.planOpen,
     }, input.visibleText);
     try {
       if (this.stoppedWhileStarting.delete(input.sessionId)) return stoppedBeforePrompt(input.sessionId, slot.agent, emit);
@@ -202,19 +205,24 @@ export class CursorSessionHost {
       nextKey: key,
       restartRuntime: input.restartRuntime,
     });
-    if (action === "reuse" && slot) return;
+    if (action === "reuse" && slot) {
+      slot.agent.noteSeat(input);
+      return;
+    }
     slot?.agent.dispose();
     const spec = buildCursorLaunchSpec({
       sessionId: input.sessionId,
       role: input.role ?? deskRoleOf({ parentId: input.parentId, hidden: input.hidden }),
       model: input.model,
       effort: input.effort,
+      fastMode: input.fastMode,
       cwd: input.cwd,
       mode: input.mode,
       sandbox: input.sandbox,
       mcpServers: input.mcpServers,
     });
     const agent = new GrokAgent({ ...spec, agentLabel: "Cursor" }, (launchSpec) => this.spawn(launchSpec as typeof spec));
+    agent.noteSeat(input);
     this.starting.add(input.sessionId);
     try {
       const started = await agent.start({

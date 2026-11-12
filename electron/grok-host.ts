@@ -22,6 +22,8 @@ export type GrokSessionOpenInput = {
   cwd: string;
   vendorSessionId?: string;
   sandbox?: SandboxProfile;
+  /** Desktop control for this chat. Missing means off. */
+  computer?: "off" | "on";
   securityPolicy?: SessionSecurityPolicy;
   mcpServers?: McpServerConfig[];
   preface?: string;
@@ -45,6 +47,10 @@ export type GrokPromptInput = GrokSessionOpenInput & {
   images?: import("../src/lib/types").ChatImage[];
   crewModes?: CrewMode[];
   spawnNames?: string[];
+  /** User turns before this one. A continuation of an earlier ask carries the spawn law. */
+  priorUserTexts?: readonly string[];
+  /** The chat's plan is still running, so this ask is already open. */
+  planOpen?: boolean;
 };
 
 export type GrokCompactInput = GrokSessionOpenInput & {
@@ -101,16 +107,20 @@ export type GrokIpcEvent =
 
 export type GrokEventSink = (event: GrokIpcEvent) => void;
 
-export function launchKey(input: Pick<GrokSessionOpenInput, "model" | "effort" | "mode" | "cwd" | "sandbox" | "mcpServers">): string {
+export function launchKey(
+  input: Pick<GrokSessionOpenInput, "model" | "effort" | "fastMode" | "agentName" | "mode" | "cwd" | "sandbox" | "mcpServers">,
+): string {
   const spec = buildGrokLaunchSpec({
     model: input.model,
     effort: input.effort,
+    fastMode: input.fastMode,
+    agentName: input.agentName,
     cwd: input.cwd,
     mode: input.mode,
     sandbox: input.sandbox,
     mcpServers: input.mcpServers,
   });
-  return `${spec.argv.join("\0")}\0${spec.cwd}\0${JSON.stringify(spec.sessionParams.mcpServers)}`;
+  return `${spec.argv.join("\0")}\0${spec.cwd}\0${JSON.stringify(spec.sessionParams.mcpServers)}\0${spec.fastMode === true ? "fast" : "normal"}\0${spec.agentName ?? ""}`;
 }
 
 /**
@@ -223,9 +233,12 @@ export class GrokSessionHost {
     const text = composeVendorPrompt(input.text, input.preface, slot.agent.opened, {
       mode: input.mode,
       sandbox: input.sandbox,
+      computer: input.computer,
       role: input.role ?? (input.parentId || input.hidden ? "worker" : "orchestrator"),
       crewMode: input.crewModes,
       spawnNames: input.spawnNames,
+      priorUserTexts: input.priorUserTexts,
+      planOpen: input.planOpen,
     }, input.visibleText);
 
     try {
@@ -361,6 +374,7 @@ export class GrokSessionHost {
       restartRuntime: input.restartRuntime,
     });
     if (action === "reuse" && slot) {
+      slot.agent.noteSeat(input);
       await slot.agent.preferContextWindow(input.contextWindow);
       return;
     }
@@ -370,6 +384,8 @@ export class GrokSessionHost {
       role: input.role ?? deskRoleOf({ parentId: input.parentId, hidden: input.hidden }),
       model: input.model,
       effort: input.effort,
+      fastMode: input.fastMode,
+      agentName: input.agentName,
       cwd: input.cwd,
       mode: input.mode,
       sandbox: input.sandbox,
@@ -377,6 +393,7 @@ export class GrokSessionHost {
       contextWindow: input.contextWindow,
     });
     const agent = new GrokAgent(spec, this.spawn);
+    agent.noteSeat(input);
     this.starting.add(input.sessionId);
     try {
       const started = await agent.start({

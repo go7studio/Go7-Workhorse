@@ -108,7 +108,6 @@ export function spawnCodexProcess(spec: ReturnType<typeof buildCodexLaunchSpec>)
     cwd: spawnCwd(cwd),
     env,
     stdio: ["pipe", "pipe", "pipe"],
-    windowsHide: true,
     // The CLI leads its own group, so a stop reaches what the CLI started too.
     ...groupSpawnOptions(),
   }) as ChildProcessWithoutNullStreams;
@@ -159,9 +158,12 @@ export class CodexSessionHost {
     const text = composeVendorPrompt(input.text, input.preface, slot.agent.opened, {
       mode: input.mode,
       sandbox: input.sandbox,
+      computer: input.computer,
       role: input.role ?? (input.parentId || input.hidden ? "worker" : "orchestrator"),
       crewMode: input.crewModes,
       spawnNames: input.spawnNames,
+      priorUserTexts: input.priorUserTexts,
+      planOpen: input.planOpen,
     }, input.visibleText);
 
     try {
@@ -262,7 +264,10 @@ export class CodexSessionHost {
       nextKey: key,
       restartRuntime: input.restartRuntime,
     });
-    if (action === "reuse" && slot) return;
+    if (action === "reuse" && slot) {
+      slot.agent.noteSeat(input);
+      return;
+    }
     slot?.agent.dispose();
     const spec = buildCodexLaunchSpec({
       sessionId: input.sessionId,
@@ -276,6 +281,7 @@ export class CodexSessionHost {
       mcpServers: input.mcpServers,
     });
     const agent = new GrokAgent(spec, (launchSpec) => this.spawn(launchSpec as typeof spec));
+    agent.noteSeat(input);
     this.starting.add(input.sessionId);
     try {
       const started = await agent.start({

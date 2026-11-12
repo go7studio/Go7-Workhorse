@@ -10,6 +10,8 @@ import {
 import { uid } from "../src/lib/id";
 import { deskRoleOf, parseProviderId } from "../src/lib/subagents";
 import { vendorDeclinedForBot } from "../src/lib/vendor-decline";
+import { judgeComputerTool, userDeclinedComputer } from "../src/lib/computer-seat";
+import type { ComputerSeat } from "../src/lib/computer-seat";
 import { withCrewModeHint, withCustomPeerHint, withLooseDeleteHint, withPermissionHint, withSpawnHint, withWriteLimitHint } from "../src/lib/workhorse-rules";
 import { hydrateChatImages, hydrateHistoryMessage } from "./attachment-store";
 import { spawnCwd } from "./spawn-cwd";
@@ -21,6 +23,7 @@ import {
   customToolOffered,
   customToolPolicy,
   executeCustomTool,
+  normalizeCustomToolName,
   groupFanOutToolUses,
   headWithoutSplit,
   limitCustomToolResult,
@@ -41,6 +44,7 @@ export type CustomPromptInput = {
   cwd: string;
   mode?: PermissionMode;
   sandbox?: SandboxProfile;
+  computer?: ComputerSeat;
   preface?: string;
   history?: CustomChatMessage[];
   mcpServers?: McpServerConfig[];
@@ -60,10 +64,11 @@ export function customPrefaceForLimits(
   preface: string | undefined,
   mode?: PermissionMode,
   sandbox?: SandboxProfile,
+  computer?: ComputerSeat,
 ): string {
   // Threaded, never read ambiently inside the shared lib — that lib also runs
   // in the renderer, where process.platform is not the machine's answer.
-  const policy = buildPolicyContext({ mode, sandbox, platform: process.platform });
+  const policy = buildPolicyContext({ mode, sandbox, computer, platform: process.platform });
   const head = preface?.trim() ?? "";
   if (!head) return policy;
   if (head.includes("This chat’s live desk limits")) return head;
@@ -389,8 +394,10 @@ export class CustomSessionHost {
     const history = (input.history ?? [])
       .filter((item) => item.role === "user" || item.role === "assistant")
       .map((item) => hydrateHistoryMessage(item));
+    const priorUserTexts = history.filter((item) => item.role === "user").map((item) => item.text ?? "");
     let mode = input.mode ?? "ask";
     let sandbox = input.sandbox ?? "off";
+    const computer = input.computer === "on" ? "on" : "off";
     const role = input.role ?? deskRoleOf({ parentId: input.parentId, hidden: input.hidden });
     let messages: CustomChatMessage[] = [
       ...history,
@@ -399,7 +406,7 @@ export class CustomSessionHost {
         text: withCrewModeHint(
           withLooseDeleteHint(
             withCustomPeerHint(
-              withSpawnHint(withPermissionHint(withWriteLimitHint(input.text, mode, sandbox), role), role),
+              withSpawnHint(withPermissionHint(withWriteLimitHint(input.text, mode, sandbox), role), role, priorUserTexts),
               role,
             ),
             role,
@@ -412,7 +419,7 @@ export class CustomSessionHost {
       },
     ];
     const baseMessageCount = messages.length;
-    const preface = customPrefaceForLimits(input.preface, input.mode, input.sandbox);
+    const preface = customPrefaceForLimits(input.preface, input.mode, input.sandbox, input.computer);
     /*
      * The folder this turn works in, checked the way every other vendor host
      * checks it. Claude and Codex route their cwd through spawnCwd so a folder
@@ -751,6 +758,26 @@ export class CustomSessionHost {
             });
             continue;
           }
+          if (normalizeCustomToolName(use.name) === "computer") {
+            const verdict = judgeComputerTool(use.input, {
+              computer,
+              mode,
+              sandbox,
+              grants: input.permissionGrants,
+            });
+            if (verdict.kind === "block") {
+              results.push({ id: use.id, name: use.name, content: verdict.message, isError: true });
+              emit({
+                type: "tool",
+                sessionId: input.sessionId,
+                toolCallId: use.id,
+                title: use.name,
+                status: "failed",
+                detail: "denied",
+              });
+              continue;
+            }
+          }
           const security = securityPolicyAnswer({
             policy: input.securityPolicy,
             tool: use.name,
@@ -769,6 +796,7 @@ export class CustomSessionHost {
             : customToolPolicy(use, {
                 mode,
                 sandbox,
+                computer,
                 grants: input.permissionGrants,
                 cwd: toolCwd(),
                 sessionId: input.sessionId,
@@ -829,7 +857,9 @@ export class CustomSessionHost {
             // read-only seat it carries the shape of a call that would work.
             // Told only "denied", a bot asked for the sandbox to be dropped
             // when the read it wanted was already allowed as a gh or git read.
-            const denial = sandbox === "read-only" || sandbox === "strict"
+            const denial = normalizeCustomToolName(use.name) === "computer"
+              ? userDeclinedComputer(typeof use.input?.app === "string" ? use.input.app : "that app")
+              : sandbox === "read-only" || sandbox === "strict"
               ? `Denied by permission/sandbox: ${use.name}. ${READ_ONLY_SHELL_HINT}`
               : `Denied by permission/sandbox: ${use.name}`;
             results.push({ id: use.id, name: use.name, content: denial, isError: true });
@@ -850,6 +880,7 @@ export class CustomSessionHost {
             : await this.executeTool(use, {
                 mode,
                 sandbox,
+                computer,
                 cwd: toolCwd(),
                 sessionId: input.sessionId,
                 folders: input.folders,

@@ -4,7 +4,7 @@ Go7 Workhorse is MIT (see [LICENSE](LICENSE)). The installer also carries the
 packages below. This file is generated from the production dependency tree by
 `npm run notices`, and a test fails when it drifts.
 
-64 packages ship.
+67 packages ship.
 
 ## Not open source
 
@@ -46,6 +46,7 @@ is a licensing question, not a formatting one.
 | `express` | 5.2.1 | MIT |
 | `express-rate-limit` | 8.6.2 | MIT |
 | `fast-sha256` | 1.3.0 | Unlicense |
+| `fsevents` | 2.3.2 | MIT |
 | `hono` | 4.13.7 | MIT |
 | `http-errors` | 2.0.1 | MIT |
 | `hyparquet` | 1.31.1 | MIT |
@@ -64,6 +65,8 @@ is a licensing question, not a formatting one.
 | `open` | 11.0.0 | MIT |
 | `path-key` | 3.1.1 | MIT |
 | `pkce-challenge` | 5.0.1 | MIT |
+| `playwright` | 1.62.1 | Apache-2.0 |
+| `playwright-core` | 1.62.1 | Apache-2.0 |
 | `powershell-utils` | 0.1.0 | MIT |
 | `raw-body` | 3.0.2 | MIT |
 | `react` | 19.2.8 | MIT |

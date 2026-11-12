@@ -24,11 +24,18 @@ export function finishedAssignmentSpawnError(parent: Session): string | undefine
     lineup?.startedAt ?? 0,
     ...(lineup?.rows.map((row) => row.finishedAt ?? 0) ?? []),
   );
+  // A paused plan is still this assignment. The next hire waits until it is
+  // running again, and that refusal is the plan's, not a demand for a new ask.
+  if (parent.planRun?.status === "paused") return "Agents can be assigned only while the plan is running.";
   const newRequest = parent.messages.some((message) => message.role === "user" && message.createdAt > endedAt);
   if (newRequest) return undefined;
   const cancelled = stopped || lineup?.rows.some((row) => row.status === "cancelled");
   const mission = normalizeMissionIteration(parent.agentRun?.mission ?? lineup?.mission);
-  if (!cancelled && (parent.planRun?.status === "running" || parent.crewModes?.includes("mission") ||
+  // Cancelling a lane does not finish a plan that is still running. The same
+  // ask restarts that lane. A clean wave, or a cancel with no open plan, still
+  // waits for a new request.
+  if (parent.planRun?.status === "running") return undefined;
+  if (!cancelled && (parent.crewModes?.includes("mission") ||
     (mission && mission.iteration < mission.maxIterations))) return undefined;
   return "This assignment has finished or was cancelled. Report its results; do not hire another checker. A new user request is required to spawn more workers.";
 }
@@ -113,6 +120,7 @@ export function normalizeLineup(raw: unknown): DeskLineup | undefined {
     ...(record.joinOwner === "desk" || record.joinOwner === "external-runtime" ? { joinOwner: record.joinOwner } : {}),
     ...(notifiedAt !== undefined && !hasNewerWave ? { notifiedAt } : {}),
     ...(typeof record.userText === "string" && record.userText.trim() ? { userText: record.userText.trim() } : {}),
+    ...(typeof record.openResumeAt === "number" ? { openResumeAt: record.openResumeAt } : {}),
     ...(mission ? { mission } : {}),
   };
 }
@@ -1009,6 +1017,34 @@ export function applyJoinRateLimitRetry(
     notBefore: now + JOIN_RETRY_MS,
   });
   return queued ?? cleared;
+}
+
+export const OPEN_PLAN_RESUME =
+  "The plan is still running. A cancelled lane is unfinished work on this same assignment. Restart that named worker on the model the assignment asked for, and finish the remaining steps. Do not ask the user to continue.";
+
+/**
+ * A still-running plan whose lane was cancelled is the same ask. Queue one
+ * hidden turn so the desk finishes it. A second launch does not queue another.
+ */
+export function queueOpenPlanResume(sessions: Session[], now = Date.now()): Session[] {
+  let next = sessions;
+  for (const session of sessions) {
+    if (session.parentId || session.hidden || session.status !== "idle") continue;
+    if (session.planRun?.status !== "running" || session.queue?.length) continue;
+    const lineup = session.lineup;
+    if (!lineup || lineup.openResumeAt || !lineupIsTerminal(lineup)) continue;
+    if (!lineup.rows.some((row) => row.status === "cancelled")) continue;
+    const queued = enqueuePrompt(next, session.id, {
+      text: OPEN_PLAN_RESUME,
+      hideUser: true,
+      createdAt: now,
+    });
+    if (!queued) continue;
+    next = queued.map((item) =>
+      item.id === session.id && item.lineup ? { ...item, lineup: { ...item.lineup, openResumeAt: now } } : item,
+    );
+  }
+  return next;
 }
 
 export function maybeEnqueueLineupJoin(

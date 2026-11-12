@@ -256,5 +256,7 @@ test("main checks GUI launches before a shell runs, and the seat card is not a n
   assert.match(setup, /ComputerSeatCard/);
   assert.match(card, /System Settings/);
   assert.doesNotMatch(card, /SettingsPane|settings-section|<strong>Settings<\/strong>/);
-  assert.match(readFileSync(path.join(ROOT, "electron", "workhorse-mcp.ts"), "utf8"), /computerUse:/);
+  const mcp = readFileSync(path.join(ROOT, "electron", "workhorse-mcp.ts"), "utf8");
+  assert.match(mcp, /computerUse: false/);
+  assert.doesNotMatch(mcp, /computer\|desktop\|screen/);
 });

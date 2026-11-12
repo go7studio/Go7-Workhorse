@@ -30,6 +30,7 @@ import {
   composerEscapeAction,
   composerFieldPlaceholder,
   joinVoiceDraft,
+  listenBarScales,
   LOCAL_SPEECH_CAPABILITY,
   MAC_SPEECH_PRIVACY_URL,
   osSpeechGaveUp,
@@ -869,9 +870,6 @@ export const Composer = memo(function Composer({
             submit();
           }}
         >
-        <div className="composer-listen" aria-hidden="true">
-          <span style={{ transform: `scaleX(${recording ? Math.max(listenLevel, 0.08) : 0})` }} />
-        </div>
         <textarea
           ref={field}
           data-composer-field="true"
@@ -1252,6 +1250,11 @@ export const Composer = memo(function Composer({
           </button>
         )}
         <span className="composer-tools-spacer" aria-hidden="true" />
+        <span className="composer-listen" aria-hidden="true">
+          {listenBarScales(recording ? listenLevel : 0).map((scale, index) => (
+            <span key={index} style={{ transform: `scaleY(${scale})` }} />
+          ))}
+        </span>
         <button
           className={`composer-mic${recording ? " recording" : ""}`}
           type="button"

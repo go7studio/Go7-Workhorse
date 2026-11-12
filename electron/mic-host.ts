@@ -17,6 +17,14 @@ export const MAC_SPEECH_PRIVACY_URL =
 export const WINDOWS_MICROPHONE_PRIVACY_URL = "ms-settings:privacy-microphone";
 export const LISTENING_PLACEHOLDER = "Listening…";
 
+const LISTEN_BAR_WEIGHTS = [0.55, 0.9, 1, 0.7] as const;
+
+/** Four short bars beside the mic. Quiet at rest, taller as the voice gets louder. */
+export function listenBarScales(level: number): number[] {
+  const amount = Number.isFinite(level) ? Math.min(1, Math.max(0, level)) : 0;
+  return LISTEN_BAR_WEIGHTS.map((weight) => Math.round((0.28 + weight * amount * 0.72) * 100) / 100);
+}
+
 export const NS_MICROPHONE_USAGE_DESCRIPTION =
   "Workhorse records from the microphone so your words can be typed into the unsent draft.";
 export const NS_SPEECH_RECOGNITION_USAGE_DESCRIPTION =

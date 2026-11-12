@@ -13,6 +13,7 @@ import {
   installDeskMediaPermissions,
   joinVoiceDraft,
   LISTENING_PLACEHOLDER,
+  listenBarScales,
   LOCAL_SPEECH_CAPABILITY,
   macDictationLaunch,
   MAC_SPEECH_PRIVACY_URL,
@@ -450,6 +451,9 @@ test("a live mic fills the text area from on-device lines and says Listening unt
     }),
     null,
   );
+  assert.deepEqual(listenBarScales(0), [0.28, 0.28, 0.28, 0.28]);
+  assert.deepEqual(listenBarScales(1), [0.68, 0.93, 1, 0.78]);
+  assert.deepEqual(listenBarScales(2), listenBarScales(1));
   assert.equal(MAC_SPEECH_PRIVACY_URL.includes("Privacy_SpeechRecognition"), true);
   assert.match(read("src/ui/Composer.tsx"), /LISTENING_PLACEHOLDER|composerFieldPlaceholder/);
   assert.match(read("electron/mac-dictation.swift"), /shouldReportPartialResults = true/);
@@ -483,7 +487,8 @@ test("main, preload, and composer wire the mic control after the tools spacer", 
   assert.match(composer, /micDictateStart/);
   assert.match(read("electron/preload.ts"), /micDictateStart/);
   assert.match(read("electron/main.ts"), /mic:dictate-start/);
-  assert.match(css, /\.composer\.listening textarea::placeholder/);
+  assert.match(css, /\.composer\.listening \.composer-listen/);
+  assert.match(composer, /listenBarScales/);
   assert.match(composer, /composerEscapeAction/);
   assert.match(composer, /preserveVoiceDraft/);
   assert.match(css, /\.composer-mic \{[\s\S]*?height:\s*32px/);

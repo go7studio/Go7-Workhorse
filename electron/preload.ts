@@ -57,6 +57,14 @@ contextBridge.exposeInMainWorld("workhorse", {
   micGetStatus: () => ipcRenderer.invoke("mic:get-status") as Promise<import("./mic-host").MicAccessStatus>,
   micTranscribeLocal: (input: { audioBase64: string; mimeType: string }) =>
     ipcRenderer.invoke("mic:transcribe", input) as Promise<import("./mic-host").MicTranscriptResult>,
+  micDictateStart: () =>
+    ipcRenderer.invoke("mic:dictate-start") as Promise<{ ok: true } | { ok: false; reason: string }>,
+  micDictateStop: () => ipcRenderer.invoke("mic:dictate-stop") as Promise<boolean>,
+  onMicDictation: (handler: (event: import("./mic-host").DictationLine) => void) => {
+    const listener = (_event: IpcRendererEvent, payload: import("./mic-host").DictationLine) => handler(payload);
+    ipcRenderer.on("mic:dictation", listener);
+    return () => ipcRenderer.removeListener("mic:dictation", listener);
+  },
   pickLocalComputeTokenFile: () => ipcRenderer.invoke("localCompute:pickTokenFile") as Promise<string | null>,
   mediaSrc: (href: string, cwd?: string, vendorSessionId?: string) =>
     ipcRenderer.invoke("media:src", href, cwd, vendorSessionId) as Promise<string | null>,

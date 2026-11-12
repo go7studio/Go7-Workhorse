@@ -55,6 +55,7 @@ import {
   requestMicrophoneAccess,
   transcribeLocalSpeech,
 } from "./mic-host";
+import { startMacDictation, stopMacDictation } from "./mac-dictation";
 import { LocalCapabilityHostClient } from "./local-capability-host";
 
 import { displaySrcForHref, openableMediaPath, resolveMediaProtocolFile, safeLocalPath } from "./media-src";
@@ -1692,6 +1693,20 @@ app.whenReady().then(async () => {
           : "granted",
     }),
   );
+  ipcMain.handle("mic:dictate-start", (event) =>
+    startMacDictation({
+      resourcesPath: process.resourcesPath,
+      appPath: app.getAppPath(),
+      onLine: (line) => {
+        if (event.sender.isDestroyed()) return;
+        event.sender.send("mic:dictation", line);
+      },
+    }),
+  );
+  ipcMain.handle("mic:dictate-stop", () => {
+    stopMacDictation();
+    return true;
+  });
   ipcMain.handle("mic:transcribe", async (_event, raw: unknown) => {
     const hosts = liveSettings.localCompute?.hosts ?? [];
     const audioBase64 =
@@ -3006,6 +3021,7 @@ app.on("before-quit", (event) => {
   // through, and so does a second Cmd-Q while the first drain is still going.
   if (quitDrained) return;
   quitDrained = true;
+  stopMacDictation();
   learningCloser?.pause();
   learningCloser?.close();
   // Every host that registered itself, in the order it was built. One that

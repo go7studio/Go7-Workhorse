@@ -28,8 +28,11 @@ import type { ChatImage, CrewMode } from "../lib/types";
 import { crewModeLabel, hasCrewMode, orderedCrewModes, toggleCrewMode } from "../lib/workhorse-rules";
 import {
   composerEscapeAction,
+  composerFieldPlaceholder,
   joinVoiceDraft,
   LOCAL_SPEECH_CAPABILITY,
+  MAC_SPEECH_PRIVACY_URL,
+  osSpeechGaveUp,
   pickLocalSpeechHost,
   pickSpeechEngine,
   speechEngineAfterOsStartFailure,
@@ -193,6 +196,8 @@ export const Composer = memo(function Composer({
   const [crewWidth, setCrewWidth] = useState(0);
   const [shownCrew, setShownCrew] = useState<CrewMode[]>([]);
   const [recording, setRecording] = useState(false);
+  const [listenStatus, setListenStatus] = useState("");
+  const [listenLevel, setListenLevel] = useState(0);
   const [preserveVoiceDraft, setPreserveVoiceDraft] = useState(false);
   const field = useRef<HTMLTextAreaElement>(null);
   const stagedId = useRef<number | null>(null);
@@ -203,6 +208,7 @@ export const Composer = memo(function Composer({
   const baseDraftRef = useRef("");
   const finalSpeechRef = useRef("");
   const recordingRef = useRef(false);
+  const dictationRef = useRef(false);
   const filePicker = useRef<HTMLInputElement>(null);
   const wrap = useRef<HTMLDivElement>(null);
   const crewInner = useRef<HTMLDivElement>(null);
@@ -375,7 +381,11 @@ export const Composer = memo(function Composer({
     setSpawnOpen(false);
     setPreserveVoiceDraft(false);
     recordingRef.current = false;
+    dictationRef.current = false;
     setRecording(false);
+    setListenStatus("");
+    setListenLevel(0);
+    void window.workhorse?.micDictateStop?.();
     try {
       recognitionRef.current?.stop();
     } catch {
@@ -487,9 +497,12 @@ export const Composer = memo(function Composer({
   };
 
   const stopMic = async () => {
-    if (!recordingRef.current && !recognitionRef.current && !recorderRef.current) return;
+    if (!recordingRef.current && !dictationRef.current && !recognitionRef.current && !recorderRef.current) return;
     recordingRef.current = false;
+    dictationRef.current = false;
     setRecording(false);
+    setListenLevel(0);
+    void window.workhorse?.micDictateStop?.();
     const rec = recognitionRef.current;
     recognitionRef.current = null;
     if (rec) {
@@ -548,10 +561,46 @@ export const Composer = memo(function Composer({
     return pickLocalSpeechHost(hosts, probes);
   };
 
+  useEffect(() => {
+    return window.workhorse?.onMicDictation?.((event) => {
+      if (!dictationRef.current && !recordingRef.current) return;
+      if (event.type === "partial" || event.type === "final") {
+        finalSpeechRef.current = event.text;
+        setListenStatus("");
+        setValue(joinVoiceDraft(baseDraftRef.current, event.text));
+        if (event.type === "final") setPreserveVoiceDraft(true);
+        return;
+      }
+      if (event.type === "level") {
+        setListenLevel(event.value);
+        return;
+      }
+      if (event.type === "error") {
+        setListenStatus(event.message);
+        if (event.openSettings) void window.workhorse?.openExternal?.(MAC_SPEECH_PRIVACY_URL);
+      }
+    });
+  }, []);
+
   const startMic = async () => {
     if (recordingRef.current) return;
     const access = await window.workhorse?.micRequestAccess?.();
     if (access && !access.granted) return;
+    const dictate = window.workhorse?.micDictateStart;
+    if (dictate) {
+      baseDraftRef.current = valueRef.current;
+      finalSpeechRef.current = "";
+      setListenStatus("");
+      setListenLevel(0.08);
+      dictationRef.current = true;
+      const started = await dictate();
+      if (started.ok) {
+        recordingRef.current = true;
+        setRecording(true);
+        return;
+      }
+      dictationRef.current = false;
+    }
     const Ctor = speechRecognitionCtor();
     const localHostId = Ctor ? null : await resolveGrantedLocalSpeechHost();
     if (pickSpeechEngine(Boolean(Ctor), localHostId) === "none") return;
@@ -571,6 +620,10 @@ export const Composer = memo(function Composer({
       rec.continuous = true;
       rec.interimResults = true;
       rec.lang = navigator.language || "en-US";
+      rec.onerror = (event) => {
+        if (!recordingRef.current || !osSpeechGaveUp(event.error)) return;
+        setListenStatus("Speech recognition didn't return words. Tap the mic to stop.");
+      };
       rec.onresult = (event) => {
         let interim = "";
         for (let i = event.resultIndex; i < event.results.length; i += 1) {
@@ -578,6 +631,7 @@ export const Composer = memo(function Composer({
           if (event.results[i]!.isFinal) finalSpeechRef.current = joinVoiceDraft(finalSpeechRef.current, piece);
           else interim += piece;
         }
+        setListenStatus("");
         setValue(joinVoiceDraft(baseDraftRef.current, joinVoiceDraft(finalSpeechRef.current, interim)));
       };
       rec.onend = () => {
@@ -809,25 +863,27 @@ export const Composer = memo(function Composer({
           </ul>
         )}
         <form
-          className="composer"
+          className={`composer${recording ? " listening" : ""}`}
           onSubmit={(event) => {
             event.preventDefault();
             submit();
           }}
         >
+        <div className="composer-listen" aria-hidden="true">
+          <span style={{ transform: `scaleX(${recording ? Math.max(listenLevel, 0.08) : 0})` }} />
+        </div>
         <textarea
           ref={field}
           data-composer-field="true"
           rows={1}
           value={value}
           readOnly={recording}
-          placeholder={
-            over
-              ? "Drop files or folders"
-              : running
-                ? "Queue for next, or Steer to redirect"
-                : "Message, drop a file or folder, or type /"
-          }
+          placeholder={composerFieldPlaceholder({
+            recording,
+            dropping: over,
+            running,
+            status: listenStatus,
+          })}
           onPaste={(event) => {
             const files = filesFromClipboard(event.clipboardData);
             if (files.length === 0) return;

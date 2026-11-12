@@ -8,14 +8,20 @@ import type { LocalComputeHostSettings } from "../src/lib/types";
 import {
   allowDeskMediaPermission,
   composerEscapeAction,
+  composerFieldPlaceholder,
   getMicrophoneAccessStatus,
   installDeskMediaPermissions,
   joinVoiceDraft,
+  LISTENING_PLACEHOLDER,
   LOCAL_SPEECH_CAPABILITY,
+  macDictationLaunch,
+  MAC_SPEECH_PRIVACY_URL,
   MAC_MICROPHONE_PRIVACY_URL,
   MAC_SYSTEM_PREFERENCES_APP,
   MAC_SYSTEM_SETTINGS_APP,
   microphonePrivacyUrl,
+  osSpeechGaveUp,
+  parseDictationLine,
   pickLocalSpeechHost,
   pickSpeechEngine,
   requestMicrophoneAccess,
@@ -388,6 +394,67 @@ test("voice draft join and Escape keep a just-recorded draft", () => {
   assert.equal(composerEscapeAction({ recording: false, plusOpen: false, preserveVoiceDraft: false }), "clear");
 });
 
+test("a live mic fills the text area from on-device lines and says Listening until words arrive", () => {
+  assert.equal(
+    composerFieldPlaceholder({ recording: true, dropping: false, running: false }),
+    LISTENING_PLACEHOLDER,
+  );
+  assert.equal(
+    composerFieldPlaceholder({ recording: true, dropping: false, running: false, status: "Speech recognition is off." }),
+    "Speech recognition is off.",
+  );
+  assert.equal(
+    composerFieldPlaceholder({ recording: false, dropping: false, running: true }),
+    "Queue for next, or Steer to redirect",
+  );
+  assert.equal(osSpeechGaveUp("network"), true);
+  assert.equal(osSpeechGaveUp("no-speech"), false);
+  assert.deepEqual(parseDictationLine('{"type":"partial","text":"hello desk"}'), { type: "partial", text: "hello desk" });
+  assert.deepEqual(parseDictationLine('{"type":"level","value":1.4}'), { type: "level", value: 1 });
+  assert.deepEqual(parseDictationLine('{"type":"error","message":"off","openSettings":true}'), {
+    type: "error",
+    message: "off",
+    openSettings: true,
+  });
+  assert.equal(parseDictationLine("not json"), null);
+  const binary = path.join(ROOT, "resources", "mac-dictation");
+  const script = path.join(ROOT, "electron", "mac-dictation.swift");
+  const files = new Set([script, "/usr/bin/swift"]);
+  assert.deepEqual(
+    macDictationLaunch({
+      platform: "darwin",
+      binaryPath: binary,
+      swiftPath: "/usr/bin/swift",
+      scriptPath: script,
+      existsSync: (file) => files.has(file),
+    }),
+    { command: "/usr/bin/swift", args: [script] },
+  );
+  assert.deepEqual(
+    macDictationLaunch({
+      platform: "darwin",
+      binaryPath: binary,
+      swiftPath: "/usr/bin/swift",
+      scriptPath: script,
+      existsSync: (file) => file === binary || files.has(file),
+    }),
+    { command: binary, args: [] },
+  );
+  assert.equal(
+    macDictationLaunch({
+      platform: "win32",
+      binaryPath: binary,
+      swiftPath: "/usr/bin/swift",
+      scriptPath: script,
+      existsSync: () => true,
+    }),
+    null,
+  );
+  assert.equal(MAC_SPEECH_PRIVACY_URL.includes("Privacy_SpeechRecognition"), true);
+  assert.match(read("src/ui/Composer.tsx"), /LISTENING_PLACEHOLDER|composerFieldPlaceholder/);
+  assert.match(read("electron/mac-dictation.swift"), /shouldReportPartialResults = true/);
+});
+
 test("the packaged app declares mic usage strings and the hardened-runtime audio entitlement", () => {
   const pkg = JSON.parse(read("package.json")) as {
     build?: { mac?: { extendInfo?: Record<string, string> } };
@@ -411,6 +478,11 @@ test("main, preload, and composer wire the mic control after the tools spacer", 
   assert.match(preload, /micTranscribeLocal/);
   assert.match(composer, /composer-tools-spacer[\s\S]*composer-mic[\s\S]*Steer/);
   assert.match(composer, /aria-label=\{recording \? "Stop recording" : "Record voice"\}/);
+  assert.match(composer, /composerFieldPlaceholder/);
+  assert.match(composer, /micDictateStart/);
+  assert.match(read("electron/preload.ts"), /micDictateStart/);
+  assert.match(read("electron/main.ts"), /mic:dictate-start/);
+  assert.match(css, /\.composer\.listening textarea::placeholder/);
   assert.match(composer, /composerEscapeAction/);
   assert.match(composer, /preserveVoiceDraft/);
   assert.match(css, /\.composer-mic \{[\s\S]*?height:\s*32px/);

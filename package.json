@@ -127,6 +127,10 @@
       {
         "from": "skills",
         "to": "skills"
+      },
+      {
+        "from": "electron/mac-dictation.swift",
+        "to": "mac-dictation.swift"
       }
     ],
     "win": {

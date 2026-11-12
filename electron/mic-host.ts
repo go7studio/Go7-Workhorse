@@ -12,7 +12,10 @@ export const MAC_SYSTEM_SETTINGS_APP = "/System/Applications/System Settings.app
 export const MAC_SYSTEM_PREFERENCES_APP = "/System/Applications/System Preferences.app";
 export const MAC_MICROPHONE_PRIVACY_URL =
   "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone";
+export const MAC_SPEECH_PRIVACY_URL =
+  "x-apple.systempreferences:com.apple.preference.security?Privacy_SpeechRecognition";
 export const WINDOWS_MICROPHONE_PRIVACY_URL = "ms-settings:privacy-microphone";
+export const LISTENING_PLACEHOLDER = "Listening…";
 
 export const NS_MICROPHONE_USAGE_DESCRIPTION =
   "Workhorse records from the microphone so your words can be typed into the unsent draft.";
@@ -204,6 +207,75 @@ export function joinVoiceDraft(existing: string, spoken: string): string {
   if (existing.endsWith("\n")) return `${existing}${speech}`;
   if (/\s$/.test(existing)) return `${existing}${speech}`;
   return `${existing} ${speech}`;
+}
+
+/** Electron's web speech engine often starts and then reports one of these. */
+export function osSpeechGaveUp(error: string | undefined): boolean {
+  return error === "network" || error === "not-allowed" || error === "service-not-allowed" || error === "audio-capture";
+}
+
+export function composerFieldPlaceholder(input: {
+  recording: boolean;
+  dropping: boolean;
+  running: boolean;
+  status?: string;
+}): string {
+  if (input.dropping) return "Drop files or folders";
+  if (input.recording) {
+    const status = input.status?.trim();
+    return status || LISTENING_PLACEHOLDER;
+  }
+  if (input.running) return "Queue for next, or Steer to redirect";
+  return "Message, drop a file or folder, or type /";
+}
+
+export type DictationLine =
+  | { type: "ready" }
+  | { type: "partial"; text: string }
+  | { type: "final"; text: string }
+  | { type: "level"; value: number }
+  | { type: "error"; message: string; openSettings?: boolean };
+
+export function parseDictationLine(line: string): DictationLine | null {
+  const trimmed = line.trim();
+  if (!trimmed.startsWith("{")) return null;
+  let raw: unknown;
+  try {
+    raw = JSON.parse(trimmed);
+  } catch {
+    return null;
+  }
+  if (!raw || typeof raw !== "object") return null;
+  const record = raw as { type?: unknown; text?: unknown; value?: unknown; message?: unknown; openSettings?: unknown };
+  if (record.type === "ready") return { type: "ready" };
+  if ((record.type === "partial" || record.type === "final") && typeof record.text === "string") {
+    return { type: record.type, text: record.text };
+  }
+  if (record.type === "level" && typeof record.value === "number" && Number.isFinite(record.value)) {
+    return { type: "level", value: Math.min(1, Math.max(0, record.value)) };
+  }
+  if (record.type === "error" && typeof record.message === "string" && record.message.trim()) {
+    return {
+      type: "error",
+      message: record.message.trim(),
+      ...(record.openSettings === true ? { openSettings: true } : {}),
+    };
+  }
+  return null;
+}
+
+/** Prefer a bundled on-device helper. Otherwise the system Swift interpreter and a script the caller already resolved. */
+export function macDictationLaunch(input: {
+  platform: NodeJS.Platform;
+  binaryPath: string;
+  swiftPath: string;
+  scriptPath: string | null;
+  existsSync: (file: string) => boolean;
+}): { command: string; args: string[] } | null {
+  if (input.platform !== "darwin") return null;
+  if (input.existsSync(input.binaryPath)) return { command: input.binaryPath, args: [] };
+  if (!input.scriptPath || !input.existsSync(input.swiftPath) || !input.existsSync(input.scriptPath)) return null;
+  return { command: input.swiftPath, args: [input.scriptPath] };
 }
 
 export function composerEscapeAction(input: {

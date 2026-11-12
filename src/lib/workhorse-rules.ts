@@ -230,6 +230,11 @@ const SPAWN_ASK = new RegExp(
     `(?:a|an|the|some|several|multiple|more|\\d+)?\\s*${SPAWN_TARGET}` +
     `|multiple\\s+${SPAWN_TARGET}` +
     `|new\\s+${SPAWN_TARGET}` +
+    `|prove\\s+orchestration` +
+    `|orchestration\\s+proof` +
+    // "start the workers" is a thread pool. "Start Quinn on Cursor" is a lane.
+    `|start\\s+(?!the\\b|a\\b|an\\b|all\\b|some\\b|every\\b)[a-z][a-z]+\\s+on\\s+(?:cursor|composer|grok|claude|codex|gemini)` +
+    `|queue\\s+(?!the\\b|a\\b|an\\b|all\\b|some\\b)[a-z][a-z]+\\s+to\\s+start` +
   ")\\b",
   "i",
 );

@@ -336,7 +336,8 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
   does a later note that the work is incomplete or not working: the same
   assignment resumes without a second confirmation. A bare yes with no earlier
   ask is still refused: pin the chat to Orchestrate or Mission, or ask again
-  in spawn, worker, bot or agent words.
+  in spawn, worker, bot or agent words. Starting a named worker on a vendor,
+  or a note that says prove orchestration, counts as that ask.
 - One assignment is one worker, or a
   named continuation on this parent for the same topic; a bare spawn still
   starts clear-headed.

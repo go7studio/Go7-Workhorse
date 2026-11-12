@@ -381,6 +381,8 @@ test("one predicate decides who gets the law and who may spawn", () => {
     },
     { text: "yes", priorTexts: ["Spawn two agents to review this."], carried: false },
     { text: "Repair the blockers with new agents.", carried: true },
+    { text: "Prove orchestration on this desk. Start Quinn on Cursor Composer 2.5. Queue Ida to start after Quinn.", carried: true },
+    { text: "start the workers in the pool", carried: false },
     { text: "get a reviewer on this", carried: false },
     { text: "Read the config.", crewMode: ["orchestrate"], carried: true },
     { text: "Read the config.", crewMode: ["mission"], carried: true },

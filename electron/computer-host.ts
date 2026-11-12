@@ -5,6 +5,7 @@ import {
   computerSettingsUrl,
   guiShellRefusal,
   isComputerAction,
+  judgeComputerTool,
   userDeclinedComputer,
   type ComputerAction,
   type ComputerOsGrant,
@@ -411,6 +412,57 @@ export function electronComputerIo(electron: ElectronLike, platform: NodeJS.Plat
       void electron.shell.openExternal(url);
     },
   };
+}
+
+export type DeskComputerSession = {
+  computer?: ComputerSeat | null;
+  mode?: PermissionMode | null;
+  sandbox?: SandboxProfile | null;
+  permissionGrants?: Array<{ key: string; expiresAt?: number }>;
+};
+
+/**
+ * One Computer call for a desk chat. The MCP helper cannot see the OS grant,
+ * so Electron main runs this. A screenshot stays a short line: the bridge
+ * cannot carry the image.
+ */
+export async function deskComputerAnswer(
+  session: DeskComputerSession | null,
+  raw: Record<string, unknown>,
+  io: ComputerIo = activeComputerIo(),
+): Promise<string> {
+  if (!session) return "This chat is not on the desk.";
+  const verdict = judgeComputerTool(raw, {
+    computer: session.computer,
+    mode: session.mode,
+    sandbox: session.sandbox,
+    grants: session.permissionGrants,
+  });
+  if (verdict.kind === "block") return verdict.message;
+  if (verdict.kind === "ask") {
+    const app = verdict.app.trim() || "That app";
+    return `${app} needs a permission card before Computer runs.`;
+  }
+  const action = typeof raw.action === "string" ? raw.action : "";
+  const result = await runComputerAction(
+    {
+      action,
+      app: typeof raw.app === "string" ? raw.app : undefined,
+      x: typeof raw.x === "number" ? raw.x : undefined,
+      y: typeof raw.y === "number" ? raw.y : undefined,
+      text: typeof raw.text === "string" ? raw.text : undefined,
+      key: typeof raw.key === "string" ? raw.key : undefined,
+      dx: typeof raw.dx === "number" ? raw.dx : undefined,
+      dy: typeof raw.dy === "number" ? raw.dy : undefined,
+      computer: session.computer,
+      mode: session.mode,
+      sandbox: session.sandbox,
+      allowed: true,
+    },
+    io,
+  );
+  if (result.ok && action === "screenshot") return "screenshot captured";
+  return result.message;
 }
 
 /** Screenshot uses Electron's capturer, which the synchronous IO shape cannot await. */

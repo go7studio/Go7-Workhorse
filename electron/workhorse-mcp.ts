@@ -1056,6 +1056,26 @@ const TOOLS = [
     },
   },
   {
+    name: "workhorse_computer",
+    description:
+      "Drive a desktop app from this chat. action is frontmost, screenshot, click, type, key, or scroll. Runs only when this chat's Computer switch is on and Sandbox is Off. Plan, Read-only, and Strict refuse. The first use of an app asks on the permission card. The Workhorse window, browsers, and typing into a terminal or IDE stay out.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        action: { type: "string", description: "frontmost, screenshot, click, type, key, or scroll" },
+        app: { type: "string", description: "Application name, such as Finder or Explorer" },
+        x: { type: "number" },
+        y: { type: "number" },
+        text: { type: "string" },
+        key: { type: "string" },
+        dx: { type: "number" },
+        dy: { type: "number" },
+      },
+      required: ["action"],
+      additionalProperties: false,
+    },
+  },
+  {
     name: "workhorse_delete_bot",
     description: "Delete a custom desk slot by id or name.",
     inputSchema: {
@@ -3537,6 +3557,30 @@ function chromeSeat(sessionId: string): {
 }
 
 async function callDeskTool(name: string, args: Record<string, unknown>, from?: string, localDiscovery: LocalRuntimeDiscovery | null = null): Promise<string> {
+  if (name === "workhorse_computer") {
+    const sessionId = from?.trim() ?? "";
+    if (!sessionId) throw new Error("Computer needs a chat.");
+    return postBridge(
+      "/bots",
+      botsAsk(
+        {
+          action: "computer",
+          message: JSON.stringify({
+            action: args.action,
+            app: args.app,
+            x: args.x,
+            y: args.y,
+            text: args.text,
+            key: args.key,
+            dx: args.dx,
+            dy: args.dy,
+          }),
+        },
+        sessionId,
+      ),
+      { timeoutMs: 20_000, inbox: false },
+    );
+  }
   if (name === "workhorse_chrome") {
     const sessionId = from?.trim() ?? "";
     if (!sessionId) throw new Error("Chrome needs a chat.");

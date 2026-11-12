@@ -12,7 +12,7 @@ import { AgySessionHost } from "./agy-host";
 import { detectAgyLogin } from "./agy-login";
 import { readAgyPlan, readAgyUsageStdout } from "./agy-plan";
 import { CustomSessionHost, type CustomPromptInput } from "./custom-host";
-import { bindDefaultComputerIo } from "./computer-host";
+import { bindDefaultComputerIo, deskComputerAnswer } from "./computer-host";
 import { observedMcpServer, probeMcpServer } from "./mcp-tool-bridge";
 import { mcpInventorySnapshot } from "./mcp-inventory";
 import { boundLinkRead } from "../src/lib/link-read";
@@ -1314,6 +1314,22 @@ app.whenReady().then(async () => {
     const win = liveDeskWindow();
     if (!win || win.webContents.isDestroyed()) return { error: "Workhorse window is closed" };
     if (ask.action === "viewer") return viewerHost.handle(ask);
+    if (ask.action === "computer") {
+      let raw: Record<string, unknown> = {};
+      try {
+        const parsed = JSON.parse(ask.message) as unknown;
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) raw = parsed as Record<string, unknown>;
+      } catch {
+        raw = {};
+      }
+      const sessions = readState().sessions;
+      const list = Array.isArray(sessions) ? sessions : [];
+      const session =
+        list.find((item): item is { id?: string; computer?: "off" | "on"; mode?: "ask" | "accept-edits" | "always-approve" | "plan"; sandbox?: "off" | "workspace" | "read-only" | "strict"; permissionGrants?: Array<{ key: string; expiresAt?: number }> } => {
+          return Boolean(item) && typeof item === "object" && (item as { id?: unknown }).id === ask.fromSessionId;
+        }) ?? null;
+      return { text: await deskComputerAnswer(session, raw) };
+    }
     if (ask.mode === "bots" && ask.action === "link-read" && ask.name === "mcp") {
       return boundLinkRead(JSON.stringify(mcpInventorySnapshot(readViewerState(), ask.message.trim(), ask.fromSessionId ?? "", true, observedMcpServer)));
     }

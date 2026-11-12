@@ -20,6 +20,7 @@ import {
 } from "../src/lib/computer-seat";
 import {
   computerInputCommand,
+  deskComputerAnswer,
   frontmostCommand,
   runComputerAction,
   type ComputerIo,
@@ -244,6 +245,51 @@ test("an allowed Finder click records the input and a deny does not", async () =
   assert.match(frontmostCommand("darwin")?.args.join(" ") ?? "", /frontmost is true/);
   assert.match(frontmostCommand("win32")?.args.join(" ") ?? "", /GetForegroundWindow/);
   assert.equal(frontmostCommand("linux"), null);
+});
+
+test("a desk chat names the frontmost app only when Computer is on", async () => {
+  const mac = io("darwin");
+  const off = await deskComputerAnswer(
+    { computer: "off", mode: "always-approve", sandbox: "off" },
+    { action: "frontmost" },
+    mac,
+  );
+  assert.match(off, /Computer is off/);
+  const named = await deskComputerAnswer(
+    { computer: "on", mode: "always-approve", sandbox: "off" },
+    { action: "frontmost" },
+    mac,
+  );
+  assert.equal(named, "Finder");
+  const blocked = io("darwin", { accessibility: () => false });
+  const denied = await deskComputerAnswer(
+    { computer: "on", mode: "always-approve", sandbox: "off" },
+    { action: "frontmost" },
+    blocked,
+  );
+  assert.match(denied, /OS is blocking Computer/);
+  assert.equal(blocked.calls.length, 0);
+  const asked = await deskComputerAnswer(
+    { computer: "on", mode: "always-approve", sandbox: "off" },
+    { action: "screenshot", app: "Finder" },
+    mac,
+  );
+  assert.match(asked, /permission card/);
+  const shot = await deskComputerAnswer(
+    {
+      computer: "on",
+      mode: "always-approve",
+      sandbox: "off",
+      permissionGrants: [{ key: computerGrantKey("Finder"), expiresAt: Date.now() + 60_000 }],
+    },
+    { action: "screenshot", app: "Finder" },
+    mac,
+  );
+  assert.equal(shot, "screenshot captured");
+  const main = readFileSync(path.join(ROOT, "electron", "main.ts"), "utf8");
+  const bridge = readFileSync(path.join(ROOT, "electron", "workhorse-bridge.ts"), "utf8");
+  assert.match(main, /ask\.action === "computer"/);
+  assert.match(bridge, /raw\.action === "computer"/);
 });
 
 test("main checks GUI launches before a shell runs, and the seat card is not a new Settings tab", () => {

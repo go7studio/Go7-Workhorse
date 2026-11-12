@@ -221,7 +221,7 @@ test("Allow launches installed Chrome on the desk profile and refuses a smoke po
   assert.equal(stopped, 0);
 
   const refused = createGrantedChromeLauncher({
-    spawnImpl: (() => fakeChild()) as typeof import("node:child_process").spawn,
+    spawnImpl: (() => fakeChild()) as unknown as typeof import("node:child_process").spawn,
     executable: "/opt/chrome-test",
     readDebuggingPort: async () => "9333",
     connect: async () => {

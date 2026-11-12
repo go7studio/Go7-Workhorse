@@ -80,7 +80,6 @@ export class CodexAppServerClient {
       cwd: this.options.cwd,
       env: this.options.env ?? codexAppServerEnv(),
       stdio: ["pipe", "pipe", "pipe"],
-      windowsHide: true,
       // The app server runs the same tools the ACP path does, so it leads its
       // own group and closing it reaches what it started.
       ...groupSpawnOptions(),

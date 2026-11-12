@@ -192,6 +192,12 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
 - A chat reads media the agent wrote, so a generated image shows in the
   transcript, not a path.
 - **Permission modes** ask, accept-edits, always-approve, plan.
+- **Computer** is a per-chat switch beside Permission and Sandbox. It ships off.
+  Spawn does not copy it onto a worker and cannot turn it on. It runs only
+  with Sandbox off. Plan, read-only, and strict refuse it. The first use of an
+  app asks on the permission card. Finder, Explorer, and System Settings can
+  be driven from Electron main. The Workhorse window, browsers, and typing
+  into terminals or IDEs stay out.
 - **Sandbox profiles** off, workspace, read-only, strict. Read-only still reads:
   gh, git and the search tools. Anything that writes or sends stops, and so does
   every interpreter, because a script cannot be read for what it will do.

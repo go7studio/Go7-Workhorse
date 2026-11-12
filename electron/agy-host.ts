@@ -186,6 +186,7 @@ export class AgySessionHost {
       {
         mode: input.mode,
         sandbox: input.sandbox,
+        computer: input.computer,
         role: input.role ?? (input.parentId || input.hidden ? "worker" : "orchestrator"),
         crewMode: input.crewModes,
         spawnNames: input.spawnNames,

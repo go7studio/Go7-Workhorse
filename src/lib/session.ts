@@ -289,6 +289,7 @@ export function normalizeSession(raw: unknown, liveRunIds?: ReadonlySet<string>)
     titleLocked: record.titleLocked === true,
     mode,
     sandbox: normalizeSandbox(record.sandbox),
+    ...(record.computer === "on" ? { computer: "on" as const } : {}),
     securityPolicy: normalizeSessionSecurityPolicy(record.securityPolicy),
     environment: normalizeSessionEnvironment(record.environment),
     ...(normalizePresets(record.presets) ? { presets: normalizePresets(record.presets) } : {}),

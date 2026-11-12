@@ -12,6 +12,7 @@ import { sessionEnvironmentKind } from "../lib/session-environment";
 import { useActiveSession, useStore } from "../lib/store";
 import { vendorTidePercent } from "../lib/usage";
 import type { EffortLevel, PermissionMode, ProviderId, SandboxProfile } from "../lib/types";
+import { ComputerSeatCard } from "./ComputerSeatCard";
 
 const PERMISSIONS: { id: PermissionMode; label: string }[] = [
   { id: "ask", label: "Ask each time" },
@@ -48,6 +49,7 @@ export function SessionSetup({ onClose }: { onClose: () => void }) {
   const {
     setMode,
     setSandbox,
+    setComputer,
     setSessionEffort,
     setSessionContextWindow,
     setSessionEnvironment,
@@ -521,6 +523,11 @@ export function SessionSetup({ onClose }: { onClose: () => void }) {
             </div>
           </div>
         </div>
+        <ComputerSeatCard
+          computer={session.computer === "on" ? "on" : "off"}
+          worker={session.hidden === true}
+          onChange={setComputer}
+        />
         <div className="setup-block">
           <div className="setup-choice-title">
             <strong>Blender</strong>

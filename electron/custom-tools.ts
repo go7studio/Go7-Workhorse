@@ -4,6 +4,9 @@ import path from "node:path";
 import { withDeskToolEnv, withoutWorkhorsePrivateEnv } from "./desk-path";
 import { groupSpawnOptions, stopProcessGroup, trackProcessGroup } from "./process-registry";
 import { permissionPolicyAnswer, looksLikeWriteTool, autoAllowPermission, type PermissionAnswer } from "../src/lib/permissions";
+import { judgeComputerTool } from "../src/lib/computer-seat";
+import type { ComputerSeat } from "../src/lib/computer-seat";
+import { runComputerAction, shellGuiBlock, type ComputerIo } from "./computer-host";
 import {
   deskRoleOf,
   toolsForDeskRole,
@@ -80,6 +83,10 @@ const RUN_COMMAND_TIMEOUT_MS = 30_000;
 export type CustomToolPolicy = {
   mode?: PermissionMode;
   sandbox?: SandboxProfile;
+  computer?: ComputerSeat;
+  /** Injected in tests. Production uses the IO Electron main bound. */
+  computerIo?: ComputerIo;
+  platform?: NodeJS.Platform;
   grants?: PermissionGrant[];
   cwd?: string;
   folders?: string[];
@@ -127,6 +134,25 @@ const WORKSPACE_TOOLS: { name: string; description: string; input_schema: Record
         content: { type: "string", description: "Full file contents" },
       },
       required: ["path", "content"],
+    },
+  },
+  {
+    name: "computer",
+    description:
+      "Drive a desktop app on this Mac or Windows machine. Actions: frontmost, screenshot, click, type, key, scroll. Runs only when this chat's Computer switch is on and Sandbox is Off. Plan, Read-only, and Strict refuse. The first use of an app asks on the permission card. Browsers, the Workhorse window, and typing into a terminal or IDE are refused.",
+    input_schema: {
+      type: "object",
+      properties: {
+        action: { type: "string", description: "frontmost, screenshot, click, type, key, or scroll" },
+        app: { type: "string", description: "Application name, such as Finder or Explorer" },
+        x: { type: "number" },
+        y: { type: "number" },
+        text: { type: "string" },
+        key: { type: "string" },
+        dx: { type: "number" },
+        dy: { type: "number" },
+      },
+      required: ["action"],
     },
   },
   {
@@ -554,6 +580,12 @@ export function toolDetail(use: CustomToolUse): { detail: string; path?: string 
     const command = typeof input.command === "string" ? input.command : "";
     return { detail: command || "run command", path: typeof input.cwd === "string" ? input.cwd : undefined };
   }
+  if (name === "computer") {
+    const action = typeof input.action === "string" ? input.action : "computer";
+    const app = typeof input.app === "string" ? input.app.trim() : "";
+    // The card and the 24h grant are per app. The key is computer:<app>.
+    return { detail: app || action };
+  }
   if (name === "workhorse_spawn_agent") {
     const provider = typeof input.provider === "string" ? input.provider.trim() : "";
     const chat = typeof input.chat === "string" ? input.chat.trim() : "";
@@ -575,6 +607,17 @@ export function customToolPolicy(
 ): PermissionAnswer | "ask" {
   const name = normalizeCustomToolName(use.name);
   const { detail, path: filePath } = toolDetail({ ...use, name });
+  if (name === "computer") {
+    const verdict = judgeComputerTool(use.input, {
+      computer: policy.computer,
+      mode: policy.mode,
+      sandbox: policy.sandbox,
+      grants: policy.grants,
+    });
+    if (verdict.kind === "block") return "deny";
+    if (verdict.kind === "ask") return "ask";
+    return "once";
+  }
   const forced = permissionPolicyAnswer({
     mode: policy.mode ?? "ask",
     sandbox: policy.sandbox ?? "off",
@@ -821,9 +864,38 @@ export async function executeCustomTool(
       else writeWithoutFollowing(filePath, content);
       return { id: use.id, name, content: `Wrote ${filePath} (${content.length} chars)` };
     }
+    if (name === "computer") {
+      const raw = use.input ?? {};
+      const result = await runComputerAction(
+        {
+          action: typeof raw.action === "string" ? raw.action : "",
+          app: typeof raw.app === "string" ? raw.app : undefined,
+          x: typeof raw.x === "number" ? raw.x : undefined,
+          y: typeof raw.y === "number" ? raw.y : undefined,
+          text: typeof raw.text === "string" ? raw.text : undefined,
+          key: typeof raw.key === "string" ? raw.key : undefined,
+          dx: typeof raw.dx === "number" ? raw.dx : undefined,
+          dy: typeof raw.dy === "number" ? raw.dy : undefined,
+          computer: policy.computer,
+          mode: policy.mode,
+          sandbox: policy.sandbox,
+          allowed: true,
+        },
+        policy.computerIo,
+      );
+      return { id: use.id, name, content: result.message, isError: !result.ok };
+    }
     if (name === "run_command") {
       const command = typeof use.input.command === "string" ? use.input.command : "";
       if (!command.trim()) throw new Error("command is required");
+      const refusal = shellGuiBlock({
+        command,
+        computer: policy.computer,
+        mode: policy.mode,
+        sandbox: policy.sandbox,
+        platform: policy.platform,
+      });
+      if (refusal) return { id: use.id, name, content: refusal, isError: true };
       const runCwd = resolveWorkspacePath(typeof use.input.cwd === "string" ? use.input.cwd : cwd, cwd, folders, sandbox);
       return await new Promise<CustomToolResult>((resolve) => {
         /*

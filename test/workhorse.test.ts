@@ -5414,14 +5414,15 @@ test("sidebar nests project chats in folders; top New chat stays loose", async (
     }).map((item) => item.id),
     ["codex", "grok-bot", "dgx-spark", "own"],
   );
-  assert.ok(
+  assert.deepEqual(
     addBotChoices({
       grok: { connected: true },
       codex: { connected: true },
       claude: { connected: true },
       cursor: { connected: true },
       gemini: { connected: false },
-    }).some((item) => item.id === "gemini"),
+    }).map((item) => item.id),
+    ["grok-bot", "dgx-spark", "own"],
   );
   assert.equal(vendorStatusCopy("cursor", { connected: false, available: false }), "Needs Cursor Agent CLI");
   assert.equal(

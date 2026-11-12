@@ -5,13 +5,12 @@ When you add a feature, add it here in the same commit.
 
 ## What it is
 
-- Go7 Workhorse runs Grok, Claude, Codex, Cursor, Gemini and your own API bots
+- Go7 Workhorse runs Grok, Claude, Codex, Cursor, and your own API bots
   in one desktop window, each under its own login.
 - Set the bot, model and thinking effort per chat, or let the desk pick.
 - Spawned workers copy this chat's Permission and Sandbox. A path allowlist
   still launches the vendor at Ask so writes can be preflighted; the worker
-  chip stays Always if the orchestrator is Always. Gemini keeps the chat's
-  own permission, because headless agy does not ask. Always with Sandbox Off or
+  chip stays Always if the orchestrator is Always. Always with Sandbox Off or
   Workspace skips that allowlist.
 - Chat status is a tiled Workhorse mascot, a 3-by-3 grid with the bottom-right
   pixel sliver omitted. It rests as one seamless image that separates into tiles
@@ -49,23 +48,12 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
 | Claude | ACP over stdio | Runs the local Claude Code CLI |
 | Codex | ACP, plus an App Server | App Server adds native history and capability discovery |
 | Cursor | ACP over stdio | Runs `cursor-agent` |
-| Gemini | Local Antigravity CLI (`agy`) | Uses the Google login already on this machine. Leftover is three rings: Gemini models, Gemini 4 Argon, and Claude or GPT models on that login. The desk does not drive the Gemini app. |
 | Custom | HTTP | Any Anthropic Messages or OpenAI Chat Completions endpoint, hosted or local |
 
 - Each vendor runs under its own login. Subscriptions, context and sandboxes are
   never pooled.
-- Gemini on the desk is the Antigravity CLI. The Gemini API preset stays a
-  separate HTTP bot. A new Gemini chat starts on Always allow. Ask, Accept
-  edits, and Plan stay available on that chat.
-- Gemini replies keep the final text delta, including a word completed as the
-  native CLI finishes the response.
-- Resuming a Gemini conversation bills the new turn's native model-call counts,
-  without charging its earlier conversation totals again.
-- Gemini's headless CLI cannot ask for interactive approval. A denied action
-  reports its reason in the reply.
-- Gemini receives the MCP tools attached to that chat, including Workhorse
-  Link and optional Blender. Its temporary tool configuration leaves the
-  user's workspace and global CLI configuration unchanged.
+- Gemini API stays a custom HTTP bot. The desk does not sign in to Google or
+  launch the Antigravity CLI (`agy`).
 - Client and model are separate: **Grok Build CLI** runs the model ids
   **Grok 4.7**, **Grok 4.6**, and **Grok 4.5**.
 - The CLI's live catalog is authoritative. The desk shows the model, never the
@@ -515,8 +503,7 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
   list, read and ask chats, query leftover and availability, delegation,
   continuation, worker status and read-only MCP inventory.
 - Capacity discovery identifies each native subscription's client, models,
-  authentication readiness and callability. Gemini names the Antigravity CLI
-  (`agy`); API bots remain separate accounts.
+  authentication readiness and callability. API bots remain separate accounts.
 - MCP inventory lists configured servers, observed tool input shapes and a
   chat's existing runtime and preset grants. Configuration, authorization,
   connection and availability are separate states; unobserved stays unknown.

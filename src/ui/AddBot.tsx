@@ -8,7 +8,7 @@ import { BotForm } from "./BotForm";
 import { GrokBotWakeSetup } from "./GrokBotWakeSetup";
 
 const CATALOG: {
-  id: "grok" | "codex" | "claude" | "cursor" | "gemini" | "grok-bot" | "dgx-spark" | "own";
+  id: "grok" | "codex" | "claude" | "cursor" | "grok-bot" | "dgx-spark" | "own";
   name: string;
   hint: string;
 }[] = [
@@ -16,21 +16,20 @@ const CATALOG: {
   { id: "codex", name: "Codex", hint: "Local Codex." },
   { id: "claude", name: "Claude", hint: "Local Claude Code." },
   { id: "cursor", name: "Cursor", hint: "Local Cursor Agent." },
-  { id: "gemini", name: "Gemini", hint: "Local Antigravity CLI (agy)." },
   { id: "grok-bot", name: "Grok Bot", hint: "Private local bridge. Instant replies are optional." },
   { id: "dgx-spark", name: "DGX Spark", hint: "Qwen on the Spark. NVIDIA Sync local-forwards 8788." },
   { id: "own", name: "Your own", hint: "API URL and key." },
 ];
 
-type Stage = "catalog" | "own" | "grok" | "codex" | "claude" | "cursor" | "gemini" | "grok-bot" | "dgx-spark";
+type Stage = "catalog" | "own" | "grok" | "codex" | "claude" | "cursor" | "grok-bot" | "dgx-spark";
 
 const ALWAYS_OFFERED = new Set<(typeof CATALOG)[number]["id"]>(["grok-bot", "dgx-spark", "own"]);
 
 export function addBotChoices(llms: Record<"grok" | "codex" | "claude" | "cursor" | "gemini", Pick<LlmLink, "connected">>) {
-  return CATALOG.filter((item) => ALWAYS_OFFERED.has(item.id) || !llms[item.id as "grok" | "codex" | "claude" | "cursor" | "gemini"]?.connected);
+  return CATALOG.filter((item) => ALWAYS_OFFERED.has(item.id) || !llms[item.id as "grok" | "codex" | "claude" | "cursor"]?.connected);
 }
 
-type StockStage = "grok" | "codex" | "claude" | "cursor" | "gemini";
+type StockStage = "grok" | "codex" | "claude" | "cursor";
 
 export function vendorStatusCopy(stage: StockStage, link: Pick<LlmLink, "available" | "connected" | "needsAuth">) {
   const linked = Boolean(link?.connected);
@@ -40,12 +39,10 @@ export function vendorStatusCopy(stage: StockStage, link: Pick<LlmLink, "availab
   if (linked) return "Needs attention";
   if (needsAuth) {
     if (stage === "cursor") return "Installed - sign in with agent login";
-    if (stage === "gemini") return "Installed - sign in with agy";
     return "Needs auth";
   }
   if (found) return "Ready to add";
   if (stage === "cursor") return "Needs Cursor Agent CLI";
-  if (stage === "gemini") return "Needs the Antigravity CLI";
   return "Not found";
 }
 
@@ -58,12 +55,6 @@ export function vendorSetupHelpCopy(stage: StockStage, link: Pick<LlmLink, "avai
   }
   if (stage === "cursor" && needsAuth && !linked) {
     return "Run agent login in PowerShell or Terminal, then Recheck.";
-  }
-  if (stage === "gemini" && !linked && !found) {
-    return "Install the Antigravity CLI (agy), then Recheck.";
-  }
-  if (stage === "gemini" && needsAuth && !linked) {
-    return "Run agy and sign in, then Recheck.";
   }
   return "";
 }
@@ -127,7 +118,6 @@ export function AddBot() {
     if (id === "grok") store.refreshGrokLogin();
     if (id === "codex") store.refreshCodexLogin();
     if (id === "claude") store.refreshClaudeLogin();
-    if (id === "gemini") store.refreshGeminiLogin();
     setStage(id);
   };
 
@@ -255,7 +245,7 @@ export function AddBot() {
         </>
       )}
 
-      {(stage === "grok" || stage === "codex" || stage === "claude" || stage === "cursor" || stage === "gemini") && (
+      {(stage === "grok" || stage === "codex" || stage === "claude" || stage === "cursor") && (
         <VendorStatus stage={stage} onBack={leaveChoice} onDesk={store.closeAddBot} />
       )}
     </section>
@@ -267,7 +257,7 @@ function VendorStatus({
   onBack,
   onDesk,
 }: {
-  stage: "grok" | "codex" | "claude" | "cursor" | "gemini";
+  stage: "grok" | "codex" | "claude" | "cursor";
   onBack: () => void;
   onDesk: () => void;
 }) {
@@ -276,7 +266,7 @@ function VendorStatus({
   const linked = Boolean(link?.connected);
   const needsAuth = Boolean(link?.needsAuth);
   const found = Boolean(link?.available) || needsAuth;
-  const name = stage === "grok" ? "Grok" : stage === "codex" ? "Codex" : stage === "cursor" ? "Cursor" : stage === "gemini" ? "Gemini" : "Claude";
+  const name = stage === "grok" ? "Grok" : stage === "codex" ? "Codex" : stage === "cursor" ? "Cursor" : "Claude";
   const setupHelp = vendorSetupHelpCopy(stage, link);
 
   return (
@@ -311,9 +301,7 @@ function VendorStatus({
                 ? store.refreshCodexLogin()
                 : stage === "cursor"
                   ? store.refreshCursorLogin()
-                  : stage === "gemini"
-                    ? store.refreshGeminiLogin()
-                    : store.refreshClaudeLogin()
+                  : store.refreshClaudeLogin()
           }
         >
           Recheck

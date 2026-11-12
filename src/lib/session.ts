@@ -174,6 +174,8 @@ export function applySessionModelChange(
     fastMode?: boolean;
   },
 ): Session {
+  // Google Gemini login was removed. Do not move a chat onto that vendor.
+  if (next.provider === "gemini") return session;
   const providerChanged =
     session.provider !== next.provider || (session.customBotId || undefined) !== (next.customBotId || undefined);
   const nextFast =
@@ -187,16 +189,13 @@ export function applySessionModelChange(
     customBotId: next.customBotId,
     fastMode: nextFast,
   });
-  // Landing on Gemini sets always-approve. Headless agy cannot ask.
-  // A model change while the chat is already on Gemini keeps a later choice.
-  const landingOnGemini = next.provider === "gemini" && session.provider !== "gemini";
   return {
     ...session,
     provider: next.provider,
     model: next.model,
     effort: next.effort,
     fastMode: nextFast || undefined,
-    mode: landingOnGemini ? "always-approve" : session.mode,
+    mode: session.mode,
     customBotId: next.customBotId,
     vendorSessionId: switched ? undefined : session.vendorSessionId,
     vendorProvider: switched ? undefined : session.vendorProvider,

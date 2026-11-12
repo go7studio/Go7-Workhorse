@@ -162,7 +162,7 @@ import {
   projectForSpawn,
 } from "./project";
 import { isParentTakeoverTool, isWriteToolTitle, projectEdits, workerChangedFiles, writePathFromToolEvent } from "./project-edits";
-import { isProviderId, providerById } from "./providers";
+import { GEMINI_LOGIN_REMOVED, isProviderId, providerById } from "./providers";
 import { sameDeskSkills, skillsForAutoLoad } from "./skills-catalog";
 import { withSkillDiscoveryHint } from "./skill-suggestions";
 import { mcpServersForSession } from "./mcp-servers";
@@ -189,6 +189,7 @@ import {
   normalizeSkillDiscovery,
   vendorAttachedForSession,
   vendorLaunchGate,
+  withoutGeminiLogin,
 } from "./settings";
 import { acceptInboundEnvelope, allowedExternalCandidates, formatExternalAgentRef, parseExternalAgentRef } from "./agent-runtime";
 import { decideDispatch } from "./dispatch";
@@ -1543,9 +1544,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           const cursor = window.workhorse?.detectCursorLogin
             ? await window.workhorse.detectCursorLogin()
             : { connected: false, binary: null, accessDefaults: undefined };
-          const gemini = window.workhorse?.detectGeminiLogin
-            ? await window.workhorse.detectGeminiLogin()
-            : { connected: false, binary: null, accessDefaults: undefined };
           const catalog = window.workhorse?.listVendorModels
             ? await window.workhorse.listVendorModels()
             : null;
@@ -1608,16 +1606,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                     ),
                     ...vendorLaunchGate(cursor),
                   },
-                  gemini: {
-                    ...current.settings.llms.gemini,
-                    available: Boolean(gemini.binary || gemini.connected),
-                    needsAuth: Boolean((gemini as { needsAuth?: boolean }).needsAuth) && !gemini.connected,
-                    accessDefaults: keepVendorAccessDefaults(
-                      current.settings.llms.gemini.accessDefaults,
-                      gemini.accessDefaults,
-                    ),
-                    ...vendorLaunchGate(gemini),
-                  },
+                  gemini: withoutGeminiLogin(current.settings.llms.gemini),
                   custom: { ...current.settings.llms.custom, connected: false },
                 },
               },
@@ -2007,6 +1996,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         return { ...current, panel: "settings", settingsSection: "llms" };
       }
       const picked = provider ?? remembered!.provider;
+      if (picked === "gemini") return current;
       const model = provider ? defaultModel(provider).id : remembered!.model;
       const customBotId = picked === "custom" ? remembered?.customBotId : undefined;
       // A new chat starts at the desk default. It no longer copies the last
@@ -2022,9 +2012,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         model,
         effort: withEffort(picked, model, remembered?.effort ?? null),
         sandbox: seat.sandbox,
-        // Gemini's own default is always-approve, even when the desk seat is
-        // tighter. Headless agy cannot ask, and a soft deny has no inbox.
-        mode: picked === "gemini" ? "always-approve" : seat.mode,
+        mode: seat.mode,
         customBotId,
       };
       const opened = openDraft(current.sessions, {
@@ -2579,32 +2567,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, [refreshVendorModels]);
 
   const refreshGeminiLogin = useCallback(() => {
-    void (async () => {
-      const detected = window.workhorse?.detectGeminiLogin
-        ? await window.workhorse.detectGeminiLogin()
-        : { connected: false, binary: null, accessDefaults: undefined };
-      setState((current) => ({
-        ...current,
-        settings: {
-          ...current.settings,
-          llms: {
-            ...current.settings.llms,
-            gemini: {
-              ...current.settings.llms.gemini,
-              available: Boolean(detected.binary || detected.connected),
-              needsAuth: Boolean(detected.needsAuth) && !detected.connected,
-              accessDefaults: keepVendorAccessDefaults(
-                current.settings.llms.gemini.accessDefaults,
-                detected.accessDefaults,
-              ),
-              ...vendorLaunchGate(detected),
-            },
-          },
+    setState((current) => ({
+      ...current,
+      settings: {
+        ...current.settings,
+        llms: {
+          ...current.settings.llms,
+          gemini: withoutGeminiLogin(current.settings.llms.gemini),
         },
-      }));
-      refreshVendorModels();
-    })();
-  }, [refreshVendorModels]);
+      },
+    }));
+  }, []);
 
   const refreshClaudeLogin = useCallback((options?: { recheck?: boolean }) => {
     void (async () => {
@@ -3887,41 +3860,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           ingestCursorLedgerRef.current();
           return;
         }
-        if (live === "gemini") {
-          if (!window.workhorse?.geminiPrompt) {
-            throw new Error("Gemini agent runs in the Workhorse desktop window.");
-          }
-          if (options?.replaceUserId) vendorSessionId = undefined;
-          const result = await window.workhorse.geminiPrompt({ ...promptInput, vendorSessionId });
-          const reply = typeof result?.text === "string" ? result.text : "";
-          vendorSessionId =
-            typeof result?.vendorSessionId === "string" && result.vendorSessionId
-              ? result.vendorSessionId
-              : vendorSessionId;
-          setState((latest) => ({
-            ...latest,
-            sessions: latest.sessions.map((item) =>
-              item.id === session.id
-                ? {
-                    ...item,
-                    vendorSessionId,
-                    messages: item.messages.map((entry) =>
-                      entry.id === assistantId
-                        ? { ...entry, text: keepStreamedAssistantText({ reply, existingText: entry.text, authoritativeReply: result?.stopReason === "end_turn", preserveWhitespace: true }) }
-                        : entry,
-                    ),
-                  }
-                : item,
-            ),
-          }));
-          void window.workhorse?.geminiPlanUsage?.()
-            .then((plan) => {
-              setGeminiPlan((previous) => planAfterRefresh(previous, plan));
-              markVendorPlanKnown("gemini");
-            })
-            .catch(() => markVendorPlanKnown("gemini"));
-          return;
-        }
+        if (live === "gemini") throw new Error(GEMINI_LOGIN_REMOVED);
         if (live === "codex") {
           if (!window.workhorse?.codexPrompt) {
             throw new Error("Codex agent runs in the Workhorse desktop window.");
@@ -4797,11 +4736,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             const result = await window.workhorse.cursorPrompt(promptInput);
             return typeof result?.text === "string" ? result.text.trim() : "";
           }
-          if (live === "gemini") {
-            if (!window.workhorse?.geminiPrompt) throw new Error("Gemini agent runs in the Workhorse desktop window.");
-            const result = await window.workhorse.geminiPrompt(promptInput);
-            return typeof result?.text === "string" ? result.text.trim() : "";
-          }
+          if (live === "gemini") throw new Error(GEMINI_LOGIN_REMOVED);
           if (!window.workhorse?.grokPrompt) throw new Error("Grok agent runs in the Workhorse desktop window.");
           const result = await window.workhorse.grokPrompt(promptInput);
           return typeof result?.text === "string" ? result.text.trim() : "";
@@ -6683,6 +6618,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                     },
                   )
                 : null) : null;
+            if (resolvedSpec.provider === "gemini") {
+              await replyAsk({ error: GEMINI_LOGIN_REMOVED });
+              return;
+            }
             const spec = {
               ...resolvedSpec,
               effort: spawnEffortFor({
@@ -8788,14 +8727,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             .catch(() => markVendorPlanKnown("cursor"));
           ingestCursorLedgerRef.current();
         }
-        if (session?.provider === "gemini") {
-          void window.workhorse?.geminiPlanUsage?.()
-            .then((plan) => {
-              setGeminiPlan((previous) => planAfterRefresh(previous, plan));
-              markVendorPlanKnown("gemini");
-            })
-            .catch(() => markVendorPlanKnown("gemini"));
-        }
         const closeTurn = () => {
         const idleHandle = turnIdleTimer.current[event.sessionId];
         if (idleHandle) window.clearTimeout(idleHandle);
@@ -9290,6 +9221,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const setLlmConnected = useCallback((id: Exclude<ProviderId, "custom">, connected: boolean) => {
+    if (id === "gemini") {
+      setState((current) => ({
+        ...current,
+        settings: {
+          ...current.settings,
+          llms: { ...current.settings.llms, gemini: withoutGeminiLogin(current.settings.llms.gemini) },
+        },
+      }));
+      return;
+    }
     setState((current) => {
       const currentLink = current.settings.llms[id];
       return {
@@ -9308,6 +9249,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const setLlmEnabled = useCallback((id: Exclude<ProviderId, "custom">, enabled: boolean) => {
+    if (id === "gemini") {
+      setState((current) => ({
+        ...current,
+        settings: {
+          ...current.settings,
+          llms: { ...current.settings.llms, gemini: withoutGeminiLogin(current.settings.llms.gemini) },
+        },
+      }));
+      return;
+    }
     setState((current) => ({
       ...current,
       settings: {
@@ -9696,20 +9647,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, [ingestCursorLedger, markVendorPlanKnown]);
 
   const refreshGeminiPlan = useCallback(() => {
-    if (!window.workhorse?.geminiPlanUsage) {
-      setGeminiPlan(undefined);
-      return;
-    }
-    void window.workhorse
-      .geminiPlanUsage()
-      .then((plan) => {
-        setGeminiPlan((previous) => planAfterRefresh(previous, plan));
-        markVendorPlanKnown("gemini");
-      })
-      .catch(() => {
-        setGeminiPlan((previous) => planAfterRefresh(previous, undefined));
-        markVendorPlanKnown("gemini");
-      });
+    setGeminiPlan(undefined);
+    markVendorPlanKnown("gemini");
   }, [markVendorPlanKnown]);
 
   const refreshClaudePlan = useCallback(() => {

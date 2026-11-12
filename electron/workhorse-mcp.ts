@@ -750,7 +750,7 @@ const TOOLS = [
   {
     name: "workhorse_query_capacity",
     description:
-      "Discover Workhorse subscriptions, models, authentication readiness, client transport, leftover and callability, plus separate custom API accounts. Gemini subscription access uses agy under its own Google login. This is not a reservation and records no usage. Prefer this over workhorse_list_bots for a machine-readable snapshot.",
+      "Discover Workhorse subscriptions, models, authentication readiness, client transport, leftover and callability, plus separate custom API accounts. This is not a reservation and records no usage. Prefer this over workhorse_list_bots for a machine-readable snapshot.",
     inputSchema: {
       type: "object",
       properties: {

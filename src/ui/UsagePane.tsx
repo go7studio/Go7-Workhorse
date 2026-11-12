@@ -335,7 +335,7 @@ function planLoaderFor(row: { provider: ProviderId; focus: string }): boolean {
   if (row.provider === "codex") return Boolean(window.workhorse?.codexPlanUsage);
   if (row.provider === "claude") return Boolean(window.workhorse?.claudePlanUsage);
   if (row.provider === "cursor") return Boolean(window.workhorse?.cursorPlanUsage);
-  if (row.provider === "gemini") return Boolean(window.workhorse?.geminiPlanUsage);
+  if (row.provider === "gemini") return false;
   return Boolean(window.workhorse?.customPlanUsage);
 }
 

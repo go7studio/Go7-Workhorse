@@ -120,7 +120,7 @@ reads still answer from the last saved state, delegation does not.
 ## Subscription and MCP discovery
 
 `workhorse_query_capacity` is the subscription catalog as well as the leftover
-snapshot. A native vendor row's `access` names its client (`agy` for Gemini),
+snapshot. A native vendor row's `access` names its client,
 transport, connected/enabled state, authentication readiness and known launch
 readiness. `availability.canCall` remains the final desk admission result: a
 login can be ready while a quota, reserve or daily bank holds the call. Each

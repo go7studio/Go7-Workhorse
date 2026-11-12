@@ -259,7 +259,7 @@ contextBridge.exposeInMainWorld("workhorse", {
     };
   },
   detectGeminiLogin: () =>
-    ipcRenderer.invoke("gemini:detect-login") as Promise<import("./agy-login").AgyLoginDetectResult>,
+    ipcRenderer.invoke("gemini:detect-login") as Promise<{ connected: boolean; needsAuth?: boolean; launchable?: boolean; binary: string | null; launchBlocker?: string }>,
   geminiPrompt: (input: GrokPromptInput) => ipcRenderer.invoke("gemini:prompt", input),
   geminiAnswerPermission: (requestId: string, answer: PermissionAnswer) =>
     ipcRenderer.invoke("gemini:answer-permission", { requestId, answer }),

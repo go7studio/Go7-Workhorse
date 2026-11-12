@@ -5,6 +5,7 @@ const VENDOR_NAMES: Record<Exclude<ProviderId, "custom">, string> = { grok: "Gro
 
 /** The short word under a vendor's name on its Settings card. */
 export function llmCardHint(id: Exclude<ProviderId, "custom">, link: LlmLink): string {
+  if (id === "gemini") return "Removed";
   if (!vendorEnabled(link)) return "Disabled";
   if (link.authProblem && link.needsAuth) return "Sign in again";
   // Installed but signed out is a different problem from missing, and the
@@ -17,6 +18,7 @@ export function llmCardHint(id: Exclude<ProviderId, "custom">, link: LlmLink): s
 
 /** The one line under the card that says what to do next. */
 export function llmDetailCopy(id: Exclude<ProviderId, "custom">, link: LlmLink): string {
+  if (id === "gemini") return "Google Gemini login was removed from Workhorse.";
   if (link.connected && link.enabled === false) {
     return "Disabled for new chats.";
   }
@@ -35,7 +37,6 @@ export function llmDetailCopy(id: Exclude<ProviderId, "custom">, link: LlmLink):
   if (link.needsAuth) {
     if (id === "claude") return "Not signed in. Log in with Claude mints a token for this desk.";
     if (id === "cursor") return "Sign in to Cursor Agent, then Recheck.";
-    if (id === "gemini") return "Sign in with agy, then Recheck.";
     return "Not signed in. Sign in, then Recheck.";
   }
   if (link.launchable === false && link.launchBlocker) return `${link.launchBlocker}. Install it, then Recheck.`;
@@ -55,9 +56,6 @@ export function llmDetailCopy(id: Exclude<ProviderId, "custom">, link: LlmLink):
   }
   if (id === "cursor") {
     return found || link.connected ? "Local Cursor Agent ready." : "Cursor ACP binary or login not found.";
-  }
-  if (id === "gemini") {
-    return found || link.connected ? "Local Antigravity CLI ready." : "Antigravity CLI (agy) not found.";
   }
   return found ? "Marked for a future adapter" : "Not connected";
 }

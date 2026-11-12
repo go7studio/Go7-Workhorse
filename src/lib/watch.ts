@@ -725,7 +725,7 @@ export type DeskCallRow = {
   reason?: string;
 };
 
-const DESK_STOCK: Exclude<ProviderId, "custom">[] = ["grok", "codex", "claude", "cursor", "gemini"];
+const DESK_STOCK: Exclude<ProviderId, "custom">[] = ["grok", "codex", "claude", "cursor"];
 
 function deskCallRow(input: {
   key: string;
@@ -885,43 +885,6 @@ export function deskCallCatalog(input: {
           burstBlock: burstWindowBlocksCall(planForKey("cursor:other-models"), spentPercent),
         }),
       );
-      continue;
-    }
-    if (id === "gemini") {
-      const connected = Boolean(link?.connected);
-      const enabled = Boolean(link?.connected && link?.enabled !== false);
-      const rings = [
-        { key: "gemini" as const, name: "Gemini", model: "gemini-3.8-flash-high" },
-        { key: "gemini:argon" as const, name: "Gemini · Argon", model: "gemini-4-argon-medium" },
-        { key: "gemini:third-party" as const, name: "Gemini · Claude and GPT", model: "claude-sonnet-5-5-medium" },
-      ];
-      for (const ring of rings) {
-        const status = byKey.get(ring.key);
-        const models = modelsFor("gemini").filter((item) => agyWatchKey(item.id) === ring.key);
-        rows.push(
-          deskCallRow({
-            key: ring.key,
-            name: status?.label ?? ring.name,
-            provider: "gemini",
-            model: models.some((item) => item.id === ring.model) ? ring.model : models[0]?.id,
-            models: models.map((item) => ({ id: item.id, name: item.name })),
-            kind: "vendor",
-            connected,
-            enabled,
-            launchable: link?.launchable,
-            launchBlocker: link?.launchBlocker,
-            leftover: status?.leftover,
-            usedPercent: status?.usedPercent,
-            period: status?.period,
-            allowedPercent: status?.allowedPercent,
-            overPercent: status?.overPercent,
-            resetsAt: status?.resetsAt,
-            holding: Boolean(status?.holding),
-            spentPercent,
-            burstBlock: burstWindowBlocksCall(planForKey(ring.key), spentPercent),
-          }),
-        );
-      }
       continue;
     }
     const status = byKey.get(id);

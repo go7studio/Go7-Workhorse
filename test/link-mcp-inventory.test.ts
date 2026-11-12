@@ -105,23 +105,20 @@ test("passive inventory observes actual client lifetime, isolates chats and inva
   assert.deepEqual(observedMcpServer(config)?.connectedSessionIds, [], "a completed probe is a catalog, never an active chat connection");
 });
 
-test("subscription discovery reports AGY authentication independently from its official quota", () => {
-  const settings = normalizeSettings({ llms: { gemini: { connected: false, needsAuth: true, launchable: true, authProblem: SECRET } } });
+test("subscription discovery does not offer Google Gemini login", () => {
+  const settings = normalizeSettings({ llms: { gemini: { connected: true, needsAuth: true, launchable: true, authProblem: SECRET } } });
+  assert.equal(settings.llms.gemini.connected, false);
+  assert.equal(settings.llms.gemini.enabled, false);
+  assert.equal(settings.llms.gemini.launchable, false);
+  assert.equal(settings.llms.gemini.needsAuth, false);
   const rows = deskCallCatalog({ settings, usage: [], plans: {}, permits: {} });
+  assert.equal(rows.some((row) => row.provider === "gemini"), false);
   const snapshot = projectCapacitySnapshot(rows, { settings, provider: "gemini" });
-  assert.ok(snapshot.rows.length > 0);
-  for (const row of snapshot.rows) {
-    assert.equal(row.access?.kind, "subscription");
-    assert.equal(row.access?.client, "agy");
-    assert.equal(row.access?.transport, "cli");
-    assert.equal(row.access?.authentication, "required");
-    assert.equal(row.availability.canCall, false);
-    assert.equal(row.meter.status, "unknown");
-  }
+  assert.equal(snapshot.rows.length, 0);
   assert.ok(!JSON.stringify(snapshot).includes(SECRET));
-  settings.llms.gemini = { connected: true, needsAuth: false, launchable: true };
-  const ready = projectCapacitySnapshot(deskCallCatalog({ settings, usage: [], plans: {}, permits: {} }), { settings, provider: "gemini" });
-  assert.ok(ready.rows.every(row => row.access?.authentication === "ready" && row.availability.canCall));
+  settings.llms.gemini = { connected: true, needsAuth: false, launchable: true, enabled: true };
+  const forced = projectCapacitySnapshot(deskCallCatalog({ settings, usage: [], plans: {}, permits: {} }), { settings, provider: "gemini" });
+  assert.equal(forced.rows.length, 0);
 });
 
 type RpcReply = { error?: { message?: string }; result?: { tools?: Array<{ name: string }>; content?: Array<{ text?: string }> } };

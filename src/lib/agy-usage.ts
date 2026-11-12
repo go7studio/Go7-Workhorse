@@ -1,7 +1,7 @@
 import type { GrokPlanProduct, GrokPlanUsage } from "./types";
 
 /**
- * Gemini on the Antigravity CLI is one Google login with three pools.
+ * Historical Antigravity meters had three pools. The desk no longer signs in or launches agy.
  * Product ids for the other pools must not be `weekly` or `5h`: the desk's
  * allowance and burst helpers take the first product whose id matches, and a
  * second `weekly` would put Argon or Claude on the Gemini ring.

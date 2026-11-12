@@ -8,9 +8,6 @@ import { CodexSessionHost, type CodexPromptInput } from "./codex-host";
 import { ClaudeSessionHost, type ClaudePromptInput } from "./claude-host";
 import { resolveClaudeModel } from "./claude-launch";
 import { CursorSessionHost, type CursorPromptInput } from "./cursor-host";
-import { AgySessionHost } from "./agy-host";
-import { detectAgyLogin } from "./agy-login";
-import { readAgyPlan, readAgyUsageStdout } from "./agy-plan";
 import { CustomSessionHost, type CustomPromptInput } from "./custom-host";
 import { bindDefaultComputerIo, deskComputerAnswer } from "./computer-host";
 import { observedMcpServer, probeMcpServer } from "./mcp-tool-bridge";
@@ -29,6 +26,7 @@ import { runClaudeSetupToken } from "./claude-auth";
 import { detectCustomLogin, fillEmptyCustomBotKeys, hydrateDetectedCustomCredentials, openClawKeyForBaseUrl } from "./custom-login";
 import { probeCustomHttp, testCustomModel } from "./custom-http";
 import { cachedCustomCatalog, forgetCustomCatalogsExcept, readCustomCatalog } from "./custom-catalog";
+import { GEMINI_LOGIN_REMOVED } from "../src/lib/providers";
 import { listVendorModels, rememberDeskCatalog, rememberVendorModels, type CustomBotCatalog } from "./vendor-models";
 import { fetchGrokPlanUsage } from "./grok-plan";
 import { fetchCodexPlanUsage } from "./codex-plan";
@@ -2423,7 +2421,7 @@ app.whenReady().then(async () => {
       codex: await detectCodexLogin(),
       claude: await detectClaudeLogin(),
       cursor: await detectCursorLogin(),
-      gemini: await detectAgyLogin({ probe: () => readAgyUsageStdout() }),
+      gemini: { connected: false, binary: null },
       openclaw: { connected: runtimes.some((item) => item.runtimeId === "openclaw" && item.reachable), binary: runtimes.find((item) => item.runtimeId === "openclaw")?.binaryPath },
       hermes: { connected: runtimes.some((item) => item.runtimeId === "hermes" && item.reachable), binary: runtimes.find((item) => item.runtimeId === "hermes")?.binaryPath },
     },
@@ -2664,7 +2662,7 @@ app.whenReady().then(async () => {
     // `cursorModelsOutput: null` keeps this off the Cursor CLI. Without it every
     // Claude prompt spawned `cursor-agent models` and waited up to four seconds
     // for a list this question does not use.
-    return listVendorModels({ userData: app.getPath("userData"), cursorModelsOutput: null, agyModelsOutput: null }).claude.some((row) => {
+    return listVendorModels({ userData: app.getPath("userData"), cursorModelsOutput: null }).claude.some((row) => {
       const id = row.id.toLowerCase();
       const aliases = row.aliases?.map((alias) => alias.toLowerCase()) ?? [];
       return id === raw || id === resolved || aliases.includes(raw) || aliases.includes(resolved);
@@ -2703,13 +2701,7 @@ app.whenReady().then(async () => {
     }
   });
   ipcMain.removeHandler("gemini:plan-usage");
-  ipcMain.handle("gemini:plan-usage", async () => {
-    try {
-      return (await readAgyPlan()) ?? null;
-    } catch {
-      return null;
-    }
-  });
+  ipcMain.handle("gemini:plan-usage", async () => null);
   ipcMain.removeHandler("cursor:ledger-events");
   ipcMain.handle("cursor:ledger-events", async (_event, raw?: { startDate?: number; endDate?: number }) => {
     try {
@@ -2827,29 +2819,18 @@ app.whenReady().then(async () => {
     cursorHost.cancel(sessionId);
   });
 
-  ipcMain.handle("gemini:detect-login", () => detectAgyLogin({ probe: () => readAgyUsageStdout() }));
-  const geminiHost = new AgySessionHost();
-  disposeAtQuit("gemini", () => geminiHost.disposeAll());
-  ipcMain.handle("gemini:prompt", async (event, raw: GrokPromptInput) => {
-    const input: GrokPromptInput = {
-      ...raw,
-      cwd: requireSessionCwd(raw.cwd),
-    };
-    const result = await geminiHost.prompt(input, (payload) => {
-      try {
-        sendToDesk(event.sender, "gemini:event", payload);
-      } catch (error) {
-        console.error("workhorse gemini event send failed", error);
-      }
-    });
-    return result;
+  ipcMain.handle("gemini:detect-login", () => ({
+    connected: false,
+    launchable: false,
+    needsAuth: false,
+    binary: null,
+    launchBlocker: GEMINI_LOGIN_REMOVED,
+  }));
+  ipcMain.handle("gemini:prompt", async () => {
+    throw new Error(GEMINI_LOGIN_REMOVED);
   });
-  ipcMain.handle("gemini:answer-permission", (_event, payload: { requestId: string; answer: PermissionAnswer }) => {
-    return geminiHost.answerPermission(payload.requestId, payload.answer);
-  });
-  ipcMain.handle("gemini:cancel", (_event, sessionId: string) => {
-    geminiHost.cancel(sessionId);
-  });
+  ipcMain.handle("gemini:answer-permission", () => false);
+  ipcMain.handle("gemini:cancel", () => undefined);
 
   const customHost = new CustomSessionHost();
 
@@ -2863,7 +2844,6 @@ app.whenReady().then(async () => {
       ...claudeHost.liveSessionIds(),
       ...codexHost.liveSessionIds(),
       ...cursorHost.liveSessionIds(),
-      ...geminiHost.liveSessionIds(),
       ...grokHost.liveSessionIds(),
       ...customHost.liveSessionIds(),
     ]),

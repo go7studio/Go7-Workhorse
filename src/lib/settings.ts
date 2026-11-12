@@ -5,7 +5,7 @@ import { DEFAULT_LOCAL_COMPUTE_SETTINGS, normalizeLocalComputeSettings } from ".
 import { DEFAULT_WORKSHOP_SETTINGS, normalizeWorkshopSettings } from "./workshop-pack";
 import { defaultModel, withEffort, type ModelChoice } from "./models";
 import { inboundAccess } from "./permissions";
-import { isProviderId, providerById } from "./providers";
+import { GEMINI_LOGIN_REMOVED, isProviderId, providerById } from "./providers";
 import type { AgentSystemsSettings, BotAccessDefaults, CustomBot, CustomLlm, DeskAccess, LlmLink, ProviderId, McpServerConfig, Profile, RoutingSettings, Session, Settings, SettingsSection, SkillDiscoverySettings } from "./types";
 import { normalizeBotKnowledge } from "./bot-knowledge-rubric";
 import { migrateCustomBotRatings } from "./routing";
@@ -14,6 +14,22 @@ import { DEFAULT_WATCH } from "./watch-defaults";
 import { normalizeJudge } from "./judge";
 import { RETENTION_DAYS_DEFAULT, normalizeRetentionDays } from "./transcript-sidecar";
 
+/** Drop a saved Antigravity login. Name and color can stay; the Google session cannot. */
+export function withoutGeminiLogin(link?: Pick<LlmLink, "name" | "color">): LlmLink {
+  const name = link?.name?.trim();
+  const color = link?.color?.trim();
+  return {
+    connected: false,
+    enabled: false,
+    available: false,
+    needsAuth: false,
+    launchable: false,
+    launchBlocker: GEMINI_LOGIN_REMOVED,
+    ...(name ? { name } : {}),
+    ...(color ? { color } : {}),
+  };
+}
+
 export const DEFAULT_SETTINGS: Settings = {
   profile: { name: "", handle: "" },
   llms: {
@@ -21,7 +37,7 @@ export const DEFAULT_SETTINGS: Settings = {
     claude: { connected: false },
     codex: { connected: false },
     cursor: { connected: false },
-    gemini: { connected: false },
+    gemini: withoutGeminiLogin(),
     custom: structuredClone(EMPTY_CUSTOM_DRAFT),
   },
   customBots: [],
@@ -217,7 +233,7 @@ export function vendorEnabled(link: LlmLink | undefined): boolean {
   return Boolean(link?.connected) && link?.enabled !== false;
 }
 
-const STOCK: Exclude<ProviderId, "custom">[] = ["grok", "codex", "claude", "cursor", "gemini"];
+const STOCK: Exclude<ProviderId, "custom">[] = ["grok", "codex", "claude", "cursor"];
 
 export function attachedStockVendors(settings: Settings): Exclude<ProviderId, "custom">[] {
   return STOCK.filter((id) => vendorEnabled(settings.llms[id]));
@@ -428,7 +444,7 @@ export function normalizeSettings(raw: unknown): Settings {
       claude: link(record.llms?.claude),
       codex: link(record.llms?.codex),
       cursor: link(record.llms?.cursor),
-      gemini: link(record.llms?.gemini),
+      gemini: withoutGeminiLogin(link(record.llms?.gemini)),
       custom: custom(record.llms?.custom),
     },
     // The migration runs here, at the one seam every load passes through, and

@@ -105,6 +105,7 @@ export function spawnPickerRows(settings: {
 }): SpawnPickerRow[] {
   const rows: SpawnPickerRow[] = [];
   for (const id of STOCK_SPAWN_IDS) {
+    if (id === "gemini") continue;
     const link = settings.llms[id];
     if (!link?.connected || link.enabled === false) continue;
     rows.push({ id, name: providerById(id).name });

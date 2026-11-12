@@ -1,5 +1,8 @@
 import type { Provider, ProviderId } from "./types";
 
+/** The desk does not sign in to Google or launch the Antigravity CLI. */
+export const GEMINI_LOGIN_REMOVED = "Google Gemini login was removed from Workhorse.";
+
 export const PROVIDERS: Provider[] = [
   {
     id: "grok",
@@ -37,9 +40,9 @@ export const PROVIDERS: Provider[] = [
     id: "gemini",
     name: "Gemini",
     short: "Ge",
-    tagline: "Antigravity CLI via agy",
+    tagline: "Removed",
     connected: false,
-    statusNote: "Headless Antigravity CLI (`agy`). Uses your existing Google login on this machine.",
+    statusNote: GEMINI_LOGIN_REMOVED,
   },
   {
     id: "custom",

@@ -44,13 +44,72 @@ ecdd7639eedb  .global-results span, .global-results em
 2564c4b8b13c  .agent-thread-review span
 488204f0bdfb  .agent-thread-review em
 2d8a492b0205  .brand
+69271fc98e5f  .sidebar .brand
 63409cb91129  .brand-mark-btn
 ddf5e82e6326  .brand-mark-btn:hover
 f6a17d9dced4  .brand-mark-btn:active
 1fb301054e97  .brand-mark-btn:focus, .brand-mark-btn:focus-visible
 ba1fb4613722  .brand-mark
 f3727f28f901  .brand-copy
+4aa43d7e841d  .sidebar .brand-copy
+6c33d1430c4f  .brand-menu-btn
+2d787250282c  .brand-menu-btn:hover, .brand-menu-btn[aria-expanded="true"]
+1a8319e48ebf  .brand-caret
+e8db9e1e8634  .brand-menu
+246d958fcc40  .brand-menu button
+2d787250282c  .brand-menu button[aria-checked="true"]
+1662defca8ca  .brand-menu button:hover, .brand-menu button:focus-visible
+7b695570c5c3  .brand-menu-label
+93b9a5448c1d  .brand-menu-mark
+6859596637a2  .brand-menu-name
+ffc4e03d372a  .brand-menu button[aria-checked="true"] .brand-menu-name
+19e7a3622d52  .brand-menu-check
+84ea117acc0e  .inspect-listen, .inspect-quiet, .inspect-lead
+e4b32e65aa42  .inspect-listen
+d529e1f5d1cf  .inspect-listen span
+9f481b9f9f6a  .inspect-listen i, .inspect-state i
+8534b16df9f2  .inspect-listen[data-state="on"] i, .inspect-state.is-done i
+e243581a5994  .inspect-listen[data-state="wait"] i, .inspect-state.is-working i
+4766e8163a3c  .inspect-state.is-bad i
+ea32a18b146f  .inspect-nav
+a3bfc3a3840e  .inspect-nav:focus-visible
+d79e58314f14  .inspect-caller
+5a5688d7d263  .inspect-caller > button, .inspect-worker
+3fd70c2278d9  .inspect-caller > button, .inspect-worker
+600f762c96c4  .inspect-caller > button strong, .inspect-worker strong
+ee7b2a8457b0  .inspect-caller > button span, .inspect-worker span
+8ac12a08c806  .inspect-worker
+2d787250282c  .inspect-caller > button[aria-current="true"], .inspect-worker[aria-current="true"]
+63d56e2d3a6a  .inspect-more
+bb116541ac78  .main.inspect-main
+a3bfc3a3840e  .main.inspect-main:focus-visible
+5006c3b938cb  .inspect-head, .inspect-section, .inspect-empty, .inspect-about
+f7166cf15079  .inspect-empty
+dbed10f30b1f  .inspect-empty h2, .inspect-head h2
+621cdf7ecf28  .inspect-empty p
+93e5d15d24f6  .inspect-head
+d3b787b8afa1  .inspect-state
+25a98a3a6a48  .inspect-state i
+70ae72af2fce  .inspect-lead
+5fd9d6a4badb  .inspect-facts
+acf9bf60a3e5  .inspect-facts div
+f15debbcc217  .inspect-facts dt
+5d24137e3245  .inspect-facts dd
+e7f3badc64e3  .inspect-section h3
+cbbe3dc97822  .inspect-call, .inspect-line
+79520f6f6441  .inspect-call strong
+73bd819af6e1  .inspect-line span
+6a0c2a961b5c  .inspect-line p, .inspect-call p, .inspect-tech p, .inspect-about p
+733476d09fa7  .inspect-line p
+f11991f4300b  .inspect-line.is-thinking p
+787736537d59  .inspect-error
+0af1d9d98b10  .inspect-tech, .inspect-about
+b77719b58fda  .inspect-tech summary, .inspect-about summary
+1aacbc1dc3cb  .inspect-about
+3b736e2d04a0  .inspect-about p, .inspect-tech p
 497eb6eb80fe  .brand-title
+a6149a7b651d  .sidebar .brand-title
+31147c53e7ab  .brand-header-mark
 8e4fbdf96987  .brand h1
 50c98c2a0ef5  .brand-ver
 350fd0c5875f  .brand p
@@ -69,6 +128,9 @@ cf0754a1d7a7  .primary
 fc7b8bd8cf59  .tiny.danger
 f7494f7de419  .section-label
 1b3ac0e1e435  .sidebar .section-label
+9cb91322ea2a  .sidebar .sidebar-section-head
+a6b5303ad397  .sidebar-section-add
+a9fd68747ac5  .sidebar-section-add:hover
 97db9024a43f  .scroll
 15328f8ac49e  .sidebar-dock
 d529e1f5d1cf  .sidebar-settings
@@ -173,6 +235,7 @@ cc5981bd10d7  .provider-grid
 d640f0dd9638  .card .rail.grok
 b972529ced4d  .card .rail.claude
 48e1b722ae4b  .card .rail.codex
+97700514a076  .card .rail.gemini
 33d04944face  .card .rail.custom
 d4e9f5180075  .card-copy
 378e76576ae0  .card-title
@@ -259,6 +322,7 @@ aac2a48830c9  .turn.live
 4a9e8bd8f650  .turn-who:has(.dot.claude)
 2182be31b312  .turn-who:has(.dot.codex)
 64ffa98174bd  .turn-who:has(.dot.cursor)
+69f8f34213db  .turn-who:has(.dot.gemini)
 8dd5ef61ccfd  .turn-who:has(.dot.custom)
 c44e5d3e866b  .turn-who .dot
 3611bde2da7a  .turn-stamp
@@ -424,7 +488,8 @@ bac9f2690c7f  .session-header.slim .context-meter
 447150e75b52  .prompt-queue
 40809ad4e539  .prompt-queue-item
 49416461b759  .prompt-queue-when
-8335e7107ee9  .prompt-queue-text
+5566ee837a06  .prompt-queue-text
+6c31f64ac6c5  .prompt-queue-edit
 6c31f64ac6c5  .prompt-queue-steer
 6a36a08b1dac  .prompt-queue-item > button:last-child
 3ec64cab794e  .send-steer
@@ -458,6 +523,7 @@ b0f973dee158  .dot.grok
 99d085499cec  .dot.claude
 76bb65798538  .dot.codex
 77f0e3f2555c  .dot.cursor
+acd74140a724  .dot.gemini
 d31f44aa0264  .dot.custom
 79c32fd15781  .dot.auto
 0eeaf5da393c  .path
@@ -736,6 +802,7 @@ a34b3fb3f3d9  .usage-brain.on
 f8713f173831  .llm-mark.claude.on
 cb79507b2e6f  .llm-mark.codex.on
 f8764abb73bc  .llm-mark.cursor.on
+6a31274fa00f  .llm-mark.gemini.on
 2789b996b92b  .llm-mark.plus
 25a98a3a6a48  .llm-detail
 31cc15eda300  .llm-detail.bot-edit
@@ -802,6 +869,7 @@ baccb0368f7a  .skill-row em, .pack-row em
 964660a669b0  .skill-origin.codex
 8002bbc988cf  .skill-origin.claude
 23d7b4aef323  .skill-origin.cursor
+6131e309c543  .skill-origin.gemini
 ed86a2a94c78  .skill-origin.workhorse
 f368e3596f65  .skill-push
 8fb73980a127  .llm-brains .usage-brain.off
@@ -853,6 +921,7 @@ cd8e646124d4  .fuel-ring .fuel-fill
 4e90faebcf5a  .fuel-ring.claude
 00314f5b15ff  .fuel-ring.codex
 24e6ae74758a  .fuel-ring.cursor
+a84139522dab  .fuel-ring.gemini
 673dfb276a36  .fuel-ring.custom
 e076e733a87c  .fuel-ring strong
 14ff7f70f5d9  .fuel-ring[style*="104px"] strong, .fuel-ring[style*="120px"] strong, .fuel-ring[style*="148px"] strong
@@ -888,6 +957,7 @@ c5de97a41529  .usage-split-track
 b972529ced4d  .usage-split-track i.claude
 48e1b722ae4b  .usage-split-track i.codex
 ea14d789232c  .usage-split-track i.cursor
+97700514a076  .usage-split-track i.gemini
 33d04944face  .usage-split-track i.custom
 97ad4ac867b7  .usage-stretch
 fab8f8e3563a  .usage-dots, .usage-dot-labels, .usage-stretch-peak
@@ -950,6 +1020,7 @@ d640f0dd9638  .usage-swatch.grok
 b972529ced4d  .usage-swatch.claude
 48e1b722ae4b  .usage-swatch.codex
 ea14d789232c  .usage-swatch.cursor
+97700514a076  .usage-swatch.gemini
 33d04944face  .usage-swatch.custom
 38c9e778127f  .usage-model .usage-swatch, .usage-tip .usage-swatch
 886049ebee8c  .usage-model em
@@ -975,6 +1046,7 @@ a4a0398f605b  .context-ring
 4963c247ad76  .context-meter.claude .context-ring-fill
 dec89380f0c1  .context-meter.codex .context-ring-fill
 fcd4277d3fe9  .context-meter.cursor .context-ring-fill
+2f8b2b90a1bb  .context-meter.gemini .context-ring-fill
 2f99d74bf0b2  .context-meter.custom .context-ring-fill
 a4dc2fa285dc  .context-copy
 02c54eb96afc  .context-copy strong
@@ -991,6 +1063,7 @@ cf862347f29f  .context-meter-wrap.grok .seg.messages, .context-meter-wrap.grok .
 98e62fdb0511  .context-meter-wrap.claude .seg.messages, .context-meter-wrap.claude .seg.used
 721d5179e111  .context-meter-wrap.codex .seg.messages, .context-meter-wrap.codex .seg.used
 ad9391538429  .context-meter-wrap.cursor .seg.messages, .context-meter-wrap.cursor .seg.used
+77c1deb82f67  .context-meter-wrap.gemini .seg.messages, .context-meter-wrap.gemini .seg.used
 98f13e6eca95  .context-meter-wrap.custom .seg.messages, .context-meter-wrap.custom .seg.used
 ed2b42d71051  .context-stack .seg.overhead, .context-stack .seg.other
 a73f9b791ba5  .context-stack .seg.free
@@ -1033,6 +1106,89 @@ b2c6553a4d72  .settings-control > input
 2564c4b8b13c  .settings-control > input:disabled
 70ce2b58d993  .settings-control .unit
 5d121e7bd644  .settings-control .actions
+301414120b49  .bot-knowledge-pane
+02419cffd4a2  .bot-knowledge-pane .settings-pane-head h2
+b0e443c5ea81  .bot-knowledge-pane .settings-pane-lead, .bot-knowledge-pane .bk-scale p, .bot-knowledge-pane .bk-empty
+f6279acc7326  .bot-knowledge-pane .settings-pane-lead
+a821db6449a7  .bot-knowledge-pane .bk-empty
+c44bd08c16d4  .bk-scale
+6c6a2bc011f0  .bot-knowledge-pane .settings-row.bk-route-tier-row
+3a5a29bf7cf1  .bot-knowledge-pane .bk-route-tier-control
+d14d44f1e141  .bot-knowledge-pane .bk-route-meter
+632d501c0722  .bk-scale .bk-ticks
+02419cffd4a2  .bk-scale p
+661a64d6dd41  .bk-scale p strong
+e9c565a5909b  .bot-knowledge-table
+aa75644121bb  .bot-knowledge-table, .bot-knowledge-table tbody
+f26885d6e34d  .bot-knowledge-table thead
+4fa00029d5b1  .bk-board
+c79d5c389aef  .bot-knowledge-table tr
+acbcaab49428  @media (prefers-reduced-motion: reduce) { .bot-knowledge-table tr
+acad3dbfbdfe  .bot-knowledge-table tbody tr + tr
+5b53c0b0609d  .bot-knowledge-table td
+5f4db81ee2fd  .bot-knowledge-table td.bk-score-cell
+5ed4b0cd4e1f  .bot-knowledge-table td.bk-name
+c5b5d633841f  .bk-domain-chips
+3c13883f26b2  .bot-knowledge-pane .settings-row-hint
+129d91cd648e  .bk-row-domains
+5405c8580254  .bk-domain-tag
+e84156bacf5f  .bk-model-label
+15785887c3d8  .bk-login-tag
+f40d40cfd05a  .bot-knowledge-table td.bk-row-actions
+7b831555c64c  .bk-rubric-cog
+150ad7fc2ff6  .bk-rubric-cog:hover
+4503ad0ff6cb  .bk-callable-pill
+7b0161bac66e  .bk-callable-pill i
+a9fd68747ac5  .bk-callable-pill.yes
+d28d3137dc96  .bk-callable-pill.yes i
+3d9e0d2967f6  .bk-rubric-backdrop
+0d4e333718bf  .bk-rubric-sheet
+28c812cdf26d  @keyframes bk-rubric-fade-in
+3c6ce70cddf3  @keyframes bk-rubric-sheet-in
+4bf0f2ef8e24  .bk-rubric-head
+488bba1a137e  .bk-rubric-head h3
+d5aed8e38cd7  .picker .bk-rubric-sheet p
+a1743d834dff  .picker .bk-rubric-lead
+d0f253140915  .bk-rubric-close
+f0a8902ae124  .bk-rubric-body
+b7f7de577074  .bk-rubric-weight
+493d54fe4a99  .bk-rubric-weight label
+1a2afabc95f3  .bk-rubric-weight label strong
+a55c94755ecd  .bk-rubric-weight label span
+7356971d40a2  .bk-rubric-weight input[type="number"]
+d18c7f9817a2  .bk-rubric-weight input[type="number"]:focus
+9b3fd7a7b07f  .bk-rubric-domains
+8a0f50cba36d  .bk-rubric-domains li
+aae28417709c  .bk-rubric-domains li:nth-child(-n + 2)
+27ed8c24b5e3  .bk-rubric-domain-head
+1a2afabc95f3  .bk-rubric-domain-head strong
+f18ccf90b119  .bk-rubric-domain-meta
+bbcbf571cef8  .bk-rubric-domain-head output
+7aa54f4a4556  .bk-rubric-catalog
+fb25ca5897fc  .bk-rubric-domain-control
+646ffb8b6a5d  .bk-rubric-domain-control input[type="range"]
+a2748ecdc2d1  .bk-rubric-domain-control input[type="range"]::-webkit-slider-runnable-track
+fbcfed96ca3b  .bk-rubric-domain-control input[type="range"]::-webkit-slider-thumb
+ecb4add6caf6  .bk-rubric-edited
+b955dddbe66c  .bk-rubric-foot
+b03c831b467d  .bk-rubric-foot .ghost, .bk-rubric-foot .primary
+a9c77021d675  .bk-rubric-foot-actions
+d50ca3ac0cb0  @media (prefers-reduced-motion: reduce) { .bk-rubric-backdrop, .bk-rubric-sheet
+a422f6e500ba  .bot-knowledge-table td.bk-source
+9dfa37f698fd  .bot-knowledge-table td.bk-plan
+73b614047e33  .bk-plan-meter
+c951d6bbdcc5  .bk-score
+1a6e76c87ab7  .bk-score strong
+f46993dd9a38  .bk-score strong span
+4ea6d59d92a8  .bk-score.below strong
+d8c3fa92bddb  .bk-ticks
+a6a809685514  .bk-ticks i
+8d48b1db3e7e  .bk-ticks i.fill
+b542a785046b  .bk-score.below .bk-ticks i.fill
+9e4a037c5d30  .bk-ticks i.bar
+f8520a98ab56  .bk-plan-track
+0bfb5388e8a2  .bk-plan-track i
+65d7573fcadf  .bk-plan-line
 5f46f639edc5  .settings-picks
 a3c62f8ab1a3  .settings-picks-head
 02419cffd4a2  .settings-picks-head .section-label
@@ -1131,6 +1287,7 @@ ea43ef8f1860  .setup-effort
 42dd58d764a7  .setup-effort button.grok
 4b497d73602a  .setup-effort button.codex
 ab30de1979b2  .setup-effort button.claude
+b046fb4790e5  .setup-effort button.gemini
 9b15fcce0873  .setup-effort button.custom
 7b752212d3ee  .setup-effort button.on
 01c48e72a9af  .setup-slider
@@ -1164,8 +1321,13 @@ dd5cac286925  .setup-close
 36f733f0b739  .setup-close:hover
 e1b52dd02f10  .setup-card
 4a1e40a91fd3  .setup-top-grid
+b9270eba65cc  .setup-model-card
+f3354deca940  .setup-model-card .setup-subgroup:last-child
 02419cffd4a2  .setup-top-grid .setup-card
 b6197dfbae4b  .setup-compact-stack
+092aafe123d1  .setup-top-grid .setup-effort button
+e9f2bacf99e8  .setup-top-grid .setup-vendors
+67b48fd5f0fd  .setup-access-card
 147ef4dafc32  .setup-top-grid .setup-models
 abc76c3a394f  .setup-top-grid .setup-environments
 907a2f0ebe3c  .setup-top-grid .setup-environments button
@@ -1202,6 +1364,8 @@ aa75644121bb  .setup-environments strong, .setup-environments em
 077508afbf7a  .setup-reasoning-card .setup-slider-thumb
 e7a29b03311f  .setup-reasoning-card .setup-slider-marks
 6e3a4714ba19  .setup-reasoning-card .setup-slider-marks button
+147ef4dafc32  .session-setup .setup-context
+7013fa78bab8  .setup-context-card .row-meta
 58cf3fe563b8  .session-setup .setup-split
 6e3a4714ba19  .setup-choice-title > span
 5d28bce17e66  .session-setup .setup-grid
@@ -1258,6 +1422,7 @@ d640f0dd9638  .watch-day-track i.grok
 b972529ced4d  .watch-day-track i.claude
 48e1b722ae4b  .watch-day-track i.codex
 ea14d789232c  .watch-day-track i.cursor
+97700514a076  .watch-day-track i.gemini
 33d04944face  .watch-day-track i.custom
 f20d8e0f2c6d  .watch-row.hold
 75c5ba74e620  .watch-row strong
@@ -1364,6 +1529,9 @@ a34b3fb3f3d9  .subagent-resume:hover
 834e2a7ba250  .workshop-rail.is-collapsed
 7b1afda7c325  .workshop-rail.is-expanded
 28540252436f  .workshop-rail-head
+f90069fd534a  .workshop-rail-head .section-label, .workshop-rail-head .workshop-chip
+6b277e379b16  .workshop-rail-head button, .workshop-rail-head a
+6b277e379b16  .workshop-rail-body, .workshop-rail-foot, .workshop-rail-strip
 2b9aa835ab68  .workshop-rail-head .section-label
 52454228ca93  .workshop-rail-head-side
 662614235010  .workshop-rail-toggle, .workshop-fold
@@ -1443,6 +1611,9 @@ c858f4c6e1af  .workshop-chip
 38577ccb6de8  .workshop-chip-warn
 2564c4b8b13c  .workshop-chip-mute
 3b0cefebbb23  .workshop-breakout
+d09d285c18e5  .workshop-breakout .link-head
+f90069fd534a  .workshop-breakout .link-head strong, .workshop-breakout .link-head .row-meta
+6b277e379b16  .workshop-breakout .link-head button, .workshop-breakout .link-head a
 0826b80ec30e  .workshop-card
 3f10b0bc13ef  .workshop-meter
 2e2f744a9926  .workshop-track

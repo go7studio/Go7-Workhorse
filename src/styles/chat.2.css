@@ -1666,7 +1666,16 @@
   cursor: pointer;
 }
 
-.prompt-queue-edit,
+.prompt-queue-edit {
+  flex-shrink: 0;
+  padding: 3px 8px;
+  border-radius: var(--radius-pill);
+  font-size: var(--text-11);
+  font-weight: 590;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg-solid));
+}
+
 .prompt-queue-steer {
   flex-shrink: 0;
   padding: 3px 8px;

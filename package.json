@@ -131,6 +131,10 @@
       {
         "from": "electron/mac-dictation.swift",
         "to": "mac-dictation.swift"
+      },
+      {
+        "from": "build/mac-dictation",
+        "to": "mac-dictation"
       }
     ],
     "win": {

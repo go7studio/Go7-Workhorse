@@ -82,6 +82,17 @@ async function afterPack(context) {
   execFileSync("/usr/bin/codesign", ["--force", "--deep", "--sign", "-", appPath], {
     stdio: "inherit",
   });
+  signDictationHelper(appPath, "-");
+}
+
+function signDictationHelper(appPath, identity) {
+  const helper = path.join(appPath, "Contents", "Resources", "mac-dictation");
+  if (!fs.existsSync(helper)) return;
+  execFileSync(
+    "/usr/bin/codesign",
+    ["--force", "--sign", identity, "--entitlements", path.join(__dirname, "..", "build", "entitlements.mac.plist"), helper],
+    { stdio: "inherit" },
+  );
 }
 
 module.exports = afterPack;

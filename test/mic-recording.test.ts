@@ -462,6 +462,7 @@ test("the packaged app declares mic usage strings and the hardened-runtime audio
   assert.match(pkg.build?.mac?.extendInfo?.NSMicrophoneUsageDescription ?? "", /microphone/);
   assert.match(pkg.build?.mac?.extendInfo?.NSSpeechRecognitionUsageDescription ?? "", /speech recognition on this Mac/);
   assert.match(read("build/entitlements.mac.plist"), /device\.audio-input/);
+  assert.match(read("package.json"), /"to": "mac-dictation"/);
 });
 
 test("main, preload, and composer wire the mic control after the tools spacer", () => {

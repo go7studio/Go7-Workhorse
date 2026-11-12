@@ -709,6 +709,23 @@
   background: var(--bg-hover);
 }
 
+.next-prompt {
+  margin-top: 8px;
+}
+
+.next-prompt button {
+  padding: 4px 10px;
+  border-radius: var(--radius-pill);
+  font-size: var(--text-12);
+  color: var(--text);
+  background: var(--bg-solid);
+  border: 1px solid var(--line);
+}
+
+.next-prompt button:hover {
+  background: var(--bg-hover);
+}
+
 .turn.system {
   max-width: 560px;
 }

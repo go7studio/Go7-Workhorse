@@ -30,6 +30,11 @@ export function GoalBar() {
             Allow selected harnesses
           </label>
         ) : null}
+        {plan && session ? (
+          <button className="goal-action quiet" type="button" aria-label="Drop plan" onClick={() => store.dropPlan(session.id)}>
+            Drop
+          </button>
+        ) : null}
         {(view?.actions ?? []).map((action) => (
           <button
             key={action}

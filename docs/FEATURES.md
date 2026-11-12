@@ -381,7 +381,8 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
   turn, drops the old vendor session, and restarts that worker on the new brain
   with the same desk transcript. A fresh start on that same name reopens the
   free worker. A plan that is still running stays open after a cancel, and the
-  desk picks the unfinished lane back up without a new message. A paused plan
+  desk picks the unfinished lane back up without a new message. Drop on the plan
+  bar removes that plan. A paused plan
   refuses the next assignment until it is resumed.
 - Cancelling one worker stops that worker only, and the wave is not called
   finished while others run.

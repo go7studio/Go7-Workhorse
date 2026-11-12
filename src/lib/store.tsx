@@ -687,6 +687,8 @@ export type Store = AppState & {
   /** Uninstall, yank, or a forced off: the add-on leaves every chat immediately. */
   dropWorkshopPackFromChats: (packId: string) => void;
   grantPlanExternalAgents: (sessionId: string, allow: boolean) => void;
+  /** Take the plan off this chat. The bar goes away, and a cancelled lane is not picked back up. */
+  dropPlan: (sessionId: string) => void;
   /** Public leaderboard scores the desk holds (LMArena), and the last check. Null outside the desktop app. */
   botScores: BotScoresView | null;
   /** Check the leaderboard now; download it if it moved. */
@@ -9949,6 +9951,20 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     setState(next);
   }, []);
 
+  const dropPlan = useCallback((sessionId: string) => {
+    const current = stateRef.current;
+    let changed = false;
+    const sessions = current.sessions.map((session) => {
+      if (session.id !== sessionId || !session.planRun) return session;
+      changed = true;
+      return { ...session, planRun: undefined };
+    });
+    if (!changed) return;
+    const next = { ...current, sessions };
+    stateRef.current = next;
+    setState(next);
+  }, []);
+
   const grantPlanExternalAgents = useCallback((sessionId: string, allow: boolean) => {
     setState((current) => ({
       ...current,
@@ -10356,6 +10372,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       updateWorkshop,
       setSessionWorkshopPacks,
       dropWorkshopPackFromChats,
+      dropPlan,
       grantPlanExternalAgents,
       botScores,
       refreshBotScores,
@@ -10516,6 +10533,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       updateWorkshop,
       setSessionWorkshopPacks,
       dropWorkshopPackFromChats,
+      dropPlan,
       grantPlanExternalAgents,
       botScores,
       refreshBotScores,

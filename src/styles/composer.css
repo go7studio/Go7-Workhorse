@@ -31,7 +31,7 @@
   background: transparent;
   color: var(--text-secondary);
   padding: 0;
-  border-radius: 8px;
+  border-radius: var(--radius-10);
 }
 
 .composer-mic:hover {

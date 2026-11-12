@@ -114,7 +114,7 @@ test("a missing Playwright driver fails before any process exists", async () => 
         (() => {
           spawned += 1;
           throw new Error("spawned");
-        }) as typeof import("node:child_process").spawn,
+        }) as unknown as typeof import("node:child_process").spawn,
         {
           loadDriver: async () => {
             throw new Error("Cannot find module 'playwright'");
@@ -159,7 +159,7 @@ test("granted Chrome is a hook and does not spawn the default profile", async ()
         (() => {
           spawned += 1;
           return fakeChild();
-        }) as typeof import("node:child_process").spawn,
+        }) as unknown as typeof import("node:child_process").spawn,
       ),
     /default Chrome profile/,
   );
@@ -176,7 +176,7 @@ test("decline spawns a desk-owned headless browser with the console hidden", asy
     ((command: string, args: readonly string[], options: SpawnOptions) => {
       spawned.push({ command, args, options });
       return child;
-    }) as typeof import("node:child_process").spawn,
+    }) as unknown as typeof import("node:child_process").spawn,
     {
       loadDriver: async () => ({
         executablePath: () => "workhorse-chromium-test",
@@ -213,7 +213,7 @@ test("a driver that cannot attach is stopped and is not returned as a session", 
     () =>
       defaultBackgroundBrowserLauncher(
         launchRequest("background-headless", true),
-        (() => fakeChild(99_002)) as typeof import("node:child_process").spawn,
+        (() => fakeChild(99_002)) as unknown as typeof import("node:child_process").spawn,
         {
           loadDriver: async () => ({
             executablePath: () => "workhorse-chromium-test",

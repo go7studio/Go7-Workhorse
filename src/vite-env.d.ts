@@ -10,6 +10,8 @@ type GrokPromptBridgeInput = {
   effort: import("./lib/types").EffortLevel | null;
   /** Window this chat picked, when the model offers more than one. */
   contextWindow?: number;
+  /** Fast call option for Grok, Claude, and Cursor when the model offers it. */
+  fastMode?: boolean;
   mode: import("./lib/types").PermissionMode;
   cwd: string;
   vendorSessionId?: string;

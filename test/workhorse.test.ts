@@ -5223,6 +5223,8 @@ test("empty chats stay drafts until the first send names them", () => {
   assert.equal(flushed?.sessions[0]?.queue?.length ?? 0, 0);
   const composer = readFileSync(path.join(ROOT, "src", "ui", "Composer.tsx"), "utf8");
   assert.match(composer, /Steer/);
+  assert.match(composer, /editQueuedPrompt/);
+  assert.match(composer, /prompt-queue-edit/);
   assert.match(composer, /Queue for next/);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "SessionPane.tsx"), "utf8"), /omitQueuedUserMessages/);
   assert.match(composer, /fitComposerField/);

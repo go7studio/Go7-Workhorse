@@ -26,17 +26,18 @@ export type CursorEventSink = GrokEventSink;
 type CursorSpawnFn = (spec: ReturnType<typeof buildCursorLaunchSpec>) => ChildProcessWithoutNullStreams;
 
 export function cursorLaunchKey(
-  input: Pick<GrokSessionOpenInput, "model" | "effort" | "mode" | "cwd" | "sandbox" | "mcpServers">,
+  input: Pick<GrokSessionOpenInput, "model" | "effort" | "fastMode" | "mode" | "cwd" | "sandbox" | "mcpServers">,
 ): string {
   const spec = buildCursorLaunchSpec({
     model: input.model,
     effort: input.effort,
+    fastMode: input.fastMode,
     cwd: input.cwd,
     mode: input.mode,
     sandbox: input.sandbox,
     mcpServers: input.mcpServers,
   });
-  return `${spec.command}\0${spec.argv.join("\0")}\0${spec.cwd}\0${JSON.stringify(spec.sessionParams.mcpServers)}\0${spec.model}\0${spec.effort}\0${spec.sandbox}\0${input.mode}`;
+  return `${spec.command}\0${spec.argv.join("\0")}\0${spec.cwd}\0${JSON.stringify(spec.sessionParams.mcpServers)}\0${spec.model}\0${spec.effort}\0${spec.sandbox}\0${input.mode}\0${input.fastMode === true ? "fast" : "normal"}`;
 }
 
 /** A failed `cursor-agent models` read should not re-stall every launch. */
@@ -209,6 +210,7 @@ export class CursorSessionHost {
       role: input.role ?? deskRoleOf({ parentId: input.parentId, hidden: input.hidden }),
       model: input.model,
       effort: input.effort,
+      fastMode: input.fastMode,
       cwd: input.cwd,
       mode: input.mode,
       sandbox: input.sandbox,

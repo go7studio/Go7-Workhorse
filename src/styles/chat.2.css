@@ -1656,9 +1656,17 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
   font-size: var(--text-13);
+  text-align: left;
+  cursor: pointer;
 }
 
+.prompt-queue-edit,
 .prompt-queue-steer {
   flex-shrink: 0;
   padding: 3px 8px;

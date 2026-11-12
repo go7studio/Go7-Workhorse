@@ -5,7 +5,7 @@ import { makerLabel, modelChipLabel, parseModelId } from "../lib/model-groups";
 import { cursorFamilyId } from "../lib/cursor-catalog";
 import { agyWatchKey, type AgyWatchKey } from "../lib/agy-usage";
 import { cursorWatchLane, type CursorWatchKey } from "../lib/cursor-lane";
-import { contextWindowFor, contextWindowsFor, defaultModel, effortLabel, effortStopAt, effortStopPos, effortsFor, formatWindow, modelName, modelsForPicker, withEffort } from "../lib/models";
+import { contextWindowFor, contextWindowsFor, defaultModel, effortLabel, effortStopAt, effortStopPos, effortsFor, formatWindow, modelName, modelsForPicker, supportsFastMode, withEffort } from "../lib/models";
 import { hasAttachedLlm, vendorEnabled, vendorLabel, vendorTint } from "../lib/settings";
 import { BLENDER_PRESET, presetOn } from "../lib/environment-presets";
 import { sessionEnvironmentKind } from "../lib/session-environment";
@@ -49,6 +49,7 @@ export function SessionSetup({ onClose }: { onClose: () => void }) {
     setMode,
     setSandbox,
     setSessionEffort,
+    setSessionFastMode,
     setSessionContextWindow,
     setSessionEnvironment,
     setSessionModel,
@@ -365,6 +366,39 @@ export function SessionSetup({ onClose }: { onClose: () => void }) {
                 <span className="setup-current">{session.effort ? effortLabel(session.effort) : "Auto"}</span>
               </div>
               <p className="row-meta">Picked with the model for each message. Choose a provider above to set it yourself.</p>
+            </section>
+          )}
+          {session.routingMode !== "auto" && supportsFastMode(session.provider, session.model) && (
+            <section className="setup-card setup-fast-card">
+              <div className="setup-heading compact">
+                <div>
+                  <strong>Fast</strong>
+                </div>
+                <span className="setup-current">{session.fastMode ? "On" : "Off"}</span>
+              </div>
+              <p className="row-meta">
+                {session.provider === "cursor"
+                  ? "Prefer Cursor’s faster launch slug when the model lists one."
+                  : "Ask the vendor for its faster path when this model offers it."}
+              </p>
+              <div className="setup-effort setup-fast" role="listbox" aria-label="Fast">
+                <button
+                  type="button"
+                  className={!session.fastMode ? "on" : undefined}
+                  aria-selected={!session.fastMode}
+                  onClick={() => setSessionFastMode(false)}
+                >
+                  Off
+                </button>
+                <button
+                  type="button"
+                  className={session.fastMode ? "on" : undefined}
+                  aria-selected={Boolean(session.fastMode)}
+                  onClick={() => setSessionFastMode(true)}
+                >
+                  Fast
+                </button>
+              </div>
             </section>
           )}
           {session.routingMode !== "auto" && thinking.length > 0 && (

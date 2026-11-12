@@ -641,6 +641,11 @@ const TOOLS = [
         },
         files: { type: "array", items: { type: "string" }, description: "Files to attach to the worker" },
         effort: { type: "string", description: "Explicit user override only. Omit to keep a reused worker's thinking level; otherwise the desk derives it from task depth" },
+        fast: {
+          type: "boolean",
+          description:
+            "Fast call option when Grok, Claude, or Cursor offers it. Omit to keep a reused worker's Fast setting; otherwise the desk leaves Fast off.",
+        },
         timeoutSeconds: { type: "number", description: "Ignored. The desk does not stop a worker on a runtime limit. The worker runs until it finishes or is cancelled." },
         tokenBudget: { type: "number", description: "Ignored. The desk does not stop a worker on a token ceiling. This chat's billed spend is on the meter." },
         isolation: { type: "string", description: "worktree or shared. Omit to inherit this chat's workspace: isolated worktree stays a worktree, local folder stays the local folder. Nested helpers are always shared." },
@@ -2413,6 +2418,7 @@ async function spawnAgent(
     chat?: string;
     worker?: string;
     effort?: string;
+    fast?: boolean;
     /** The seat this call asks for the child; the desk caps both at its default. */
     permission?: string;
     sandbox?: string;
@@ -2587,6 +2593,7 @@ async function spawnAgent(
     chat: spawnInput.chat,
     worker: spawnInput.worker,
     effort: spawnInput.effort,
+    ...(typeof spawnInput.fast === "boolean" ? { fast: spawnInput.fast } : {}),
     permission: spawnInput.permission,
     sandbox: spawnInput.sandbox,
     continuedAccess: spawnInput.continuedAccess,
@@ -2632,6 +2639,7 @@ async function spawnAgent(
       chat: spawnInput.chat,
       worker: spawnInput.worker,
       effort: spawnInput.effort,
+      ...(typeof spawnInput.fast === "boolean" ? { fast: spawnInput.fast } : {}),
       permission: spawnInput.permission,
       sandbox: spawnInput.sandbox,
       continuedAccess: spawnInput.continuedAccess,
@@ -3583,6 +3591,7 @@ async function callDeskTool(name: string, args: Record<string, unknown>, from?: 
         chat: typeof args.chat === "string" ? args.chat : undefined,
         worker: typeof args.worker === "string" ? args.worker : undefined,
         effort: typeof args.effort === "string" ? args.effort : undefined,
+        fast: typeof args.fast === "boolean" ? args.fast : undefined,
         permission: typeof args.permission === "string" ? args.permission : undefined,
         sandbox: typeof args.sandbox === "string" ? args.sandbox : undefined,
         timeoutSeconds: typeof args.timeoutSeconds === "number" ? args.timeoutSeconds : undefined,

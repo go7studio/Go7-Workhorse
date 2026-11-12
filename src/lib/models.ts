@@ -405,6 +405,14 @@ export function effortsFor(provider: ProviderId, modelId?: string): ReasoningLev
   return model?.effort === false ? [] : EFFORTS;
 }
 
+/**
+ * Grok and Claude advertise ACP `fast` on/off. Cursor lists `-fast` variants
+ * for the same family. Codex, Gemini, and custom HTTP do not.
+ */
+export function supportsFastMode(provider: ProviderId, _modelId?: string): boolean {
+  return provider === "grok" || provider === "claude" || provider === "cursor";
+}
+
 /** Official thinking controls for a known API model. Empty means the model has no user-facing levels. */
 export function thinkingLevelsForModel(modelId?: string): ReasoningLevel[] | undefined {
   if (!modelId) return undefined;

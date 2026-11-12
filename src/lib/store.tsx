@@ -135,6 +135,7 @@ import {
   normalizeModelId,
   parseEffort,
   parseEffortFromText,
+  supportsFastMode,
   withEffort,
 } from "./models";
 import { applyStreamQueues, createStreamCommitScheduler, mergeStreamChunk } from "./stream-commit";
@@ -390,6 +391,8 @@ import {
   normalizeSession,
   parsePermissionMode,
   parseSandbox,
+  stampUnstampedMessages,
+  vendorBrainChanged,
   vendorSessionForSend,
   applyStandingGrant,
 } from "./session";
@@ -575,6 +578,7 @@ export type Store = AppState & {
   /** Re-read the desk catalog. A custom host's freshly read model list lands here. */
   refreshVendorModels: () => void;
   setSessionEffort: (effort: EffortLevel) => void;
+  setSessionFastMode: (on: boolean) => void;
   setSessionContextWindow: (tokens: number) => void;
   setSessionEnvironment: (kind: "local" | "worktree") => Promise<{ ok: boolean; message: string }>;
   selectSession: (id: string) => void;
@@ -2134,6 +2138,30 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  const setSessionFastMode = useCallback((on: boolean) => {
+    const current = stateRef.current;
+    const session = current.sessions.find((item) => item.id === current.activeSessionId);
+    if (!session || !supportsFastMode(session.provider, session.model)) return;
+    const nextFast = on === true;
+    if (Boolean(session.fastMode) === nextFast) return;
+    cancelVendorSession(session);
+    setState((latest) => {
+      const live = latest.sessions.find((item) => item.id === latest.activeSessionId);
+      if (!live || !supportsFastMode(live.provider, live.model)) return latest;
+      const next = applySessionModelChange(live, {
+        provider: live.provider,
+        model: live.model,
+        effort: live.effort,
+        customBotId: live.customBotId,
+        fastMode: nextFast,
+      });
+      return {
+        ...latest,
+        sessions: latest.sessions.map((item) => (item.id === live.id ? next : item)),
+      };
+    });
+  }, []);
+
   const setSessionContextWindow = useCallback((tokens: number) => {
     setState((current) => {
       const session = current.sessions.find((item) => item.id === current.activeSessionId);
@@ -3605,6 +3633,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           images,
           model: session.model,
           effort: session.effort,
+          ...(supportsFastMode(session.provider, session.model) && session.fastMode === true
+            ? { fastMode: true as const }
+            : {}),
           mode: vendorLaunchMode(session),
           cwd,
           vendorSessionId,
@@ -3633,6 +3664,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 provider: session.provider,
                 model: session.model,
                 effort: session.effort,
+                fastMode: session.fastMode,
                 mode: session.mode,
                 botName: customBotForSession(stateRef.current.settings.customBots, session)?.name,
               }),
@@ -4604,6 +4636,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             images,
             model: session.model,
             effort: session.effort,
+            ...(supportsFastMode(session.provider, session.model) && session.fastMode === true
+              ? { fastMode: true as const }
+              : {}),
             mode: vendorLaunchMode(session),
             cwd,
             vendorSessionId: vendorSessionForSend(session),
@@ -6926,11 +6961,25 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 : undefined,
             });
             const childMission = spawnMission;
+            const spawnFastMode =
+              typeof (payload as { fast?: unknown }).fast === "boolean"
+                ? (payload as { fast: boolean }).fast === true
+                : priorWorker?.fastMode === true;
+            const nextBrain = {
+              provider: spec.provider,
+              model: spec.model,
+              effort: spec.effort,
+              customBotId: spec.customBotId,
+              fastMode: spawnFastMode || undefined,
+            };
+            // Continuity keeps vendorSessionId only when the brain is the same.
+            // A named Wren handed Composer → Cursor Grok must cancel and reopen,
+            // not fail against the old ACP session.
+            const brainChanged = priorWorker ? vendorBrainChanged(priorWorker, nextBrain) : false;
+            if (priorWorker && brainChanged) cancelVendorSession(priorWorker);
             const child: Session = {
-              // A reused worker keeps everything it already is — most of all
-              // vendorSessionId, which IS its memory of the last slice. Only
-              // the run and the new message are fresh. Slice spend starts at
-              // zero on this assignment; billed usage for the chat stays on the meter.
+              // A reused worker keeps the desk transcript and folder. The vendor
+              // session is continuity only when provider/model/effort/fast match.
               ...(priorWorker ?? {}),
               // The pointer belongs to the transcript that was retired, and the
               // new run's messages start from that transcript already merged
@@ -6949,6 +6998,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               model: spec.model,
               customBotId: spec.customBotId,
               effort: spec.effort,
+              ...(supportsFastMode(spec.provider, spec.model) && spawnFastMode
+                ? { fastMode: true as const }
+                : { fastMode: undefined }),
               title: workerTaskTitle(workerName, spec.title),
               titleLocked: true,
               // Two dials. The vendor session is the first: a path-owned worker
@@ -6990,10 +7042,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               ...(routedWorkerIsRouted
                 ? { routingMode: "auto" as const, routingDecision: routeDecision ?? undefined }
                 : { routingMode: "manual" as const }),
-              ...(spawnSeed === "fresh" ? { vendorSessionId: undefined, vendorProvider: undefined } : {}),
+              ...(spawnSeed === "fresh" || brainChanged
+                ? { vendorSessionId: undefined, vendorProvider: undefined }
+                : {}),
               messages: workerStartMessages({
                 seed: spawnSeed,
-                priorMessages,
+                priorMessages: brainChanged && priorMessages
+                  ? stampUnstampedMessages(priorMessages, brainStamp(priorWorker!))
+                  : priorMessages,
                 userId: uid("msg"),
                 assistantId,
                 fromTitle: parent.title?.trim() || "another agent",
@@ -10062,6 +10118,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       probeCustomBot,
       refreshVendorModels,
       setSessionEffort,
+      setSessionFastMode,
       setSessionContextWindow,
       setSessionEnvironment,
       selectSession,
@@ -10220,6 +10277,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       probeCustomBot,
       refreshVendorModels,
       setSessionEffort,
+      setSessionFastMode,
       setSessionContextWindow,
       setSessionEnvironment,
       selectSession,

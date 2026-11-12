@@ -101,16 +101,20 @@ export type GrokIpcEvent =
 
 export type GrokEventSink = (event: GrokIpcEvent) => void;
 
-export function launchKey(input: Pick<GrokSessionOpenInput, "model" | "effort" | "mode" | "cwd" | "sandbox" | "mcpServers">): string {
+export function launchKey(
+  input: Pick<GrokSessionOpenInput, "model" | "effort" | "fastMode" | "agentName" | "mode" | "cwd" | "sandbox" | "mcpServers">,
+): string {
   const spec = buildGrokLaunchSpec({
     model: input.model,
     effort: input.effort,
+    fastMode: input.fastMode,
+    agentName: input.agentName,
     cwd: input.cwd,
     mode: input.mode,
     sandbox: input.sandbox,
     mcpServers: input.mcpServers,
   });
-  return `${spec.argv.join("\0")}\0${spec.cwd}\0${JSON.stringify(spec.sessionParams.mcpServers)}`;
+  return `${spec.argv.join("\0")}\0${spec.cwd}\0${JSON.stringify(spec.sessionParams.mcpServers)}\0${spec.fastMode === true ? "fast" : "normal"}\0${spec.agentName ?? ""}`;
 }
 
 /**
@@ -370,6 +374,8 @@ export class GrokSessionHost {
       role: input.role ?? deskRoleOf({ parentId: input.parentId, hidden: input.hidden }),
       model: input.model,
       effort: input.effort,
+      fastMode: input.fastMode,
+      agentName: input.agentName,
       cwd: input.cwd,
       mode: input.mode,
       sandbox: input.sandbox,

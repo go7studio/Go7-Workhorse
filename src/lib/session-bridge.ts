@@ -192,6 +192,7 @@ export function catalogSessions(state: LooseState, opts?: { fromSessionId?: stri
         provider,
         model,
         effort: typeof session.effort === "string" ? session.effort : null,
+        fastMode: session.fastMode === true,
         mode: typeof session.mode === "string" ? session.mode : "ask",
       }),
       // A desk read sends the count beside a handful of messages, because

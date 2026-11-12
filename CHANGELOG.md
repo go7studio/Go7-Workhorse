@@ -8,6 +8,48 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.7.11](https://github.com/go7studio/Go7-Workhorse/compare/v0.7.10...v0.7.11) (2026-11-12)
+
+
+### Features
+
+* add a per-chat Computer seat for Mac and Windows ([7db91de](https://github.com/go7studio/Go7-Workhorse/commit/7db91de06cdd6db4c06a9d56e4b220eda999bff0))
+* allow a chat to control installed Chrome ([bae7ea6](https://github.com/go7studio/Go7-Workhorse/commit/bae7ea64fe34583e8a080973c1a4e9e9ebeef720))
+* chat-owned background browser when Chrome is declined ([c0c8919](https://github.com/go7studio/Go7-Workhorse/commit/c0c89191d3ffc5c56004370f6d1851765b831520))
+* desk package for Fast, mic, Computer, browser, and orchestration ([0b45d85](https://github.com/go7studio/Go7-Workhorse/commit/0b45d853113a350a2541fd491242a5aeef56a132))
+* Fast call option, model-switch restart, and Edit on Next ([9c8ffd0](https://github.com/go7studio/Go7-Workhorse/commit/9c8ffd057e31941761b0877072aa42f542f744bc))
+* type spoken words into the unsent composer draft ([75cdf9d](https://github.com/go7studio/Go7-Workhorse/commit/75cdf9d505e86a4233be0ceaa09987ef4a019b71))
+
+
+### Bug Fixes
+
+* a confirmation already carries the spawn law ([a28bc17](https://github.com/go7studio/Go7-Workhorse/commit/a28bc17153a976ce13587eeebe238247de2e8602))
+* a server name is not a Computer grant ([c7bb761](https://github.com/go7studio/Go7-Workhorse/commit/c7bb761c696a6ee481c119d28e822b4c4497a426))
+* admit an assignment already given, and fail a Cursor login refusal ([fbfda21](https://github.com/go7studio/Go7-Workhorse/commit/fbfda21f6a64baef8893e10682724253d041bf24))
+* bundle the on-device dictation helper in the Mac app ([7596264](https://github.com/go7studio/Go7-Workhorse/commit/75962645200a8d96aaba6ef89ec8b2e18d1f31cc))
+* fail a missing browser driver and ask before a background browser starts ([a1fb7f1](https://github.com/go7studio/Go7-Workhorse/commit/a1fb7f1821f3cf8662820180f57bb8c13e7a5b10))
+* group spawn options already hide the Windows console ([9788601](https://github.com/go7studio/Go7-Workhorse/commit/9788601ed1723d967c53af40cf21158a0d6988f2))
+* keep a running plan open so a cancelled lane restarts ([1ec93b5](https://github.com/go7studio/Go7-Workhorse/commit/1ec93b5654ca70fee98e1cca5cdfa33a7a63ff98))
+* keep a spoken draft when OS speech will not start ([e0feaba](https://github.com/go7studio/Go7-Workhorse/commit/e0feaba0b24d46638ece69f02c9989a612d7a891))
+* keep Playwright out of the desktop bundle ([8df2ebd](https://github.com/go7studio/Go7-Workhorse/commit/8df2ebdd8259037f4e7a006708bddc987e8ac112))
+* keep Playwright out of the desktop bundle ([569e0ea](https://github.com/go7studio/Go7-Workhorse/commit/569e0ea5d203738db2338c4b29d49dd08e8ae590))
+* keep queue CSS selectors in the desk census ([f966bf1](https://github.com/go7studio/Go7-Workhorse/commit/f966bf14cb1c02dd1a19c1abda9dc1f58aed9d4c))
+* keep the mic button on the corner scale ([09fa773](https://github.com/go7studio/Go7-Workhorse/commit/09fa7732d7dc3c34f7db1f9467820b594e1335f9))
+* keep the mic level as a short waveform beside the button ([3929b54](https://github.com/go7studio/Go7-Workhorse/commit/3929b54249612edd1ec7c721b7e556a51bb7f4bf))
+* keep the orchestration proof inside the test typecheck ([7e143da](https://github.com/go7studio/Go7-Workhorse/commit/7e143da52d35dab09bbd2ca797a1eac13a3f7560))
+* let a desk chat call Computer through Electron main ([6392b84](https://github.com/go7studio/Go7-Workhorse/commit/6392b845afa911fbe35322e85dcc74cec0d5909e))
+* let a stuck plan be dropped from the chat ([b33feb7](https://github.com/go7studio/Go7-Workhorse/commit/b33feb7f5ca1b6c0ca9d3875aa9b69ce6d0069f0))
+* list Playwright in the third-party notices ([878129e](https://github.com/go7studio/Go7-Workhorse/commit/878129ea617b60a747699fcddd07db65cff0a483))
+* match the quit drain and the drop hint after the mic move ([9112d89](https://github.com/go7studio/Go7-Workhorse/commit/9112d8995b03942f6080cc760cffc1a983a258d3))
+* pack Chromium so a declined browser opens in the installed desk ([9e3a16a](https://github.com/go7studio/Go7-Workhorse/commit/9e3a16a35d420b57863405dfd44e02285baff8e2))
+* queue a worker behind a shared lease or a cancel ([753651a](https://github.com/go7studio/Go7-Workhorse/commit/753651ae37df07b747fc9bab6a8e590e982adc0e))
+* remember a microphone grant for the rest of the app run ([956a92b](https://github.com/go7studio/Go7-Workhorse/commit/956a92bf8ed9fc853fbf896f603537003141ba18))
+* resume an unfinished assignment without asking again ([6266085](https://github.com/go7studio/Go7-Workhorse/commit/62660857ed8bf528eab3be542c1965d3d7ad8520))
+* treat a named lane start as a request for workers ([405f73c](https://github.com/go7studio/Go7-Workhorse/commit/405f73c25369dd8433b95836686a53789b2e7cf0))
+* type the mic draft while Listening shows in the composer ([2f8440c](https://github.com/go7studio/Go7-Workhorse/commit/2f8440cd084d363f5e59af4dec9e5b607657b2be))
+* typecheck Chrome allow on the current spawn options ([c6666be](https://github.com/go7studio/Go7-Workhorse/commit/c6666be24916029c2623657838b804082c1592b4))
+* typecheck the background browser spawn mocks ([f6bf9d7](https://github.com/go7studio/Go7-Workhorse/commit/f6bf9d70a19feddca0044b2846224b9e52b4b766))
+
 ## [0.7.10](https://github.com/go7studio/Go7-Workhorse/compare/v0.7.9...v0.7.10) (2026-11-06)
 
 

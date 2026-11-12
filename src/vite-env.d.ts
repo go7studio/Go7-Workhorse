@@ -123,6 +123,12 @@ type WorkhorseBridge = {
   ) => Promise<{ written: number; refused: number }>;
   teamPresence?: (folder: string, journalId: string, beat: import("./lib/team").PresenceBeat) => Promise<boolean>;
   pickAttach?: () => Promise<string[]>;
+  micRequestAccess?: () => Promise<import("../electron/mic-host").MicAccessResult>;
+  micGetStatus?: () => Promise<import("../electron/mic-host").MicAccessStatus>;
+  micTranscribeLocal?: (input: {
+    audioBase64: string;
+    mimeType: string;
+  }) => Promise<import("../electron/mic-host").MicTranscriptResult>;
   pickLocalComputeTokenFile?: () => Promise<string | null>;
   mediaSrc: (href: string, cwd?: string, vendorSessionId?: string) => Promise<string | null>;
   pathForFile: (file: File) => string;

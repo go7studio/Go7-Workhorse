@@ -168,6 +168,8 @@
       "entitlements": "build/entitlements.mac.plist",
       "entitlementsInherit": "build/entitlements.mac.inherit.plist",
       "extendInfo": {
+        "NSMicrophoneUsageDescription": "Workhorse records from the microphone so your words can be typed into the unsent draft.",
+        "NSSpeechRecognitionUsageDescription": "Workhorse uses speech recognition on this Mac to type what you say into the unsent draft.",
         "NSDocumentsFolderUsageDescription": "Workhorse and the agents in this chat read and write the project folders you link.",
         "NSDesktopFolderUsageDescription": "Workhorse uses Desktop folders you link as a project workspace.",
         "NSDownloadsFolderUsageDescription": "Workhorse uses Downloads folders you link as a project workspace.",

@@ -52,6 +52,11 @@ contextBridge.exposeInMainWorld("workhorse", {
     ipcRenderer.invoke("team:presence", folder, journalId, beat) as Promise<boolean>,
   pickFile: () => ipcRenderer.invoke("file:pick") as Promise<string | null>,
   pickAttach: () => ipcRenderer.invoke("attach:pick") as Promise<string[]>,
+  micRequestAccess: () =>
+    ipcRenderer.invoke("mic:request-access") as Promise<import("./mic-host").MicAccessResult>,
+  micGetStatus: () => ipcRenderer.invoke("mic:get-status") as Promise<import("./mic-host").MicAccessStatus>,
+  micTranscribeLocal: (input: { audioBase64: string; mimeType: string }) =>
+    ipcRenderer.invoke("mic:transcribe", input) as Promise<import("./mic-host").MicTranscriptResult>,
   pickLocalComputeTokenFile: () => ipcRenderer.invoke("localCompute:pickTokenFile") as Promise<string | null>,
   mediaSrc: (href: string, cwd?: string, vendorSessionId?: string) =>
     ipcRenderer.invoke("media:src", href, cwd, vendorSessionId) as Promise<string | null>,

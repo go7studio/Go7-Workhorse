@@ -18,14 +18,29 @@ import {
  *
  * A desk writes only its own files, so two desks that wrote while apart never
  * fight over one file; reading combines every desk's file by event id.
+ *
+ * Concurrent append safety:
+ * - Each device has its own journal file, avoiding write contention between desks.
+ * - Writes use a staging file (.part) then rename, which is atomic on all platforms.
+ * - On synced folders (OneDrive, Dropbox, Google Drive, Syncthing), atomic rename
+ *   ensures the sync tool sees either the old file or the complete new one.
+ * - Half-written lines from sync conflicts are skipped by the reader.
  */
-export type TeamFs = Pick<typeof fs, "mkdirSync" | "appendFileSync" | "readdirSync" | "readFileSync" | "writeFileSync" | "existsSync">;
+export type TeamFs = Pick<typeof fs, "mkdirSync" | "appendFileSync" | "readdirSync" | "readFileSync" | "writeFileSync" | "existsSync" | "renameSync" | "unlinkSync">;
 
 function journalRoot(folder: string, journalId: string): string {
   if (!isTeamId(journalId)) throw new Error("Bad team journal id.");
   return path.join(folder, journalId);
 }
 
+/**
+ * Append events to the journal using an atomic write pattern.
+ *
+ * For concurrent append safety on Windows and synced folders (OneDrive, Dropbox,
+ * Google Drive, Syncthing), this reads the existing file, appends new lines, writes
+ * to a staging file, then atomically renames. If another process is writing at the
+ * same time (rare since each device owns its own file), retry up to 3 times.
+ */
 export function appendTeamEvents(
   folder: string,
   journalId: string,
@@ -47,8 +62,49 @@ export function appendTeamEvents(
   }
   if (lines.length === 0) return { written: 0, refused };
   fsx.mkdirSync(dir, { recursive: true });
-  fsx.appendFileSync(path.join(dir, `${device}.jsonl`), `${lines.join("\n")}\n`, "utf8");
+  const target = path.join(dir, `${device}.jsonl`);
+  const staging = path.join(dir, `${device}.jsonl.part`);
+  const maxRetries = 3;
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      let existing = "";
+      try {
+        existing = String(fsx.readFileSync(target, "utf8"));
+      } catch {
+        // File does not exist yet; that is fine.
+      }
+      const content = existing.endsWith("\n") || existing === "" ? existing : existing + "\n";
+      fsx.writeFileSync(staging, content + lines.join("\n") + "\n", "utf8");
+      fsx.renameSync(staging, target);
+      return { written: lines.length, refused };
+    } catch (err) {
+      // On Windows, EBUSY can happen if the file is being synced or another process holds it.
+      const code = (err as NodeJS.ErrnoException)?.code;
+      if (attempt < maxRetries - 1 && (code === "EBUSY" || code === "ENOENT" || code === "EPERM")) {
+        continue;
+      }
+      // Clean up staging file on final failure
+      try { fsx.unlinkSync(staging); } catch { /* ignore */ }
+      throw err;
+    }
+  }
   return { written: lines.length, refused };
+}
+
+/**
+ * Checks if a filename is a sync conflict copy that should be ignored.
+ * Common patterns from OneDrive, Dropbox, Google Drive, and Syncthing.
+ */
+function isConflictCopy(name: string): boolean {
+  // OneDrive: "file (conflicted copy).jsonl", "file (Ana's conflicted copy 2024-01-01).jsonl"
+  if (/\(.*conflicted.*\)/i.test(name)) return true;
+  // Dropbox: "file (1).jsonl", "file (2).jsonl"
+  if (/\(\d+\)\.jsonl$/.test(name)) return true;
+  // Generic conflict marker
+  if (name.includes(".conflict")) return true;
+  // Windows machine name suffix: "file-DESKTOP-ABC123.jsonl"
+  if (/-[A-Z0-9]{8,}\.jsonl$/.test(name) && !name.match(/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}\.jsonl$/)) return true;
+  return false;
 }
 
 export function readTeamJournal(folder: string, journalId: string, fsx: TeamFs = fs): TeamEvent[] {
@@ -56,6 +112,8 @@ export function readTeamJournal(folder: string, journalId: string, fsx: TeamFs =
   if (!fsx.existsSync(dir)) return [];
   const lists: TeamEvent[][] = [];
   for (const name of fsx.readdirSync(dir) as string[]) {
+    // Skip sync conflict copies
+    if (isConflictCopy(name)) continue;
     const device = name.endsWith(".jsonl") ? name.slice(0, -".jsonl".length) : "";
     if (!isTeamId(device)) continue;
     let text = "";
@@ -65,7 +123,8 @@ export function readTeamJournal(folder: string, journalId: string, fsx: TeamFs =
       continue;
     }
     const rows: TeamEvent[] = [];
-    for (const line of text.split("\n")) {
+    // Handle both LF and CRLF line endings
+    for (const line of text.split(/\r?\n/)) {
       if (!line.trim()) continue;
       try {
         const clean = sanitizeTeamEvent(JSON.parse(line));

@@ -46,6 +46,8 @@ export type TeamLink = {
   joinedAt: number;
   /** Title and archive state this desk last agreed with the journal, per chat. */
   baseline?: Record<string, TeamChatMeta>;
+  /** Off pauses sync without dissolving. Presence stops, no new events are published or taken. */
+  off?: boolean;
 };
 
 export type TeamChatMeta = { title: string; archivedAt: number | null };
@@ -118,6 +120,10 @@ export type TeamEvent = EventBase &
     | { type: "ceiling.set"; ceiling: TeamCeiling | null }
     | { type: "workshop.grant"; grant: TeamWorkshopGrant }
     | { type: "inbox.owner"; owner: string; how: "start" | "handoff" | "take" }
+    /** This desk paused sync. Presence stops, new events are not published. Local only; not synced to journal. */
+    | { type: "crew.off"; off: boolean }
+    /** This desk left the team. Drops auth, stops all sync. Written to journal so mates see the departure. */
+    | { type: "crew.dissolve" }
   );
 
 export type TeamEventType = TeamEvent["type"];
@@ -137,8 +143,17 @@ export type TeamLocal = {
 // ---------------------------------------------------------------------------------------------
 // Ids, seats, hashing
 
+/**
+ * Validates a team id (journal, device, chat, event ids).
+ * Must match safe pattern and not contain path traversal or null bytes.
+ */
 export function isTeamId(value: unknown): value is string {
-  return typeof value === "string" && SAFE_ID.test(value);
+  if (typeof value !== "string") return false;
+  // Reject path traversal attempts
+  if (value.includes("..") || value.includes("\0")) return false;
+  // Reject absolute paths that might have slipped in
+  if (value.includes("/") || value.includes("\\")) return false;
+  return SAFE_ID.test(value);
 }
 
 /** The seat handle a person shows on a team. A team needs one; there is no made-up fallback. */
@@ -183,23 +198,38 @@ function escapeRegExp(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-/** Linked folder roots in text become `‹folder:label›`. The other desk maps the label to its own folder. */
+/**
+ * Linked folder roots in text become `‹folder:label›`. The other desk maps the label to its own folder.
+ * Handles both Windows (C:\Users\...) and Mac/Linux (/Users/...) paths bidirectionally.
+ */
 export function redactFolders(text: string, folders: readonly LinkedFolder[]): string {
   let out = text;
+  // Sort by path length descending to match longest paths first
   const roots = [...folders].sort((a, b) => b.path.length - a.path.length);
   for (const folder of roots) {
     const root = folder.path.replace(/[\\/]+$/, "");
     if (root.length < 2) continue;
-    const pattern = escapeRegExp(root).replace(/\\\\|\//g, "[\\\\/]");
-    out = out.replace(new RegExp(pattern, "gi"), `‹folder:${folder.label}›`);
+    // Create pattern that matches both forward and backslashes, case-insensitive for Windows
+    const escapedRoot = escapeRegExp(root);
+    // Replace escaped separators with a pattern matching either separator
+    const pattern = escapedRoot.replace(/\\\\|\//g, "[\\\\/]");
+    // Windows paths are case-insensitive
+    const isWindowsPath = /^[A-Za-z]:[\\/]|^\\\\/.test(root);
+    const flags = isWindowsPath ? "gi" : "g";
+    out = out.replace(new RegExp(pattern, flags), `‹folder:${folder.label}›`);
   }
   return out;
 }
 
+/**
+ * Restore folder tokens to this desk's paths.
+ * Handles cross-platform: Windows tokens become Mac paths and vice versa.
+ */
 export function restoreFolders(text: string, folders: readonly LinkedFolder[]): string {
   if (!text.includes("‹folder:")) return text;
   return text.replace(FOLDER_TOKEN, (token, label: string) => {
-    const folder = folders.find((item) => item.label === label);
+    // Case-insensitive label match for robustness
+    const folder = folders.find((item) => item.label.toLowerCase() === label.toLowerCase());
     return folder ? folder.path.replace(/[\\/]+$/, "") : token;
   });
 }
@@ -386,6 +416,10 @@ export function sanitizeTeamEvent(raw: unknown): TeamEvent | null {
       const how = record.how === "start" || record.how === "handoff" || record.how === "take" ? record.how : null;
       return owner && how ? { ...head, type: "inbox.owner", owner, how } : null;
     }
+    case "crew.off":
+      return typeof record.off === "boolean" ? { ...head, type: "crew.off", off: record.off } : null;
+    case "crew.dissolve":
+      return { ...head, type: "crew.dissolve" };
     default:
       return null;
   }
@@ -421,6 +455,8 @@ export type TeamView = {
   /** People. Seats come only from a join, so a worker can never be one. */
   members: string[];
   devices: Array<{ device: string; seat: string }>;
+  /** Devices that have dissolved (left) this team. Tracked for audit. */
+  dissolved: Array<{ device: string; seat: string; at: number }>;
   chats: Map<string, TeamChatState>;
   messages: Map<string, Map<string, { message: JournalMessage; device: string; seat: string; at: number }>>;
   waiting: TeamCard[];
@@ -438,6 +474,7 @@ export function foldTeamJournal(events: readonly TeamEvent[]): TeamView {
     ids: new Set(),
     members: [],
     devices: [],
+    dissolved: [],
     chats: new Map(),
     messages: new Map(),
     waiting: [],
@@ -531,6 +568,16 @@ export function foldTeamJournal(events: readonly TeamEvent[]): TeamView {
         // Applied after every join. Start writes the owner in the same instant as the join,
         // and id order can put the owner event first; the join time still has to be <= this event.
         inboxEvents.push(item);
+        break;
+      case "crew.off":
+        // Local only: Off pauses sync but does not write to the shared journal.
+        // If it somehow appears, ignore it during fold.
+        break;
+      case "crew.dissolve":
+        // Mark this device as dissolved. The member stays in the audit; the device stops syncing.
+        if (!view.dissolved.some((row) => row.device === item.device)) {
+          view.dissolved.push({ device: item.device, seat: item.seat, at: item.at });
+        }
         break;
     }
   }
@@ -1093,6 +1140,17 @@ export function permissionAnsweredEvent(
   return sanitizeTeamEvent(event(journalId, local, "permission.answered", { chatId: request.sessionId, requestId: request.id, answer }));
 }
 
+/**
+ * Create a dissolve event. This desk leaves the team, writes the departure to the journal,
+ * and stops all sync. The TeamLink is removed from the project after this.
+ */
+export function dissolveEvent(
+  journalId: string,
+  local: Pick<TeamLocal, "device" | "seat" | "now">,
+): TeamEvent | null {
+  return sanitizeTeamEvent(event(journalId, local, "crew.dissolve", {}));
+}
+
 /** A chat that is running on another desk can only be stopped there. */
 export function canStopHere(session: Pick<Session, "team">, device: string): boolean {
   const runningOn = session.team?.runningOn;
@@ -1116,6 +1174,7 @@ export function normalizeTeamLink(raw: unknown): TeamLink | undefined {
     folder: record.folder,
     joinedAt: typeof record.joinedAt === "number" ? record.joinedAt : 0,
     ...(Object.keys(baseline).length > 0 ? { baseline } : {}),
+    ...(record.off === true ? { off: true } : {}),
   };
 }
 

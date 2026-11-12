@@ -2596,6 +2596,9 @@ export function normalizeUsage(raw: unknown): UsageEvent[] {
           : undefined,
       ...(typeof record.source === "string" && USAGE_SOURCES.has(record.source) ? { source: record.source as UsageSource } : {}),
       ...(lane ? { lane } : {}),
+      ...(typeof record.crewId === "string" && record.crewId ? { crewId: record.crewId } : {}),
+      ...(typeof record.deskId === "string" && record.deskId ? { deskId: record.deskId } : {}),
+      ...(typeof record.humanId === "string" && record.humanId ? { humanId: record.humanId } : {}),
     });
   }
   return collapseStackedCustomTurns(collapseInflatedUsage(events)).map((event) => repairSummedPromptTurn(event));

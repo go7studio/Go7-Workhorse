@@ -161,6 +161,7 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
   keyboard or the selection is on it, and keeps their space at rest.
 - A crew chip in the composer shortens its name with an ellipsis rather than
   cutting it off at a narrow window.
+- The composer microphone types spoken words into the unsent draft. You still send.
 - A chat that ran a wave says who called it and how it went, such as
   `OpenClaw · Working…`, or nothing once every worker finished clean.
 - Failure is the only word in red. Interrupted and timed-out work is unfinished,

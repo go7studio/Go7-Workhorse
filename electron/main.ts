@@ -1,4 +1,4 @@
-import { app, BrowserWindow, crashReporter, dialog, ipcMain, nativeImage, nativeTheme, net, protocol, safeStorage, shell } from "electron";
+import { app, BrowserWindow, crashReporter, dialog, ipcMain, nativeImage, nativeTheme, net, protocol, safeStorage, session, shell, systemPreferences } from "electron";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -46,6 +46,14 @@ import { peerAskTimeoutMs, watchPeerInbox, writeBridgeRecord, type PeerAsk } fro
 import { existingPeerReply } from "../src/lib/session-bridge";
 import { listDropFiles } from "./drop-files";
 import { attachDialogProperties, attachDialogTitle, windowsNeedsAttachChoice } from "./attach-pick";
+import {
+  getMicrophoneAccessStatus,
+  installDeskMediaPermissions,
+  pickLocalSpeechHost,
+  requestMicrophoneAccess,
+  transcribeLocalSpeech,
+} from "./mic-host";
+import { LocalCapabilityHostClient } from "./local-capability-host";
 
 import { displaySrcForHref, openableMediaPath, resolveMediaProtocolFile, safeLocalPath } from "./media-src";
 import { watchViewerFolder } from "./viewer-watch";
@@ -981,6 +989,7 @@ function createWindow() {
     },
   });
 
+  installDeskMediaPermissions(win.webContents.session, isDeskAppUrl);
   win.setMenu(null);
   win.once("ready-to-show", () => {
     win.show();
@@ -1058,6 +1067,7 @@ app.whenReady().then(async () => {
   // the eleven learning channels, registered from their own module, answered
   // any frame at all while the test that guards the order read only main.ts.
   guardIpcSender(ipcMain, process.env.VITE_DEV_SERVER_URL, DESK_INDEX_FILE);
+  installDeskMediaPermissions(session.defaultSession, isDeskAppUrl);
   app.on("child-process-gone", (_event, details) => {
     mainLog.record(
       "child-process-gone",
@@ -1639,6 +1649,55 @@ app.whenReady().then(async () => {
     return result.filePaths[0];
   });
 
+  ipcMain.handle("mic:request-access", () =>
+    requestMicrophoneAccess({
+      platform: process.platform,
+      existsSync: (file) => fs.existsSync(file),
+      getMediaAccessStatus: (mediaType) =>
+        process.platform === "darwin" || process.platform === "win32"
+          ? systemPreferences.getMediaAccessStatus(mediaType)
+          : "granted",
+      askForMediaAccess: async (mediaType) => {
+        if (process.platform !== "darwin") return true;
+        return systemPreferences.askForMediaAccess(mediaType);
+      },
+      openExternal: (url) => shell.openExternal(url),
+    }),
+  );
+  ipcMain.handle("mic:get-status", () =>
+    getMicrophoneAccessStatus({
+      platform: process.platform,
+      getMediaAccessStatus: (mediaType) =>
+        process.platform === "darwin" || process.platform === "win32"
+          ? systemPreferences.getMediaAccessStatus(mediaType)
+          : "granted",
+    }),
+  );
+  ipcMain.handle("mic:transcribe", async (_event, raw: unknown) => {
+    const hosts = liveSettings.localCompute?.hosts ?? [];
+    const audioBase64 =
+      raw && typeof raw === "object" && typeof (raw as { audioBase64?: unknown }).audioBase64 === "string"
+        ? (raw as { audioBase64: string }).audioBase64
+        : "";
+    const mimeType =
+      raw && typeof raw === "object" && typeof (raw as { mimeType?: unknown }).mimeType === "string"
+        ? (raw as { mimeType: string }).mimeType
+        : "audio/webm";
+    const probes = await probeLocalComputeHosts(hosts);
+    const hostId = pickLocalSpeechHost(hosts, probes);
+    const host = hostId ? hosts.find((row) => row.id === hostId) : undefined;
+    if (!hostId || !host) return { ok: false as const, reason: "No granted local speech host." };
+    try {
+      const client = new LocalCapabilityHostClient({
+        hosts: [{ id: host.id, baseUrl: host.baseUrl, tokenFile: host.tokenFile }],
+        stateDir: app.getPath("userData"),
+      });
+      return await transcribeLocalSpeech({ hosts, probes, audioBase64, mimeType, client });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Local speech failed.";
+      return { ok: false as const, reason: message };
+    }
+  });
   ipcMain.handle("attach:pick", async () => {
     let kind: "files" | "folder" | "mixed" = "mixed";
     if (windowsNeedsAttachChoice(process.platform)) {

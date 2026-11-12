@@ -46,34 +46,42 @@ function entitlementsPath() {
   return path.join(__dirname, "..", "build", "entitlements.mac.plist");
 }
 
+function codesignArgs(target, authority, keychain) {
+  const args = ["--force", "--sign", authority, "--options", "runtime", "--timestamp", "--entitlements", entitlementsPath()];
+  if (keychain) args.push("--keychain", keychain);
+  args.push(target);
+  return args;
+}
+
 /** Sign one nested binary. No --deep: that would walk the rest of the app. */
-function helperSignArgs(helper, authority) {
-  return ["--force", "--sign", authority, "--options", "runtime", "--timestamp", "--entitlements", entitlementsPath(), helper];
+function helperSignArgs(helper, authority, keychain) {
+  return codesignArgs(helper, authority, keychain);
 }
 
 /**
- * electron-builder seals the app, then this hook signs mac-dictation.
- * That second signature changes a sealed resource, and `codesign --verify
- * --deep --strict` then reports the resource missing or invalid. Signing the
- * outer app again, without --deep, writes a new seal around the helper
- * signature. Notarization runs after this hook, so it staples that seal.
+ * The outer app is signed again, without --deep, so the seal includes the
+ * helper and the helper's own signature stays. This has to happen in the
+ * sign hook, before notarization. afterSign runs after the ticket is stapled,
+ * and signing anything there removes it.
  */
-function appResealArgs(appPath, authority) {
-  return ["--force", "--sign", authority, "--options", "runtime", "--timestamp", "--entitlements", entitlementsPath(), appPath];
+function appResealArgs(appPath, authority, keychain) {
+  return codesignArgs(appPath, authority, keychain);
 }
 
 function signOutput(result) {
   return `${result?.stdout ?? ""}${result?.stderr ?? ""}`;
 }
 
-function signDictationAndReseal(appPath, authority, io = { existsSync: fs.existsSync, run: spawnSync }) {
+function signDictationAndReseal(appPath, authority, io = {}) {
+  const existsSync = io.existsSync ?? fs.existsSync;
+  const run = io.run ?? spawnSync;
   const helper = path.join(appPath, "Contents", "Resources", "mac-dictation");
-  if (!io.existsSync(helper)) return false;
-  const signed = io.run("/usr/bin/codesign", helperSignArgs(helper, authority), { encoding: "utf8" });
+  if (!existsSync(helper)) return false;
+  const signed = run("/usr/bin/codesign", helperSignArgs(helper, authority, io.keychain), { encoding: "utf8" });
   if (signed.status !== 0) {
     throw new Error(`Could not sign the dictation helper.\n${signOutput(signed)}`);
   }
-  const resealed = io.run("/usr/bin/codesign", appResealArgs(appPath, authority), { encoding: "utf8" });
+  const resealed = run("/usr/bin/codesign", appResealArgs(appPath, authority, io.keychain), { encoding: "utf8" });
   if (resealed.status !== 0) {
     throw new Error(`Could not reseal the app after signing the dictation helper.\n${signOutput(resealed)}`);
   }
@@ -85,7 +93,8 @@ async function afterSign(context) {
   if (!requiresStableIdentity()) return;
   const appPath = path.join(context.appOutDir, `${context.packager.appInfo.productFilename}.app`);
   const authority = assertDeveloperIdSignature(appPath);
-  signDictationAndReseal(appPath, authority);
+  // The dictation helper is signed in scripts/mac-sign.cjs, before notarization.
+  // Signing here would replace a stapled ticket. 0.7.11 failed that way.
   console.log(`  • signed by ${authority}`);
 }
 

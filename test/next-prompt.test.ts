@@ -1,8 +1,12 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { createRequire } from "node:module";
+import { fileURLToPath } from "node:url";
 import { nextPromptForReply } from "../src/lib/next-prompt";
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 const require = createRequire(import.meta.url);
 const afterSign = require("../scripts/after-sign.cjs") as {
@@ -52,6 +56,47 @@ test("signing the dictation helper reseals the app without --deep", () => {
   assert.deepEqual(calls[1], afterSign.appResealArgs(app, authority));
   assert.ok(calls[1].includes("--options") && calls[1].includes("runtime"));
   assert.deepEqual(calls[0], afterSign.helperSignArgs(helper, authority));
+});
+
+test("the helper is signed before notarization, and afterSign does not touch the staple", async () => {
+  const macSign = require("../scripts/mac-sign.cjs") as {
+    sign: (
+      configuration: { app?: string; identity?: string; keychain?: string },
+      deps: {
+        signAsync: (configuration: { app?: string }) => Promise<void>;
+        io: {
+          existsSync: (file: string) => boolean;
+          run: (bin: string, args: string[], opts: { encoding: string }) => { status: number };
+        };
+      },
+    ) => Promise<boolean>;
+  };
+  const app = path.join("/tmp", "Go7 Workhorse.app");
+  const order: string[] = [];
+  const resealed = await macSign.sign(
+    { app, identity: "Developer ID Application: Example", keychain: "/tmp/signing.keychain" },
+    {
+      signAsync: async (configuration) => {
+        order.push(configuration.app ?? "");
+      },
+      io: {
+        existsSync: () => true,
+        run: (_bin, args) => {
+          order.push(args.at(-1) ?? "");
+          assert.equal(args.includes("--deep"), false);
+          assert.ok(args.includes("--keychain"));
+          assert.ok(args.includes("/tmp/signing.keychain"));
+          return { status: 0 };
+        },
+      },
+    },
+  );
+  assert.equal(resealed, true);
+  assert.deepEqual(order, [app, path.join(app, "Contents", "Resources", "mac-dictation"), app]);
+  const after = readFileSync(path.join(ROOT, "scripts", "after-sign.cjs"), "utf8");
+  const hook = after.slice(after.indexOf("async function afterSign"), after.indexOf("module.exports"));
+  assert.equal(hook.includes("signDictationAndReseal"), false);
+  assert.match(readFileSync(path.join(ROOT, "package.json"), "utf8"), /"sign": "\.\/scripts\/mac-sign\.cjs"/);
 });
 
 test("a helper that does not sign does not reseal a broken app", () => {

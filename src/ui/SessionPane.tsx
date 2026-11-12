@@ -5,6 +5,7 @@ import { primaryFolder } from "../lib/project";
 import { editListKey, fileFolderFromPath, fileNameFromPath, holdEditStats, markStatsFetched, mergeEdits, projectEdits, projectWritesKey, sameEditPath, startEditStatsHarvest, type ProjectEdit } from "../lib/project-edits";
 import { sessionExecutionCwd } from "../lib/session-environment";
 import { peelPlanningPreamble, unsquashSentences } from "../lib/markdown";
+import { nextPromptForReply } from "../lib/next-prompt";
 import { brainCaption, messageBrain } from "../lib/session";
 import { talkingToSummary } from "../lib/tool-labels";
 import { vendorTurnWorking } from "../lib/crew-live";
@@ -127,6 +128,7 @@ const AssistantTurn = memo(function AssistantTurn({
   onFork,
   onOpenThread,
   onRevealSpilled,
+  onUsePrompt,
 }: {
   block: Extract<TranscriptBlock, { type: "reply" }>;
   live: boolean;
@@ -139,10 +141,12 @@ const AssistantTurn = memo(function AssistantTurn({
   onFork: (id: string) => void;
   onOpenThread: (id: string) => void;
   onRevealSpilled: () => void;
+  onUsePrompt?: (text: string) => void;
 }) {
   const assistantText = block.assistant.text ?? "";
   const peeled = peelPlanningPreamble(assistantText, live);
   const body = unsquashSentences(peeled.body);
+  const nextPrompt = !live && onUsePrompt ? nextPromptForReply(body) : undefined;
   const who = brainCaption(
     messageBrain(block.assistant, { provider, model, ...(customBotId ? { customBotId } : {}) }),
     settings.customBots,
@@ -171,6 +175,11 @@ const AssistantTurn = memo(function AssistantTurn({
               { id: "copy", label: "Copy", run: () => copyText(body) },
               { id: "fork", label: "Fork", run: () => onFork(block.assistant.id) },
             ]} />
+          ) : null}
+          {nextPrompt && onUsePrompt ? (
+            <div className="next-prompt">
+              <button type="button" onClick={() => onUsePrompt(nextPrompt)}>{nextPrompt}</button>
+            </div>
           ) : null}
         </div>
       ) : null}
@@ -527,6 +536,7 @@ export function SessionPane() {
     setOpen(file);
   };
   const liveIndex = working ? lastReplyIndex(blocks) : -1;
+  const suggestIndex = working ? -1 : lastReplyIndex(blocks);
   const liveBlock = liveIndex >= 0 ? blocks[liveIndex] : undefined;
   const talking =
     liveBlock && liveBlock.type === "reply" ? talkingToSummary(liveBlock.tools) : "";
@@ -710,6 +720,7 @@ export function SessionPane() {
               onFork={desk.forkFrom}
               onOpenThread={desk.selectSession}
               onRevealSpilled={revealSpilled}
+              onUsePrompt={index === suggestIndex ? sendMarksToChat : undefined}
             />
           );
         })}

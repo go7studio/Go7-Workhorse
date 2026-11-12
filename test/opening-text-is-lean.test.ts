@@ -275,6 +275,12 @@ test("a chat that never got the spawn law is refused at the door", () => {
   assert.equal(spawn({ text: "review this", crewModes: ["mission"] }).ok, true);
   assert.equal(spawn({ text: "review this", crewModes: ["orchestrate", "mission"] }).ok, true);
   assert.equal(spawn({ text: "Spawn two agents to review this." }).ok, true);
+  // A follow-up that confirms an earlier ask, and "new agents", carry the law.
+  // The five missed phrasings above still do not.
+  assert.equal(spawn({ text: "You have my confirmation that you can do it." }).ok, true);
+  assert.equal(spawn({ text: "I already told you to hand this to agents." }).ok, true);
+  assert.equal(spawn({ text: "Repair the blockers with new agents." }).ok, true);
+  assert.equal(spawn({ text: "get a reviewer on this" }).ok, false);
 
   // A door that hands over no turn at all is refused, and that is the point of
   // the inversion. While the law was something a door opted into, the doors
@@ -338,6 +344,9 @@ test("one predicate decides who gets the law and who may spawn", () => {
     { text: "Read the config and tell me what it sets.", carried: false },
     { text: "hire two reviewers", carried: false },
     { text: "Spawn two agents to review this.", carried: true },
+    { text: "You have my confirmation that you can do it.", carried: true },
+    { text: "Repair the blockers with new agents.", carried: true },
+    { text: "get a reviewer on this", carried: false },
     { text: "Read the config.", crewMode: ["orchestrate"], carried: true },
     { text: "Read the config.", crewMode: ["mission"], carried: true },
     { text: "Spawn two agents to review this.", role: "worker", carried: false },

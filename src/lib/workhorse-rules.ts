@@ -228,9 +228,23 @@ const SPAWN_ASK = new RegExp(
     `|(?:assign|create|drive|deploy|dispatch|send|put|have|get|use|call|spin\\s+up)\\s+` +
     `(?:a|an|the|some|several|multiple|more|\\d+)?\\s*${SPAWN_TARGET}` +
     `|multiple\\s+${SPAWN_TARGET}` +
+    `|new\\s+${SPAWN_TARGET}` +
   ")\\b",
   "i",
 );
+
+/**
+ * The desk asks for a confirmation when a turn did not carry the spawn law.
+ * The answer to that question is itself the authorization. "You have my
+ * confirmation" and "I already told you" must carry the law, or the chat
+ * asks again on every follow-up.
+ */
+const SPAWN_CONFIRMATION =
+  /\b(?:you have my confirmation|i am confirming|i'm confirming|i already (?:told|asked|gave) you|already given you the instruction|should(?:n't| not) need to confirm|do(?:n't| not) need (?:my |a )?confirm)\b/i;
+
+export function looksLikeSpawnConfirmation(text: string): boolean {
+  return SPAWN_CONFIRMATION.test(text);
+}
 
 export function looksLikeWorkerBrief(text: string): boolean {
   const value = text.trim();
@@ -276,6 +290,7 @@ export function turnCarriesSpawnLaw(input: {
   if (role === "worker" || role === "auditor" || role === "helper") return false;
   if (looksLikeWorkerBrief(text)) return false;
   if (orchestrationEnabled(input.crewMode)) return true;
+  if (looksLikeSpawnConfirmation(text)) return true;
   return looksLikeSpawnRequest(text);
 }
 

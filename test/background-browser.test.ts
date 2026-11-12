@@ -5,6 +5,7 @@ import test from "node:test";
 import type { ChildProcess, SpawnOptions } from "node:child_process";
 import {
   BackgroundBrowserHost,
+  bundledPlaywrightBrowsersDir,
   defaultBackgroundBrowserLauncher,
   type BackgroundBrowserEvent,
   type BackgroundBrowserLauncher,
@@ -160,6 +161,60 @@ test("granted Chrome is a hook and does not spawn the default profile", async ()
           spawned += 1;
           return fakeChild();
         }) as unknown as typeof import("node:child_process").spawn,
+      ),
+    /default Chrome profile/,
+  );
+  assert.equal(spawned, 0);
+});
+
+test("a packaged desk looks beside the app for Chromium", () => {
+  const resources = path.join("Applications", "Go7 Workhorse Dev.app", "Contents", "Resources");
+  const found = bundledPlaywrightBrowsersDir(resources, (file) => file === path.join(resources, "ms-playwright"));
+  assert.equal(found, path.join(resources, "ms-playwright"));
+  assert.equal(bundledPlaywrightBrowsersDir(resources, () => false), undefined);
+  assert.equal(bundledPlaywrightBrowsersDir("  ", () => true), undefined);
+});
+
+test("Playwright Chrome for Testing is the background browser", async () => {
+  const spawned: string[] = [];
+  const child = fakeChild(99_010);
+  const executable =
+    "/Users/test/Library/Caches/ms-playwright/chromium-1234/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing";
+  const result = await defaultBackgroundBrowserLauncher(
+    launchRequest("background-headless", true),
+    ((command: string) => {
+      spawned.push(command);
+      return child;
+    }) as unknown as typeof import("node:child_process").spawn,
+    {
+      loadDriver: async () => ({
+        executablePath: () => executable,
+        connectOverCDP: async () => ({ close: async () => undefined }),
+      }),
+      readDebuggingPort: async () => "9444",
+    },
+  );
+  assert.deepEqual(spawned, [executable]);
+  assert.equal(result.child, child);
+});
+
+test("the person's installed Chrome is not the background browser", async () => {
+  let spawned = 0;
+  await assert.rejects(
+    () =>
+      defaultBackgroundBrowserLauncher(
+        launchRequest("background-headless", true),
+        (() => {
+          spawned += 1;
+          return fakeChild(99_011);
+        }) as unknown as typeof import("node:child_process").spawn,
+        {
+          loadDriver: async () => ({
+            executablePath: () => "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+            connectOverCDP: async () => ({ close: async () => undefined }),
+          }),
+          readDebuggingPort: async () => "9445",
+        },
       ),
     /default Chrome profile/,
   );

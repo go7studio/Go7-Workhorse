@@ -107,10 +107,24 @@ function developmentPackEnv(): NodeJS.ProcessEnv {
   return env;
 }
 
+function installBackgroundChromium(env: NodeJS.ProcessEnv) {
+  const dest = path.join(ROOT, "build", "ms-playwright");
+  fs.mkdirSync(dest, { recursive: true });
+  say("Installing the desk-owned Chromium for the background browser...");
+  const install = spawnSync("npx", ["playwright", "install", "chromium"], {
+    cwd: ROOT,
+    env: { ...env, PLAYWRIGHT_BROWSERS_PATH: dest },
+    stdio: "inherit",
+    timeout: 300_000,
+  });
+  if (install.status !== 0) die("playwright chromium install failed.");
+}
+
 function packCurrentArch() {
   const arch = macArch();
   say(`Packing a development ${arch} dir (unsigned, this tree)...`);
   const env = developmentPackEnv();
+  installBackgroundChromium(env);
   const build = spawnSync("npm", ["run", "build"], { cwd: ROOT, env, stdio: "inherit" });
   if (build.status !== 0) die("npm run build failed.");
   const pack = spawnSync(

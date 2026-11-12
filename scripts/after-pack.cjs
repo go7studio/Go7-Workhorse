@@ -64,15 +64,42 @@ function writeWinBuildMarker(appOutDir, env = process.env) {
   return marker;
 }
 
+function bundledBrowserSource(platform) {
+  const source = path.join(__dirname, "..", "build", "ms-playwright");
+  if (!fs.existsSync(source)) return null;
+  const entries = fs.readdirSync(source);
+  if (platform === "darwin") {
+    return entries.some((name) => name.startsWith("chromium")) ? source : null;
+  }
+  if (platform === "win32") {
+    const windowsBinary = entries.some((name) =>
+      fs.existsSync(path.join(source, name, "chrome-win64", "chrome.exe")),
+    );
+    return windowsBinary ? source : null;
+  }
+  return null;
+}
+
+function copyBundledBrowsers(destDir, platform) {
+  const source = bundledBrowserSource(platform);
+  if (!source) return;
+  fs.rmSync(destDir, { recursive: true, force: true });
+  fs.cpSync(source, destDir, { recursive: true });
+}
+
 async function afterPack(context) {
   if (context.electronPlatformName !== "darwin") {
-    if (context.electronPlatformName === "win32") writeWinBuildMarker(context.appOutDir);
+    if (context.electronPlatformName === "win32") {
+      copyBundledBrowsers(path.join(context.appOutDir, "resources", "ms-playwright"), "win32");
+      writeWinBuildMarker(context.appOutDir);
+    }
     return;
   }
   assertStableReleaseIdentity();
 
   const appName = `${context.packager.appInfo.productFilename}.app`;
   const appPath = path.join(context.appOutDir, appName);
+  copyBundledBrowsers(path.join(appPath, "Contents", "Resources", "ms-playwright"), "darwin");
   writeBuildMarker(appPath);
   if (!shouldAdHocSign()) return;
 

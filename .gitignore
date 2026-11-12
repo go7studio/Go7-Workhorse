@@ -28,3 +28,6 @@ credentials.json
 attachments/
 # Viewer test artifacts
 .workhorse/
+
+# Chromium downloaded for the packaged background browser. Not source.
+build/ms-playwright/

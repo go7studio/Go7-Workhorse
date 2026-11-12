@@ -75,6 +75,7 @@
     "@agentclientprotocol/claude-agent-acp": "^0.66.0",
     "@agentclientprotocol/codex-acp": "^1.2.0",
     "hyparquet": "^1.31.1",
+    "playwright": "^1.62.1",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
     "three": "^0.172.0"
@@ -87,7 +88,6 @@
     "@vitejs/plugin-react": "^5.0.2",
     "electron": "^43.7.5",
     "electron-builder": "^26.15.3",
-    "playwright": "^1.62.1",
     "tsx": "^4.23.12",
     "typescript": "^5.9.2",
     "vite": "^7.1.3",

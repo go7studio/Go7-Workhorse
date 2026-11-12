@@ -133,14 +133,42 @@ function driverFailure(error: unknown): Error {
   return new Error(`Playwright is not available for the background browser. ${reason}`.trim());
 }
 
+/**
+ * The person's installed Chrome. Playwright's Chromium is branded
+ * "Google Chrome for Testing" and lives under ms-playwright; that is the
+ * desk-owned background browser, not the default Chrome profile.
+ */
 function refusesDefaultChromeExecutable(file: string): boolean {
   const normalized = file.replaceAll("\\", "/");
+  if (/chrome for testing/i.test(normalized) || /ms-playwright/i.test(normalized)) return false;
   return /google chrome/i.test(normalized) || /\/Google\/Chrome\//i.test(normalized);
 }
 
-/** Playwright is a devDependency. A packaged desk that cannot load it must fail before any process exists. */
+/**
+ * Chromium shipped beside the app, outside the asar, so the packaged desk
+ * can spawn it. Playwright's cache under the home directory is a developer
+ * machine, not the installed app.
+ */
+export function bundledPlaywrightBrowsersDir(
+  resourcesPath: string,
+  exists: (file: string) => boolean = fs.existsSync,
+): string | undefined {
+  if (!resourcesPath.trim()) return undefined;
+  const dir = path.join(resourcesPath, "ms-playwright");
+  return exists(dir) ? dir : undefined;
+}
+
+function applyBundledPlaywrightBrowsers(): void {
+  if (process.env.PLAYWRIGHT_BROWSERS_PATH?.trim()) return;
+  const resources = typeof process.resourcesPath === "string" ? process.resourcesPath : "";
+  const dir = bundledPlaywrightBrowsersDir(resources);
+  if (dir) process.env.PLAYWRIGHT_BROWSERS_PATH = dir;
+}
+
+/** Playwright ships with the desk. A packaged app that cannot load it must fail before any process exists. */
 async function loadPlaywrightDriver(): Promise<BackgroundBrowserDriver> {
   try {
+    applyBundledPlaywrightBrowsers();
     const playwright = (await import("playwright")) as {
       chromium: {
         executablePath: () => string;

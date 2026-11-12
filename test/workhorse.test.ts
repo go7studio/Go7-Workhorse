@@ -1005,11 +1005,13 @@ test("dropped images become ACP image blocks and stay on the user turn", () => {
   assert.equal(message?.images?.[0]?.name, "shot.png");
 
   const composer = readFileSync(path.join(ROOT, "src", "ui", "Composer.tsx"), "utf8");
+  const mic = readFileSync(path.join(ROOT, "electron", "mic-host.ts"), "utf8");
   assert.match(composer, /collectDroppedFiles/);
   assert.match(composer, /filesFromClipboard/);
   assert.match(composer, /readChatAttachment/);
   assert.match(composer, /collectDroppedFiles/);
-  assert.match(composer, /Drop files or folders/);
+  assert.match(composer, /composerFieldPlaceholder/);
+  assert.match(mic, /if \(input\.dropping\) return "Drop files or folders"/);
   assert.equal(shouldSkipDropDir("node_modules"), true);
   assert.equal(shouldSkipDropDir(".git"), true);
   assert.equal(shouldSkipDropDir("src"), false);

@@ -29,8 +29,10 @@ import { crewModeLabel, hasCrewMode, orderedCrewModes, toggleCrewMode } from "..
 import {
   composerEscapeAction,
   joinVoiceDraft,
+  LOCAL_SPEECH_CAPABILITY,
   pickLocalSpeechHost,
   pickSpeechEngine,
+  speechEngineAfterOsStartFailure,
 } from "../../electron/mic-host";
 
 type SpeechRec = {
@@ -516,24 +518,25 @@ export const Composer = memo(function Composer({
     }
   };
 
+  const resolveGrantedLocalSpeechHost = async (): Promise<string | null> => {
+    const hosts = settings.localCompute?.hosts ?? [];
+    const granted = hosts.some(
+      (row) =>
+        row.enabled &&
+        row.allowedCallerRoles.includes("desk") &&
+        row.allowedCapabilities.includes(LOCAL_SPEECH_CAPABILITY),
+    );
+    if (!granted) return null;
+    const probes = (await window.workhorse?.probeLocalCompute?.(hosts)) ?? [];
+    return pickLocalSpeechHost(hosts, probes);
+  };
+
   const startMic = async () => {
     if (recordingRef.current) return;
     const access = await window.workhorse?.micRequestAccess?.();
     if (access && !access.granted) return;
     const Ctor = speechRecognitionCtor();
-    const hosts = settings.localCompute?.hosts ?? [];
-    let localHostId: string | null = null;
-    if (!Ctor) {
-      const granted = hosts.some(
-        (row) =>
-          row.enabled &&
-          row.allowedCallerRoles.includes("desk") &&
-          row.allowedCapabilities.includes("audio.speech.transcribe"),
-      );
-      if (!granted) return;
-      const probes = (await window.workhorse?.probeLocalCompute?.(hosts)) ?? [];
-      localHostId = pickLocalSpeechHost(hosts, probes);
-    }
+    const localHostId = Ctor ? null : await resolveGrantedLocalSpeechHost();
     if (pickSpeechEngine(Boolean(Ctor), localHostId) === "none") return;
     let stream: MediaStream;
     try {
@@ -569,14 +572,29 @@ export const Composer = memo(function Composer({
         }
       };
       recognitionRef.current = rec;
-      try {
-        rec.start();
-      } catch {
+      const engine = await speechEngineAfterOsStartFailure(
+        () => rec.start(),
+        async () => {
+          recognitionRef.current = null;
+          rec.onend = null;
+          rec.onresult = null;
+          try {
+            rec.stop();
+          } catch {
+            /* start never began */
+          }
+          return resolveGrantedLocalSpeechHost();
+        },
+      );
+      if (engine === "os") return;
+      recognitionRef.current = null;
+      rec.onend = null;
+      if (engine !== "local-compute") {
         recordingRef.current = false;
         setRecording(false);
         releaseMic();
+        return;
       }
-      return;
     }
     const mime = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
       ? "audio/webm;codecs=opus"

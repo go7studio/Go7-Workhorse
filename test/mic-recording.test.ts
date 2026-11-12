@@ -19,7 +19,9 @@ import {
   pickLocalSpeechHost,
   pickSpeechEngine,
   requestMicrophoneAccess,
+  speechEngineAfterOsStartFailure,
   transcribeLocalSpeech,
+  WINDOWS_MICROPHONE_PRIVACY_URL,
   type MediaPermissionSession,
   type MicTranscribeClient,
 } from "../electron/mic-host";
@@ -178,27 +180,67 @@ test("mac not-determined asks then opens privacy settings if the person denies",
 });
 
 test("windows grants session media and never reads mac System Settings paths", async () => {
-  const seen: string[] = [];
   const result = await requestMicrophoneAccess({
     platform: "win32",
-    existsSync: (file) => {
-      seen.push(file);
-      return true;
+    existsSync: () => {
+      throw new Error("windows grant must not read the disk");
     },
-    getMediaAccessStatus: () => {
-      throw new Error("windows must not query mac media status");
-    },
+    getMediaAccessStatus: () => "granted",
     askForMediaAccess: async () => {
       throw new Error("windows has no askForMediaAccess");
     },
     openExternal: () => {
-      throw new Error("windows must not open a mac privacy URL");
+      throw new Error("windows grant must not open privacy settings");
     },
   });
   assert.deepEqual(result, { status: "granted", granted: true });
-  assert.deepEqual(seen, []);
-  assert.equal(getMicrophoneAccessStatus({ platform: "win32", getMediaAccessStatus: () => "denied" }), "granted");
-  assert.equal(microphonePrivacyUrl("win32", () => true), null);
+  assert.equal(getMicrophoneAccessStatus({ platform: "win32", getMediaAccessStatus: () => "granted" }), "granted");
+  assert.equal(
+    microphonePrivacyUrl("win32", () => {
+      throw new Error("windows privacy link must not read the disk");
+    }),
+    WINDOWS_MICROPHONE_PRIVACY_URL,
+  );
+});
+
+test("windows denial opens microphone privacy settings through the injected opener", async () => {
+  const opened: string[] = [];
+  const denied = await requestMicrophoneAccess({
+    platform: "win32",
+    existsSync: () => {
+      throw new Error("windows denial must not read the disk");
+    },
+    getMediaAccessStatus: () => "denied",
+    askForMediaAccess: async () => {
+      throw new Error("windows has no askForMediaAccess");
+    },
+    openExternal: async (url) => {
+      opened.push(url);
+    },
+  });
+  assert.equal(denied.granted, false);
+  assert.equal(denied.status, "denied");
+  assert.equal(denied.openedSettings, true);
+  assert.deepEqual(opened, [WINDOWS_MICROPHONE_PRIVACY_URL]);
+  assert.equal(getMicrophoneAccessStatus({ platform: "win32", getMediaAccessStatus: () => "denied" }), "denied");
+  assert.equal(opened.some((url) => url.startsWith("x-apple.systempreferences:")), false);
+
+  const restricted = await requestMicrophoneAccess({
+    platform: "win32",
+    existsSync: () => {
+      throw new Error("windows restriction must not read the disk");
+    },
+    getMediaAccessStatus: () => "restricted",
+    askForMediaAccess: async () => {
+      throw new Error("windows has no askForMediaAccess");
+    },
+    openExternal: async (url) => {
+      opened.push(url);
+    },
+  });
+  assert.equal(restricted.granted, false);
+  assert.equal(restricted.openedSettings, true);
+  assert.deepEqual(opened, [WINDOWS_MICROPHONE_PRIVACY_URL, WINDOWS_MICROPHONE_PRIVACY_URL]);
 });
 
 test("desk media permission allows microphone and refuses camera or a foreign page", () => {
@@ -231,6 +273,42 @@ test("the session handler answers from the injected isDesk check", () => {
   installDeskMediaPermissions(ses, (url) => url.startsWith("file:///app/dist/index.html"));
   assert.equal(requestAllow, true);
   assert.equal(checkAllow, true);
+});
+
+test("a thrown OS speech start falls back to a granted advertised local host", async () => {
+  let probes = 0;
+  const started = await speechEngineAfterOsStartFailure(
+    () => {
+      throw new Error("SpeechRecognition.start failed");
+    },
+    async () => {
+      probes += 1;
+      return pickLocalSpeechHost([host()], [probe()]);
+    },
+  );
+  assert.equal(started, "local-compute");
+  assert.equal(probes, 1);
+
+  const blocked = await speechEngineAfterOsStartFailure(
+    () => {
+      throw new Error("SpeechRecognition.start failed");
+    },
+    async () => pickLocalSpeechHost([host({ allowedCapabilities: [] })], [probe()]),
+  );
+  assert.equal(blocked, "none");
+
+  const os = await speechEngineAfterOsStartFailure(
+    () => undefined,
+    async () => {
+      throw new Error("must not probe after OS speech starts");
+    },
+  );
+  assert.equal(os, "os");
+
+  const composer = read("src/ui/Composer.tsx");
+  const start = composer.slice(composer.indexOf("const startMic"));
+  assert.match(start, /speechEngineAfterOsStartFailure\(\s*\(\) => rec\.start\(\)/);
+  assert.match(start, /engine !== "local-compute"[\s\S]*releaseMic\(\);[\s\S]*return;[\s\S]*\}[\s\S]*new MediaRecorder\(stream/);
 });
 
 test("local speech needs a granted host that already advertises the capability", () => {

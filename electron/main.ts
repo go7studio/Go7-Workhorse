@@ -1654,7 +1654,9 @@ app.whenReady().then(async () => {
       platform: process.platform,
       existsSync: (file) => fs.existsSync(file),
       getMediaAccessStatus: (mediaType) =>
-        process.platform === "darwin" ? systemPreferences.getMediaAccessStatus(mediaType) : "granted",
+        process.platform === "darwin" || process.platform === "win32"
+          ? systemPreferences.getMediaAccessStatus(mediaType)
+          : "granted",
       askForMediaAccess: async (mediaType) => {
         if (process.platform !== "darwin") return true;
         return systemPreferences.askForMediaAccess(mediaType);
@@ -1666,7 +1668,9 @@ app.whenReady().then(async () => {
     getMicrophoneAccessStatus({
       platform: process.platform,
       getMediaAccessStatus: (mediaType) =>
-        process.platform === "darwin" ? systemPreferences.getMediaAccessStatus(mediaType) : "granted",
+        process.platform === "darwin" || process.platform === "win32"
+          ? systemPreferences.getMediaAccessStatus(mediaType)
+          : "granted",
     }),
   );
   ipcMain.handle("mic:transcribe", async (_event, raw: unknown) => {

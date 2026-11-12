@@ -12,6 +12,7 @@ export const MAC_SYSTEM_SETTINGS_APP = "/System/Applications/System Settings.app
 export const MAC_SYSTEM_PREFERENCES_APP = "/System/Applications/System Preferences.app";
 export const MAC_MICROPHONE_PRIVACY_URL =
   "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone";
+export const WINDOWS_MICROPHONE_PRIVACY_URL = "ms-settings:privacy-microphone";
 
 export const NS_MICROPHONE_USAGE_DESCRIPTION =
   "Workhorse records from the microphone so your words can be typed into the unsent draft.";
@@ -88,6 +89,7 @@ export function mapMediaAccessStatus(value: string): MicAccessStatus {
 }
 
 export function microphonePrivacyUrl(platform: NodeJS.Platform, existsSync: (file: string) => boolean): string | null {
+  if (platform === "win32") return WINDOWS_MICROPHONE_PRIVACY_URL;
   if (platform !== "darwin") return null;
   if (existsSync(MAC_SYSTEM_SETTINGS_APP) || existsSync(MAC_SYSTEM_PREFERENCES_APP)) {
     return MAC_MICROPHONE_PRIVACY_URL;
@@ -121,11 +123,19 @@ export function installDeskMediaPermissions(ses: MediaPermissionSession, isDesk:
 }
 
 export function getMicrophoneAccessStatus(deps: Pick<MicAccessDeps, "platform" | "getMediaAccessStatus">): MicAccessStatus {
-  if (deps.platform !== "darwin") return "granted";
+  if (deps.platform !== "darwin" && deps.platform !== "win32") return "granted";
   return mapMediaAccessStatus(deps.getMediaAccessStatus("microphone"));
 }
 
 export async function requestMicrophoneAccess(deps: MicAccessDeps): Promise<MicAccessResult> {
+  if (deps.platform === "win32") {
+    const current = mapMediaAccessStatus(deps.getMediaAccessStatus("microphone"));
+    if (current === "denied" || current === "restricted") {
+      const openedSettings = await openMicPrivacy(deps);
+      return { status: current, granted: false, openedSettings };
+    }
+    return { status: "granted", granted: true };
+  }
   if (deps.platform !== "darwin") {
     return { status: "granted", granted: true };
   }
@@ -172,6 +182,19 @@ export function pickSpeechEngine(osAvailable: boolean, localHostId: string | nul
   if (osAvailable) return "os";
   if (localHostId) return "local-compute";
   return "none";
+}
+
+/** OS speech wins until start() throws. A granted local host then records. */
+export async function speechEngineAfterOsStartFailure(
+  startOs: () => void,
+  resolveLocalHost: () => Promise<string | null>,
+): Promise<SpeechEngine> {
+  try {
+    startOs();
+    return "os";
+  } catch {
+    return pickSpeechEngine(false, await resolveLocalHost());
+  }
 }
 
 export function joinVoiceDraft(existing: string, spoken: string): string {

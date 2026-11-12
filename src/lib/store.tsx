@@ -72,7 +72,7 @@ import {
   shiftQueuedPrompt,
   sidebarKeepsChat,
 } from "./chats";
-import { isTerminalRunStatus, settledWorkers, workerJustSettled } from "./worker-settled";
+import { settledWorkers, workerJustSettled } from "./worker-settled";
 import { foldersToCount, leftInFolderNote, workerLabel } from "./worker-folders";
 import { deskPersistBodyEqual, hotSavePayload, persistDelayMs } from "./desk-persist";
 import { restoredPanel } from "./restored-panel";
@@ -362,6 +362,8 @@ import {
   shouldAutoRouteSpawn,
   parseProviderId,
   userLockedSpawnModel,
+  lockedCursorGrokSpawn,
+  predecessorStillWaiting,
   routingDecisionMatchesSpawn,
   constrainRouteCandidatesForSpawn,
   spawnContinuationHowToUse,
@@ -6298,6 +6300,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             const effectiveExclusions = spawnExclusions(caller, payload.exclude, isNested);
             const orchestrationBench = orchestrationEnabled(caller.crewModes);
             const userLockedModel = userLockedSpawnModel(caller.messages);
+            const cursorGrokLock = lockedCursorGrokSpawn(userLockedModel);
             const coordinatorModel = typeof payload.model === "string" && Boolean(payload.model.trim());
             const routeSpawn = shouldAutoRouteSpawn({
               routingEnabled: latest.settings.routing.enabled,
@@ -6438,8 +6441,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               });
               return;
             }
-            const spawnProvider = routeDecision?.provider ?? payload.provider;
-            const spawnModel = routeDecision?.model ?? payload.model;
+            const spawnProvider = cursorGrokLock?.provider ?? routeDecision?.provider ?? payload.provider;
+            const spawnModel = cursorGrokLock?.model ?? routeDecision?.model ?? payload.model;
             const selectedTier =
               routeDecision?.taskTier ??
               routeTier ??
@@ -6669,7 +6672,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             const waitingOn = spawnAfter.waitFor.filter((item) => item.id !== childId);
             const waitingAtStart = waitingOn.some((item) => {
               const earlier = latest.sessions.find((session) => session.id === item.id);
-              return Boolean(earlier) && !isTerminalRunStatus(earlier?.agentRun?.status);
+              return Boolean(earlier) && predecessorStillWaiting(earlier?.agentRun?.status);
             });
             // The caller learns its child's seat from the spawn result, not
             // from a card the person has to answer. `log` is the main-log line
@@ -6801,6 +6804,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             }
             const childCwd = sessionExecutionCwd(environment, root);
             let claimedLeases = releaseSessionLeases(pathLeasesRef.current, childId);
+            let deferredPathClaim = false;
             if (assignedPaths.length > 0) {
               if (!childCwd || !window.workhorse?.readSourceFile) {
                 await replyAsk({ error: "Path ownership is unavailable for this worker folder." });
@@ -6824,12 +6828,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 // not the label on its role.
                 sandbox: callAccess.granted.sandbox,
                 files,
+                // A path leased only by someone this spawn is waiting on does not
+                // reject the queue. The claim is taken when this worker starts.
+                deferTo: waitingOn.map((item) => item.id),
               });
               if (!claim.ok) {
                 await replyAsk({ error: claim.error });
                 return;
               }
               claimedLeases = claim.leases;
+              deferredPathClaim = claim.deferred === true;
             }
             // Folder/lease preparation awaited I/O. Cancellation may have
             // closed the assignment while this request was preparing.
@@ -7274,34 +7282,58 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             };
             /*
              * A slice that comes after others starts when they have all ended.
-             * If one of them did not finish its work, this one never starts:
-             * its ground was never laid, and a run on it is spent for nothing.
-             * The head reads why in the join. A worker the person or the head
-             * stopped while it waited stays stopped.
+             * Failed still blocks the follower: its ground was never laid.
+             * Cancelled does not. If that same session is running again, keep
+             * waiting. If it stays cancelled, start and put the cancellation
+             * in the after brief. A worker stopped while it waited stays stopped.
              */
+            const claimDeferredPaths = async (): Promise<string | undefined> => {
+              if (!deferredPathClaim) return undefined;
+              if (!childCwd || !window.workhorse?.readSourceFile) return "Path ownership is unavailable for this worker folder.";
+              const fresh: Array<{ path: string; fingerprint: string }> = [];
+              for (const ownedPath of assignedPaths) {
+                const source = await window.workhorse.readSourceFile(ownedPath, [childCwd]);
+                if (!source || source.directory || source.unreadable) return `Cannot lease path: ${ownedPath}.`;
+                fresh.push({ path: ownedPath, fingerprint: fileContentsFingerprint(source.text) });
+              }
+              const taken = claimSharedFiles({
+                leases: releaseSessionLeases(pathLeasesRef.current, childId),
+                sessionId: childId,
+                isolation,
+                role: spawnRole,
+                sandbox: callAccess.granted.sandbox,
+                files: fresh,
+              });
+              if (!taken.ok) return taken.error;
+              flushSync(() => {
+                pathLeasesRef.current = taken.leases;
+                setState((current) => ({ ...current, leases: taken.leases }));
+              });
+              return undefined;
+            };
             const startWhenReady = async (): Promise<string> => {
+              let finished: Array<{ name: string; status: string; report: string; changedFiles?: string[] }> = [];
               if (waitingOn.length > 0) {
                 const deadline = Date.now() + AFTER_WAIT_MS;
-                const stillOpen = () =>
-                  waitingOn.filter((item) => {
-                    const earlier = stateRef.current.sessions.find((session) => session.id === item.id);
-                    return Boolean(earlier) && !isTerminalRunStatus(earlier?.agentRun?.status);
+                const readFinished = () => {
+                  const sessionsNow = stateRef.current.sessions;
+                  const rows = sessionsNow.find((session) => session.id === parent.id)?.lineup?.rows ?? [];
+                  return waitingOn.map((item) => {
+                    const earlier = sessionsNow.find((session) => session.id === item.id);
+                    return {
+                      name: item.name,
+                      status: earlier ? (earlier.agentRun?.status ?? "") : "completed",
+                      report: rows.find((row) => row.childId === item.id)?.report ?? childReportText(earlier) ?? "",
+                      ...(earlier?.agentRun?.changedFiles?.length ? { changedFiles: earlier.agentRun.changedFiles } : {}),
+                    };
                   });
-                while (stillOpen().length > 0 && Date.now() < deadline) {
+                };
+                finished = readFinished();
+                while (finished.some((item) => predecessorStillWaiting(item.status)) && Date.now() < deadline) {
                   await new Promise((resolve) => setTimeout(resolve, AFTER_POLL_MS));
+                  finished = readFinished();
                 }
-                const sessionsNow = stateRef.current.sessions;
-                const rows = sessionsNow.find((session) => session.id === parent.id)?.lineup?.rows ?? [];
-                const finished = waitingOn.map((item) => {
-                  const earlier = sessionsNow.find((session) => session.id === item.id);
-                  return {
-                    name: item.name,
-                    status: earlier?.agentRun?.status ?? "completed",
-                    report: rows.find((row) => row.childId === item.id)?.report ?? childReportText(earlier) ?? "",
-                    ...(earlier?.agentRun?.changedFiles?.length ? { changedFiles: earlier.agentRun.changedFiles } : {}),
-                  };
-                });
-                const open = stillOpen();
+                const open = finished.filter((item) => predecessorStillWaiting(item.status));
                 notStarted = open.length > 0
                   ? `Did not start: ${open.map((item) => item.name).join(", ")} had not finished after ${Math.round(AFTER_WAIT_MS / 3_600_000)} hours.`
                   : afterBlockedReason(finished);
@@ -7310,6 +7342,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                   return "";
                 }
                 if (stateRef.current.sessions.find((session) => session.id === childId)?.agentRun?.status !== "running") return "";
+              }
+              const claimError = await claimDeferredPaths();
+              if (claimError) {
+                notStarted = claimError;
+                markChildFailure(new Error(claimError));
+                return "";
+              }
+              if (waitingOn.length > 0) {
                 afterNote = afterBriefFor(finished);
                 setState((current) => ({
                   ...current,

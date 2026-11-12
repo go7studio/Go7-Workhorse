@@ -327,6 +327,65 @@ test("Always skips the path allowlist; Ask, accept-edits, read-only, and strict 
   }), true);
 });
 
+test("a queued worker accepts a path leased only by the worker it is waiting on", () => {
+  const first = claimSharedFiles({
+    leases: [],
+    sessionId: "wren",
+    isolation: "shared",
+    files: [{ path: "docs/FEATURES.md", fingerprint: fileContentsFingerprint("v1") }],
+    now: 10,
+  });
+  assert.equal(first.ok, true);
+  if (!first.ok) return;
+  const queued = claimSharedFiles({
+    leases: first.leases,
+    sessionId: "dexter",
+    isolation: "shared",
+    files: [{ path: "docs/FEATURES.md", fingerprint: fileContentsFingerprint("v1") }],
+    deferTo: ["wren"],
+    now: 11,
+  });
+  assert.equal(queued.ok, true);
+  if (!queued.ok) return;
+  assert.equal(queued.deferred, true, "the claim waits until the follower starts");
+  assert.equal(queued.leases.some((lease) => lease.sessionId === "dexter"), false);
+  const stranger = claimSharedFiles({
+    leases: first.leases,
+    sessionId: "marlow",
+    isolation: "shared",
+    files: [{ path: "docs/FEATURES.md", fingerprint: fileContentsFingerprint("v1") }],
+    deferTo: ["dexter"],
+  });
+  assert.equal(stranger.ok, false);
+  if (!stranger.ok) assert.match(stranger.error, /Shared-folder claim blocked: docs\/FEATURES\.md already leased/);
+  const mixed = claimSharedFiles({
+    leases: [
+      ...first.leases,
+      { sessionId: "otter", path: "src/lib/store.tsx", fingerprint: "x", claimedAt: 1 },
+    ],
+    sessionId: "dexter",
+    isolation: "shared",
+    files: [
+      { path: "docs/FEATURES.md", fingerprint: fileContentsFingerprint("v1") },
+      { path: "src/lib/store.tsx", fingerprint: fileContentsFingerprint("v1") },
+    ],
+    deferTo: ["wren"],
+  });
+  assert.equal(mixed.ok, false, "a holder outside the wait list still rejects the spawn");
+  const released = releaseSessionLeases(first.leases, "wren");
+  const started = claimSharedFiles({
+    leases: released,
+    sessionId: "dexter",
+    isolation: "shared",
+    files: [{ path: "docs/FEATURES.md", fingerprint: fileContentsFingerprint("v2") }],
+    now: 12,
+  });
+  assert.equal(started.ok, true);
+  if (!started.ok) return;
+  assert.equal(started.deferred, undefined);
+  assert.equal(started.leases.some((lease) => lease.sessionId === "dexter"), true);
+});
+
 test("releasing a session lease lets the next shared writer claim the path", () => {
   const first = claimSharedFiles({
     leases: [],

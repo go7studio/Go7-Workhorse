@@ -4,7 +4,16 @@ import path from "node:path";
 import test from "node:test";
 import { applyAnthropicEvent, buildAnthropicBody, streamCustomHttp, type AnthropicStreamState } from "../electron/custom-http";
 import { lineupJoinPrompt, normalizeLineup } from "../src/lib/lineup";
-import { afterBlockedReason, afterBriefFor, resolveSpawnAfter, spawnContinuationHowToUse } from "../src/lib/subagents";
+import {
+  afterBlockedReason,
+  afterBriefFor,
+  lockedCursorGrokSpawn,
+  predecessorStillWaiting,
+  resolveSpawnAfter,
+  shouldAutoRouteSpawn,
+  spawnContinuationHowToUse,
+  userLockedSpawnModel,
+} from "../src/lib/subagents";
 import { asksForProse, inferTaskDomain } from "../src/lib/task-domain";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
@@ -119,6 +128,21 @@ test("a queued slice starts with the earlier reports, and does not start on a fa
     afterBlockedReason([{ name: "Wren", status: "failed" }, { name: "Dexter", status: "completed" }]),
     "Did not start: Wren failed, and this slice was to come after it.",
   );
+  assert.equal(afterBlockedReason([{ name: "Dexter", status: "cancelled" }]), undefined, "a cancel does not block the follower");
+  assert.equal(
+    afterBlockedReason([{ name: "Wren", status: "failed" }, { name: "Dexter", status: "cancelled" }]),
+    "Did not start: Wren failed, and this slice was to come after it.",
+    "failed still blocks when a sibling was only cancelled",
+  );
+  assert.match(
+    afterBriefFor([{ name: "Dexter", status: "cancelled", report: "stopped early" }]),
+    /Dexter \(cancelled\)\. Cancelled\. Report: stopped early/,
+    "the cancellation is in the after brief",
+  );
+  assert.equal(predecessorStillWaiting("running"), true, "a session that is running again keeps the follower waiting");
+  assert.equal(predecessorStillWaiting("cancelled"), false);
+  assert.equal(predecessorStillWaiting("failed"), false);
+  assert.equal(predecessorStillWaiting("completed"), false);
   assert.match(spawnContinuationHowToUse("Marlow", false, ["Wren", "Dexter"]), /^Marlow starts when Wren and Dexter finish, and gets their reports\./);
   assert.match(spawnContinuationHowToUse("Marlow", false), /^Worker is running in its own chat\./);
 });
@@ -135,6 +159,50 @@ test("after reaches the desk from both spawn doors and holds the row as queued",
   assert.match(store, /void startWhenReady\(\)\.catch\(markChildFailure\);/);
   assert.match(store, /fallback = await startWhenReady\(\);/);
   assert.match(store, /text: afterNote \? `\$\{payload\.message\}\\n\\n\$\{afterNote\}` : payload\.message,/, "the waiting worker gets the earlier reports under its brief");
+  assert.match(store, /deferTo: waitingOn\.map\(\(item\) => item\.id\)/, "a queue accepts a path held only by the worker it waits on");
+  assert.match(store, /predecessorStillWaiting\(item\.status\)/);
+  assert.match(store, /cursorGrokLock\?\.provider \?\? routeDecision\?\.provider \?\? payload\.provider/);
+});
+
+test("Cursor Grok with a space locks Cursor, and grok-4.7 alone may still compete", () => {
+  assert.equal(
+    userLockedSpawnModel([{ role: "user", text: "Please use Cursor Grok 4.7 for this slice." }]),
+    "cursor-grok-4.7",
+  );
+  assert.equal(userLockedSpawnModel([{ role: "user", text: "cursor grok 4.7" }]), "cursor-grok-4.7");
+  assert.equal(userLockedSpawnModel([{ role: "user", text: "use grok-4.7" }]), "grok-4.7");
+  assert.deepEqual(lockedCursorGrokSpawn("cursor-grok-4.7"), { provider: "cursor", model: "grok-4.7-high" });
+  assert.equal(lockedCursorGrokSpawn("grok-4.7"), null);
+  assert.equal(
+    shouldAutoRouteSpawn({
+      routingEnabled: true,
+      provider: "cursor",
+      model: "grok-4.7",
+      coordinatorModel: true,
+    }),
+    false,
+    "an explicit provider on the spawn is a lock",
+  );
+  assert.equal(
+    shouldAutoRouteSpawn({
+      routingEnabled: true,
+      model: "grok-4.7",
+      coordinatorModel: true,
+      userLockedModel: "cursor-grok-4.7",
+    }),
+    false,
+    "the Cursor Grok phrase does not compete with ACP Grok",
+  );
+  assert.equal(
+    shouldAutoRouteSpawn({ routingEnabled: true, model: "grok-4.7", coordinatorModel: true }),
+    true,
+    "grok-4.7 with no vendor and no Cursor phrase may still compete",
+  );
+  assert.equal(
+    shouldAutoRouteSpawn({ routingEnabled: true, provider: "claude" }),
+    true,
+    "a named vendor with no model still ranks its models",
+  );
 });
 
 test("a release note is writing even when it names the code it announces", () => {

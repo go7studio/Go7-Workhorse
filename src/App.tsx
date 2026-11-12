@@ -6,6 +6,7 @@ import { selectSurface, titlebarLabel } from "./lib/surface";
 import { EditContextMenu } from "./ui/EditContextMenu";
 import { InspectWorkspace } from "./ui/InspectWorkspace";
 import { NewProjectSheet } from "./ui/NewProjectSheet";
+import { ChromeAccessCard } from "./ui/ChromeAccessCard";
 import { PermissionCard } from "./ui/PermissionBar";
 import { ProjectHome } from "./ui/ProjectHome";
 import { ReferenceSheet } from "./ui/ReferenceSheet";
@@ -112,6 +113,7 @@ export function App() {
         {surface === "session" && <WorkshopRail />}
       </div>
       <PermissionCard />
+      <ChromeAccessCard />
       <WatchNotices hidden={surface === "project-home"} />
       <NewProjectSheet />
       <ReferenceSheet />

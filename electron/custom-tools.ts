@@ -923,7 +923,6 @@ export async function executeCustomTool(
           // vendor login in its vault. With no `env` at all it inherited the
           // lot, and `printenv WORKHORSE_BRIDGE_TOKEN` was a valid command.
           env: withDeskToolEnv(withoutWorkhorsePrivateEnv(process.env)),
-          windowsHide: true,
           stdio: ["ignore", "pipe", "pipe"],
           ...groupSpawnOptions(),
         });

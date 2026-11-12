@@ -653,6 +653,13 @@ export type Session = {
    * and not Workhorse scheduledRuns. Dropped on load; ACP events refill the strip.
    */
   vendorTasks?: import("./vendor-tasks").VendorBackgroundTask[];
+  /**
+   * Chat-owned Chromium/Playwright sessions (background browser). Not the person's
+   * real Chrome profile. Dropped on load; main refills from the live host.
+   */
+  backgroundBrowsers?: import("./background-browser").BackgroundBrowserSession[];
+  /** Chrome access for browser tools: unset prompts, granted uses Piper, declined is headless. */
+  chromeAccess?: import("./background-browser").ChromeAccessState;
   /** Workhorse-owned context checkpoint used when a provider has no native compaction. */
   contextCheckpoint?: PortableCheckpoint;
   /** Unsent composer text. Kept when leaving this chat. */
@@ -1170,6 +1177,11 @@ export type AppState = {
   activeProjectId: string | null;
   activeSessionId: string | null;
   pending: PermissionRequest[];
+  /**
+   * In-chat Chrome access prompt for browser tools. Not a Settings tab.
+   * Cleared when the person allows or declines.
+   */
+  chromeAccessPrompt?: { sessionId: string; name?: string } | null;
   /** Active path claims. Released when their worker reaches a terminal state. */
   leases?: FileLease[];
   /** Stable ids dismissed from the derived attention inbox. */

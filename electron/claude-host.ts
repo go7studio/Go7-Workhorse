@@ -67,7 +67,6 @@ export function spawnClaudeProcess(spec: ReturnType<typeof buildClaudeLaunchSpec
     cwd: spawnCwd(cwd),
     env,
     stdio: ["pipe", "pipe", "pipe"],
-    windowsHide: true,
     // The CLI leads its own group, so a stop reaches what the CLI started too.
     ...groupSpawnOptions(),
   }) as ChildProcessWithoutNullStreams;

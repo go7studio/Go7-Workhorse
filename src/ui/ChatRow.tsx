@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { chatHasRunningBackgroundBrowser } from "../lib/background-browser";
 import { lastTalkedAt } from "../lib/chats";
 import type { MissionRowLook } from "../lib/lineup";
 import { clampMenuPosition } from "../lib/edit-menu";
@@ -188,10 +189,11 @@ export function ChatRow({
   };
 
   const talkedAt = lastTalkedAt(session);
+  const browserLive = chatHasRunningBackgroundBrowser(session.backgroundBrowsers);
 
   return (
     <div
-      className={`chat-row${nested ? " nested-worker" : ""}${!desk.settingsOpen && session.id === desk.activeSessionId ? " active" : ""}${link ? " peer-link" : ""}${menu || confirmDelete ? " menu-open" : ""}`}
+      className={`chat-row${nested ? " nested-worker" : ""}${!desk.settingsOpen && session.id === desk.activeSessionId ? " active" : ""}${link ? " peer-link" : ""}${menu || confirmDelete ? " menu-open" : ""}${browserLive ? " browser-live" : ""}`}
       ref={root}
       draggable={!renaming}
       onDragStart={(event) => {
@@ -257,6 +259,7 @@ export function ChatRow({
                     : session.status === "needs-input"
                       ? "Needs you"
                       : rowLabel}
+              {browserLive ? <span className="row-state"> · Browser</span> : null}
             </span>
           </span>
           <TimeStamp at={talkedAt} className="row-talked" />

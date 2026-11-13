@@ -259,7 +259,15 @@ import {
   setPlanStepStatus,
   startPlanRun,
 } from "./plan";
-import { applyBackgroundBrowserSession, chromeAccessPromptForBrowserTool } from "./background-browser";
+import {
+  applyBackgroundBrowserSession,
+  applyChromeAccessAnswer,
+  chromeAccessDecision,
+  chromeAccessPromptForBrowserTool,
+  chromeGrantsFromSessions,
+  restoreChromeAccess,
+  restoredChromeAccessPrompt,
+} from "./background-browser";
 import { browserControlRefusal } from "./browser-access";
 import { applyVendorBackgroundTask } from "./vendor-tasks";
 import {
@@ -628,10 +636,15 @@ export type Store = AppState & {
   cycleTheme: () => void;
   toggleWorkhorseTheme: () => void;
   answerPermission: (id: string, answer: "once" | "session" | "deny") => void;
-  /** Show the in-chat Chrome access prompt for browser tools (not a Settings tab). */
+  /** Show the in-chat Chrome access prompt for browser tools. */
   promptChromeAccess: (sessionId: string, name?: string) => void;
-  /** Allow → Piper Chrome path; Decline → start headless background browser. */
-  answerChromeAccess: (sessionId: string, access: "granted" | "declined") => void;
+  /**
+   * This chat saves the allow on that chat. All chats saves it for every chat.
+   * Decline starts a headless browser for this chat.
+   */
+  answerChromeAccess: (sessionId: string, access: "granted" | "declined", scope?: "session" | "always") => void;
+  /** Standing Chrome switch. Off asks each chat that has not answered. */
+  setChromeAlways: (on: boolean) => void;
   demoPermission: () => void;
   recordUsage: (draft: UsageDraft) => void;
   openSettings: (section?: SettingsSection) => void;
@@ -1087,6 +1100,10 @@ function hydrate(value: unknown, liveRunIds?: ReadonlySet<string>): AppState {
           ? record.settingsSection
           : "profile",
     settings,
+    chromeAccessPrompt: restoredChromeAccessPrompt(record.chromeAccessPrompt, {
+      deskAlways: settings.chromeAlways === true,
+      sessions,
+    }),
     watchPermits: normalizeWatchPermits((record as { watchPermits?: unknown }).watchPermits),
     watchDayMarks: normalizeWatchDayMarks((record as { watchDayMarks?: unknown }).watchDayMarks),
     deskPlans: (record as { deskPlans?: AppState["deskPlans"] }).deskPlans,
@@ -1529,6 +1546,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const saved = window.workhorse ? await window.workhorse.loadState() : null;
       if (!cancelled) {
         const next = hydrate(saved, new Set(live));
+        await restoreChromeAccess(
+          { deskAlways: next.settings.chromeAlways === true, grants: chromeGrantsFromSessions(next.sessions) },
+          {
+            setAlways: window.workhorse?.backgroundBrowserSetChromeAlways,
+            setSession: window.workhorse?.backgroundBrowserSetChromeAccess,
+          },
+        );
+        if (cancelled) return;
         setState(next);
         setReady(true);
         void (async () => {
@@ -2618,6 +2643,38 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const elevatePeerReply = useRef<Map<string, (result: { text?: string; error?: string }) => void>>(new Map());
 
+  /**
+   * Write the desk now. A Chrome click cannot wait on the live-turn timer:
+   * quit only finishes a save the window has already sent.
+   */
+  const persistDeskNow = useCallback((next: AppState) => {
+    stateRef.current = next;
+    setState(next);
+    persistBody.current = next;
+    if (persistTimer.current) {
+      window.clearTimeout(persistTimer.current);
+      persistTimer.current = null;
+    }
+    persistDirtySince.current = null;
+    if (!window.workhorse?.saveState) return;
+    const saved = listedChats(applyComposerDrafts(next.sessions, composerDraftsRef.current));
+    const activeSessionId =
+      next.activeSessionId && saved.some((session) => session.id === next.activeSessionId)
+        ? next.activeSessionId
+        : null;
+    persistSentRefs.current = new Map(saved.map((session) => [session.id, session]));
+    void window.workhorse
+      .saveState({
+        ...next,
+        sessions: saved,
+        activeSessionId,
+      })
+      .then((outcome) => {
+        if (outcome?.reset) persistSentRefs.current = new Map();
+      })
+      .catch(() => undefined);
+  }, []);
+
   const promptChromeAccess = useCallback((sessionId: string, name?: string) => {
     const id = sessionId.trim();
     if (!id) return;
@@ -2627,30 +2684,63 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }));
   }, []);
 
-  const answerChromeAccess = useCallback((sessionId: string, access: "granted" | "declined") => {
+  const answerChromeAccess = useCallback((sessionId: string, access: "granted" | "declined", scope: "session" | "always" = "session") => {
     const id = sessionId.trim();
     if (!id) return;
-    setState((current) => ({
+    const current = stateRef.current;
+    const decision = applyChromeAccessAnswer({
+      access,
+      scope,
+      deskAlways: current.settings.chromeAlways === true,
+    });
+    const sessionAccess = decision.sessionAccess;
+    const next: AppState = {
       ...current,
-      chromeAccessPrompt: current.chromeAccessPrompt?.sessionId === id ? null : current.chromeAccessPrompt,
-      sessions: current.sessions.map((session) =>
-        session.id === id ? { ...session, chromeAccess: access } : session,
-      ),
-    }));
+      chromeAccessPrompt:
+        decision.clearPrompt && current.chromeAccessPrompt?.sessionId === id ? null : current.chromeAccessPrompt,
+      settings:
+        decision.deskAlways === current.settings.chromeAlways
+          ? current.settings
+          : { ...current.settings, chromeAlways: decision.deskAlways },
+      sessions: sessionAccess
+        ? current.sessions.map((session) =>
+            session.id === id ? { ...session, chromeAccess: sessionAccess } : session,
+          )
+        : current.sessions,
+    };
+    persistDeskNow(next);
+    if (!decision.start || !sessionAccess) return;
+    const start = decision.start;
     void (async () => {
-      const recorded = await window.workhorse?.backgroundBrowserSetChromeAccess?.(id, access);
-      if (recorded !== access) return;
+      if (decision.deskAlways) await window.workhorse?.backgroundBrowserSetChromeAlways?.(true);
+      const recorded = await window.workhorse?.backgroundBrowserSetChromeAccess?.(id, sessionAccess);
+      if (recorded !== sessionAccess) return;
       const session = stateRef.current.sessions.find((item) => item.id === id);
       if (browserControlRefusal({ permissionMode: session?.mode, sandbox: session?.sandbox })) return;
       await window.workhorse?.backgroundBrowserStart?.({
         sessionId: id,
-        name: access === "granted" ? "Chrome" : "Background browser",
-        preferHeadless: access !== "granted",
+        name: start === "chrome" ? "Chrome" : "Background browser",
+        preferHeadless: start !== "chrome",
         permissionMode: session?.mode,
         sandbox: session?.sandbox,
       });
     })();
-  }, []);
+  }, [persistDeskNow]);
+
+  const setChromeAlways = useCallback((on: boolean) => {
+    const enabled = on === true;
+    const current = stateRef.current;
+    if (current.settings.chromeAlways === enabled && (!enabled || !current.chromeAccessPrompt)) {
+      void window.workhorse?.backgroundBrowserSetChromeAlways?.(enabled);
+      return;
+    }
+    persistDeskNow({
+      ...current,
+      settings: { ...current.settings, chromeAlways: enabled },
+      chromeAccessPrompt: enabled ? null : current.chromeAccessPrompt,
+    });
+    void window.workhorse?.backgroundBrowserSetChromeAlways?.(enabled);
+  }, [persistDeskNow]);
 
   const answerPermission = useCallback((id: string, answer: "once" | "session" | "deny") => {
     const pending = stateRef.current.pending.find((item) => item.id === id);
@@ -7930,7 +8020,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const raiseBrowserAccess = (sessionId: string, tool: string) => {
       const owner = stateRef.current.sessions.find((item) => item.id === sessionId);
       if (browserControlRefusal({ permissionMode: owner?.mode, sandbox: owner?.sandbox })) return;
-      if (!chromeAccessPromptForBrowserTool(tool, owner?.chromeAccess)) return;
+      if (!chromeAccessPromptForBrowserTool(tool, owner?.chromeAccess, stateRef.current.settings.chromeAlways)) return;
       if (stateRef.current.chromeAccessPrompt?.sessionId === sessionId) return;
       promptChromeAccess(sessionId, tool);
       void window.workhorse?.backgroundBrowserEnsure?.({
@@ -9015,6 +9105,19 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const offCustom = window.workhorse?.onCustomEvent?.(apply);
     const offBrowser = window.workhorse?.onBackgroundBrowserEvent?.((event) => {
       if (event.type === "chrome-prompt") {
+        const current = stateRef.current;
+        const owner = current.sessions.find((session) => session.id === event.sessionId);
+        const decision = chromeAccessDecision({
+          sessionAccess: owner?.chromeAccess,
+          deskAlways: current.settings.chromeAlways === true,
+        });
+        if (decision !== "unset") {
+          if (current.settings.chromeAlways) void window.workhorse?.backgroundBrowserSetChromeAlways?.(true);
+          if (owner?.chromeAccess === "granted" || owner?.chromeAccess === "declined") {
+            void window.workhorse?.backgroundBrowserSetChromeAccess?.(event.sessionId, owner.chromeAccess);
+          }
+          return;
+        }
         promptChromeAccess(event.sessionId, event.name);
         return;
       }
@@ -10296,6 +10399,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       answerPermission,
       promptChromeAccess,
       answerChromeAccess,
+      setChromeAlways,
       demoPermission,
       recordUsage,
       openSettings,
@@ -10459,6 +10563,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       answerPermission,
       promptChromeAccess,
       answerChromeAccess,
+      setChromeAlways,
       demoPermission,
       recordUsage,
       openSettings,

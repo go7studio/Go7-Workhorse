@@ -1,12 +1,20 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import type { ChildProcess, SpawnOptions } from "node:child_process";
 import { BackgroundBrowserHost } from "../electron/background-browser-host";
 import { createGrantedChromeLauncher } from "../electron/chrome-host";
 import { groupSpawnOptions } from "../electron/process-registry";
-import { requestsBackgroundBrowser } from "../src/lib/background-browser";
+import {
+  applyChromeAccessAnswer,
+  chromeAccessPromptLabel,
+  requestsBackgroundBrowser,
+  restoredChromeAccessPrompt,
+} from "../src/lib/background-browser";
+import { normalizeSession } from "../src/lib/session";
+import { normalizeSettings } from "../src/lib/settings";
 import {
   CHROME_ACCESS_QUESTION,
   CHROME_EVALUATE_REFUSAL,
@@ -54,6 +62,78 @@ function toolClient(calls: string[]): ChromeToolClient {
     },
   };
 }
+
+test("this chat's Chrome allow survives a reload, and All chats is a saved desk switch", () => {
+  assert.equal(normalizeSettings({}).chromeAlways, false);
+  assert.equal(normalizeSettings({ chromeAlways: true }).chromeAlways, true);
+  assert.equal(normalizeSettings({ chromeAlways: "yes" }).chromeAlways, false);
+  const granted = normalizeSession({ id: "chat", title: "Chat", provider: "cursor", chromeAccess: "granted" });
+  assert.equal(granted?.chromeAccess, "granted");
+  assert.equal(normalizeSession(JSON.parse(JSON.stringify(granted)))?.chromeAccess, "granted");
+  assert.equal(normalizeSession({ id: "chat", chromeAccess: "declined" })?.chromeAccess, "declined");
+  assert.equal(normalizeSession({ id: "chat", chromeAccess: "unset" })?.chromeAccess, undefined);
+  assert.equal(normalizeSession({ id: "chat", chromeAccess: "always" })?.chromeAccess, undefined);
+});
+
+test("a Chrome click names the chat, writes on the click, and Decline under All chats only closes the card", () => {
+  assert.equal(chromeAccessPromptLabel("Remove Gemini Login"), "Remove Gemini Login");
+  assert.equal(chromeAccessPromptLabel("  "), "This chat");
+  assert.equal(chromeAccessPromptLabel(undefined), "This chat");
+
+  const session = applyChromeAccessAnswer({ access: "granted", scope: "session", deskAlways: false });
+  assert.equal(session.deskAlways, false);
+  assert.equal(session.sessionAccess, "granted");
+  assert.equal(session.start, "chrome");
+
+  const every = applyChromeAccessAnswer({ access: "granted", scope: "always", deskAlways: false });
+  assert.equal(every.deskAlways, true);
+  assert.equal(every.sessionAccess, "granted");
+  assert.equal(every.clearPrompt, true);
+
+  const hidden = applyChromeAccessAnswer({ access: "declined", deskAlways: true });
+  assert.equal(hidden.sessionAccess, null);
+  assert.equal(hidden.start, null);
+  assert.equal(hidden.clearPrompt, true);
+  assert.equal(hidden.deskAlways, true);
+
+  const declined = applyChromeAccessAnswer({ access: "declined", deskAlways: false });
+  assert.equal(declined.sessionAccess, "declined");
+  assert.equal(declined.start, "headless");
+
+  assert.equal(
+    restoredChromeAccessPrompt(
+      { sessionId: "chat", name: "browser_navigate" },
+      { deskAlways: true, sessions: [{ id: "chat" }] },
+    ),
+    null,
+  );
+  assert.equal(
+    restoredChromeAccessPrompt(
+      { sessionId: "chat", name: "browser_navigate" },
+      { deskAlways: false, sessions: [{ id: "chat", chromeAccess: "granted" }] },
+    ),
+    null,
+  );
+  assert.deepEqual(
+    restoredChromeAccessPrompt(
+      { sessionId: "chat", name: "browser_navigate" },
+      { deskAlways: false, sessions: [{ id: "chat" }] },
+    ),
+    { sessionId: "chat", name: "browser_navigate" },
+  );
+
+  const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
+  const store = readFileSync(path.join(root, "src/lib/store.tsx"), "utf8");
+  const answer = store.slice(store.indexOf("const answerChromeAccess"), store.indexOf("const setChromeAlways"));
+  assert.match(answer, /persistDeskNow\(next\)/);
+  assert.ok(answer.indexOf("persistDeskNow(next)") < answer.indexOf("backgroundBrowserStart"));
+  const always = store.slice(store.indexOf("const setChromeAlways"), store.indexOf("const answerPermission"));
+  assert.match(always, /persistDeskNow/);
+  assert.match(always, /chromeAccessPrompt: enabled \? null/);
+  const card = readFileSync(path.join(root, "src/ui/ChromeAccessCard.tsx"), "utf8");
+  assert.match(card, /chromeAccessPromptLabel\(session\?\.title\)/);
+  assert.doesNotMatch(card, /chromeAccessPrompt\.name/);
+});
 
 test("the chat asks before Chrome is used", () => {
   assert.equal(CHROME_ACCESS_QUESTION, "Allow this chat to access your Chrome?");

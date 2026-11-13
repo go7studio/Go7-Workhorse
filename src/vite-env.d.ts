@@ -187,6 +187,7 @@ type WorkhorseBridge = {
     sessionId: string,
     access: import("./lib/background-browser").ChromeAccessState,
   ) => Promise<import("./lib/background-browser").ChromeAccessState>;
+  backgroundBrowserSetChromeAlways?: (on: boolean) => Promise<boolean>;
   backgroundBrowserEnsure?: (input: {
     sessionId: string;
     name?: string;

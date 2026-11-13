@@ -1923,6 +1923,7 @@
 
 .permission-card .actions {
   justify-content: flex-end;
+  flex-wrap: wrap;
   margin-top: 4px;
   position: sticky;
   bottom: 0;

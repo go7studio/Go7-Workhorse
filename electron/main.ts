@@ -1032,7 +1032,8 @@ const codexHost = new CodexSessionHost();
 const terminalHost = new TerminalHost();
 /*
  * Chat-owned background browser (Playwright/Chromium under userData).
- * Piper Chrome grant: setChromeAccess("granted"). Decline → headless.
+ * Piper Chrome grant: setChromeAccess("granted") for this chat.
+ * setChromeAlways(true) allows every chat and survives a restart. Decline → headless.
  * Wren mic + Dexter Computer seat hook into the same quit list / preload
  * surface nearby — do not invent a Settings tab for any of these.
  */
@@ -1905,6 +1906,9 @@ app.whenReady().then(async () => {
       return "unset";
     }
     return backgroundBrowserHost.setChromeAccess(sessionId, access, (payload) => emitBackgroundBrowser(event, payload));
+  });
+  ipcMain.handle("backgroundBrowser:setChromeAlways", (_event, on: unknown) => {
+    return backgroundBrowserHost.setDeskChromeAlways(on === true);
   });
   ipcMain.handle("backgroundBrowser:ensure", async (event, raw: unknown) => {
     return backgroundBrowserHost.ensureBrowser(browserLaunchInput(raw), (payload) => emitBackgroundBrowser(event, payload));

@@ -1,16 +1,20 @@
+import { chromeAccessDecision, chromeAccessPromptLabel } from "../lib/background-browser";
 import { CHROME_ACCESS_QUESTION } from "../lib/browser-access";
 import { useStore } from "../lib/store";
 
 /**
  * In-chat Chrome access prompt for browser tools.
- * Allow launches installed Chrome on a desk-owned profile. Decline starts the headless session.
- * Not a Settings tab.
+ * This chat keeps the allow on that chat. All chats allows every chat.
+ * Both stay after a restart. Decline starts the headless session.
  */
 export function ChromeAccessCard() {
-  const { chromeAccessPrompt, answerChromeAccess, sessions } = useStore();
+  const { chromeAccessPrompt, answerChromeAccess, sessions, settings } = useStore();
   if (!chromeAccessPrompt?.sessionId) return null;
   const session = sessions.find((item) => item.id === chromeAccessPrompt.sessionId);
-  const label = chromeAccessPrompt.name?.trim() || session?.title || "This chat";
+  if (chromeAccessDecision({ sessionAccess: session?.chromeAccess, deskAlways: settings.chromeAlways }) !== "unset") {
+    return null;
+  }
+  const label = chromeAccessPromptLabel(session?.title);
 
   return (
     <div className="palette-overlay permission-overlay" role="dialog" aria-modal="true">
@@ -20,7 +24,7 @@ export function ChromeAccessCard() {
         </div>
         <strong>{CHROME_ACCESS_QUESTION}</strong>
         <span className="permission-detail">
-          {label} asked for a browser. Allow controls installed Chrome with navigate, snapshot, click, fill, screenshot, and console, in a profile under Workhorse. Your Chrome profile is used only when this chat explicitly asks for it. Decline keeps a headless browser for this chat. Always permission does not attach your Chrome profile.
+          {label} asked for a browser. This chat keeps that allow after a restart. All chats allows every chat and stays on after a restart. Both use installed Chrome with navigate, snapshot, click, fill, screenshot, and console, in a profile under Workhorse. Your Chrome profile is used only when a chat explicitly asks for it. Decline stays on this chat and keeps a headless browser. Always permission does not attach your Chrome profile.
         </span>
         <div className="actions">
           <button
@@ -33,9 +37,15 @@ export function ChromeAccessCard() {
           <button
             className="primary"
             type="button"
-            onClick={() => answerChromeAccess(chromeAccessPrompt.sessionId, "granted")}
+            onClick={() => answerChromeAccess(chromeAccessPrompt.sessionId, "granted", "session")}
           >
-            Allow Chrome
+            This chat
+          </button>
+          <button
+            type="button"
+            onClick={() => answerChromeAccess(chromeAccessPrompt.sessionId, "granted", "always")}
+          >
+            All chats
           </button>
         </div>
       </div>

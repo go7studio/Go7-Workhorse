@@ -1084,6 +1084,11 @@ export type Settings = {
   workshop: import("./workshop-pack").WorkshopSettings;
   /** Days a finished worker's transcript stays in the desk file. Nought keeps every row in it. */
   retentionDays: number;
+  /**
+   * Installed Chrome is allowed for every chat, including after a restart.
+   * Off leaves the choice on each chat.
+   */
+  chromeAlways: boolean;
 };
 
 export type UsageRange = "today" | "week" | "month" | "all";

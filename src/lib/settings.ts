@@ -64,6 +64,8 @@ export const DEFAULT_SETTINGS: Settings = {
   localCompute: structuredClone(DEFAULT_LOCAL_COMPUTE_SETTINGS),
   workshop: structuredClone(DEFAULT_WORKSHOP_SETTINGS),
   retentionDays: RETENTION_DAYS_DEFAULT,
+  /** All chats may use installed Chrome. Off asks each chat that has not answered. */
+  chromeAlways: false,
 };
 
 export function normalizeRouting(raw: unknown): RoutingSettings {
@@ -467,6 +469,7 @@ export function normalizeSettings(raw: unknown): Settings {
     localCompute: normalizeLocalComputeSettings((record as { localCompute?: unknown }).localCompute),
     workshop: normalizeWorkshopSettings((record as { workshop?: unknown }).workshop),
     retentionDays: normalizeRetentionDays((record as { retentionDays?: unknown }).retentionDays),
+    chromeAlways: (record as { chromeAlways?: unknown }).chromeAlways === true,
   };
 }
 

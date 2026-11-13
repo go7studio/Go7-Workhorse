@@ -16,6 +16,8 @@ import {
   applyBackgroundBrowserSession,
   chatHasRunningBackgroundBrowser,
   chromeAccessPromptForBrowserTool,
+  chromeGrantsFromSessions,
+  restoreChromeAccess,
   refusesDesktopInput,
   refusesDesktopScreenshotClickFallback,
   refusesDoubleFork,
@@ -92,6 +94,8 @@ test("a browser tool name asks for Chrome access and a search does not", () => {
   assert.equal(chromeAccessPromptForBrowserTool("browser_navigate", "unset"), true);
   assert.equal(chromeAccessPromptForBrowserTool("browser_navigate", "declined"), false);
   assert.equal(chromeAccessPromptForBrowserTool("browser_navigate", "granted"), false);
+  assert.equal(chromeAccessPromptForBrowserTool("browser_navigate", "unset", true), false);
+  assert.equal(chromeAccessPromptForBrowserTool("browser_navigate", "declined", true), false);
 });
 
 function launchRequest(mode: BackgroundBrowserLaunchRequest["mode"], windowsHide: boolean): BackgroundBrowserLaunchRequest {
@@ -382,6 +386,70 @@ test("applyBackgroundBrowserSession keeps running rows and chatHasRunningBackgro
   assert.equal(list.length, 2);
   assert.equal(chatHasRunningBackgroundBrowser(list), true);
   assert.equal(chatHasRunningBackgroundBrowser([{ ...running, status: "killed", endedAt: 200 }]), false);
+});
+
+test("All chats is the same grant on darwin and win32, and a session grant stays on that chat", async () => {
+  for (const platform of ["darwin", "win32"] as const) {
+    const modes: string[] = [];
+    const host = new BackgroundBrowserHost({
+      userData: path.join("/tmp", "workhorse-bb-always", platform),
+      platform,
+      mkdir: () => undefined,
+      launcher: async (request) => {
+        modes.push(`${request.mode}:${request.attachRealProfile === true ? "real" : "desk"}`);
+        assert.equal(request.chromeAccess, "granted");
+        return { child: fakeChild() as unknown as ChildProcess };
+      },
+    });
+    assert.equal(host.getChromeAccess("fresh"), "unset");
+    host.setDeskChromeAlways(true);
+    assert.equal(host.getChromeAccess("fresh"), "granted");
+    host.setChromeAccess("declined-chat", "declined");
+    assert.equal(host.getChromeAccess("declined-chat"), "granted");
+    const events: BackgroundBrowserEvent[] = [];
+    const started = await host.ensureBrowser(
+      { sessionId: "fresh", permissionMode: "always-approve", sandbox: "off" },
+      (event) => events.push(event),
+    );
+    assert.equal(started.ok, true);
+    if (started.ok) assert.equal(started.session.mode, "chrome");
+    assert.equal(events.some((event) => event.type === "chrome-prompt"), false);
+    assert.deepEqual(modes, ["chrome:desk"]);
+    assert.equal(host.setDeskChromeAlways(false), false);
+    assert.equal(host.getChromeAccess("fresh"), "unset");
+    assert.equal(host.getChromeAccess("declined-chat"), "declined");
+    host.setChromeAccess("one-chat", "granted");
+    assert.equal(host.getChromeAccess("one-chat"), "granted");
+    assert.equal(host.getChromeAccess("other-chat"), "unset");
+  }
+});
+
+test("a restart restores All chats before per-chat grants", async () => {
+  const calls: string[] = [];
+  const grants = chromeGrantsFromSessions([
+    { id: "keep", chromeAccess: "granted" },
+    { id: "skip", chromeAccess: "unset" },
+    { id: "headless", chromeAccess: "declined" },
+  ]);
+  await restoreChromeAccess(
+    { deskAlways: true, grants },
+    {
+      setAlways: (on) => {
+        calls.push(on ? "always" : "ask");
+      },
+      setSession: (id, access) => {
+        calls.push(`${id}:${access}`);
+      },
+    },
+  );
+  assert.deepEqual(calls, ["always", "keep:granted", "headless:declined"]);
+  calls.length = 0;
+  await restoreChromeAccess({ deskAlways: false, grants: [] }, {
+    setAlways: (on) => {
+      calls.push(on ? "always" : "ask");
+    },
+  });
+  assert.deepEqual(calls, ["ask"]);
 });
 
 test("groupSpawnOptions always hides the Windows console", () => {

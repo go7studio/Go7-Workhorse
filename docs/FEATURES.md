@@ -178,12 +178,17 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
   that seat is granted on the chat. It is not a desktop takeover of the login
   session by default.
 - **Chrome access prompt** — before a chat uses Chrome, it asks "Allow this
-  chat to access your Chrome?" Allow controls installed Chrome through
+  chat to access your Chrome?" This chat keeps that allow on the chat after
+  a restart. Decline stays on that chat after a restart. All chats allows
+  every chat and stays on after a restart, and it closes a card that is still
+  open. The choice is written on the click. Settings → LLMs, under Desk
+  access, can switch that standing allow off; a chat that already allowed
+  Chrome keeps its own allow. Allow controls installed Chrome through
   navigate, snapshot, click, fill, screenshot, and console. There is no page
   script in this version. The profile stays under Workhorse userData unless
   the chat explicitly attaches the person’s Chrome profile. Permission Always
   does not attach that profile. Plan, read-only, and strict refuse browser
-  control.
+  control. The same choice is used on macOS and Windows.
 - **Background browser session** — on Decline, the chat owns a headless
   Chromium session under Workhorse userData. A missing Playwright driver fails
   that start instead of leaving a running session. A small strip shows name,

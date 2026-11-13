@@ -111,6 +111,8 @@ contextBridge.exposeInMainWorld("workhorse", {
     ipcRenderer.invoke("backgroundBrowser:setChromeAccess", sessionId, access) as Promise<
       import("../src/lib/background-browser").ChromeAccessState
     >,
+  backgroundBrowserSetChromeAlways: (on: boolean) =>
+    ipcRenderer.invoke("backgroundBrowser:setChromeAlways", on) as Promise<boolean>,
   backgroundBrowserEnsure: (input: {
     sessionId: string;
     name?: string;

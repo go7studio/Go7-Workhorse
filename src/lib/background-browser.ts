@@ -76,9 +76,114 @@ export function requestsBackgroundBrowser(tool: string): boolean {
   return BROWSER_TOOL_TOKENS.has(first);
 }
 
+/**
+ * All chats wins over a saved decline. A saved grant or decline is this chat
+ * only. Unset is the prompt. The same rule runs on macOS and Windows.
+ */
+export function chromeAccessDecision(input: {
+  sessionAccess?: ChromeAccessState | null;
+  deskAlways?: boolean;
+}): ChromeAccessState {
+  if (input.deskAlways) return "granted";
+  if (input.sessionAccess === "granted" || input.sessionAccess === "declined") return input.sessionAccess;
+  return "unset";
+}
+
+/** The card names the chat. A tool name is not a chat. */
+export function chromeAccessPromptLabel(sessionTitle?: string | null): string {
+  const title = sessionTitle?.trim();
+  return title || "This chat";
+}
+
+/**
+ * What a click on the Chrome card writes.
+ * All chats already on means Decline only closes the card. It does not
+ * hide a headless answer under that switch.
+ */
+export function applyChromeAccessAnswer(input: {
+  access: "granted" | "declined";
+  scope?: "session" | "always";
+  deskAlways: boolean;
+}): {
+  deskAlways: boolean;
+  sessionAccess: "granted" | "declined" | null;
+  clearPrompt: boolean;
+  start: "chrome" | "headless" | null;
+} {
+  const always = input.access === "granted" && input.scope === "always";
+  if (input.access === "declined" && input.deskAlways) {
+    return { deskAlways: true, sessionAccess: null, clearPrompt: true, start: null };
+  }
+  if (always) {
+    return { deskAlways: true, sessionAccess: "granted", clearPrompt: true, start: "chrome" };
+  }
+  if (input.access === "granted") {
+    return { deskAlways: input.deskAlways, sessionAccess: "granted", clearPrompt: true, start: "chrome" };
+  }
+  return { deskAlways: input.deskAlways, sessionAccess: "declined", clearPrompt: true, start: "headless" };
+}
+
+/**
+ * An open card is not a saved answer. Drop it when the desk or that chat
+ * has already decided, so a restart does not ask again.
+ */
+export function restoredChromeAccessPrompt(
+  raw: unknown,
+  input: {
+    deskAlways: boolean;
+    sessions: readonly { id: string; chromeAccess?: ChromeAccessState | null }[];
+  },
+): { sessionId: string; name?: string } | null {
+  if (!raw || typeof raw !== "object") return null;
+  const sessionId = (raw as { sessionId?: unknown }).sessionId;
+  if (typeof sessionId !== "string" || !sessionId.trim()) return null;
+  const id = sessionId.trim();
+  const session = input.sessions.find((item) => item.id === id);
+  if (chromeAccessDecision({ sessionAccess: session?.chromeAccess, deskAlways: input.deskAlways }) !== "unset") {
+    return null;
+  }
+  const name = (raw as { name?: unknown }).name;
+  return { sessionId: id, ...(typeof name === "string" && name.trim() ? { name: name.trim() } : {}) };
+}
+
+export type ChromeAccessGrant = { id: string; access: "granted" | "declined" };
+
+export function chromeGrantsFromSessions(
+  sessions: readonly { id: string; chromeAccess?: ChromeAccessState | null }[],
+): ChromeAccessGrant[] {
+  const grants: ChromeAccessGrant[] = [];
+  for (const session of sessions) {
+    if (session.chromeAccess === "granted" || session.chromeAccess === "declined") {
+      grants.push({ id: session.id, access: session.chromeAccess });
+    }
+  }
+  return grants;
+}
+
+/**
+ * Push the saved desk grant before any per-chat grant. All chats has to be
+ * on the host before a browser tool can run, or a restart asks again.
+ */
+export async function restoreChromeAccess(
+  input: { deskAlways: boolean; grants: readonly ChromeAccessGrant[] },
+  bridge: {
+    setAlways?: (on: boolean) => Promise<unknown> | unknown;
+    setSession?: (id: string, access: "granted" | "declined") => Promise<unknown> | unknown;
+  },
+): Promise<void> {
+  await bridge.setAlways?.(input.deskAlways);
+  for (const grant of input.grants) {
+    await bridge.setSession?.(grant.id, grant.access);
+  }
+}
+
 /** Unset Chrome access plus a browser tool is the in-chat Allow/Decline card. */
-export function chromeAccessPromptForBrowserTool(tool: string, access: ChromeAccessState | undefined): boolean {
-  return (access ?? "unset") === "unset" && requestsBackgroundBrowser(tool);
+export function chromeAccessPromptForBrowserTool(
+  tool: string,
+  access: ChromeAccessState | undefined,
+  deskAlways = false,
+): boolean {
+  return chromeAccessDecision({ sessionAccess: access, deskAlways }) === "unset" && requestsBackgroundBrowser(tool);
 }
 
 export function resolveBackgroundBrowserMode(

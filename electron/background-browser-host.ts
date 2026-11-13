@@ -2,6 +2,7 @@ import { spawn, type ChildProcess, type SpawnOptions } from "node:child_process"
 import fs from "node:fs";
 import path from "node:path";
 import {
+  chromeAccessDecision,
   clipBrowserName,
   refusesDesktopInput,
   refusesDesktopScreenshotClickFallback,
@@ -305,6 +306,8 @@ export async function defaultBackgroundBrowserLauncher(
 export class BackgroundBrowserHost {
   private readonly slots = new Map<string, Slot>();
   private readonly chromeAccess = new Map<string, ChromeAccessState>();
+  /** Saved desk switch. Same decision on macOS and Windows. */
+  private deskAlways = false;
   private readonly userData: string;
   private readonly spawnImpl: typeof spawn;
   private readonly launcher: BackgroundBrowserLauncher;
@@ -327,7 +330,16 @@ export class BackgroundBrowserHost {
   }
 
   getChromeAccess(sessionId: string): ChromeAccessState {
-    return this.chromeAccess.get(sessionId.trim()) ?? "unset";
+    return chromeAccessDecision({
+      sessionAccess: this.chromeAccess.get(sessionId.trim()),
+      deskAlways: this.deskAlways,
+    });
+  }
+
+  /** All chats. Does not erase a per-chat grant or decline. */
+  setDeskChromeAlways(on: boolean): boolean {
+    this.deskAlways = on === true;
+    return this.deskAlways;
   }
 
   setChromeAccess(sessionId: string, access: ChromeAccessState, emit?: (event: BackgroundBrowserEvent) => void): ChromeAccessState {

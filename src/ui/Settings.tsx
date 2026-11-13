@@ -1327,6 +1327,36 @@ function DeskAccessBlock() {
           </div>
         </div>
       </div>
+      <div className="settings-row">
+        <div className="settings-row-copy">
+          <strong>Chrome</strong>
+          <span>
+            All chats keeps installed Chrome allowed after a restart and closes an open Chrome card. Ask each chat asks a chat that has not answered. A decline stays on that chat.
+          </span>
+        </div>
+        <div className="settings-control">
+          <div className="actions" role="radiogroup" aria-label="Chrome access">
+            <button
+              className={store.settings.chromeAlways ? "tiny" : "tiny active-kind"}
+              type="button"
+              role="radio"
+              aria-checked={!store.settings.chromeAlways}
+              onClick={() => store.setChromeAlways(false)}
+            >
+              Ask each chat
+            </button>
+            <button
+              className={store.settings.chromeAlways ? "tiny active-kind" : "tiny"}
+              type="button"
+              role="radio"
+              aria-checked={store.settings.chromeAlways === true}
+              onClick={() => store.setChromeAlways(true)}
+            >
+              All chats
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

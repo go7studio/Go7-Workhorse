@@ -405,6 +405,9 @@ export function normalizeSession(raw: unknown, liveRunIds?: ReadonlySet<string>)
       normalizeSessionEnvironment(record.environment),
       typeof record.id === "string" && liveRunIds ? liveRunIds.has(record.id) : false,
     ),
+    ...(record.chromeAccess === "granted" || record.chromeAccess === "declined"
+      ? { chromeAccess: record.chromeAccess }
+      : {}),
     lineup: normalizeLineup(record.lineup),
     planRun: normalizePlanRun(record.planRun),
     routingMode: record.routingMode === "auto" ? "auto" : "manual",

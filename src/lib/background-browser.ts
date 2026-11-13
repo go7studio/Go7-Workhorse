@@ -36,7 +36,7 @@ const DOUBLE_FORK_RE =
 
 /** Desktop input into the person's login session — never a browser fallback. */
 const DESKTOP_INPUT_RE =
-  /\b(robotjs|nut\.js|@nut-tree|cliclick|screencapture\s+-i|desktopCapturer|CGEventPost|SendInput|keybd_event)\b/i;
+  /\b(robotjs|nut\.js|@nut-tree|cliclick|screencapture\s+-i|desktopCapturer|CGEventPost|SendInput|keybd_event|mouse_event|SendKeys)\b/i;
 
 export function clipBrowserName(value: string): string {
   const text = value.replace(/\s+/g, " ").trim();

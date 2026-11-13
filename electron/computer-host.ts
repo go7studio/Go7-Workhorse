@@ -3,9 +3,11 @@ import {
   actionOnApp,
   computerSeatAllows,
   computerSettingsUrl,
+  displayComputerApp,
   guiShellRefusal,
   isComputerAction,
   judgeComputerTool,
+  sameComputerApp,
   userDeclinedComputer,
   type ComputerAction,
   type ComputerOsGrant,
@@ -127,20 +129,21 @@ export async function runComputerAction(
       "The OS did not name the frontmost app. This call did not run.",
     );
   }
-  if (action === "frontmost") return { ok: true, message: front, ran: false, app: front };
+  const frontLabel = io.platform === "win32" ? displayComputerApp(front) : front;
+  if (action === "frontmost") return { ok: true, message: frontLabel, ran: false, app: frontLabel };
 
-  const app = (input.app?.trim() || front).trim();
+  const app = (input.app?.trim() || frontLabel).trim();
   if (input.declined) return { ok: false, message: userDeclinedComputer(app), ran: false, app };
   const named = actionOnApp(action, app);
   if (!named.ok) return { ok: false, message: named.message, ran: false, app };
-  const live = actionOnApp(action, front);
-  if (!live.ok) return { ok: false, message: live.message, ran: false, app: front };
-  if (normalizeMatch(front) !== normalizeMatch(app)) {
+  const live = actionOnApp(action, frontLabel);
+  if (!live.ok) return { ok: false, message: live.message, ran: false, app: frontLabel };
+  if (!sameComputerApp(front, app) && !sameComputerApp(frontLabel, app)) {
     return {
       ok: false,
-      message: `The frontmost app is ${front}. Computer was asked for ${app}. This call did not run.`,
+      message: `The frontmost app is ${frontLabel}. Computer was asked for ${app}. This call did not run.`,
       ran: false,
-      app: front,
+      app: frontLabel,
     };
   }
   if (!input.allowed) {
@@ -177,10 +180,6 @@ export async function runComputerAction(
     };
   }
   return { ok: true, message: `${action} ${app}`, ran: true, app };
-}
-
-function normalizeMatch(name: string): string {
-  return name.trim().toLowerCase().replace(/\.exe$/i, "");
 }
 
 function performInput(
@@ -258,8 +257,11 @@ export function computerInputCommand(
 
 function windowsInputScript(input: ComputerPerform): string {
   if (input.kind === "click") {
+    // SetProcessDPIAware so SetCursorPos uses the same physical screen space as
+    // Electron's display metrics. A DPI-unaware PowerShell host otherwise misses.
     return [
-      "Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public class WhIn { [DllImport(\"user32.dll\")] public static extern bool SetCursorPos(int x, int y); [DllImport(\"user32.dll\")] public static extern void mouse_event(uint f, uint x, uint y, uint d, System.UIntPtr e); }';",
+      "Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public class WhIn { [DllImport(\"user32.dll\")] public static extern bool SetProcessDPIAware(); [DllImport(\"user32.dll\")] public static extern bool SetCursorPos(int x, int y); [DllImport(\"user32.dll\")] public static extern void mouse_event(uint f, uint x, uint y, uint d, System.UIntPtr e); }';",
+      "[void][WhIn]::SetProcessDPIAware();",
       `[WhIn]::SetCursorPos(${input.x}, ${input.y});`,
       "[WhIn]::mouse_event(2, 0, 0, 0, [System.UIntPtr]::Zero);",
       "[WhIn]::mouse_event(4, 0, 0, 0, [System.UIntPtr]::Zero);",
@@ -403,7 +405,8 @@ export function electronComputerIo(electron: ElectronLike, platform: NodeJS.Plat
     frontmost: () => {
       const spec = frontmostCommand(platform);
       if (!spec) throw new Error("Computer runs on macOS and Windows.");
-      return run(spec.command, spec.args);
+      const raw = run(spec.command, spec.args);
+      return platform === "win32" ? displayComputerApp(raw) : raw;
     },
     screenshot: () => "",
     perform: (input) => {

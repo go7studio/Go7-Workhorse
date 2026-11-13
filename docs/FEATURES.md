@@ -197,7 +197,8 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
   falls back to screenshot-and-click on the real desktop. Helpers that
   double-fork onto launchd or systemd are refused.
 - **Attach** takes files or a folder. You can drag them onto the window or paste
-  them in.
+  them in. On Windows the picker asks which first, because that OS cannot mix
+  files and folders in one dialog.
   - **Images** png, jpg, jpeg, webp, gif, bmp
   - **Audio** mp3, wav, m4a, aac, flac, ogg, opus, webm
   - **Video** mp4, mov, m4v, webm, avi, mkv

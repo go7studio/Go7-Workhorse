@@ -225,6 +225,30 @@ test("Chrome candidates and the real profile path are injected, not read from ho
     "D:\\Apps\\Google\\Chrome\\Application\\chrome.exe",
     "D:\\Apps86\\Google\\Chrome\\Application\\chrome.exe",
   ]);
+  assert.deepEqual(
+    chromeExecutableCandidates("win32", {
+      PROGRAMFILES: "C:\\Program Files",
+      "PROGRAMFILES(X86)": "C:\\Program Files (x86)",
+      PROGRAMW6432: "C:\\Program Files",
+      LOCALAPPDATA: "C:\\Users\\ada\\AppData\\Local",
+    }),
+    [
+      "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+      "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
+      "C:\\Users\\ada\\AppData\\Local\\Google\\Chrome\\Application\\chrome.exe",
+    ],
+  );
+  assert.deepEqual(
+    chromeExecutableCandidates("win32", {
+      ProgramFiles: "C:/Program Files",
+      USERPROFILE: "D:/Users/ada",
+    }),
+    [
+      "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+      "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
+      "D:\\Users\\ada\\AppData\\Local\\Google\\Chrome\\Application\\chrome.exe",
+    ],
+  );
   assert.equal(defaultRealChromeProfile("darwin", ""), null);
   assert.equal(
     defaultRealChromeProfile("darwin", "/tmp/chrome-home"),
@@ -232,6 +256,10 @@ test("Chrome candidates and the real profile path are injected, not read from ho
   );
   assert.equal(
     defaultRealChromeProfile("win32", "D:\\Users\\ada"),
+    "D:\\Users\\ada\\AppData\\Local\\Google\\Chrome\\User Data",
+  );
+  assert.equal(
+    defaultRealChromeProfile("win32", "D:/Users/ada/"),
     "D:\\Users\\ada\\AppData\\Local\\Google\\Chrome\\User Data",
   );
   const seen: string[] = [];
@@ -243,6 +271,17 @@ test("Chrome candidates and the real profile path are injected, not read from ho
     "/opt/chrome-test",
   );
   assert.deepEqual(seen, ["/tmp/missing-chrome", "/opt/chrome-test"]);
+  const winChrome = "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe";
+  assert.equal(
+    firstExisting(
+      chromeExecutableCandidates("win32", {
+        PROGRAMFILES: "C:\\Program Files",
+        LOCALAPPDATA: "C:\\Users\\ada\\AppData\\Local",
+      }),
+      (file) => file === winChrome,
+    ),
+    winChrome,
+  );
 });
 
 test("smoke ports are not a Chrome debugging endpoint", () => {
@@ -436,5 +475,221 @@ test("a read-only seat does not ask for Chrome and does not launch", async () =>
   );
   assert.equal(result.ok, false);
   if (!result.ok) assert.match(result.message, /Read-only refuses/);
+  assert.equal(launched, 0);
+});
+
+test("Windows Allow uses chrome.exe from Program Files on a desk profile", async () => {
+  const spawned: Array<{ command: string; args: readonly string[]; options: SpawnOptions }> = [];
+  const desk = "C:\\Users\\ada\\AppData\\Roaming\\Go7 Workhorse\\background-browser\\chat\\bb";
+  const chrome = "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe";
+  const launch = createGrantedChromeLauncher({
+    platform: "win32",
+    env: {
+      PROGRAMFILES: "C:\\Program Files",
+      "PROGRAMFILES(X86)": "C:\\Program Files (x86)",
+      LOCALAPPDATA: "C:\\Users\\ada\\AppData\\Local",
+    },
+    exists: (file) => file === chrome,
+    spawnImpl: ((command: string, args: readonly string[], options: SpawnOptions) => {
+      spawned.push({ command, args, options });
+      return fakeChild();
+    }) as typeof import("node:child_process").spawn,
+    readDebuggingPort: async (dir) => {
+      assert.equal(dir, desk);
+      return "41234";
+    },
+    connect: async (endpoint) => {
+      assert.equal(endpoint, "http://127.0.0.1:41234");
+      return { tools: toolClient([]), close: async () => undefined };
+    },
+    stop: () => {
+      throw new Error("stop must not run");
+    },
+  });
+  const handle = await launch({
+    mode: "chrome",
+    userDataDir: desk,
+    deskUserDataDir: desk,
+    workhorseUserData: "C:\\Users\\ada\\AppData\\Roaming\\Go7 Workhorse",
+    url: "https://example.com",
+    headless: false,
+    env: {},
+    spawnOptions: groupSpawnOptions("win32"),
+    chromeAccess: "granted",
+    permissionMode: "always-approve",
+    sandbox: "off",
+  });
+  assert.equal(spawned.length, 1);
+  assert.equal(spawned[0]?.command, chrome);
+  assert.equal(spawned[0]?.options.shell, false);
+  assert.equal(spawned[0]?.options.windowsHide, true);
+  const args = spawned[0]?.args ?? [];
+  assert.ok(args.includes(`--user-data-dir=${desk}`));
+  assert.ok(args.includes("--remote-debugging-port=0"));
+  assert.ok(args.includes("https://example.com"));
+  assert.equal(args.some((arg) => arg.includes("9333") || arg.includes("=933")), false);
+  assert.equal(handle.profile, "desk");
+});
+
+test("Windows Allow uses per-user chrome.exe when Program Files is empty", async () => {
+  const spawned: string[] = [];
+  const localChrome = "C:\\Users\\ada\\AppData\\Local\\Google\\Chrome\\Application\\chrome.exe";
+  const desk = "C:\\Users\\ada\\AppData\\Roaming\\Go7 Workhorse\\background-browser\\chat\\bb";
+  const launch = createGrantedChromeLauncher({
+    platform: "win32",
+    env: {
+      PROGRAMFILES: "C:\\Program Files",
+      LOCALAPPDATA: "C:\\Users\\ada\\AppData\\Local",
+    },
+    exists: (file) => file === localChrome,
+    spawnImpl: ((command: string) => {
+      spawned.push(command);
+      return fakeChild();
+    }) as typeof import("node:child_process").spawn,
+    readDebuggingPort: async () => "41234",
+    connect: async () => ({ tools: toolClient([]), close: async () => undefined }),
+  });
+  const handle = await launch({
+    mode: "chrome",
+    userDataDir: desk,
+    deskUserDataDir: desk,
+    url: "about:blank",
+    headless: false,
+    env: {},
+    spawnOptions: {},
+    chromeAccess: "granted",
+    permissionMode: "ask",
+  });
+  assert.deepEqual(spawned, [localChrome]);
+  assert.equal(handle.profile, "desk");
+});
+
+test("Windows Chrome is not found when no chrome.exe candidate exists", async () => {
+  let spawned = 0;
+  const launch = createGrantedChromeLauncher({
+    platform: "win32",
+    env: { PROGRAMFILES: "C:\\Program Files", LOCALAPPDATA: "C:\\Users\\ada\\AppData\\Local" },
+    exists: () => false,
+    spawnImpl: (() => {
+      spawned += 1;
+      return fakeChild();
+    }) as unknown as typeof import("node:child_process").spawn,
+  });
+  await assert.rejects(
+    () =>
+      launch({
+        mode: "chrome",
+        userDataDir: "C:\\Users\\ada\\AppData\\Roaming\\Go7 Workhorse\\background-browser\\chat\\bb",
+        deskUserDataDir: "C:\\Users\\ada\\AppData\\Roaming\\Go7 Workhorse\\background-browser\\chat\\bb",
+        url: "about:blank",
+        headless: false,
+        env: {},
+        spawnOptions: {},
+        chromeAccess: "granted",
+      }),
+    /Installed Chrome was not found/,
+  );
+  assert.equal(spawned, 0);
+});
+
+test("a Windows chrome.exe spawn error fails fast and kills the process tree", async () => {
+  const child = fakeChild();
+  let stopped = 0;
+  const launch = createGrantedChromeLauncher({
+    platform: "win32",
+    executable: "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+    spawnImpl: (() => {
+      queueMicrotask(() => child.emit("error", new Error("ENOENT: chrome.exe")));
+      return child;
+    }) as unknown as typeof import("node:child_process").spawn,
+    connect: async () => {
+      throw new Error("connect must not run after a spawn error");
+    },
+    stop: () => {
+      stopped += 1;
+    },
+  });
+  await assert.rejects(
+    () =>
+      launch({
+        mode: "chrome",
+        userDataDir: "C:\\Users\\ada\\AppData\\Roaming\\Go7 Workhorse\\background-browser\\chat-spawn-fail\\bb",
+        deskUserDataDir: "C:\\Users\\ada\\AppData\\Roaming\\Go7 Workhorse\\background-browser\\chat-spawn-fail\\bb",
+        url: "about:blank",
+        headless: false,
+        env: {},
+        spawnOptions: groupSpawnOptions("win32"),
+        chromeAccess: "granted",
+        permissionMode: "ask",
+      }),
+    /ENOENT: chrome\.exe/,
+  );
+  assert.equal(stopped, 1);
+});
+
+test("Windows Permission Always keeps the desk profile; an explicit User Data dir is the real profile", () => {
+  const desk = "C:\\Users\\ada\\AppData\\Roaming\\Go7 Workhorse\\background-browser\\chat\\bb";
+  const workhorseUserData = "C:\\Users\\ada\\AppData\\Roaming\\Go7 Workhorse";
+  const real = "C:\\Users\\ada\\AppData\\Local\\Google\\Chrome\\User Data";
+  const always = planChromeLaunch({
+    deskUserDataDir: desk,
+    chromeAccess: "granted",
+    permissionMode: "always-approve",
+    sandbox: "off",
+    workhorseUserData,
+  });
+  assert.equal(always.ok, true);
+  if (always.ok) {
+    assert.equal(always.profile, "desk");
+    assert.equal(always.userDataDir, desk);
+    assert.ok(always.args.includes(`--user-data-dir=${desk}`));
+    assert.ok(always.args.includes("--remote-debugging-port=0"));
+  }
+  const attached = planChromeLaunch({
+    deskUserDataDir: desk,
+    chromeAccess: "granted",
+    permissionMode: "always-approve",
+    attachRealProfile: true,
+    realProfileDir: real,
+    workhorseUserData,
+  });
+  assert.equal(attached.ok, true);
+  if (attached.ok) {
+    assert.equal(attached.profile, "real");
+    assert.equal(attached.userDataDir, real);
+  }
+  const nested = planChromeLaunch({
+    deskUserDataDir: desk,
+    chromeAccess: "granted",
+    attachRealProfile: true,
+    realProfileDir: "C:\\Users\\ada\\AppData\\Roaming\\Go7 Workhorse\\Chrome",
+    workhorseUserData,
+  });
+  assert.equal(nested.ok, false);
+  if (!nested.ok) assert.match(nested.message, /Workhorse window/);
+});
+
+test("a win32 host still asks for Chrome and does not launch", async () => {
+  let launched = 0;
+  const events: Array<{ type: string }> = [];
+  const host = new BackgroundBrowserHost({
+    userData: "C:\\Users\\ada\\AppData\\Roaming\\Go7 Workhorse",
+    platform: "win32",
+    launcher: async () => {
+      launched += 1;
+      return { child: fakeChild() as unknown as ChildProcess };
+    },
+    mkdir: () => undefined,
+  });
+  const result = await host.ensureBrowser(
+    { sessionId: "chat-prompt", name: "chrome_navigate" },
+    (event) => events.push(event),
+  );
+  assert.equal(result.ok, false);
+  if (!result.ok) {
+    assert.equal(result.access, "unset");
+    assert.match(result.message, /Chrome access has not been decided/);
+  }
+  assert.equal(events.some((event) => event.type === "chrome-prompt"), true);
   assert.equal(launched, 0);
 });

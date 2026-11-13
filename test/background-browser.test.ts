@@ -57,6 +57,9 @@ test("double-fork helpers and desktop input helpers are refused", () => {
   assert.equal(refusesDoubleFork("npx playwright open https://example.com"), false);
   assert.equal(refusesDesktopInput("robotjs.moveMouse(1, 2)"), true);
   assert.equal(refusesDesktopInput("cliclick c:100,200"), true);
+  assert.equal(refusesDesktopInput("mouse_event(0, 10, 10, 0, 0)"), true);
+  assert.equal(refusesDesktopInput("SendInput(1, inputs, 40)"), true);
+  assert.equal(refusesDesktopInput("SendKeys.SendWait(\"a\")"), true);
   assert.equal(refusesDesktopInput("page.click('button')"), false);
   assert.equal(refusesDesktopScreenshotClickFallback(), true);
 });
@@ -179,6 +182,14 @@ test("a packaged desk looks beside the app for Chromium", () => {
   assert.equal(bundledPlaywrightBrowsersDir("  ", () => true), undefined);
 });
 
+test("a packaged Windows desk looks beside the app for Chromium", () => {
+  const resources = "C:\\Users\\ada\\AppData\\Local\\Programs\\Go7 Workhorse\\resources";
+  const expected = path.join(resources, "ms-playwright");
+  const found = bundledPlaywrightBrowsersDir(resources, (file) => file === expected);
+  assert.equal(found, expected);
+  assert.equal(bundledPlaywrightBrowsersDir(resources, () => false), undefined);
+});
+
 test("Playwright Chrome for Testing is the background browser", async () => {
   const spawned: string[] = [];
   const child = fakeChild(99_010);
@@ -223,6 +234,164 @@ test("the person's installed Chrome is not the background browser", async () => 
     /default Chrome profile/,
   );
   assert.equal(spawned, 0);
+});
+
+test("the person's Windows chrome.exe is not the background browser", async () => {
+  let spawned = 0;
+  await assert.rejects(
+    () =>
+      defaultBackgroundBrowserLauncher(
+        launchRequest("background-headless", true),
+        (() => {
+          spawned += 1;
+          return fakeChild(99_012);
+        }) as unknown as typeof import("node:child_process").spawn,
+        {
+          loadDriver: async () => ({
+            executablePath: () => "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+            connectOverCDP: async () => ({ close: async () => undefined }),
+          }),
+          readDebuggingPort: async () => "9446",
+        },
+      ),
+    /default Chrome profile/,
+  );
+  assert.equal(spawned, 0);
+  await assert.rejects(
+    () =>
+      defaultBackgroundBrowserLauncher(
+        launchRequest("background-headless", true),
+        (() => {
+          spawned += 1;
+          return fakeChild(99_013);
+        }) as unknown as typeof import("node:child_process").spawn,
+        {
+          loadDriver: async () => ({
+            executablePath: () => "C:\\Users\\ada\\AppData\\Local\\Google\\Chrome\\Application\\chrome.exe",
+            connectOverCDP: async () => ({ close: async () => undefined }),
+          }),
+          readDebuggingPort: async () => "9447",
+        },
+      ),
+    /default Chrome profile/,
+  );
+  assert.equal(spawned, 0);
+});
+
+test("Windows Playwright chromium is the background browser", async () => {
+  const spawned: string[] = [];
+  const child = fakeChild(99_014);
+  const executable =
+    "C:\\Users\\ada\\AppData\\Local\\ms-playwright\\chromium-1234\\chrome-win64\\chrome.exe";
+  const result = await defaultBackgroundBrowserLauncher(
+    launchRequest("background-headless", true),
+    ((command: string) => {
+      spawned.push(command);
+      return child;
+    }) as unknown as typeof import("node:child_process").spawn,
+    {
+      loadDriver: async () => ({
+        executablePath: () => executable,
+        connectOverCDP: async () => ({ close: async () => undefined }),
+      }),
+      readDebuggingPort: async () => "9448",
+    },
+  );
+  assert.deepEqual(spawned, [executable]);
+  assert.equal(result.child, child);
+});
+
+test("Windows headless Chromium disables GPU, hides the console, and uses a desk userData dir", async () => {
+  const spawned: Array<{ command: string; args: readonly string[]; options: SpawnOptions }> = [];
+  const child = fakeChild(99_015);
+  const userDataDir = "C:\\Users\\ada\\AppData\\Roaming\\Go7 Workhorse\\background-browser\\chat\\bb";
+  const executable =
+    "C:\\Users\\ada\\AppData\\Local\\ms-playwright\\chromium-1234\\chrome-win64\\chrome.exe";
+  const request = {
+    ...launchRequest("background-headless", false),
+    userDataDir,
+  };
+  const result = await defaultBackgroundBrowserLauncher(
+    request,
+    ((command: string, args: readonly string[], options: SpawnOptions) => {
+      spawned.push({ command, args, options });
+      return child;
+    }) as unknown as typeof import("node:child_process").spawn,
+    {
+      platform: "win32",
+      loadDriver: async () => ({
+        executablePath: () => executable,
+        connectOverCDP: async (endpoint: string) => {
+          assert.equal(endpoint, "http://127.0.0.1:41234");
+          return { close: async () => undefined };
+        },
+      }),
+      readDebuggingPort: async (dir: string) => {
+        assert.equal(dir, path.resolve(userDataDir));
+        return "41234";
+      },
+    },
+  );
+  assert.equal(spawned.length, 1);
+  assert.equal(spawned[0]?.command, executable);
+  assert.equal(spawned[0]?.options.windowsHide, true);
+  assert.equal(spawned[0]?.options.shell, false);
+  const args = spawned[0]?.args ?? [];
+  assert.ok(args.includes(`--user-data-dir=${path.resolve(userDataDir)}`));
+  assert.ok(args.includes("--headless=new"));
+  assert.ok(args.includes("--disable-gpu"));
+  assert.ok(args.includes("--remote-debugging-port=0"));
+  assert.equal(args.some((arg) => /google chrome|screencapture|robotjs|SendInput|mouse_event/i.test(arg)), false);
+  assert.equal(result.child, child);
+});
+
+test("declined Windows session stays under Workhorse userData and stop kills the tree", async () => {
+  const events: BackgroundBrowserEvent[] = [];
+  const children: Array<ReturnType<typeof fakeChild>> = [];
+  const dirs: string[] = [];
+  let stopped = 0;
+  const userData = "C:\\Users\\ada\\AppData\\Roaming\\Go7 Workhorse";
+  const host = new BackgroundBrowserHost({
+    userData,
+    platform: "win32",
+    launcher: async (request) => {
+      assert.ok(
+        request.userDataDir.replace(/\\/g, "/").includes("Go7 Workhorse/background-browser/chat-win"),
+        "profile stays under Workhorse userData",
+      );
+      assert.equal(request.headless, true);
+      assert.equal(request.mode, "background-headless");
+      assert.equal(request.spawnOptions.windowsHide, true);
+      assert.equal(request.spawnOptions.detached, false);
+      assert.equal(request.spawnOptions.shell, false);
+      const child = fakeChild(50_100 + children.length);
+      children.push(child);
+      return {
+        child: child as unknown as ChildProcess,
+        close: async () => {
+          stopped += 1;
+        },
+      };
+    },
+    mkdir: (dir) => {
+      dirs.push(dir);
+    },
+    now: () => 1_700_000_000_100,
+  });
+  host.setChromeAccess("chat-win", "declined", (event) => events.push(event));
+  const result = await host.ensureBrowser({ sessionId: "chat-win", name: "Docs" }, (event) => events.push(event));
+  assert.equal(result.ok, true);
+  if (result.ok) {
+    assert.equal(result.session.mode, "background-headless");
+    assert.equal(result.session.status, "running");
+  }
+  assert.equal(children.length, 1);
+  assert.ok(dirs.some((dir) => dir.replace(/\\/g, "/").includes("Go7 Workhorse/background-browser/chat-win")));
+  assert.equal(host.stop(result.ok ? result.session.id : "", (event) => events.push(event)), true);
+  assert.equal(stopped, 1);
+  const ended = events.filter((event) => event.type === "session").at(-1);
+  assert.ok(ended && ended.type === "session");
+  if (ended.type === "session") assert.equal(ended.session.status, "killed");
 });
 
 test("decline spawns a desk-owned headless browser with the console hidden", async () => {

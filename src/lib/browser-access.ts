@@ -187,19 +187,39 @@ export function chromeExecutableCandidates(platform: NodeJS.Platform, env: NodeJ
   if (platform === "win32") {
     const programFiles = env.PROGRAMFILES || env.ProgramFiles || "C:\\Program Files";
     const programFilesX86 = env["PROGRAMFILES(X86)"] || env["ProgramFiles(x86)"] || "C:\\Program Files (x86)";
-    const local = env.LOCALAPPDATA || env.LocalAppData || "";
-    const rows = [
+    const programW6432 = env.PROGRAMW6432 || env.ProgramW6432 || "";
+    const userProfile = env.USERPROFILE || env.UserProfile || "";
+    const local =
+      env.LOCALAPPDATA ||
+      env.LocalAppData ||
+      (userProfile.trim() ? pathWin(userProfile, "AppData", "Local") : "");
+    const files = [
       pathWin(programFiles, "Google", "Chrome", "Application", "chrome.exe"),
       pathWin(programFilesX86, "Google", "Chrome", "Application", "chrome.exe"),
     ];
-    if (local.trim()) rows.push(pathWin(local, "Google", "Chrome", "Application", "chrome.exe"));
+    if (programW6432.trim()) {
+      files.push(pathWin(programW6432, "Google", "Chrome", "Application", "chrome.exe"));
+    }
+    if (local.trim()) files.push(pathWin(local, "Google", "Chrome", "Application", "chrome.exe"));
+    const seen = new Set<string>();
+    const rows: string[] = [];
+    for (const file of files) {
+      const key = file.replace(/\\/g, "/").toLowerCase();
+      if (!file.trim() || seen.has(key)) continue;
+      seen.add(key);
+      rows.push(file);
+    }
     return rows;
   }
   return ["/usr/bin/google-chrome", "/usr/bin/google-chrome-stable"];
 }
 
 function pathWin(...parts: string[]): string {
-  return parts.filter((part) => part !== "").join("\\").replace(/\\+/g, "\\");
+  return parts
+    .map((part) => part.replace(/\//g, "\\"))
+    .filter((part) => part !== "")
+    .join("\\")
+    .replace(/\\+/g, "\\");
 }
 
 /** A profile path for an explicit real-Chrome request. `home` is injected. This does not read the machine. */
@@ -207,7 +227,7 @@ export function defaultRealChromeProfile(platform: NodeJS.Platform, home: string
   const root = home.trim().replace(/[\\/]+$/, "");
   if (!root) return null;
   if (platform === "darwin") return `${root}/Library/Application Support/Google/Chrome`;
-  if (platform === "win32") return `${root}\\AppData\\Local\\Google\\Chrome\\User Data`;
+  if (platform === "win32") return pathWin(root, "AppData", "Local", "Google", "Chrome", "User Data");
   return `${root}/.config/google-chrome`;
 }
 

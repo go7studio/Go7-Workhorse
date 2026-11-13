@@ -102,6 +102,81 @@ test("resolveClaudeCliBinary reads a Windows shim, and still returns null when n
   );
 });
 
+test("a Windows ACP .cmd starts through cmd.exe, and a JS entry through node.exe", () => {
+  // Node refuses to spawn a batch file without a shell (EINVAL since
+  // CVE-2024-27980). The npm global shim is claude-agent-acp.cmd.
+  const home = path.join(path.sep, "Users", "me");
+  const cmd = path.join(home, "AppData", "Roaming", "npm", "claude-agent-acp.cmd");
+  const comspec = path.join(path.sep, "Windows", "System32", "cmd.exe");
+  const node = path.join(path.sep, "Program Files", "nodejs", "node.exe");
+  const js = path.join(
+    home,
+    "proj",
+    "node_modules",
+    "@agentclientprotocol",
+    "claude-agent-acp",
+    "dist",
+    "index.js",
+  );
+
+  const fromCmd = resolveClaudeAcpLaunch({
+    env: { CLAUDE_ACP_BIN: cmd, ComSpec: comspec, PATH: "" },
+    platform: "win32",
+    pathDirs: [],
+    existsSync: (file) => file === cmd || file === comspec,
+  });
+  assert.equal(fromCmd?.command, comspec);
+  assert.deepEqual(fromCmd?.argv, ["/d", "/s", "/c", `"${cmd}"`]);
+  assert.equal(fromCmd?.acpFile, cmd);
+
+  assert.equal(
+    resolveClaudeAcpLaunch({
+      env: { CLAUDE_ACP_BIN: cmd, ComSpec: comspec, PATH: "" },
+      platform: "win32",
+      pathDirs: [],
+      existsSync: (file) => file === cmd,
+    }),
+    null,
+    "a missing cmd.exe cannot launch a .cmd",
+  );
+
+  const fromJs = resolveClaudeAcpLaunch({
+    env: { CLAUDE_ACP_BIN: js, PATH: path.dirname(node) },
+    platform: "win32",
+    pathDirs: [path.dirname(node)],
+    existsSync: (file) => file === js || file === node,
+  });
+  assert.equal(fromJs?.command, node);
+  assert.deepEqual(fromJs?.argv, [js]);
+  assert.equal(fromJs?.acpFile, js);
+
+  // A packaged script lives inside app.asar. Prefer the desk binary over
+  // node.exe on PATH, or the child dies with MODULE_NOT_FOUND.
+  const asarScript = path.join(
+    path.sep,
+    "Programs",
+    "Go7 Workhorse",
+    "resources",
+    "app.asar",
+    "node_modules",
+    "@agentclientprotocol",
+    "claude-agent-acp",
+    "dist",
+    "index.js",
+  );
+  const packaged = path.join(path.sep, "Programs", "Go7 Workhorse", "Go7 Workhorse.exe");
+  const fromAsar = resolveClaudeAcpLaunch({
+    env: { CLAUDE_ACP_BIN: asarScript, PATH: path.dirname(node) },
+    pathDirs: [path.dirname(node)],
+    existsSync: (file) => file === asarScript || file === node || file === packaged,
+    execPath: packaged,
+    electron: true,
+    platform: "win32",
+  });
+  assert.equal(fromAsar?.command, packaged);
+  assert.notEqual(fromAsar?.command, node);
+});
+
 test("detectClaudeLogin requires ACP plus a real login artifact", () => {
   const missing = detectClaudeLogin({
     env: {},

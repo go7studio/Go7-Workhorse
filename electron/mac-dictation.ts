@@ -136,7 +136,23 @@ export function startMacDictation(input: {
   };
   handle.stop = stop;
   active = handle;
-  child.stdin?.write("start\n");
+  try {
+    child.stdin?.write("start\n");
+  } catch {
+    /* spawn already failed */
+  }
+  child.on("error", () => {
+    if (stopped || reported) return;
+    reported = true;
+    report({
+      type: "error",
+      message:
+        platform === "win32"
+          ? "On-device speech is not available on this PC."
+          : "On-device speech is not available on this Mac.",
+    });
+    stop();
+  });
   let buffer = "";
   child.stdout?.on("data", (chunk: Buffer | string) => {
     buffer += chunk.toString();

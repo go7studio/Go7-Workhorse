@@ -3,8 +3,9 @@ import crypto from "node:crypto";
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { ClaudeSessionHost, type ClaudePromptInput } from "../electron/claude-host";
-import { MAC_KEY_ROUNDS, readClaudeDesktopOauth } from "../electron/claude-desktop-auth";
+import { decryptElectronV10, MAC_KEY_ROUNDS, readClaudeDesktopOauth } from "../electron/claude-desktop-auth";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
@@ -567,6 +568,53 @@ test("a Mac token written by Claude Desktop is read back", () => {
   const fixture = desktopFixture("darwin", MAC_PAYLOAD_FROM_CHROMIUM);
   const oauth = readClaudeDesktopOauth(fixture.input);
   assert.equal(oauth?.accessToken, "invented-desktop-oauth");
+  assert.equal(oauth?.source, "desktop");
+});
+
+test("a Windows Electron v10 payload decrypts as AES-256-GCM", () => {
+  const key = Buffer.alloc(32, 7);
+  const nonce = Buffer.alloc(12, 3);
+  const clear = JSON.stringify({ ok: true, token: "invented-desktop-oauth" });
+  const cipher = crypto.createCipheriv("aes-256-gcm", key, nonce);
+  const payload = Buffer.concat([
+    Buffer.from("v10"),
+    nonce,
+    cipher.update(clear),
+    cipher.final(),
+    cipher.getAuthTag(),
+  ]).toString("base64");
+  assert.equal(decryptElectronV10(payload, key, "win32"), clear);
+  assert.throws(() => decryptElectronV10(payload, key, "darwin"));
+  assert.throws(() => decryptElectronV10(Buffer.from("nope").toString("base64"), key, "win32"));
+});
+
+test("Windows DPAPI decrypts the Local State key Claude Desktop stores", { skip: process.platform !== "win32" }, () => {
+  // Tests used to inject unprotect, so a broken powershell DPAPI helper still
+  // passed. Protect a known AES key the way Chromium does, then read it back
+  // through the real helper.
+  const key = Buffer.alloc(32, 7);
+  const protect = [
+    "Add-Type -AssemblyName System.Security",
+    `$plain = [Convert]::FromBase64String('${key.toString("base64")}')`,
+    "$enc = [System.Security.Cryptography.ProtectedData]::Protect($plain, $null, 'CurrentUser')",
+    "[Convert]::ToBase64String($enc)",
+  ].join("; ");
+  const protectedB64 = execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", protect], {
+    encoding: "utf8",
+    windowsHide: true,
+    timeout: 15_000,
+  }).trim();
+  assert.ok(protectedB64, "Protect must return a blob");
+  const encryptedKey = Buffer.concat([Buffer.from("DPAPI"), Buffer.from(protectedB64, "base64")]).toString("base64");
+  const fixture = desktopFixture("win32");
+  delete fixture.input.unprotect;
+  const prevRead = fixture.input.readFile!;
+  fixture.input.readFile = (file) =>
+    file.replace(/\\/g, "/").endsWith("Local State")
+      ? JSON.stringify({ os_crypt: { encrypted_key: encryptedKey } })
+      : prevRead(file);
+  const oauth = readClaudeDesktopOauth(fixture.input);
+  assert.equal(oauth?.accessToken, fixture.token);
   assert.equal(oauth?.source, "desktop");
 });
 

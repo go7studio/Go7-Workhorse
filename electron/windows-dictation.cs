@@ -1,7 +1,9 @@
 // Rebuilt by scripts/build-windows-dictation.mjs before dev and before a Windows pack.
 using System;
+using System.Collections.Concurrent;
 using System.Globalization;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Speech.Recognition;
 using System.Speech.Synthesis;
 using System.Text;
@@ -9,16 +11,68 @@ using System.Threading;
 
 internal static class WindowsDictation
 {
+    private const uint WM_QUIT = 0x0012;
+    private const uint WM_APP = 0x8000;
+    private const uint PM_NOREMOVE = 0;
+    private const uint PM_REMOVE = 1;
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct POINT
+    {
+        public int x;
+        public int y;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MSG
+    {
+        public IntPtr hwnd;
+        public uint message;
+        public IntPtr wParam;
+        public IntPtr lParam;
+        public uint time;
+        public POINT pt;
+    }
+
+    [DllImport("user32.dll")]
+    private static extern int GetMessage(out MSG lpMsg, IntPtr hWnd, uint min, uint max);
+
+    [DllImport("user32.dll")]
+    private static extern bool PeekMessage(out MSG lpMsg, IntPtr hWnd, uint min, uint max, uint remove);
+
+    [DllImport("user32.dll")]
+    private static extern bool TranslateMessage([In] ref MSG lpMsg);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr DispatchMessage([In] ref MSG lpMsg);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool PostThreadMessage(uint idThread, uint msg, IntPtr wParam, IntPtr lParam);
+
+    [DllImport("kernel32.dll")]
+    private static extern uint GetCurrentThreadId();
+
     private static readonly object Gate = new object();
+    private static readonly ConcurrentQueue<string> Commands = new ConcurrentQueue<string>();
     private static string committed = "";
     private static bool listening;
     private static SpeechRecognitionEngine engine;
     private static DateTime lastLevel = DateTime.MinValue;
+    private static uint staThreadId;
 
     [STAThread]
     private static int Main(string[] args)
     {
         if (args.Length == 1 && args[0] == "--self-test") return SelfTest();
+        try
+        {
+            Console.SetIn(new StreamReader(Console.OpenStandardInput(), Encoding.UTF8));
+        }
+        catch (Exception)
+        {
+            /* stdin already bound */
+        }
+
         try
         {
             engine = CreateEngine();
@@ -29,12 +83,25 @@ internal static class WindowsDictation
             return 3;
         }
 
-        string line;
-        while ((line = Console.ReadLine()) != null)
+        staThreadId = GetCurrentThreadId();
+        // PostThreadMessage fails until this thread has a queue. PeekMessage creates it
+        // before the stdin thread can deliver the first "start".
+        MSG warmup;
+        PeekMessage(out warmup, IntPtr.Zero, 0, 0, PM_NOREMOVE);
+        var stdin = new Thread(ReadCommands);
+        stdin.IsBackground = true;
+        stdin.Start();
+
+        MSG msg;
+        while (GetMessage(out msg, IntPtr.Zero, 0, 0) > 0)
         {
-            var command = line.Trim();
-            if (command == "start") Start();
-            else if (command == "stop") Stop();
+            if (msg.message == WM_APP)
+            {
+                DrainCommands();
+                continue;
+            }
+            TranslateMessage(ref msg);
+            DispatchMessage(ref msg);
         }
 
         try
@@ -46,6 +113,43 @@ internal static class WindowsDictation
             /* already closed */
         }
         return 0;
+    }
+
+    private static void ReadCommands()
+    {
+        try
+        {
+            string line;
+            while ((line = Console.ReadLine()) != null)
+            {
+                Commands.Enqueue(line.Trim());
+                Wake(WM_APP);
+            }
+        }
+        catch (Exception)
+        {
+            /* stdin closed */
+        }
+        Wake(WM_QUIT);
+    }
+
+    private static void Wake(uint message)
+    {
+        for (var attempt = 0; attempt < 40; attempt++)
+        {
+            if (PostThreadMessage(staThreadId, message, IntPtr.Zero, IntPtr.Zero)) return;
+            Thread.Sleep(5);
+        }
+    }
+
+    private static void DrainCommands()
+    {
+        string command;
+        while (Commands.TryDequeue(out command))
+        {
+            if (command == "start") Start();
+            else if (command == "stop") Stop();
+        }
     }
 
     private static SpeechRecognitionEngine CreateEngine()
@@ -238,15 +342,9 @@ internal static class WindowsDictation
                 synth.SetOutputToWaveFile(wav);
                 synth.Speak("hello desk");
             }
-            using (var recognizer = new SpeechRecognitionEngine(new CultureInfo("en-US")))
-            {
-                recognizer.SetInputToWaveFile(wav);
-                recognizer.LoadGrammar(new DictationGrammar());
-                var result = recognizer.Recognize(TimeSpan.FromSeconds(8));
-                var text = result == null ? "" : (result.Text ?? "").Trim();
-                Emit("{\"type\":\"final\",\"text\":" + Json(text) + "}");
-                return text.Length == 0 ? 4 : 0;
-            }
+            var text = RecognizeWav(wav);
+            Emit("{\"type\":\"final\",\"text\":" + Json(text) + "}");
+            return text.Length == 0 ? 4 : 0;
         }
         catch (Exception ex)
         {
@@ -256,6 +354,60 @@ internal static class WindowsDictation
         finally
         {
             try { if (File.Exists(wav)) File.Delete(wav); } catch (Exception) { }
+        }
+    }
+
+    private static string RecognizeWav(string wav)
+    {
+        var text = "";
+        var done = new ManualResetEvent(false);
+        using (var recognizer = new SpeechRecognitionEngine(new CultureInfo("en-US")))
+        {
+            recognizer.SetInputToWaveFile(wav);
+            recognizer.LoadGrammar(new DictationGrammar());
+            recognizer.SpeechRecognized += delegate(object sender, SpeechRecognizedEventArgs e)
+            {
+                try
+                {
+                    if (e.Result != null && e.Result.Text != null) text = e.Result.Text.Trim();
+                }
+                catch (Exception)
+                {
+                    /* wait for completed */
+                }
+            };
+            recognizer.RecognizeCompleted += delegate { done.Set(); };
+            recognizer.RecognizeAsync(RecognizeMode.Single);
+            PumpUntil(done, 8);
+            try { recognizer.RecognizeAsyncCancel(); } catch (Exception) { }
+        }
+        if (text.Length > 0) return text;
+        using (var recognizer = new SpeechRecognitionEngine(new CultureInfo("en-US")))
+        {
+            recognizer.SetInputToWaveFile(wav);
+            recognizer.LoadGrammar(new DictationGrammar());
+            var result = recognizer.Recognize(TimeSpan.FromSeconds(8));
+            return result == null ? "" : (result.Text ?? "").Trim();
+        }
+    }
+
+    private static void PumpUntil(WaitHandle done, int seconds)
+    {
+        var until = DateTime.UtcNow.AddSeconds(seconds);
+        MSG msg;
+        while (DateTime.UtcNow < until)
+        {
+            if (done.WaitOne(0)) return;
+            if (PeekMessage(out msg, IntPtr.Zero, 0, 0, PM_REMOVE))
+            {
+                if (msg.message == WM_QUIT) return;
+                TranslateMessage(ref msg);
+                DispatchMessage(ref msg);
+            }
+            else
+            {
+                Thread.Sleep(15);
+            }
         }
     }
 

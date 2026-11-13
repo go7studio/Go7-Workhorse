@@ -105,9 +105,51 @@ export function normalizeAppName(name: string): string {
   return name.trim().toLowerCase().replace(/\.exe$/i, "").replace(/\s+/g, " ");
 }
 
+/**
+ * Stable id for grants and frontmost matching. Windows ProcessName drops spaces
+ * (explorer, SystemSettings, WindowsTerminal); the seat card and tool docs use
+ * File Explorer / System Settings / Windows Terminal.
+ */
+export function computerAppIdentity(name: string): string {
+  const normalized = normalizeAppName(name);
+  if (!normalized) return "";
+  const compact = normalized.replace(/\s+/g, "");
+  if (compact === "explorer" || compact === "fileexplorer" || compact === "windowsexplorer") {
+    return "fileexplorer";
+  }
+  if (compact === "systemsettings" || compact === "windowssettings") {
+    return "systemsettings";
+  }
+  if (compact === "windowsterminal") return "windowsterminal";
+  if (compact === "visualstudiocode" || compact === "vscode") return "code";
+  return compact;
+}
+
+export function sameComputerApp(a: string, b: string): boolean {
+  const left = computerAppIdentity(a);
+  const right = computerAppIdentity(b);
+  return Boolean(left) && left === right;
+}
+
+/** Label the desk and permission card already use for known Windows process names. */
+export function displayComputerApp(name: string): string {
+  const id = computerAppIdentity(name);
+  if (id === "fileexplorer") return "File Explorer";
+  if (id === "systemsettings") return "System Settings";
+  if (id === "windowsterminal") return "Windows Terminal";
+  return name.trim();
+}
+
 function matchesPhrase(name: string, phrase: string): boolean {
-  if (phrase.length < 6) return name === phrase;
-  return name === phrase || name.includes(phrase);
+  const compactName = name.replace(/\s+/g, "");
+  const compactPhrase = phrase.replace(/\s+/g, "");
+  if (phrase.length < 6) return name === phrase || compactName === compactPhrase;
+  return (
+    name === phrase ||
+    name.includes(phrase) ||
+    compactName === compactPhrase ||
+    compactName.includes(compactPhrase)
+  );
 }
 
 export function appClass(name: string): ComputerAppClass {
@@ -150,7 +192,7 @@ export function actionOnApp(
 }
 
 export function computerGrantKey(app: string): string {
-  return `computer:${normalizeAppName(app)}`;
+  return `computer:${computerAppIdentity(app) || normalizeAppName(app)}`;
 }
 
 export function computerGrantCovers(
@@ -158,8 +200,12 @@ export function computerGrantCovers(
   app: string,
   now = Date.now(),
 ): boolean {
-  const key = computerGrantKey(app);
-  return (grants ?? []).some((grant) => grant.key === key && (grant.expiresAt == null || grant.expiresAt > now));
+  return (grants ?? []).some((grant) => {
+    if (grant.expiresAt != null && grant.expiresAt <= now) return false;
+    if (grant.key === computerGrantKey(app)) return true;
+    if (!grant.key.startsWith("computer:")) return false;
+    return sameComputerApp(grant.key.slice("computer:".length), app);
+  });
 }
 
 export function userDeclinedComputer(app: string): string {

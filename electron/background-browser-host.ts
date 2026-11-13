@@ -98,6 +98,7 @@ export type BackgroundBrowserLauncherDeps = {
   stop?: (child: ChildProcess) => void;
   /** Piper's installed-Chrome launch. The default refuses the person's profile. */
   grantedChrome?: GrantedChromeLauncher;
+  platform?: NodeJS.Platform;
 };
 
 export type BackgroundBrowserHostOptions = {
@@ -208,7 +209,11 @@ async function readDevToolsActivePort(
   throw new Error("Background browser did not open a debugging port.");
 }
 
-function chromiumLaunchArgs(userDataDir: string, request: BackgroundBrowserLaunchRequest): string[] {
+function chromiumLaunchArgs(
+  userDataDir: string,
+  request: BackgroundBrowserLaunchRequest,
+  platform: NodeJS.Platform,
+): string[] {
   const args = [
     `--user-data-dir=${userDataDir}`,
     "--no-first-run",
@@ -216,7 +221,12 @@ function chromiumLaunchArgs(userDataDir: string, request: BackgroundBrowserLaunc
     "--disable-extensions",
     "--remote-debugging-port=0",
   ];
-  if (request.headless || request.mode === "background-headless") args.push("--headless=new");
+  if (request.headless || request.mode === "background-headless") {
+    args.push("--headless=new");
+    // Headless Chromium on Windows often never writes DevToolsActivePort if the
+    // GPU process crashes. SwiftShader is enough for snapshot and screenshot.
+    if (platform === "win32") args.push("--disable-gpu");
+  }
   const url = request.url.trim();
   if (url && url !== "about:blank") args.push(url);
   return args;
@@ -260,6 +270,7 @@ export async function defaultBackgroundBrowserLauncher(
   }
 
   const userDataDir = path.resolve(request.userDataDir);
+  const platform = deps.platform ?? process.platform;
   const spawnOptions: SpawnOptions = {
     env: request.env,
     ...request.spawnOptions,
@@ -268,7 +279,7 @@ export async function defaultBackgroundBrowserLauncher(
     stdio: "ignore",
     windowsHide: true,
   };
-  const child = spawnImpl(executable, chromiumLaunchArgs(userDataDir, request), spawnOptions);
+  const child = spawnImpl(executable, chromiumLaunchArgs(userDataDir, request, platform), spawnOptions);
   let spawnError: Error | undefined;
   child.once("error", (error) => {
     spawnError = error instanceof Error ? error : new Error(String(error));
@@ -323,6 +334,7 @@ export class BackgroundBrowserHost {
       ((request) =>
         defaultBackgroundBrowserLauncher(request, this.spawnImpl, {
           grantedChrome: options.grantedChromeLauncher,
+          platform: this.platform,
         }));
     this.now = options.now ?? Date.now;
     this.mkdir = options.mkdir ?? ((dir) => fs.mkdirSync(dir, { recursive: true }));

@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { test } from "node:test";
 import { manifestVersionFrom, releaseDecision, versionFrom } from "../scripts/detect-release.mjs";
 
@@ -198,6 +198,21 @@ test("the release gate runs its checks wherever it is checked out", () => {
   const stamped = run();
   assert.equal(stamped.status, 1, `${stamped.stdout}${stamped.stderr}`);
   assert.match(stamped.stdout, /FAIL .*channel=development/);
+});
+
+test("isMainModule compares real paths, not a file-URL string", async () => {
+  // `import.meta.url === file://${argv[1]}` held only on a POSIX path with
+  // nothing to escape. On Windows the URL reads file:///D:/a/... against
+  // D:\a\..., so the gate ran nothing and passed every Windows release.
+  const { isMainModule } = await import("../scripts/assert-release-channel.mjs");
+  const dir = mkdtempSync(path.join(os.tmpdir(), "wh main "));
+  const script = path.join(dir, "gate.mjs");
+  writeFileSync(script, "export {}\n");
+  const url = pathToFileURL(script).href;
+  assert.equal(isMainModule(script, url), true);
+  const naive = `file://${script}`;
+  assert.notEqual(url, naive, "a space (and a Windows path) make file://${argv[1]} the wrong URL");
+  assert.equal(isMainModule("", url), false);
 });
 
 /*

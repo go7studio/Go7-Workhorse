@@ -140,7 +140,6 @@ export function createGrantedChromeLauncher(deps: ChromeLauncherDeps = {}) {
   const env = deps.env ?? process.env;
   const exists = deps.exists ?? ((file: string) => fs.existsSync(file));
   const stop = deps.stop ?? ((child: ChildProcess) => stopProcessTree(child));
-  const readPort = deps.readDebuggingPort ?? ((dir: string) => readDevToolsActivePort(dir, () => undefined));
 
   return async (request: BackgroundBrowserLaunchRequest): Promise<ChromeLaunchHandle> => {
     const realProfileDir =
@@ -192,6 +191,8 @@ export function createGrantedChromeLauncher(deps: ChromeLauncherDeps = {}) {
     child.once("error", (error) => {
       spawnError = error instanceof Error ? error : new Error(String(error));
     });
+    const readPort =
+      deps.readDebuggingPort ?? ((dir: string) => readDevToolsActivePort(dir, () => spawnError));
     try {
       const port = await readPort(plan.userDataDir);
       if (spawnError) throw spawnError;

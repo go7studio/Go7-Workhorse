@@ -518,9 +518,15 @@ test("the packaged app declares mic usage strings and the hardened-runtime audio
   assert.match(windowsSource, /ms-settings:privacy-microphone/);
   assert.match(windowsSource, /ms-settings:speech/);
   assert.match(windowsSource, /RecognizeCompleted/);
+  assert.match(windowsSource, /PeekMessage/);
+  assert.match(windowsSource, /GetMessage/);
+  assert.match(windowsSource, /OpenStandardInput/);
+  assert.match(windowsSource, /RecognizeAsync\(RecognizeMode\.Single\)/);
+  assert.match(windowsSource, /PostThreadMessage/);
   assert.match(read("package.json"), /build-windows-dictation\.mjs/);
   assert.match(read("scripts/build-windows-dictation.mjs"), /System\.Speech\.dll/);
   assert.match(read("scripts/after-pack.cjs"), /windows-dictation\.exe/);
+  assert.match(read("scripts/after-pack.cjs"), /copyFileSync\(built, helper\)/);
   assert.match(read(".gitignore"), /build\/windows-dictation\.exe/);
   const macSpeech = read("electron/mac-dictation.swift");
   assert.match(macSpeech, /Privacy_Microphone/);
@@ -622,5 +628,39 @@ test("a second mic tap reuses the helper instead of starting another one", () =>
   assert.equal(startMacDictation(input).ok, true);
   assert.equal(spawns, 1);
   assert.deepEqual(writes, ["start\n", "stop\n", "start\n"]);
+  stopMacDictation();
+});
+
+test("a failed helper spawn reports an error instead of staying silent", () => {
+  stopMacDictation();
+  const lines: Array<{ type: string; message?: string }> = [];
+  const child = new EventEmitter() as EventEmitter & {
+    stdin: Writable;
+    stdout: EventEmitter;
+    stderr: EventEmitter;
+    exitCode: number | null;
+    killed: boolean;
+  };
+  child.stdout = new EventEmitter();
+  child.stderr = new EventEmitter();
+  child.exitCode = null;
+  child.killed = false;
+  child.stdin = new Writable({
+    write(_chunk, _encoding, done) {
+      done();
+    },
+  });
+  const spawnImpl = (() => child) as unknown as NonNullable<Parameters<typeof startMacDictation>[0]["spawnImpl"]>;
+  const started = startMacDictation({
+    platform: "win32",
+    resourcesPath: path.join(ROOT, "resources"),
+    appPath: ROOT,
+    existsSync: (file) => file.endsWith(`${path.sep}windows-dictation.exe`),
+    spawnImpl,
+    onLine: (line) => lines.push(line),
+  });
+  assert.equal(started.ok, true);
+  child.emit("error", Object.assign(new Error("spawn ENOENT"), { code: "ENOENT" }));
+  assert.deepEqual(lines, [{ type: "error", message: "On-device speech is not available on this PC." }]);
   stopMacDictation();
 });

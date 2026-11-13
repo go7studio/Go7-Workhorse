@@ -6,15 +6,18 @@ import { fileURLToPath } from "node:url";
 import {
   actionOnApp,
   appClass,
+  computerAppIdentity,
   computerForSpawnedWorker,
   computerGrantCovers,
   computerGrantKey,
   computerLine,
   computerSeatAllows,
   computerSettingsUrl,
+  displayComputerApp,
   guiLaunchName,
   guiShellRefusal,
   judgeComputerTool,
+  sameComputerApp,
   userDeclinedComputer,
   vendorGuiShellBlock,
 } from "../src/lib/computer-seat";
@@ -242,6 +245,7 @@ test("an allowed Finder click records the input and a deny does not", async () =
   const windows = computerInputCommand("win32", { kind: "click", x: 3, y: 4 });
   assert.equal(windows.command, "powershell.exe");
   assert.match(windows.args.join(" "), /SetCursorPos\(3, 4\)/);
+  assert.match(windows.args.join(" "), /SetProcessDPIAware/);
   const vertical = computerInputCommand("win32", { kind: "scroll", dx: 0, dy: -40 });
   assert.match(vertical.args.join(" "), /0x0800, 0, 0, -40/);
   assert.doesNotMatch(vertical.args.join(" "), /0x1000/);
@@ -251,6 +255,101 @@ test("an allowed Finder click records the input and a deny does not", async () =
   assert.match(frontmostCommand("darwin")?.args.join(" ") ?? "", /frontmost is true/);
   assert.match(frontmostCommand("win32")?.args.join(" ") ?? "", /GetForegroundWindow/);
   assert.equal(frontmostCommand("linux"), null);
+});
+
+test("Windows ProcessName matches File Explorer and System Settings without posting input", async () => {
+  assert.equal(computerAppIdentity("explorer"), "fileexplorer");
+  assert.equal(computerAppIdentity("File Explorer"), "fileexplorer");
+  assert.equal(sameComputerApp("explorer", "File Explorer"), true);
+  assert.equal(sameComputerApp("SystemSettings", "System Settings"), true);
+  assert.equal(displayComputerApp("explorer"), "File Explorer");
+  assert.equal(displayComputerApp("SystemSettings"), "System Settings");
+  assert.equal(displayComputerApp("WindowsTerminal"), "Windows Terminal");
+  assert.equal(computerGrantKey("File Explorer"), computerGrantKey("explorer"));
+  assert.equal(computerGrantKey("System Settings"), computerGrantKey("SystemSettings"));
+  assert.equal(computerGrantCovers([{ key: "computer:explorer" }], "File Explorer"), true);
+  assert.equal(computerGrantCovers([{ key: computerGrantKey("File Explorer") }], "explorer"), true);
+  assert.equal(appClass("WindowsTerminal"), "terminal");
+  assert.equal(actionOnApp("type", "WindowsTerminal").ok, false);
+  assert.equal(actionOnApp("scroll", "WindowsTerminal").ok, true);
+
+  const explorer = io("win32", { frontmost: () => "explorer" });
+  const clickExplorer = await runComputerAction(
+    {
+      action: "click",
+      app: "File Explorer",
+      x: 40,
+      y: 50,
+      computer: "on",
+      mode: "ask",
+      sandbox: "off",
+      allowed: true,
+    },
+    explorer,
+  );
+  assert.equal(clickExplorer.ok, true);
+  assert.equal(clickExplorer.ran, true);
+  assert.deepEqual(explorer.calls, [{ kind: "click", x: 40, y: 50 }]);
+  assert.match(computerInputCommand("win32", explorer.calls[0]!).args.join(" "), /SetCursorPos\(40, 50\)/);
+
+  const settings = io("win32", { frontmost: () => "SystemSettings" });
+  const named = await runComputerAction(
+    { action: "frontmost", computer: "on", mode: "always-approve", sandbox: "off", allowed: true },
+    settings,
+  );
+  assert.equal(named.message, "System Settings");
+  const clickSettings = await runComputerAction(
+    {
+      action: "click",
+      app: "System Settings",
+      x: 8,
+      y: 9,
+      computer: "on",
+      mode: "always-approve",
+      sandbox: "off",
+      allowed: true,
+    },
+    settings,
+  );
+  assert.equal(clickSettings.ok, true);
+  assert.equal(clickSettings.ran, true);
+  assert.deepEqual(settings.calls, [{ kind: "click", x: 8, y: 9 }]);
+
+  const terminal = io("win32", { frontmost: () => "WindowsTerminal" });
+  const typed = await runComputerAction(
+    {
+      action: "type",
+      app: "Windows Terminal",
+      text: "echo hi",
+      computer: "on",
+      mode: "ask",
+      sandbox: "off",
+      allowed: true,
+    },
+    terminal,
+  );
+  assert.equal(typed.ran, false);
+  assert.equal(terminal.calls.length, 0);
+  const scrolled = await runComputerAction(
+    {
+      action: "scroll",
+      app: "Windows Terminal",
+      dy: -20,
+      computer: "on",
+      mode: "ask",
+      sandbox: "off",
+      allowed: true,
+    },
+    terminal,
+  );
+  assert.equal(scrolled.ok, true);
+  assert.deepEqual(terminal.calls, [{ kind: "scroll", dx: 0, dy: -20 }]);
+
+  const granted = judgeComputerTool(
+    { action: "click", app: "File Explorer", x: 1, y: 1 },
+    { computer: "on", mode: "ask", sandbox: "off", grants: [{ key: "computer:explorer" }] },
+  );
+  assert.equal(granted.kind, "run");
 });
 
 test("a desk chat names the frontmost app only when Computer is on", async () => {

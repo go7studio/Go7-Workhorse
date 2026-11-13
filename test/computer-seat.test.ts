@@ -242,6 +242,12 @@ test("an allowed Finder click records the input and a deny does not", async () =
   const windows = computerInputCommand("win32", { kind: "click", x: 3, y: 4 });
   assert.equal(windows.command, "powershell.exe");
   assert.match(windows.args.join(" "), /SetCursorPos\(3, 4\)/);
+  const vertical = computerInputCommand("win32", { kind: "scroll", dx: 0, dy: -40 });
+  assert.match(vertical.args.join(" "), /0x0800, 0, 0, -40/);
+  assert.doesNotMatch(vertical.args.join(" "), /0x1000/);
+  const horizontal = computerInputCommand("win32", { kind: "scroll", dx: 24, dy: 0 });
+  assert.match(horizontal.args.join(" "), /0x1000, 0, 0, 24/);
+  assert.doesNotMatch(horizontal.args.join(" "), /0x0800/);
   assert.match(frontmostCommand("darwin")?.args.join(" ") ?? "", /frontmost is true/);
   assert.match(frontmostCommand("win32")?.args.join(" ") ?? "", /GetForegroundWindow/);
   assert.equal(frontmostCommand("linux"), null);

@@ -266,10 +266,12 @@ function windowsInputScript(input: ComputerPerform): string {
     ].join(" ");
   }
   if (input.kind === "scroll") {
-    return [
-      "Add-Type -TypeDefinition 'using System.Runtime.InteropServices; public class WhSc { [DllImport(\"user32.dll\")] public static extern void mouse_event(uint f, uint x, uint y, uint d, System.UIntPtr e); }';",
-      `[WhSc]::mouse_event(0x0800, 0, 0, ${Math.trunc(input.dy)}, [System.UIntPtr]::Zero);`,
-    ].join(" ");
+    const lines = [
+      "Add-Type -TypeDefinition 'using System.Runtime.InteropServices; public class WhSc { [DllImport(\"user32.dll\")] public static extern void mouse_event(uint f, uint x, uint y, int d, System.UIntPtr e); }';",
+    ];
+    if (input.dy !== 0) lines.push(`[WhSc]::mouse_event(0x0800, 0, 0, ${Math.trunc(input.dy)}, [System.UIntPtr]::Zero);`);
+    if (input.dx !== 0) lines.push(`[WhSc]::mouse_event(0x1000, 0, 0, ${Math.trunc(input.dx)}, [System.UIntPtr]::Zero);`);
+    return lines.join(" ");
   }
   const text = input.kind === "type" ? windowsSendKeys(input.text) : windowsKey(input.key);
   return `Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait('${text}')`;

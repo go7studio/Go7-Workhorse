@@ -130,6 +130,54 @@ test("sidebar ignores streamed prose but sees visible status and tool changes", 
   assert.equal(sameSidebarSessions([base], [{ ...streamed, status: "running" }]), false);
   const tool = { ...streamed, status: "running" as const, messages: [...streamed.messages, { ...message("t", "assistant", "Read · working", 3), kind: "tool" as const, toolStatus: "running" as const }] };
   assert.equal(sameSidebarSessions([{ ...streamed, status: "running" }], [tool]), false);
+  assert.equal(sameSidebarSessions([base], [{ ...base, fastMode: true }]), false);
+  const browser = {
+    id: "browser",
+    sessionId: base.id,
+    name: "Browser",
+    status: "running" as const,
+    mode: "background-headless" as const,
+    startedAt: 1,
+  };
+  assert.equal(sameSidebarSessions([base], [{ ...base, backgroundBrowsers: [browser] }]), false);
+  assert.equal(
+    sameSidebarSessions(
+      [{ ...base, backgroundBrowsers: [browser] }],
+      [{ ...base, backgroundBrowsers: [{ ...browser, startedAt: 9 }] }],
+    ),
+    true,
+  );
+  const lineup = {
+    id: "wave",
+    folder: "/tmp",
+    startedAt: 1,
+    joinOwner: "external-runtime" as const,
+    rows: [{
+      childId: "child",
+      title: "Check the release",
+      slice: "check",
+      folder: "/tmp",
+      vendor: "cursor",
+      status: "queued" as const,
+      startedAt: 1,
+      caller: "openclaw" as const,
+    }],
+  };
+  assert.equal(sameSidebarSessions([base], [{ ...base, lineup }]), false);
+  assert.equal(
+    sameSidebarSessions(
+      [{ ...base, lineup }],
+      [{ ...base, lineup: { ...lineup, rows: [{ ...lineup.rows[0]!, report: "a long join" }] } }],
+    ),
+    true,
+  );
+});
+
+test("archived chats sort by latest activity", () => {
+  const older = { ...session("older", "p", [message("older-u", "user", "old", 100)]), archivedAt: 1 };
+  const newer = { ...session("newer", "p", [message("newer-u", "user", "new", 400)]), archivedAt: 2 };
+  const index = buildSidebarChatIndex([older, newer]);
+  assert.deepEqual((index.archivedByProject.get("p") ?? []).map((chat) => chat.id), ["newer", "older"]);
 });
 
 test("incremental transcript rebuilds only the live turn and matches full grouping", () => {

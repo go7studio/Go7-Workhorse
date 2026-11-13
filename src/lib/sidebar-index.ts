@@ -1,3 +1,4 @@
+import { chatHasRunningBackgroundBrowser } from "./background-browser";
 import { isDraftChat, isLiveChat, sidebarOrderAt } from "./chats";
 import { nestProjectChats } from "./lineup";
 import { chatLinksFromSessions, type ChatLink } from "./tool-labels";
@@ -55,6 +56,7 @@ export function buildSidebarChatIndex(sessions: Session[]): SidebarChatIndex {
     );
     liveByProject.set(projectId, nested);
   }
+  for (const rows of archived.values()) rows.sort(compareRecent);
   const linksBySession = new Map<string, ChatLink>();
   for (const link of chatLinksFromSessions(sessions)) linksBySession.set(link.sessionId, link);
   return { liveByProject, archivedByProject: archived, linksBySession, parentsById };
@@ -83,6 +85,21 @@ export function projectLiveLine(
   if (linked.length === 0) return undefined;
   if (linked.length === 1) return { label: linked[0].label, count: 1 };
   return { label: `${linked.length} live chats`, count: linked.length };
+}
+
+/**
+ * The wave bits the row actually paints: who called, the work's name, and each
+ * slice's status. Reports stay off this mark so a growing join does not
+ * repaint the sidebar.
+ */
+function sidebarLineupMark(session: Session): string {
+  const lineup = session.lineup;
+  if (!lineup?.rows.length) return "";
+  let mark = lineup.joinOwner ?? "";
+  for (const row of lineup.rows) {
+    mark += `\n${row.childId}\0${row.status}\0${row.title}\0${row.caller ?? ""}`;
+  }
+  return mark;
 }
 
 function lastUser(messages: Session["messages"]) {
@@ -132,9 +149,14 @@ export function sameSidebarSession(left: Session, right: Session): boolean {
     left.model === right.model &&
     left.customBotId === right.customBotId &&
     left.effort === right.effort &&
+    Boolean(left.fastMode) === Boolean(right.fastMode) &&
     left.mode === right.mode &&
     left.routingMode === right.routingMode &&
     left.status === right.status &&
+    chatHasRunningBackgroundBrowser(left.backgroundBrowsers) ===
+      chatHasRunningBackgroundBrowser(right.backgroundBrowsers) &&
+    left.agentRun?.executionOwner === right.agentRun?.executionOwner &&
+    sidebarLineupMark(left) === sidebarLineupMark(right) &&
     left.composerDraft === right.composerDraft &&
     left.previewUsed === right.previewUsed &&
     left.composerImages === right.composerImages &&

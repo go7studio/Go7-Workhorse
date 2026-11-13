@@ -1331,7 +1331,7 @@ function DeskAccessBlock() {
         <div className="settings-row-copy">
           <strong>Chrome</strong>
           <span>
-            All chats keeps installed Chrome allowed after a restart and closes an open Chrome card. Ask each chat asks a chat that has not answered. A decline stays on that chat.
+            All chats keeps Chrome allowed after a restart. Ask each chat asks a chat that has not answered. A decline stays on that chat.
           </span>
         </div>
         <div className="settings-control">

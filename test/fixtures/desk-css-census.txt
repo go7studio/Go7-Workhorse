@@ -515,7 +515,7 @@ bd89dcb7fc6f  .palette-overlay
 875eae7b21fc  .permission-card .session-who .eyebrow
 ff978a005f35  .permission-card strong
 64739b730aa1  .permission-card > span, .permission-detail
-86fbd138ca57  .permission-card .actions
+759ed1bf4e51  .permission-card .actions
 beb986dc00f9  .send
 73750255c6d0  .deny
 3342d09fb7fa  .dot

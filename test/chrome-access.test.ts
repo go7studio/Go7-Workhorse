@@ -3,6 +3,7 @@ import { EventEmitter } from "node:events";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 import type { ChildProcess, SpawnOptions } from "node:child_process";
 import { BackgroundBrowserHost } from "../electron/background-browser-host";
 import { createGrantedChromeLauncher } from "../electron/chrome-host";
@@ -122,7 +123,7 @@ test("a Chrome click names the chat, writes on the click, and Decline under All 
     { sessionId: "chat", name: "browser_navigate" },
   );
 
-  const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
+  const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
   const store = readFileSync(path.join(root, "src/lib/store.tsx"), "utf8");
   const answer = store.slice(store.indexOf("const answerChromeAccess"), store.indexOf("const setChromeAlways"));
   assert.match(answer, /persistDeskNow\(next\)/);

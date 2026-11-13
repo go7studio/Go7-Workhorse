@@ -8,6 +8,20 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.7.12](https://github.com/go7studio/Go7-Workhorse/compare/v0.7.11...v0.7.12) (2026-11-13)
+
+
+### Bug Fixes
+
+* accept Gemini's single meter mark now that login is gone ([989c876](https://github.com/go7studio/Go7-Workhorse/commit/989c876ed5ddcbfb25adff461fdfad99a4ad0469))
+* dictate on Windows with the desktop speech recognizer ([e70fe93](https://github.com/go7studio/Go7-Workhorse/commit/e70fe933ff13eb59f798692399515dcbcc37548c))
+* dictate on Windows with the desktop speech recognizer ([5cc03dd](https://github.com/go7studio/Go7-Workhorse/commit/5cc03ddf93bc2935060282cb9026506769d5a1cb))
+* keep Chrome allowed after a restart, on this chat or every chat ([e387b1b](https://github.com/go7studio/Go7-Workhorse/commit/e387b1b56c85e6a201dcb2c051b63639327edd37))
+* keep Windows dictation, Computer, and Chrome on their desktop paths ([f017296](https://github.com/go7studio/Go7-Workhorse/commit/f017296c0a5b1a5d372091006931ab30959b1224))
+* let the Chrome allow pass the desk checks ([ac67a74](https://github.com/go7studio/Go7-Workhorse/commit/ac67a743bcd827cc21f06e18c26850ad01e915dd))
+* let Windows scroll both axes, and keep join text off the sidebar ([6a824d6](https://github.com/go7studio/Go7-Workhorse/commit/6a824d6803914ba9215660b685e7c717a31d4769))
+* remove Google Gemini login so the desk cannot launch agy ([3966048](https://github.com/go7studio/Go7-Workhorse/commit/39660487c18e40d3e89e549f464df63003b52b23))
+
 ## [0.7.11](https://github.com/go7studio/Go7-Workhorse/compare/v0.7.10...v0.7.11) (2026-11-12)
 
 

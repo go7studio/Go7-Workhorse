@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { attachmentMime, imageMime } from "../src/lib/images";
+import { normalizeLocalFileHref } from "../src/lib/markdown";
 import { mdImageInitialSrc, mediaUrlContext, mediaUrlToPath, pathToMediaUrl } from "../src/lib/media-display";
 
 export type MediaSrcOpts = {
@@ -39,7 +40,11 @@ function encodeCwd(cwd: string, p: MediaPathApi = path): string {
 }
 
 function windowsAbs(raw: string): string {
-  let file = raw.replace(/^file:\/\//i, "");
+  const normalized = normalizeLocalFileHref(raw);
+  // Percent-decoding stayed on every media path, not only file: URLs.
+  const bare = String(raw ?? "").trim().replace(/^<([\s\S]*)>$/, "$1").trim();
+  if (/^file:/i.test(bare)) return normalized;
+  let file = normalized;
   try {
     file = decodeURIComponent(file);
   } catch {
@@ -307,4 +312,28 @@ export function openableMediaPath(input: unknown, kind: unknown, io: LocalPathIo
   const name = p.basename(entry.resolved);
   const matches = kind === "image" ? Boolean(imageMime({ name })) : attachmentMime({ name }, "video").startsWith("video/");
   return matches ? entry.resolved : null;
+}
+
+/**
+ * A chat link to a local HTML page, or null.
+ *
+ * `.html` and `.htm` only, and only a plain file that is already on this
+ * machine. A picture stays on `openableMediaPath`. A program, a shortcut, a
+ * link, and a share are not opened. The share is refused before any stat.
+ */
+export function openableHtmlPath(input: unknown, io: LocalPathIo = {}): string | null {
+  if (typeof input !== "string") return null;
+  const normalized = normalizeLocalFileHref(input);
+  if (!normalized || isNetworkPath(normalized)) return null;
+  const entry = localEntry(normalized, io);
+  if (!entry?.file) return null;
+  const p = io.path ?? path;
+  try {
+    if ((io.lstatSync ?? fs.lstatSync)(entry.resolved).isSymbolicLink?.()) return null;
+  } catch {
+    return null;
+  }
+  const ext = p.extname(entry.resolved).toLowerCase();
+  if (ext !== ".html" && ext !== ".htm") return null;
+  return entry.resolved;
 }

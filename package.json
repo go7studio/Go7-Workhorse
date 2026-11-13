@@ -32,7 +32,7 @@
   "type": "module",
   "main": "dist-electron/main.js",
   "scripts": {
-    "dev": "vite",
+    "dev": "node scripts/build-windows-dictation.mjs && vite",
     "build": "npm run eval:validate && tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json --noEmit && vite build",
     "verify": "npm run build && npm test",
     "eval:validate": "node scripts/workhorse-eval.mjs validate",
@@ -57,8 +57,8 @@
     "eval:media-fixtures": "node scripts/workhorse-eval-media-fixtures.mjs",
     "eval:score": "node scripts/workhorse-eval.mjs score",
     "eval:finalize": "node scripts/workhorse-eval.mjs finalize",
-    "pack:win": "npm run build && electron-builder --win --dir",
-    "package:win": "electron-builder --win nsis --publish never",
+    "pack:win": "npm run build && node scripts/build-windows-dictation.mjs && electron-builder --win --dir",
+    "package:win": "node scripts/build-windows-dictation.mjs && electron-builder --win nsis --publish never",
     "dist:win": "npm run build && npm run package:win",
     "pack:mac": "npm run build && electron-builder --mac --dir --arm64 --x64 --publish never",
     "package:mac": "electron-builder --mac dmg zip --arm64 --x64 --publish never",
@@ -131,6 +131,10 @@
       {
         "from": "electron/mac-dictation.swift",
         "to": "mac-dictation.swift"
+      },
+      {
+        "from": "build/windows-dictation.exe",
+        "to": "windows-dictation.exe"
       },
       {
         "from": "build/mac-dictation",

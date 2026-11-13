@@ -15,6 +15,7 @@ export const MAC_MICROPHONE_PRIVACY_URL =
 export const MAC_SPEECH_PRIVACY_URL =
   "x-apple.systempreferences:com.apple.preference.security?Privacy_SpeechRecognition";
 export const WINDOWS_MICROPHONE_PRIVACY_URL = "ms-settings:privacy-microphone";
+export const WINDOWS_SPEECH_SETTINGS_URL = "ms-settings:speech";
 export const LISTENING_PLACEHOLDER = "Listening…";
 
 const LISTEN_BAR_WEIGHTS = [0.55, 0.9, 1, 0.7] as const;
@@ -245,7 +246,14 @@ export type DictationLine =
   | { type: "partial"; text: string }
   | { type: "final"; text: string }
   | { type: "level"; value: number }
-  | { type: "error"; message: string; openSettings?: boolean };
+  | { type: "error"; message: string; openSettings?: boolean; settingsUrl?: string };
+
+const DICTATION_SETTINGS_URLS = new Set<string>([
+  MAC_MICROPHONE_PRIVACY_URL,
+  MAC_SPEECH_PRIVACY_URL,
+  WINDOWS_MICROPHONE_PRIVACY_URL,
+  WINDOWS_SPEECH_SETTINGS_URL,
+]);
 
 export function parseDictationLine(line: string): DictationLine | null {
   const trimmed = line.trim();
@@ -257,7 +265,14 @@ export function parseDictationLine(line: string): DictationLine | null {
     return null;
   }
   if (!raw || typeof raw !== "object") return null;
-  const record = raw as { type?: unknown; text?: unknown; value?: unknown; message?: unknown; openSettings?: unknown };
+  const record = raw as {
+    type?: unknown;
+    text?: unknown;
+    value?: unknown;
+    message?: unknown;
+    openSettings?: unknown;
+    settingsUrl?: unknown;
+  };
   if (record.type === "ready") return { type: "ready" };
   if ((record.type === "partial" || record.type === "final") && typeof record.text === "string") {
     return { type: record.type, text: record.text };
@@ -266,13 +281,29 @@ export function parseDictationLine(line: string): DictationLine | null {
     return { type: "level", value: Math.min(1, Math.max(0, record.value)) };
   }
   if (record.type === "error" && typeof record.message === "string" && record.message.trim()) {
+    const settingsUrl =
+      typeof record.settingsUrl === "string" && DICTATION_SETTINGS_URLS.has(record.settingsUrl)
+        ? record.settingsUrl
+        : undefined;
     return {
       type: "error",
       message: record.message.trim(),
       ...(record.openSettings === true ? { openSettings: true } : {}),
+      ...(settingsUrl ? { settingsUrl } : {}),
     };
   }
   return null;
+}
+
+/** A compiled desktop speech helper. PowerShell cannot host the recognizer events. */
+export function windowsDictationLaunch(input: {
+  platform: NodeJS.Platform;
+  exePath: string | null;
+  existsSync: (file: string) => boolean;
+}): { command: string; args: string[] } | null {
+  if (input.platform !== "win32") return null;
+  if (!input.exePath || !input.existsSync(input.exePath)) return null;
+  return { command: input.exePath, args: [] };
 }
 
 /** Prefer a bundled on-device helper. Otherwise the system Swift interpreter and a script the caller already resolved. */

@@ -91,6 +91,12 @@ async function afterPack(context) {
   if (context.electronPlatformName !== "darwin") {
     if (context.electronPlatformName === "win32") {
       copyBundledBrowsers(path.join(context.appOutDir, "resources", "ms-playwright"), "win32");
+      const helper = path.join(context.appOutDir, "resources", "windows-dictation.exe");
+      if (!fs.existsSync(helper)) {
+        throw new Error(
+          "The Windows dictation helper is missing from the packed app. Build build/windows-dictation.exe before packaging.",
+        );
+      }
       writeWinBuildMarker(context.appOutDir);
     }
     return;

@@ -187,11 +187,14 @@ test("a built-in meter that answered reads unknown, never a permanent Loading", 
 
   const store = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
   assert.match(store, /const \[vendorPlanKnown, setVendorPlanKnown\]/);
-  for (const provider of ["grok", "codex", "claude", "cursor", "gemini"]) {
+  for (const provider of ["grok", "codex", "claude", "cursor"]) {
     // Marked on both the resolve and the reject arm: settled either way is known.
     const marks = store.match(new RegExp(`markVendorPlanKnown\\("${provider}"\\)`, "g")) ?? [];
     assert.ok(marks.length >= 2, `${provider} marks its meter known on success and on failure`);
   }
+  // Gemini has no login fetch. The meter is marked known once, immediately.
+  const geminiMarks = store.match(/markVendorPlanKnown\("gemini"\)/g) ?? [];
+  assert.ok(geminiMarks.length >= 1, "gemini marks its meter known without a login fetch");
 
   const pane = readFileSync(path.join(ROOT, "src", "ui", "UsagePane.tsx"), "utf8");
   assert.match(pane, /useStoreSelector\(selectUsageDesk, sameUsageDesk\)/);

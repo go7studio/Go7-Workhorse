@@ -186,6 +186,7 @@ guard speechIsAllowed() else {
     "type": "error",
     "message": "Speech recognition is off. Allow it in System Settings, then try the mic again.",
     "openSettings": true,
+    "settingsUrl": "x-apple.systempreferences:com.apple.preference.security?Privacy_SpeechRecognition",
   ])
   exit(2)
 }
@@ -194,6 +195,7 @@ guard microphoneIsAllowed() else {
     "type": "error",
     "message": "The microphone is off. Allow it in System Settings, then try the mic again.",
     "openSettings": true,
+    "settingsUrl": "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone",
   ])
   exit(3)
 }

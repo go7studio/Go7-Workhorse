@@ -33,6 +33,7 @@ import {
   listenBarScales,
   LOCAL_SPEECH_CAPABILITY,
   MAC_SPEECH_PRIVACY_URL,
+  WINDOWS_MICROPHONE_PRIVACY_URL,
   osSpeechGaveUp,
   pickLocalSpeechHost,
   pickSpeechEngine,
@@ -578,7 +579,10 @@ export const Composer = memo(function Composer({
       }
       if (event.type === "error") {
         setListenStatus(event.message);
-        if (event.openSettings) void window.workhorse?.openExternal?.(MAC_SPEECH_PRIVACY_URL);
+        if (event.openSettings) {
+          const fallback = /Win/.test(navigator.platform) ? WINDOWS_MICROPHONE_PRIVACY_URL : MAC_SPEECH_PRIVACY_URL;
+          void window.workhorse?.openExternal?.(event.settingsUrl || fallback);
+        }
       }
     });
   }, []);
@@ -601,6 +605,12 @@ export const Composer = memo(function Composer({
         return;
       }
       dictationRef.current = false;
+      if (/Win/.test(navigator.platform)) {
+        recordingRef.current = true;
+        setRecording(true);
+        setListenStatus(started.reason || "Speech recognition is not available on this PC.");
+        return;
+      }
     }
     const Ctor = speechRecognitionCtor();
     const localHostId = Ctor ? null : await resolveGrantedLocalSpeechHost();
@@ -623,7 +633,15 @@ export const Composer = memo(function Composer({
       rec.lang = navigator.language || "en-US";
       rec.onerror = (event) => {
         if (!recordingRef.current || !osSpeechGaveUp(event.error)) return;
-        setListenStatus("Speech recognition didn't return words. Tap the mic to stop.");
+        const detail =
+          event.error === "network"
+            ? "The speech service did not answer."
+            : event.error === "not-allowed" || event.error === "service-not-allowed"
+              ? "Speech recognition is blocked."
+              : event.error === "audio-capture"
+                ? "The microphone did not capture audio."
+                : "Speech recognition didn't return words.";
+        setListenStatus(`${detail} Tap the mic to stop.`);
       };
       rec.onresult = (event) => {
         let interim = "";

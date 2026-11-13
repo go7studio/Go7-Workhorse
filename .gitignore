@@ -31,3 +31,5 @@ attachments/
 
 # Chromium downloaded for the packaged background browser. Not source.
 build/ms-playwright/
+# Compiled from electron/windows-dictation.cs before dev or a Windows pack.
+build/windows-dictation.exe

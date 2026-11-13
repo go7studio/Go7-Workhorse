@@ -1,7 +1,12 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { macDictationLaunch, parseDictationLine, type DictationLine } from "./mic-host";
+import {
+  macDictationLaunch,
+  parseDictationLine,
+  windowsDictationLaunch,
+  type DictationLine,
+} from "./mic-host";
 import { groupSpawnOptions, stopProcessTree } from "./process-registry";
 
 const SWIFT = "/usr/bin/swift";
@@ -22,6 +27,32 @@ export function macDictationCommand(input: {
     scriptPath,
     existsSync: input.existsSync,
   });
+}
+
+export function windowsDictationCommand(input: {
+  platform: NodeJS.Platform;
+  resourcesPath: string;
+  appPath: string;
+  existsSync: (file: string) => boolean;
+}): { command: string; args: string[] } | null {
+  const bundled = path.join(input.resourcesPath, "windows-dictation.exe");
+  const built = path.join(input.appPath, "build", "windows-dictation.exe");
+  const exePath = input.existsSync(bundled) ? bundled : input.existsSync(built) ? built : null;
+  return windowsDictationLaunch({
+    platform: input.platform,
+    exePath,
+    existsSync: input.existsSync,
+  });
+}
+
+function dictationCommand(input: {
+  platform: NodeJS.Platform;
+  resourcesPath: string;
+  appPath: string;
+  existsSync: (file: string) => boolean;
+}): { command: string; args: string[] } | null {
+  if (input.platform === "win32") return windowsDictationCommand(input);
+  return macDictationCommand(input);
 }
 
 type DictationHandle = {
@@ -65,13 +96,22 @@ export function startMacDictation(input: {
   }
   stopMacDictation();
   const existsSync = input.existsSync ?? ((file: string) => fs.existsSync(file));
-  const launch = macDictationCommand({
-    platform: input.platform ?? process.platform,
+  const platform = input.platform ?? process.platform;
+  const launch = dictationCommand({
+    platform,
     resourcesPath: input.resourcesPath,
     appPath: input.appPath,
     existsSync,
   });
-  if (!launch) return { ok: false, reason: "On-device speech is not available on this Mac." };
+  if (!launch) {
+    return {
+      ok: false,
+      reason:
+        platform === "win32"
+          ? "On-device speech is not available on this PC."
+          : "On-device speech is not available on this Mac.",
+    };
+  }
   const spawnImpl = input.spawnImpl ?? spawn;
   const child = spawnImpl(launch.command, launch.args, {
     shell: false,
@@ -107,7 +147,13 @@ export function startMacDictation(input: {
       if (parsed) report(parsed);
     }
   });
-  child.on("exit", (code) => {
+  child.on("close", (code) => {
+    const pending = buffer;
+    buffer = "";
+    for (const line of pending.split("\n")) {
+      const parsed = parseDictationLine(line);
+      if (parsed) report(parsed);
+    }
     if (active?.child === child) active = null;
     if (stopped || reported || code === 0 || code === null) return;
     report({ type: "error", message: "Speech recognition stopped before it heard anything." });

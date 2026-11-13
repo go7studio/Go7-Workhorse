@@ -149,7 +149,7 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
   keyboard or the selection is on it, and keeps their space at rest.
 - A crew chip in the composer shortens its name with an ellipsis rather than
   cutting it off at a narrow window.
-- The composer microphone shows Listening in the text area, a level while you speak, and types the words into the unsent draft. You still send. On a Mac this is on-device speech recognition. A yes is remembered for the rest of that time the app is open, so the next tap does not ask again. A newly packed Dev app is a new signature, so macOS asks once for that build.
+- The composer microphone shows Listening in the text area, a level while you speak, and types the words into the unsent draft. You still send. On a Mac and on Windows this is on-device speech recognition. A yes is remembered for the rest of that time the app is open, so the next tap does not ask again. A newly packed Dev app is a new signature, so macOS asks once for that build. Windows desktop apps use the microphone privacy switch and do not show a separate speech prompt.
 - When the latest reply reports a failure, one prompt sits under it. Clicking it puts that prompt in the composer. A refused release offers Fix the release. Failed checks offer Fix the checks. You still send.
 - A chat that ran a wave says who called it and how it went, such as
   `OpenClaw · Working…`, or nothing once every worker finished clean.

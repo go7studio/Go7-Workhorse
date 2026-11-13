@@ -5,7 +5,7 @@ import path from "node:path";
 import { Writable } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
-import { pauseMacDictation, startMacDictation, stopMacDictation } from "../electron/mac-dictation";
+import { pauseMacDictation, startMacDictation, stopMacDictation, windowsDictationCommand } from "../electron/mac-dictation";
 import type { LocalArtifact, LocalJob } from "../src/lib/local-capability-contract";
 import type { LocalComputeHostSettings } from "../src/lib/types";
 import {
@@ -32,6 +32,8 @@ import {
   speechEngineAfterOsStartFailure,
   transcribeLocalSpeech,
   WINDOWS_MICROPHONE_PRIVACY_URL,
+  WINDOWS_SPEECH_SETTINGS_URL,
+  windowsDictationLaunch,
   type MediaPermissionSession,
   type MicTranscribeClient,
 } from "../electron/mic-host";
@@ -436,6 +438,21 @@ test("a live mic fills the text area from on-device lines and says Listening unt
     message: "off",
     openSettings: true,
   });
+  assert.deepEqual(
+    parseDictationLine(
+      '{"type":"error","message":"mic","openSettings":true,"settingsUrl":"ms-settings:privacy-microphone"}',
+    ),
+    {
+      type: "error",
+      message: "mic",
+      openSettings: true,
+      settingsUrl: WINDOWS_MICROPHONE_PRIVACY_URL,
+    },
+  );
+  assert.deepEqual(
+    parseDictationLine('{"type":"error","message":"nope","openSettings":true,"settingsUrl":"https://evil.example"}'),
+    { type: "error", message: "nope", openSettings: true },
+  );
   assert.equal(parseDictationLine("not json"), null);
   const binary = path.join(ROOT, "resources", "mac-dictation");
   const script = path.join(ROOT, "electron", "mac-dictation.swift");
@@ -493,6 +510,50 @@ test("the packaged app declares mic usage strings and the hardened-runtime audio
   assert.match(pkg.build?.mac?.extendInfo?.NSSpeechRecognitionUsageDescription ?? "", /speech recognition on this Mac/);
   assert.match(read("build/entitlements.mac.plist"), /device\.audio-input/);
   assert.match(read("package.json"), /"to": "mac-dictation"/);
+  assert.match(read("package.json"), /"to": "windows-dictation.exe"/);
+  const windowsSource = read("electron/windows-dictation.cs");
+  assert.match(windowsSource, /DictationGrammar/);
+  assert.match(windowsSource, /command == "start"/);
+  assert.match(windowsSource, /command == "stop"/);
+  assert.match(windowsSource, /ms-settings:privacy-microphone/);
+  assert.match(windowsSource, /ms-settings:speech/);
+  assert.match(windowsSource, /RecognizeCompleted/);
+  assert.match(read("package.json"), /build-windows-dictation\.mjs/);
+  assert.match(read("scripts/build-windows-dictation.mjs"), /System\.Speech\.dll/);
+  assert.match(read("scripts/after-pack.cjs"), /windows-dictation\.exe/);
+  assert.match(read(".gitignore"), /build\/windows-dictation\.exe/);
+  const macSpeech = read("electron/mac-dictation.swift");
+  assert.match(macSpeech, /Privacy_Microphone/);
+  assert.match(macSpeech, /settingsUrl/);
+  const exe = path.join(ROOT, "build", "windows-dictation.exe");
+  assert.deepEqual(
+    windowsDictationLaunch({
+      platform: "win32",
+      exePath: exe,
+      existsSync: (file) => file === exe,
+    }),
+    { command: exe, args: [] },
+  );
+  assert.equal(
+    windowsDictationLaunch({
+      platform: "darwin",
+      exePath: exe,
+      existsSync: () => true,
+    }),
+    null,
+  );
+  assert.equal(
+    windowsDictationCommand({
+      platform: "win32",
+      resourcesPath: path.join(ROOT, "missing-resources"),
+      appPath: ROOT,
+      existsSync: (file) => file === exe,
+    })?.command,
+    exe,
+  );
+  assert.equal(WINDOWS_SPEECH_SETTINGS_URL, "ms-settings:speech");
+  assert.match(read("src/ui/Composer.tsx"), /Speech recognition is not available on this PC/);
+  assert.match(read("electron/mac-dictation.ts"), /windowsDictationCommand/);
 });
 
 test("main, preload, and composer wire the mic control after the tools spacer", () => {

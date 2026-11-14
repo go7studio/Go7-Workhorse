@@ -126,7 +126,7 @@ export class CursorSessionHost {
     await this.ensureAgent(input, emit);
     const slot = this.slots.get(input.sessionId);
     if (!slot) throw new Error("Cursor agent is not running");
-    const text = composeVendorPrompt(input.text, input.preface, slot.agent.opened, {
+    const text = composeVendorPrompt(input.text, input.preface, slot.agent.promptContext, {
       mode: input.mode,
       sandbox: input.sandbox,
       computer: input.computer,

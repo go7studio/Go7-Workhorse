@@ -137,7 +137,7 @@ export class ClaudeSessionHost {
         const slot = this.slots.get(input.sessionId);
         if (!slot) throw new Error("Claude agent is not running");
         if (this.stoppedWhileStarting.delete(input.sessionId)) return stoppedBeforePrompt(input.sessionId, slot.agent, emit);
-        const text = composeVendorPrompt(input.text, input.preface, slot.agent.opened, {
+        const text = composeVendorPrompt(input.text, input.preface, slot.agent.promptContext, {
           mode: input.mode,
           sandbox: input.sandbox,
           computer: input.computer,

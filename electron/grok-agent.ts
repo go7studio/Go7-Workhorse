@@ -1392,6 +1392,7 @@ export class GrokAgent {
   private appliedContextWindow?: number;
   private closed = false;
   private promptTail: Promise<unknown> = Promise.resolve();
+  private promptAccepted = false;
   sessionId = "";
   opened: "session/new" | "session/load" = "session/new";
 
@@ -1403,6 +1404,11 @@ export class GrokAgent {
   /** A host may reuse this slot only while its transport can still take input. */
   get canReuse(): boolean {
     return !this.closed && Boolean(this.child?.stdin.writable);
+  }
+
+  /** Opening context belongs once to a new session; `opened` remains its provenance. */
+  get promptContext(): "session/new" | "session/load" {
+    return this.opened === "session/new" && !this.promptAccepted ? "session/new" : "session/load";
   }
 
   private get isGrok(): boolean {
@@ -1489,6 +1495,7 @@ export class GrokAgent {
     if (!sessionId) throw new Error(`${this.who} agent session/new did not return a sessionId`);
     this.sessionId = sessionId;
     this.opened = "session/new";
+    this.promptAccepted = false;
     await this.applySessionConfig(sessionId, sessionNew);
     return { initialize, sessionNew, sessionId, opened: "session/new" };
   }
@@ -1633,6 +1640,9 @@ export class GrokAgent {
       sessionId: this.sessionId,
       prompt: buildAcpPrompt(text, hydrateChatImages(images)),
     });
+    // An ACP response confirms that this session took the prompt. A stopped
+    // start or failed request must still get its opening context on retry.
+    this.promptAccepted = true;
     // PromptResponse.usage is the adapter's own total for this turn — Claude's
     // adapter sums every API call it made into it. It is the one number to
     // keep. Mid-turn snapshots are the same tokens seen early; sending the

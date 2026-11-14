@@ -597,6 +597,8 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
 - **In** is fresh input, what the model read for the first time. **Cached** is
   context served back from cache. **Out** is what it wrote, and the total is
   in + out.
+- Uncached input replay counts on every billed request, including tool loops.
+  The final prompt's retained context stays separate from those request totals.
 - Compact shrinks the context meter. Leftover moves only if that bot ran a
   billed summary.
 - A full window never holds a send the way a spent daily bank does.

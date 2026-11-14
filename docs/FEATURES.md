@@ -214,6 +214,8 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
   - **Folders** dropped whole, with dotfiles and build output skipped
 - A chat reads media the agent wrote, so a generated image shows in the
   transcript, not a path.
+- Local HTML page links open in their default app, including Windows drive
+  paths and styled link labels. Picture links still show their images.
 - **Permission modes** ask, accept-edits, always-approve, plan.
 - **Computer** is a per-chat switch beside Permission and Sandbox. It ships off.
   Spawn does not copy it onto a worker and cannot turn it on. It runs only

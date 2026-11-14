@@ -116,6 +116,7 @@ type WorkhorseBridge = {
   pickFile: () => Promise<string | null>;
   teamPickFolder?: () => Promise<import("./lib/project").PickedFolder | null>;
   teamDevice?: () => Promise<string>;
+  teamStaffDefault?: () => Promise<boolean>;
   teamRead?: (
     folder: string,
     journalId: string,

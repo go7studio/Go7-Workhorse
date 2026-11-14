@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type 
 import {
   canStopHere,
   ceilingEvent,
+  dissolveEvent,
   foldTeamJournal,
   inboxOwnerEvent,
   joinTeam,
@@ -21,9 +22,11 @@ import {
   type TeamCeiling,
   type TeamEvent,
   type TeamLocal,
+  type TeamLink,
   type TeamTotal,
   type TeamView,
 } from "./team";
+import { crewEnabled } from "./settings";
 import type { AppState, PermissionRequest, Project, Session } from "./types";
 
 /** How often a team project reads its journal and beats its presence. */
@@ -40,6 +43,8 @@ export type TeamSnapshot = {
   ceiling: TeamCeiling | null;
   grants: Array<{ pack: string; host: string; seat: string; ready: boolean; message?: string }>;
   locator: string;
+  /** True when sync is paused on this desk. */
+  off?: boolean;
   error?: string;
 };
 
@@ -48,6 +53,9 @@ export type TeamResult = { ok: boolean; message: string; locator?: string };
 export type TeamDeskApi = {
   device: string | null;
   seat: string;
+  /** True when Crew is enabled in settings or via WORKHORSE_CREW=1. */
+  enabled: boolean;
+  setEnabled: (enabled: boolean) => void;
   snapshots: Record<string, TeamSnapshot>;
   share: (projectId: string) => Promise<TeamResult>;
   join: (locator: string) => Promise<TeamResult>;
@@ -59,9 +67,46 @@ export type TeamDeskApi = {
   sendStop: (sessionId: string) => string | null;
   canStop: (sessionId: string) => boolean;
   noteAnswer: (request: PermissionRequest, answer: "once" | "session" | "deny") => void;
+  /** Pause sync on a project. Presence stops, no new events are published or taken. */
+  turnOff: (projectId: string) => Promise<TeamResult>;
+  /** Resume sync on a project after turning it off. */
+  turnOn: (projectId: string) => Promise<TeamResult>;
+  /** Leave the team permanently. Writes the departure to the journal, then removes the team link. */
+  dissolve: (projectId: string) => Promise<TeamResult>;
+  /** Change the journal folder location for a team project. */
+  changeFolder: (projectId: string) => Promise<TeamResult>;
 };
 
 type Held = { view: TeamView; beats: PresenceBeat[] };
+
+/** Leaving this desk cannot depend on a synced folder being writable. */
+export async function leaveTeam(
+  writeDeparture: () => Promise<boolean>,
+  unlink: () => void,
+): Promise<TeamResult> {
+  let published = false;
+  try { published = await writeDeparture(); }
+  catch { /* The local departure still takes effect when the shared folder is unavailable. */ }
+  finally { unlink(); }
+  return {
+    ok: true,
+    message: published
+      ? "Left the team. The project remains on this desk."
+      : "Left the team on this desk. The departure could not be written to the shared folder.",
+  };
+}
+
+/** A paused, left, moved, or disabled project cannot receive an in-flight sync. */
+export function teamSyncStillCurrent(
+  state: Pick<AppState, "settings" | "projects">,
+  projectId: string,
+  expected: TeamLink,
+  staffDefault = false,
+): boolean {
+  const link = state.projects.find((item) => item.id === projectId)?.team;
+  return crewEnabled(state.settings, staffDefault) && Boolean(link && !link.off &&
+    link.journalId === expected.journalId && link.folder === expected.folder);
+}
 
 /**
  * Take a sync result computed from one snapshot onto a desk that may have
@@ -98,6 +143,8 @@ export function useTeamDesk(input: {
   const { ready, stateRef, setState } = input;
   const [device, setDevice] = useState<string | null>(null);
   const [snapshots, setSnapshots] = useState<Record<string, TeamSnapshot>>({});
+  const [staffDefault, setStaffDefault] = useState(false);
+  const staffDefaultRef = useRef(false);
   const held = useRef<Record<string, Held>>({});
   const deviceRef = useRef<string | null>(null);
   const busy = useRef(false);
@@ -107,6 +154,10 @@ export function useTeamDesk(input: {
     void window.workhorse?.teamDevice?.().then((id) => {
       deviceRef.current = id;
       setDevice(id);
+    });
+    void window.workhorse?.teamStaffDefault?.().then((enabled) => {
+      staffDefaultRef.current = enabled;
+      setStaffDefault(enabled);
     });
   }, [ready]);
 
@@ -130,13 +181,38 @@ export function useTeamDesk(input: {
       const project = stateRef.current.projects.find((item) => item.id === projectId);
       const link = project?.team;
       if (!api?.teamRead || !api.teamAppend || !me || !link) return;
+      if (!crewEnabled(stateRef.current.settings, staffDefaultRef.current)) return;
+      // If sync is off, just update the snapshot with off=true and skip sync
+      if (link.off) {
+        setSnapshots((current) => {
+          if (current[projectId]?.off) return current;
+          const snap: TeamSnapshot = current[projectId] ?? {
+            projectId,
+            journalId: link.journalId,
+            members: [],
+            inboxOwner: null,
+            waiting: [],
+            presence: [],
+            total: { tokens: 0, costUsd: 0, bySeat: [], partial: true, offline: [] },
+            ceiling: null,
+            grants: [],
+            locator: "",
+            off: true,
+          };
+          return { ...current, [projectId]: { ...snap, off: true } };
+        });
+        return;
+      }
       const read = await api.teamRead(link.folder, link.journalId);
       const state = stateRef.current;
+      if (!teamSyncStillCurrent(state, projectId, link, staffDefaultRef.current)) return;
       const snapshot = state.sessions;
       const result = syncTeamProject(state, projectId, read.events, { ...me, now: Date.now() });
       if (!result) return;
       if (result.append.length > 0) await api.teamAppend(link.folder, link.journalId, me.device, result.append);
-      if (result.changed) setState((current) => landTeamSync(current, snapshot, projectId, result));
+      if (!teamSyncStillCurrent(stateRef.current, projectId, link, staffDefaultRef.current)) return;
+      if (result.changed) setState((current) => teamSyncStillCurrent(current, projectId, link, staffDefaultRef.current)
+        ? landTeamSync(current, snapshot, projectId, result) : current);
       const active = state.activeSessionId;
       const beat: PresenceBeat = {
         device: me.device,
@@ -162,6 +238,7 @@ export function useTeamDesk(input: {
           return { pack: grant.pack, host: grant.host, seat: grant.seat, ready: here.status === "ready", ...(here.status === "no-host" ? { message: here.message } : {}) };
         }),
         locator: teamLocator({ journal: link.journalId, project: { id: projectId, name: project.name }, from: me.seat, device: me.device }),
+        off: false,
         ...(read.error ? { error: read.error } : {}),
       };
       setSnapshots((current) => ({ ...current, [projectId]: snap }));
@@ -171,6 +248,8 @@ export function useTeamDesk(input: {
 
   const syncAll = useCallback(async () => {
     if (busy.current) return;
+    // Skip sync entirely if crew is not enabled
+    if (!crewEnabled(stateRef.current.settings, staffDefaultRef.current)) return;
     busy.current = true;
     try {
       for (const project of stateRef.current.projects) if (project.team) await syncProject(project.id);
@@ -179,18 +258,30 @@ export function useTeamDesk(input: {
     }
   }, [stateRef, syncProject]);
 
+  const enabled = crewEnabled(stateRef.current.settings, staffDefault);
   useEffect(() => {
-    if (!ready || !device) return;
+    if (!ready || !device || !enabled) return;
     void syncAll();
     const timer = window.setInterval(() => void syncAll(), TEAM_SYNC_MS);
     return () => window.clearInterval(timer);
-  }, [ready, device, syncAll]);
+  }, [ready, device, enabled, syncAll]);
+
+  const setEnabled = useCallback((enabled: boolean) => {
+    const apply = (current: AppState): AppState => ({
+      ...current, settings: { ...current.settings, crew: { enabled } },
+    });
+    stateRef.current = apply(stateRef.current);
+    setState(apply);
+  }, [setState, stateRef]);
 
   const appendOne = useCallback(
     async (projectId: string, made: TeamEvent | null | { error: string } | { event: TeamEvent }, done: string): Promise<TeamResult> => {
       const link = stateRef.current.projects.find((item) => item.id === projectId)?.team;
       const me = local();
       if (!link || !me) return { ok: false, message: "This project is not on a team." };
+      if (!teamSyncStillCurrent(stateRef.current, projectId, link, staffDefaultRef.current)) {
+        return { ok: false, message: "Team sync is off. Enable Crew in Settings → Profile, then turn on this project's sync." };
+      }
       if (!made) return { ok: false, message: "That could not be written." };
       if ("error" in made) return { ok: false, message: made.error };
       const item = "event" in made ? made.event : made;
@@ -205,6 +296,7 @@ export function useTeamDesk(input: {
 
   const share = useCallback(
     async (projectId: string): Promise<TeamResult> => {
+      if (!crewEnabled(stateRef.current.settings, staffDefaultRef.current)) return { ok: false, message: "Enable Crew in Settings → Profile first." };
       const me = local();
       const project = stateRef.current.projects.find((item) => item.id === projectId);
       if (!me || !project) return { ok: false, message: "Open the desktop app to share a project." };
@@ -214,6 +306,7 @@ export function useTeamDesk(input: {
       }
       const picked = await window.workhorse?.teamPickFolder?.();
       if (!picked) return { ok: false, message: "Pick a folder both computers can see, such as a synced folder." };
+      if (!crewEnabled(stateRef.current.settings, staffDefaultRef.current)) return { ok: false, message: "Crew was turned off." };
       const started = startTeam({ project, folder: picked.path, local: me });
       if ("error" in started) return { ok: false, message: started.error };
       await window.workhorse?.teamAppend?.(picked.path, started.link.journalId, me.device, started.events);
@@ -233,10 +326,12 @@ export function useTeamDesk(input: {
 
   const join = useCallback(
     async (locator: string): Promise<TeamResult> => {
+      if (!crewEnabled(stateRef.current.settings, staffDefaultRef.current)) return { ok: false, message: "Enable Crew in Settings → Profile first." };
       const me = local();
       if (!me) return { ok: false, message: "Open the desktop app to join a team." };
       const picked = await window.workhorse?.teamPickFolder?.();
       if (!picked) return { ok: false, message: "Pick this computer's copy of the shared team folder." };
+      if (!crewEnabled(stateRef.current.settings, staffDefaultRef.current)) return { ok: false, message: "Crew was turned off." };
       const joined = joinTeam({ locator, folder: picked.path, local: me, projects: stateRef.current.projects });
       if ("error" in joined) return { ok: false, message: joined.error };
       await window.workhorse?.teamAppend?.(picked.path, joined.project.team!.journalId, me.device, joined.events);
@@ -303,7 +398,7 @@ export function useTeamDesk(input: {
       const { project } = projectOf(sessionId);
       const me = local();
       const hold = project ? held.current[project.id] : undefined;
-      if (!project || !me || !hold) return null;
+      if (!project?.team || !me || !hold || !teamSyncStillCurrent(stateRef.current, project.id, project.team, staffDefaultRef.current)) return null;
       const total = teamProjectTotal({
         view: hold.view,
         beats: hold.beats,
@@ -330,16 +425,125 @@ export function useTeamDesk(input: {
     (request: PermissionRequest, answer: "once" | "session" | "deny") => {
       const { project } = projectOf(request.sessionId);
       const me = local();
-      if (!project?.team || !me) return;
+      if (!project?.team || !me || !teamSyncStillCurrent(stateRef.current, project.id, project.team, staffDefaultRef.current)) return;
       const made = permissionAnsweredEvent(project.team.journalId, request, answer, me);
       if (made) void window.workhorse?.teamAppend?.(project.team.folder, project.team.journalId, me.device, [made]);
     },
     [local, stateRef],
   );
 
+  const turnOff = useCallback(
+    async (projectId: string): Promise<TeamResult> => {
+      const project = stateRef.current.projects.find((item) => item.id === projectId);
+      if (!project?.team) return { ok: false, message: "This project is not on a team." };
+      if (project.team.off) return { ok: true, message: "Sync is already off." };
+      setState((current) => ({
+        ...current,
+        projects: current.projects.map((item) =>
+          item.id === projectId && item.team ? { ...item, team: { ...item.team, off: true } } : item,
+        ),
+      }));
+      stateRef.current = {
+        ...stateRef.current,
+        projects: stateRef.current.projects.map((item) =>
+          item.id === projectId && item.team ? { ...item, team: { ...item.team, off: true } } : item,
+        ),
+      };
+      setSnapshots((current) => {
+        const snap = current[projectId];
+        return snap ? { ...current, [projectId]: { ...snap, off: true } } : current;
+      });
+      return { ok: true, message: "Sync paused. Turn it back on to resume." };
+    },
+    [setState, stateRef],
+  );
+
+  const turnOn = useCallback(
+    async (projectId: string): Promise<TeamResult> => {
+      if (!crewEnabled(stateRef.current.settings, staffDefaultRef.current)) return { ok: false, message: "Enable Crew in Settings → Profile first." };
+      const project = stateRef.current.projects.find((item) => item.id === projectId);
+      if (!project?.team) return { ok: false, message: "This project is not on a team." };
+      if (!project.team.off) return { ok: true, message: "Sync is already on." };
+      setState((current) => ({
+        ...current,
+        projects: current.projects.map((item) =>
+          item.id === projectId && item.team ? { ...item, team: { ...item.team, off: false } } : item,
+        ),
+      }));
+      stateRef.current = {
+        ...stateRef.current,
+        projects: stateRef.current.projects.map((item) =>
+          item.id === projectId && item.team ? { ...item, team: { ...item.team, off: false } } : item,
+        ),
+      };
+      await syncProject(projectId);
+      return { ok: true, message: "Sync resumed." };
+    },
+    [setState, stateRef, syncProject],
+  );
+
+  const dissolve = useCallback(
+    async (projectId: string): Promise<TeamResult> => {
+      const me = local();
+      const project = stateRef.current.projects.find((item) => item.id === projectId);
+      if (!me || !project?.team) return { ok: false, message: "This project is not on a team." };
+      const link = project.team;
+      const made = dissolveEvent(link.journalId, me);
+      return leaveTeam(async () => {
+        if (!made) return false;
+        const result = await window.workhorse?.teamAppend?.(link.folder, link.journalId, me.device, [made]);
+        return result?.written === 1;
+      }, () => {
+        setState((current) => ({
+          ...current,
+          projects: current.projects.map((item) =>
+            item.id === projectId ? { ...item, team: undefined } : item,
+          ),
+        }));
+        stateRef.current = {
+          ...stateRef.current,
+          projects: stateRef.current.projects.map((item) =>
+            item.id === projectId ? { ...item, team: undefined } : item,
+          ),
+        };
+        setSnapshots((current) => {
+          const next = { ...current };
+          delete next[projectId];
+          return next;
+        });
+        delete held.current[projectId];
+      });
+    },
+    [local, setState, stateRef],
+  );
+
+  const changeFolder = useCallback(
+    async (projectId: string): Promise<TeamResult> => {
+      const project = stateRef.current.projects.find((item) => item.id === projectId);
+      if (!project?.team) return { ok: false, message: "This project is not on a team." };
+      const picked = await window.workhorse?.teamPickFolder?.();
+      if (!picked) return { ok: false, message: "Pick this computer's copy of the shared team folder." };
+      setState((current) => ({
+        ...current,
+        projects: current.projects.map((item) =>
+          item.id === projectId && item.team ? { ...item, team: { ...item.team, folder: picked.path } } : item,
+        ),
+      }));
+      stateRef.current = {
+        ...stateRef.current,
+        projects: stateRef.current.projects.map((item) =>
+          item.id === projectId && item.team ? { ...item, team: { ...item.team, folder: picked.path } } : item,
+        ),
+      };
+      await syncProject(projectId);
+      return { ok: true, message: `Journal folder changed to ${picked.path}.` };
+    },
+    [setState, stateRef, syncProject],
+  );
+
   const seat = seatOf(stateRef.current.settings.profile);
   return useMemo(
-    () => ({ device, seat, snapshots, share, join, handInbox, takeInbox, setCeiling, shareWorkshopGrant, sendStop, canStop, noteAnswer }),
-    [device, seat, snapshots, share, join, handInbox, takeInbox, setCeiling, shareWorkshopGrant, sendStop, canStop, noteAnswer],
+    () => ({ device, seat, enabled, setEnabled, snapshots, share, join, handInbox, takeInbox, setCeiling, shareWorkshopGrant, sendStop, canStop, noteAnswer, turnOff, turnOn, dissolve, changeFolder }),
+    [device, seat, enabled, setEnabled, snapshots, share, join, handInbox, takeInbox, setCeiling, shareWorkshopGrant, sendStop, canStop, noteAnswer, turnOff, turnOn, dissolve, changeFolder],
   );
 }

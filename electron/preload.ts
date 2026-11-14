@@ -40,6 +40,7 @@ contextBridge.exposeInMainWorld("workhorse", {
   teamPickFolder: () =>
     ipcRenderer.invoke("team:pick-folder") as Promise<import("../src/lib/project").PickedFolder | null>,
   teamDevice: () => ipcRenderer.invoke("team:device") as Promise<string>,
+  teamStaffDefault: () => ipcRenderer.invoke("team:staff-default") as Promise<boolean>,
   teamRead: (folder: string, journalId: string) =>
     ipcRenderer.invoke("team:read", folder, journalId) as Promise<{
       events: import("../src/lib/team").TeamEvent[];

@@ -73,17 +73,16 @@ export const DEFAULT_CREW_SETTINGS: CrewSettings = {
   enabled: false,
 };
 
-/** True when Crew is enabled in settings. Staff gate: `WORKHORSE_CREW=1` env var also enables it. */
-export function crewEnabled(settings: Settings): boolean {
-  if (typeof process !== "undefined" && process.env?.WORKHORSE_CREW === "1") return true;
-  return settings.crew?.enabled === true;
+/** The main process supplies the optional staff default; the person's saved choice wins. */
+export function crewEnabled(settings: Settings, staffDefault = DEFAULT_CREW_SETTINGS.enabled): boolean {
+  return settings.crew?.enabled ?? staffDefault;
 }
 
 export function normalizeCrew(raw: unknown): CrewSettings | undefined {
   if (!raw || typeof raw !== "object") return undefined;
   const record = raw as Partial<CrewSettings>;
-  if (record.enabled !== true) return undefined;
-  return { enabled: true };
+  if (typeof record.enabled !== "boolean") return undefined;
+  return { enabled: record.enabled };
 }
 
 export function normalizeRouting(raw: unknown): RoutingSettings {

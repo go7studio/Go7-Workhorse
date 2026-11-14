@@ -1573,6 +1573,7 @@ app.whenReady().then(async () => {
 
   ipcMain.handle("team:pick-folder", () => pickLinkedFolder("Shared team folder", "Use", ["createDirectory"]));
   ipcMain.handle("team:device", () => teamDeviceId(app.getPath("userData"), () => uid("dev")));
+  ipcMain.handle("team:staff-default", () => process.env.WORKHORSE_CREW === "1");
   ipcMain.handle("team:read", (_event, folder: unknown, journalId: unknown) => {
     if (typeof folder !== "string" || typeof journalId !== "string") return { events: [], presence: [] };
     try {

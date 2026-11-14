@@ -225,11 +225,13 @@ export function Settings() {
                 <strong>Crew</strong>
                 <span>Share projects through a folder you choose. Off pauses this desk's team sync.</span>
               </div>
-              <div className="settings-control actions" role="radiogroup" aria-label="Crew">
-                <button className={!store.team.enabled ? "tiny active-kind" : "tiny"} type="button" role="radio"
-                  aria-checked={!store.team.enabled} onClick={() => store.team.setEnabled(false)}>Off</button>
-                <button className={store.team.enabled ? "tiny active-kind" : "tiny"} type="button" role="radio"
-                  aria-checked={store.team.enabled} onClick={() => store.team.setEnabled(true)}>On</button>
+              <div className="settings-control">
+                <div className="actions" role="radiogroup" aria-label="Crew">
+                  <button className={!store.team.enabled ? "tiny active-kind" : "tiny"} type="button" role="radio"
+                    aria-checked={!store.team.enabled} onClick={() => store.team.setEnabled(false)}>Off</button>
+                  <button className={store.team.enabled ? "tiny active-kind" : "tiny"} type="button" role="radio"
+                    aria-checked={store.team.enabled} onClick={() => store.team.setEnabled(true)}>On</button>
+                </div>
               </div>
             </div>
           </div>

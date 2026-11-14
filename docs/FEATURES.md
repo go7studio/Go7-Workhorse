@@ -188,6 +188,8 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
   - **Folders** dropped whole, with dotfiles and build output skipped
 - A chat reads media the agent wrote, so a generated image shows in the
   transcript, not a path.
+- Local HTML page links open in their default app, including Windows drive
+  paths and styled link labels. Picture links still show their images.
 - **Permission modes** ask, accept-edits, always-approve, plan.
 - **Sandbox profiles** off, workspace, read-only, strict. Read-only still reads:
   gh, git and the search tools. Anything that writes or sends stops, and so does

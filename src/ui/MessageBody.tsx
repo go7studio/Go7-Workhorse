@@ -141,7 +141,12 @@ function Inlines({
               onClick={(event) => onLink(event, part.href)}
             >
               {part.children && part.children.length > 0 ? (
-                <Inlines parts={part.children} nearby={nearby} cwd={cwd} vendorSessionId={vendorSessionId} />
+                part.children.map((label, at) => {
+                  if (label.type === "strong") return <strong key={at}>{label.text}</strong>;
+                  if (label.type === "em") return <em key={at}>{label.text}</em>;
+                  if (label.type === "code") return <code key={at}>{label.text}</code>;
+                  return <span key={at}>{label.text}</span>;
+                })
               ) : (
                 part.text
               )}

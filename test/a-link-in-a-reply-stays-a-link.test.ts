@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { isLocalHtmlHref, looksLikeImageHref, parseChatMarkdown, parseInline } from "../src/lib/markdown";
+import { FileOpenProvider } from "../src/ui/FileOpen";
+import { MessageBody } from "../src/ui/MessageBody";
 
 function kinds(source: string): string[] {
   return parseInline(source).map((part) => part.type);
@@ -146,4 +150,14 @@ test("a query that names a picture stays a link, and a real picture stays a pict
   assert.deepEqual(picture, [
     { type: "image", alt: "Inventory with one fruit", href: "D:/Godot/Projects/Scratch0/Temp/inv-one-fruit.png" },
   ]);
+});
+
+test("a source-code link label remains one clickable anchor", () => {
+  const render = (text: string) => renderToStaticMarkup(createElement(FileOpenProvider, {
+    roots: [], provider: "grok", onOpen: () => {}, children: createElement(MessageBody, { text }),
+  }));
+  const linked = render("[`src/parser.ts`](https://example.com/docs)");
+  assert.match(linked, /<a\b[^>]*><code>src\/parser\.ts<\/code><\/a>/);
+  assert.doesNotMatch(linked, /<button\b/, "a label must not also open its code citation when clicked");
+  assert.match(render("`src/parser.ts`"), /<button\b[^>]*class="md-file"/, "standalone code citations keep their file action");
 });

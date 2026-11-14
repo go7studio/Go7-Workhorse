@@ -67,6 +67,21 @@ test("Open never stats a path on another machine", () => {
   assert.deepEqual(stats, []);
 });
 
+test("Windows HTML drive links normalize on every test platform", () => {
+  const page = "D:\\out\\My Gallery\\index.html";
+  const { io: fs } = io({ [page]: plainFile });
+  for (const href of [
+    page,
+    "D:/out/My Gallery/index.html",
+    "/D:/out/My Gallery/index.html",
+    "</D:/out/My Gallery/index.html>",
+    "<D:\\out\\My Gallery\\index.html>",
+    "file:///D:/out/My%20Gallery/index.html",
+  ]) {
+    assert.equal(openableHtmlPath(href, fs), page, href);
+  }
+});
+
 test("the desk opens by kind and reveals anything else local", () => {
   const main = readFileSync(path.join(ROOT, "electron", "main.ts"), "utf8");
   const handler = main.slice(main.indexOf('ipcMain.handle("desk:open-local-path"'), main.indexOf('ipcMain.handle("desk:reveal-local-path"'));
@@ -90,17 +105,21 @@ test("a local html page is the only extra file a chat link may launch", () => {
   writeFileSync(png, Buffer.from("png"));
   writeFileSync(exe, "nope");
   try {
-    const slashed = `/${html.replaceAll("\\", "/")}`;
-    const angled = `</${html.replaceAll("\\", "/")}>`;
+    // Windows citations may spell a drive with a leading slash. A native
+    // POSIX absolute path already has its slash; adding one would make an
+    // actual //host share spelling that the opener must keep refusing.
+    const nativeHref = (file: string) => process.platform === "win32" ? `/${file.replaceAll("\\", "/")}` : file;
+    const slashed = nativeHref(html);
+    const angled = `<${slashed}>`;
     assert.equal(path.resolve(openableHtmlPath(slashed)!), path.resolve(html));
     assert.equal(path.resolve(openableHtmlPath(angled)!), path.resolve(html));
     assert.equal(path.resolve(openableHtmlPath(html)!), path.resolve(html));
     assert.equal(path.resolve(openableHtmlPath(`<${htm}>`)!), path.resolve(htm));
-    assert.equal(openableHtmlPath(`/${png.replaceAll("\\", "/")}`), null, "a png is not a page");
+    assert.equal(openableHtmlPath(nativeHref(png)), null, "a png is not a page");
     assert.equal(openableHtmlPath(exe), null, "a program whose name contains .html");
     assert.equal(openableMediaPath(html, "image"), null);
     assert.equal(openableMediaPath(html, "video"), null);
-    assert.equal(path.resolve(resolveDisplayFile(`/${png.replaceAll("\\", "/")}`, { home: path.join(dir, "no-home") })!), path.resolve(png));
+    assert.equal(path.resolve(resolveDisplayFile(nativeHref(png), { home: path.join(dir, "no-home") })!), path.resolve(png));
     assert.equal(path.resolve(resolveDisplayFile(`<${png}>`, { home: path.join(dir, "no-home") })!), path.resolve(png));
     const { io: fs, stats } = io({});
     for (const share of [

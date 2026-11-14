@@ -41,6 +41,7 @@
     "eval:start": "node scripts/workhorse-eval.mjs start",
     "eval:preflight": "tsx scripts/workhorse-eval-preflight.ts",
     "eval:smoke": "tsx test/provider-live-smoke.ts",
+    "eval:context-smoke": "tsx test/provider-context-live-smoke.ts",
     "eval:cursor-ledger": "tsx test/cursor-ledger-live-smoke.ts",
     "eval:multi-model-smoke": "tsx test/custom-multi-model-live-smoke.ts",
     "eval:capability-smoke": "tsx test/capability-live-smoke.ts",

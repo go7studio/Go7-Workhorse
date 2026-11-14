@@ -164,7 +164,7 @@ export class CodexSessionHost {
       spawnNames: input.spawnNames,
       priorUserTexts: input.priorUserTexts,
       planOpen: input.planOpen,
-    }, input.visibleText);
+    }, input.visibleText, input.turnContext);
 
     try {
       if (this.stoppedWhileStarting.delete(input.sessionId)) return stoppedBeforePrompt(input.sessionId, slot.agent, emit);

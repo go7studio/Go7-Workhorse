@@ -146,7 +146,7 @@ export class ClaudeSessionHost {
           spawnNames: input.spawnNames,
           priorUserTexts: input.priorUserTexts,
           planOpen: input.planOpen,
-        }, input.visibleText);
+        }, input.visibleText, input.turnContext);
         const result = await slot.agent.prompt(text, this.handlersFor(input, forward), input.images ?? []);
         if (result.stopReason !== "cancelled") clearClaudeCredentialRejection(spec.credential.fingerprint);
         emit({ type: "done", sessionId: input.sessionId, stopReason: result.stopReason });

@@ -1407,8 +1407,8 @@ export class GrokAgent {
   }
 
   /** Opening context belongs once to a new session; `opened` remains its provenance. */
-  get promptContext(): "session/new" | "session/load" {
-    return this.opened === "session/new" && !this.promptAccepted ? "session/new" : "session/load";
+  get promptContext(): "session/new" | "session/load" | "session/continue" {
+    return this.opened === "session/new" && this.promptAccepted ? "session/continue" : this.opened;
   }
 
   private get isGrok(): boolean {

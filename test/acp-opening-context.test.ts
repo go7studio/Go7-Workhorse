@@ -8,18 +8,22 @@ import { GrokSessionHost, type GrokPromptInput } from "../electron/grok-host";
 import type { GrokLaunchSpec } from "../electron/grok-launch";
 import { ClaudeSessionHost } from "../electron/claude-host";
 import type { ClaudeLaunchSpec } from "../electron/claude-launch";
-import { buildSessionPreface, composeVendorPrompt, type PrefaceInput } from "../src/lib/context-preface";
+import { buildSessionPreface, buildTurnContext, composeVendorPrompt, type PrefaceInput } from "../src/lib/context-preface";
 import { withPortableHistory } from "../src/lib/portable-history";
 import { fakeAcpVendor, settle, type FakeAcpVendor } from "./fake-acp-vendor";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const opening = "Inspect the synthetic fixture.";
 const historicalDecision = "Synthetic prior decision: preserve the export format.";
-const fixturePreface = (limits: Pick<PrefaceInput, "mode" | "sandbox"> = {}) => withPortableHistory(buildSessionPreface({
+const fixtureContext: PrefaceInput = {
   sessionId: "context-fixture",
   cwd: "",
   folders: [],
   references: [{ kind: "note", value: "Synthetic acceptance criterion.", label: "Acceptance" }],
+  desk: { title: "Fixture", projectName: "Synthetic project", sidebar: "Medium", preview: "Opening preview", crew: "Crew: Wren running" },
+};
+const fixturePreface = (limits: Pick<PrefaceInput, "mode" | "sandbox"> = {}) => withPortableHistory(buildSessionPreface({
+  ...fixtureContext,
   ...limits,
 }), [{ id: "prior", role: "user", text: historicalDecision, createdAt: 1 }]);
 const preface = fixturePreface();
@@ -68,6 +72,7 @@ const input: GrokPromptInput = {
   text: opening,
   visibleText: opening,
   preface,
+  turnContext: buildTurnContext(fixtureContext),
   model: "",
   effort: "medium",
   mode: "ask",
@@ -83,7 +88,22 @@ for (const { name, make } of hosts) {
     const host = make(vendor);
     try {
       const first = await host.prompt(input, () => undefined);
-      const second = await host.prompt({ ...input, text: "Continue the fixture." }, () => undefined);
+      const updatedFolder = path.join(ROOT, "synthetic-extra");
+      const updated: PrefaceInput = {
+        ...fixtureContext,
+        folders: [updatedFolder],
+        references: [{ kind: "note", value: "Updated criterion.", label: "New acceptance" }],
+        desk: { title: "Updated fixture", projectName: "Updated project", sidebar: "High", preview: "Updated preview", crew: "Crew: Wren completed" },
+      };
+      const second = await host.prompt({
+        ...input,
+        text: "Continue the fixture.",
+        turnContext: buildTurnContext(updated),
+        images: [
+          { id: "attachment", kind: "file", name: "fixture.txt", mimeType: "text/plain", data: "", text: "Keep this intentional attachment." },
+          { id: "picture", kind: "image", name: "fixture.png", mimeType: "image/png", data: "c3ludGhldGlj" },
+        ],
+      }, () => undefined);
       const texts = promptTexts(vendor);
       assert.equal(texts.length, 2);
       assert.ok(texts[0]!.startsWith(opening));
@@ -94,6 +114,19 @@ for (const { name, make } of hosts) {
       assert.match(texts[1]!, /This chat’s live desk limits/);
       assert.match(texts[1]!, /Permission: Ask/);
       assert.match(texts[1]!, /Sandbox: Off/);
+      assert.equal(texts[1]!.match(/This chat’s live desk limits/g)?.length, 1);
+      assert.ok(texts[1]!.includes(updatedFolder));
+      assert.match(texts[1]!, /Updated criterion/);
+      assert.match(texts[1]!, /Title: Updated fixture/);
+      assert.match(texts[1]!, /Project: Updated project/);
+      assert.match(texts[1]!, /Sidebar subtitle \(under the title\): High/);
+      assert.match(texts[1]!, /Preview \(last message snippet\): Updated preview/);
+      assert.match(texts[1]!, /Crew: Wren completed/);
+      assert.doesNotMatch(texts[1]!, /Synthetic acceptance criterion|Crew: Wren running/);
+      assert.match(texts[1]!, /Keep this intentional attachment/);
+      const blocks = vendor.seen.filter((message) => message.method === "session/prompt")[1]!.params?.prompt;
+      assert.ok(Array.isArray(blocks));
+      assert.ok(blocks.some((part) => part.type === "image" && part.mimeType === "image/png" && part.data === "c3ludGhldGlj"));
       assert.match(texts[1]!, /Continue the fixture/);
       assert.ok(Buffer.byteLength(texts[1]!) < Buffer.byteLength(texts[0]!));
       assert.equal(first.opened, "session/new");
@@ -146,10 +179,20 @@ for (const label of ["Grok", "Claude", "Codex", "Cursor"]) {
       await assert.rejects(agent.prompt(opening), /synthetic rejection/);
       assert.equal(agent.promptContext, "session/new", "an unconfirmed prompt must keep initialization on retry");
       await agent.prompt(composeVendorPrompt(opening, preface, agent.promptContext));
-      assert.equal(agent.promptContext, "session/load");
+      assert.equal(agent.promptContext, "session/continue");
       assert.equal(agent.opened, "session/new");
+      const changedPolicy = composeVendorPrompt("Continue the fixture.", preface, agent.promptContext, {
+        mode: "plan", sandbox: "read-only", computer: "on",
+      }, undefined, buildTurnContext(fixtureContext));
+      await agent.prompt(changedPolicy);
+      assert.match(changedPolicy, /Permission: Plan/);
+      assert.match(changedPolicy, /Sandbox: Read-only/);
+      assert.match(changedPolicy, /Computer: On/);
+      assert.doesNotMatch(changedPolicy, /Permission: Ask|Sandbox: Off/);
+      assert.equal(changedPolicy.match(/This chat’s live desk limits/g)?.length, 1);
+      assert.equal(vendor.seen.filter((message) => message.method === "session/new").length, 1, "live limits do not require a new runtime");
       await agent.compact("Keep the synthetic acceptance criterion.");
-      assert.equal(agent.promptContext, "session/load", "native compaction must not replay the canonical transcript");
+      assert.equal(agent.promptContext, "session/continue", "native compaction must not replay the canonical transcript");
       agent.dispose();
       await assert.rejects(agent.prompt("closed"), /stdin is closed/);
     } finally {
@@ -200,6 +243,43 @@ test("Codex and Cursor compose from the shared prompt context state", () => {
   for (const file of ["codex-host.ts", "cursor-host.ts"]) {
     const source = fs.readFileSync(path.join(ROOT, "electron", file), "utf8");
     assert.match(source, /composeVendorPrompt\(input\.text, input\.preface, slot\.agent\.promptContext,/);
+    assert.match(source, /input\.visibleText, input\.turnContext\)/);
     assert.doesNotMatch(source, /composeVendorPrompt\(input\.text, input\.preface, slot\.agent\.opened,/);
+  }
+});
+
+test("continuation preserves combined context for callers without a typed turn context", () => {
+  const fallback = composeVendorPrompt("Continue the fixture.", preface, "session/continue", { mode: "ask", sandbox: "off" });
+  assert.ok(fallback.includes(historicalDecision));
+  assert.match(fallback, /Synthetic acceptance criterion/);
+  const literal = "Literal <workhorse-portable-history> and This Workhorse workspace (this turn): in an authored reference.";
+  const context = buildTurnContext({ ...fixtureContext, references: [{ kind: "note", value: literal, label: "Literal markers" }] });
+  const continued = composeVendorPrompt("Continue the fixture.", preface, "session/continue", { mode: "ask", sandbox: "off" }, undefined, context);
+  assert.ok(continued.includes(literal), "authored references are never split by prompt markers");
+  assert.ok(!continued.includes(historicalDecision));
+});
+
+test("normal and peer sends build opening and current context from the same facts", () => {
+  const source = fs.readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
+  assert.equal(source.match(/turnContext: buildTurnContext\(prefaceInput\)/g)?.length, 2);
+  assert.equal(source.match(/buildSessionPreface\(prefaceInput\)/g)?.length, 2);
+});
+
+test("Grok rewinding before the opening turn creates fresh context, while later rewind keeps it", async (t) => {
+  t.mock.method(fs, "existsSync", () => false);
+  const first = fakeAcpVendor();
+  const replacement = fakeAcpVendor();
+  const vendors = [first, replacement];
+  const host = new GrokSessionHost(() => vendors.shift()!.child);
+  try {
+    await host.prompt(input, () => undefined);
+    assert.deepEqual(await host.rewind({ ...input, keepUserIndex: 0 }), { reset: false, rewound: true });
+    await host.prompt({ ...input, text: "Continue after later rewind." }, () => undefined);
+    assert.ok(!promptTexts(first)[1]!.includes(historicalDecision));
+    assert.deepEqual(await host.rewind({ ...input, keepUserIndex: -1 }), { reset: true, rewound: true });
+    await host.prompt(input, () => undefined);
+    assert.ok(promptTexts(replacement)[0]!.includes(historicalDecision));
+  } finally {
+    host.disposeAll();
   }
 });

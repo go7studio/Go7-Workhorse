@@ -44,6 +44,8 @@ export type GrokPromptInput = GrokSessionOpenInput & {
   text: string;
   /** Exact visible user prompt, before Workhorse adds goal/skill/desk context. */
   visibleText?: string;
+  /** Current workspace and desk facts, kept separate from opening rules and history. */
+  turnContext?: string;
   images?: import("../src/lib/types").ChatImage[];
   crewModes?: CrewMode[];
   spawnNames?: string[];
@@ -239,7 +241,7 @@ export class GrokSessionHost {
       spawnNames: input.spawnNames,
       priorUserTexts: input.priorUserTexts,
       planOpen: input.planOpen,
-    }, input.visibleText);
+    }, input.visibleText, input.turnContext);
 
     try {
       if (this.stoppedWhileStarting.delete(input.sessionId)) return stoppedBeforePrompt(input.sessionId, slot.agent, emit);

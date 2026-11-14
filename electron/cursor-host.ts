@@ -135,7 +135,7 @@ export class CursorSessionHost {
       spawnNames: input.spawnNames,
       priorUserTexts: input.priorUserTexts,
       planOpen: input.planOpen,
-    }, input.visibleText);
+    }, input.visibleText, input.turnContext);
     try {
       if (this.stoppedWhileStarting.delete(input.sessionId)) return stoppedBeforePrompt(input.sessionId, slot.agent, emit);
       const result = await slot.agent.prompt(text, this.handlersFor(input, emit), input.images ?? []);

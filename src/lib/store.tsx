@@ -419,7 +419,7 @@ import { createPortableCheckpoint, messagesForPortableReplay } from "./portable-
 import { appendLiveTool, appendOpenTurnUser, recordLiveCompact } from "./session-ledger";
 import { fitModelImages, hasSendableAttachment } from "./images";
 import { estimateMessageTokens } from "./context-stats";
-import { buildSessionPreface } from "./context-preface";
+import { buildSessionPreface, buildTurnContext, type PrefaceInput } from "./context-preface";
 import {
   applyCompactOutcome,
   applyCursorLedger,
@@ -3755,6 +3755,35 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         };
       });
       void (async () => {
+        const prefaceInput: PrefaceInput = {
+          sessionId: session.id,
+          cwd,
+          folders: projectFolderPaths(project, folderExists),
+          references: project?.references ?? [],
+          mode: session.mode,
+          sandbox: session.sandbox,
+          computer: session.computer,
+          surface: session.provider === "custom" ? "http" : session.provider === "cursor" ? "cursor" : "mcp",
+          role: deskRoleOf(session),
+          desk: {
+            title: session.title,
+            projectName: project?.name,
+            sidebar: formatChatSidebar({
+              provider: session.provider,
+              model: session.model,
+              effort: session.effort,
+              fastMode: session.fastMode,
+              mode: session.mode,
+              botName: customBotForSession(stateRef.current.settings.customBots, session)?.name,
+            }),
+            preview: chatPreview(working),
+            ...(session.parentId
+              ? {}
+              : {
+                  crew: formatParentCrewLine(parentCrewSnapshot(stateRef.current.sessions, session.id)),
+                }),
+          },
+        };
         const promptInput = {
           sessionId: session.id,
           projectId: session.projectId ?? undefined,
@@ -3781,35 +3810,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           planOpen: session.planRun?.status === "running",
           mcpServers: mcpServersForSession(stateRef.current.settings.mcpServers, session),
           contextWindow: session.contextWindow,
-          preface: withPortableHistory(buildSessionPreface({
-            sessionId: session.id,
-            cwd,
-            folders: projectFolderPaths(project, folderExists),
-            references: project?.references ?? [],
-            mode: session.mode,
-            sandbox: session.sandbox,
-            computer: session.computer,
-            surface: session.provider === "custom" ? "http" : session.provider === "cursor" ? "cursor" : "mcp",
-            role: deskRoleOf(session),
-            desk: {
-              title: session.title,
-              projectName: project?.name,
-              sidebar: formatChatSidebar({
-                provider: session.provider,
-                model: session.model,
-                effort: session.effort,
-                fastMode: session.fastMode,
-                mode: session.mode,
-                botName: customBotForSession(stateRef.current.settings.customBots, session)?.name,
-              }),
-              preview: chatPreview(working),
-              ...(session.parentId
-                ? {}
-                : {
-                    crew: formatParentCrewLine(parentCrewSnapshot(stateRef.current.sessions, session.id)),
-                  }),
-            },
-          }), session.provider === "custom" ? [] : messagesForPortableReplay(working, session.contextCheckpoint)),
+          turnContext: buildTurnContext(prefaceInput),
+          preface: withPortableHistory(buildSessionPreface(prefaceInput), session.provider === "custom" ? [] : messagesForPortableReplay(working, session.contextCheckpoint)),
         };
         if (live === "custom") {
           if (!window.workhorse?.customPrompt) {
@@ -4720,7 +4722,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           const cwd = sessionExecutionCwd(session.environment, primaryFolder(project, folderExists)?.path ?? "");
           const live = vendorSendTarget(session.provider);
           const role = deskRoleOf(session);
-          const preface = buildSessionPreface({
+          const prefaceInput: PrefaceInput = {
             sessionId: session.id,
             cwd,
             folders: projectFolderPaths(project, folderExists),
@@ -4730,7 +4732,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             computer: session.computer,
             surface: session.provider === "custom" ? "http" : session.provider === "cursor" ? "cursor" : "mcp",
             role,
-          });
+          };
+          const preface = buildSessionPreface(prefaceInput);
           const promptInput = {
             sessionId: session.id,
             projectId: session.projectId ?? undefined,
@@ -4748,6 +4751,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             computer: session.computer,
             mcpServers: runtimeMcpServers,
             preface,
+            turnContext: buildTurnContext(prefaceInput),
             parentId: session.parentId,
             hidden: session.hidden,
             role,

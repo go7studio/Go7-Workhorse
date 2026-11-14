@@ -22,6 +22,7 @@ export function TeamBlock({ project }: { project: Project }) {
   const [handTo, setHandTo] = useState("");
   const [ceiling, setCeiling] = useState("");
   const [locator, setLocator] = useState("");
+  const [confirmDissolve, setConfirmDissolve] = useState(false);
 
   const say = (result: { message: string; locator?: string }) => {
     setNote(result.message);
@@ -35,18 +36,21 @@ export function TeamBlock({ project }: { project: Project }) {
           <span className="section-label" style={{ margin: 0 }}>
             Team
           </span>
-          <button className="tiny" type="button" onClick={() => void team.share(project.id).then(say)}>
+          <button className="tiny" type="button" disabled={!team.enabled} onClick={() => void team.share(project.id).then(say)}>
             Share project
           </button>
         </div>
         <p className="row-meta">
-          {note || "Share with a teammate on another desk. Logins, keys, Permission, Sandbox, and folders stay on each computer."}
+          {!team.enabled
+            ? "Enable Crew in Settings → Profile to share this project."
+            : note || "Share with a teammate on another desk. Logins, keys, Permission, Sandbox, and folders stay on each computer."}
         </p>
       </div>
     );
   }
 
   const shown = locator || snap?.locator || "";
+  const off = project.team.off === true;
   const others = (snap?.members ?? []).filter((seat) => seat !== snap?.inboxOwner);
   const offline = snap?.total.offline ?? [];
   const ownerAway = Boolean(snap?.inboxOwner && offline.includes(snap.inboxOwner));
@@ -173,7 +177,49 @@ export function TeamBlock({ project }: { project: Project }) {
           </button>
         ))}
       </div>
+      {!team.enabled ? <p className="row-meta">Crew is off on this desk. Enable it in Settings → Profile to resume team sync.</p> : null}
+      {off ? (
+        <p className="row-meta">
+          <strong>Sync paused.</strong> Presence stops, no new events are published or taken. Turn it back on to resume.
+        </p>
+      ) : null}
       {note || snap?.error ? <p className="row-meta">{note || snap?.error}</p> : null}
+      <div className="actions" style={{ marginTop: 8, borderTop: "1px solid var(--hairline)", paddingTop: 8 }}>
+        {off ? (
+          <button className="tiny" type="button" onClick={() => void team.turnOn(project.id).then(say)}>
+            Turn on sync
+          </button>
+        ) : (
+          <button className="tiny" type="button" onClick={() => void team.turnOff(project.id).then(say)}>
+            Turn off sync
+          </button>
+        )}
+        <button className="tiny" type="button" onClick={() => void team.changeFolder(project.id).then(say)}>
+          Change folder
+        </button>
+        {confirmDissolve ? (
+          <>
+            <span className="row-meta" style={{ marginLeft: 8 }}>Leave this team?</span>
+            <button
+              className="tiny"
+              type="button"
+              onClick={() => {
+                void team.dissolve(project.id).then(say);
+                setConfirmDissolve(false);
+              }}
+            >
+              Yes, leave
+            </button>
+            <button className="tiny" type="button" onClick={() => setConfirmDissolve(false)}>
+              Cancel
+            </button>
+          </>
+        ) : (
+          <button className="tiny" type="button" onClick={() => setConfirmDissolve(true)}>
+            Leave team
+          </button>
+        )}
+      </div>
     </div>
   );
 }
@@ -200,7 +246,7 @@ export function JoinTeamField({ onJoined }: { onJoined: () => void }) {
         <button
           className="tiny"
           type="button"
-          disabled={!text.trim()}
+          disabled={!team.enabled || !text.trim()}
           onClick={() =>
             void team.join(text).then((result) => {
               setNote(result.message);
@@ -211,7 +257,7 @@ export function JoinTeamField({ onJoined }: { onJoined: () => void }) {
           Join
         </button>
       </div>
-      {note ? <p className="row-meta">{note}</p> : null}
+      {note || !team.enabled ? <p className="row-meta">{note || "Enable Crew in Settings → Profile to join a team."}</p> : null}
     </div>
   );
 }

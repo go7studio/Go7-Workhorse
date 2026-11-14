@@ -1,4 +1,4 @@
-import { isHollowHref } from "./markdown";
+import { isHollowHref, normalizeLocalFileHref } from "./markdown";
 
 export type MediaDisplayContext = {
   cwd?: string;
@@ -39,18 +39,7 @@ export function mediaUrlContext(url: string): MediaDisplayContext {
 }
 
 function fileHrefToPath(href: string): string {
-  let file = href;
-  if (/^file:/i.test(file)) {
-    file = file.replace(/^file:\/\//i, "");
-    try {
-      file = decodeURIComponent(file);
-    } catch {
-      // keep stripped form
-    }
-    // file:///C:/... → /C:/... ; Windows drive letters must keep the colon.
-    if (file.startsWith("/") && /^[A-Za-z]:/.test(file.slice(1))) file = file.slice(1);
-  }
-  return file;
+  return normalizeLocalFileHref(href);
 }
 
 export function mdImageInitialSrc(href: string, context: MediaDisplayContext = {}): string {

@@ -122,6 +122,12 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
 ## Chats and projects
 
 - A project is a name. Folders and references are optional, added later.
+- Settings → Profile → Crew enables project sharing through a folder each desk
+  chooses. It starts off. Share a project or join with its locator; logins,
+  credentials, permissions, sandboxes, and local folder paths stay on each desk.
+- A shared project can pause or resume sync, change its journal folder, or leave
+  the team while keeping the local project. Paused or disabled sync stops new
+  journal updates and presence; a write already dispatched can finish.
 - Chats belong to a project. Rename, archive, delete, or drag one to another.
 - Vendor, model, thinking effort, and Fast (where the model offers it) are set
   per chat, not per app. Fast is on Grok, Claude, and Cursor.
@@ -208,6 +214,8 @@ When the desk token, Claude CLI login, and outer environment are unusable, Claud
   - **Folders** dropped whole, with dotfiles and build output skipped
 - A chat reads media the agent wrote, so a generated image shows in the
   transcript, not a path.
+- Local HTML page links open in their default app, including Windows drive
+  paths and styled link labels. Picture links still show their images.
 - **Permission modes** ask, accept-edits, always-approve, plan.
 - **Computer** is a per-chat switch beside Permission and Sandbox. It ships off.
   Spawn does not copy it onto a worker and cannot turn it on. It runs only

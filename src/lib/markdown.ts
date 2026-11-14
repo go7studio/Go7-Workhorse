@@ -3,7 +3,7 @@ export type Inline =
   | { type: "strong"; text: string }
   | { type: "em"; text: string }
   | { type: "code"; text: string }
-  | { type: "link"; text: string; href: string }
+  | { type: "link"; text: string; href: string; children?: Inline[] }
   | { type: "image"; text: string; href: string };
 
 export type MdAlign = "left" | "right" | "center";
@@ -66,8 +66,39 @@ function webImageHref(value: string): boolean {
   return (host === "grok.com" || host.endsWith(".grok.com")) && /\/generated\//i.test(url.pathname);
 }
 
+/**
+ * A Windows drive written as `/D:/...`, `<D:\...>`, or `file:///D:/...`.
+ * The leading slash is not a POSIX root: `path.win32.resolve` turns it into
+ * `C:\D:\...`, and that file is not there. A share still starts with two
+ * slashes, so this does not turn one into a local path. Spaces stay.
+ */
+export function normalizeLocalFileHref(href: string): string {
+  let file = String(href ?? "").trim();
+  if (file.startsWith("<") && file.endsWith(">") && file.length > 2) {
+    file = file.slice(1, -1).trim();
+  }
+  if (/^https?:\/\//i.test(file)) return file;
+  if (/^file:/i.test(file)) {
+    file = file.replace(/^file:\/\//i, "");
+    try {
+      file = decodeURIComponent(file);
+    } catch {
+      // keep the stripped form
+    }
+  }
+  if (file.startsWith("/") && /^[A-Za-z]:/.test(file.slice(1))) file = file.slice(1);
+  return file;
+}
+
+/** A local `.html` / `.htm` page. Web URLs and shares are not pages to launch. */
+export function isLocalHtmlHref(href: string): boolean {
+  const file = normalizeLocalFileHref(href);
+  if (!file || /^https?:\/\//i.test(file) || /^\s*[\\/]{2}/.test(file)) return false;
+  return /\.html?$/i.test(file);
+}
+
 export function looksLikeImageHref(href: string): boolean {
-  const value = href.trim();
+  const value = normalizeLocalFileHref(href);
   if (!value) return false;
   if (/^data:image\//i.test(value)) return true;
   if (/^https?:\/\//i.test(value)) return webImageHref(value);
@@ -81,11 +112,77 @@ export function isHollowHref(href: string): boolean {
   return !value || value === "#" || value === "about:blank" || value === "javascript:void(0)";
 }
 
+/** A raw space inside an http(s) target is not part of the URL. Local paths keep theirs. */
+function cleanHref(href: string): string {
+  const value = normalizeLocalFileHref(href);
+  if (/^https?:\/\//i.test(value)) return value.replace(/\s+/g, "");
+  return value;
+}
+
 function asLinkedMedia(label: string, href: string, forcedImage: boolean): Inline {
-  if (forcedImage || looksLikeImageHref(href) || isHollowHref(href)) {
-    return { type: "image", text: label, href };
+  const target = cleanHref(href);
+  if (forcedImage || looksLikeImageHref(target) || isHollowHref(target)) {
+    return { type: "image", text: label, href: target };
   }
-  return { type: "link", text: label, href };
+  return { type: "link", text: label, href: target };
+}
+
+/** Emphasis and code inside a link label. Labels are not scanned for nested links. */
+function emphasisParts(source: string): Inline[] | undefined {
+  if (!/[*`]/.test(source)) return undefined;
+  const out: Inline[] = [];
+  const re = /(\*\*[^*]+?\*\*|`[^`]+`|\*[^*\n]+?\*)/g;
+  let last = 0;
+  for (const match of source.matchAll(re)) {
+    const at = match.index ?? 0;
+    if (at > last) out.push({ type: "text", text: source.slice(last, at) });
+    const token = match[0];
+    if (token.startsWith("**")) out.push({ type: "strong", text: token.slice(2, -2) });
+    else if (token.startsWith("`")) out.push({ type: "code", text: token.slice(1, -1) });
+    else out.push({ type: "em", text: token.slice(1, -1) });
+    last = at + token.length;
+  }
+  if (last < source.length) out.push({ type: "text", text: source.slice(last) });
+  return out.length > 0 ? out : undefined;
+}
+
+function styledLabel(label: string, wrap: "" | "*" | "**"): Inline[] | undefined {
+  const inner = emphasisParts(label);
+  if (inner) return inner;
+  if (wrap === "**") return [{ type: "strong", text: label }];
+  if (wrap === "*") return [{ type: "em", text: label }];
+  return undefined;
+}
+
+function readLink(token: string): { wrap: "" | "*" | "**"; forced: boolean; label: string; href: string } | null {
+  let wrap: "" | "*" | "**" = "";
+  let body = token;
+  if (body.startsWith("**") && body.endsWith("**")) {
+    const inner = body.slice(2, -2);
+    if (inner.startsWith("[") || inner.startsWith("![")) {
+      wrap = "**";
+      body = inner;
+    }
+  } else if (body.startsWith("*") && body.endsWith("*")) {
+    const inner = body.slice(1, -1);
+    if (inner.startsWith("[") || inner.startsWith("![")) {
+      wrap = "*";
+      body = inner;
+    }
+  }
+  const match = body.match(/^(!?)\[([^\][]*)\]\(((?:[^()]|\([^()]*\))*)\)$/);
+  if (!match) return null;
+  return { wrap, forced: match[1] === "!", label: match[2] ?? "", href: match[3] ?? "" };
+}
+
+function linkFromToken(token: string): Inline | null {
+  const read = readLink(token);
+  if (!read) return null;
+  const media = asLinkedMedia(read.label, read.href, read.forced);
+  if (media.type !== "link") return media;
+  const children = styledLabel(read.label, read.wrap);
+  if (!children) return media;
+  return { type: "link", text: children.map((part) => part.text).join(""), href: media.href, children };
 }
 
 /*
@@ -101,25 +198,23 @@ function asLinkedMedia(label: string, href: string, forcedImage: boolean): Inlin
  */
 export function parseInline(source: string): Inline[] {
   const out: Inline[] = [];
-  const re = /(\*\*[^*]+?\*\*|`[^`]+`|!?\[[^\][]*\]\((?:[^()]|\([^()]*\))*\)|\*[^*\n]+?\*)/g;
+  // Code first, then a link wrapped in emphasis, then a bare link (its label may
+  // itself be bold), then strong and em. Strong used to match first, so
+  // `**[label](url)**` became one bold blob of raw Markdown and `[**label**](url)`
+  // never formed a link.
+  const re =
+    /(`[^`]+`|\*\*!?\[[^\][]*\]\((?:[^()]|\([^()]*\))*\)\*\*|\*!?\[[^\][]*\]\((?:[^()]|\([^()]*\))*\)\*|!?\[[^\][]*\]\((?:[^()]|\([^()]*\))*\)|\*\*[^*]+?\*\*|\*[^*\n]+?\*)/g;
   let last = 0;
   for (const match of source.matchAll(re)) {
     const at = match.index ?? 0;
     if (at > last) out.push({ type: "text", text: source.slice(last, at) });
     const token = match[0];
-    if (token.startsWith("**")) out.push({ type: "strong", text: token.slice(2, -2) });
-    else if (token.startsWith("`")) out.push({ type: "code", text: token.slice(1, -1) });
-    else if (token.startsWith("![")) {
-      const image = token.match(/^!\[([^\]]*)\]\(((?:[^()]|\([^()]*\))*)\)$/);
-      if (image) out.push(asLinkedMedia(image[1], image[2], true));
-      else out.push({ type: "text", text: token });
-    } else if (token.startsWith("[")) {
-      const link = token.match(/^\[([^\]]+)\]\(((?:[^()]|\([^()]*\))*)\)$/);
-      if (link) out.push(asLinkedMedia(link[1], link[2], false));
-      else out.push({ type: "text", text: token });
-    } else if (token.startsWith("*")) {
-      out.push({ type: "em", text: token.slice(1, -1) });
-    } else out.push({ type: "text", text: token });
+    const linked = token.startsWith("`") ? null : linkFromToken(token);
+    if (token.startsWith("`")) out.push({ type: "code", text: token.slice(1, -1) });
+    else if (linked) out.push(linked);
+    else if (token.startsWith("**")) out.push({ type: "strong", text: token.slice(2, -2) });
+    else if (token.startsWith("*")) out.push({ type: "em", text: token.slice(1, -1) });
+    else out.push({ type: "text", text: token });
     last = at + token.length;
   }
   if (last < source.length) out.push({ type: "text", text: source.slice(last) });
@@ -743,11 +838,16 @@ export function parseChatMarkdown(source: string): MdBlock[] {
       blocks.push({ type: "pre", text: body.join("\n") });
       continue;
     }
-    const picture = lines[i].trim().match(/^!?\[([^\]]*)\]\(((?:[^()]|\([^()]*\))*)\)\.?$/);
+    // `![alt](href)` is a picture. A bare `[label](page)` on its own line is a
+    // link; only an image href (or a hollow target) paints as a picture.
+    const picture = lines[i].trim().match(/^(!?)\[([^\]]*)\]\(((?:[^()]|\([^()]*\))*)\)\.?$/);
     if (picture) {
-      blocks.push({ type: "image", alt: picture[1], href: picture[2] });
-      i += 1;
-      continue;
+      const href = cleanHref(picture[3] ?? "");
+      if (picture[1] === "!" || looksLikeImageHref(href) || isHollowHref(href)) {
+        blocks.push({ type: "image", alt: picture[2] ?? "", href });
+        i += 1;
+        continue;
+      }
     }
     const heading = lines[i].match(/^(#{1,6})\s+(.+)$/);
     if (heading) {

@@ -2201,25 +2201,13 @@ function lastDefined<T>(drafts: UsageDraft[], pick: (draft: UsageDraft) => T | u
 }
 
 /**
- * Add the bills of one turn's HTTP requests. Output is always new work, so it
- * always adds. Input only adds when the vendor split fresh from cached — then
- * each request's `inputTokens` is what the model read for the first time. A
- * vendor that reports one inclusive prompt figure and no cache bucket sends the
- * whole conversation again on every request; adding those books the same
- * context once per tool call. For that vendor the last prompt already contains
- * every earlier one, so it stands as the turn's input.
+ * Add the bills of one turn's distinct HTTP requests. Replayed input is billed
+ * on every request unless the provider reports it in the cache bucket. A zero
+ * cache count does not make an earlier request's input free. Context occupancy
+ * stays separate: the trailing gauge describes only the final request.
  */
 export function sumRequestBills(requests: UsageDraft[]): UsageDraft {
-  const last = requests[requests.length - 1]!;
-  const splitsCache = requests.some((draft) => (draft.cacheReadTokens ?? 0) > 0 || (draft.cacheWriteTokens ?? 0) > 0);
-  if (splitsCache || requests.length === 1) return requests.reduce(addUsageDraft);
-  return {
-    ...last,
-    inputTokens: Math.max(...requests.map((draft) => draft.inputTokens)),
-    outputTokens: requests.reduce((sum, draft) => sum + draft.outputTokens, 0),
-    cacheReadTokens: 0,
-    cacheWriteTokens: 0,
-  };
+  return requests.reduce(addUsageDraft);
 }
 
 /**

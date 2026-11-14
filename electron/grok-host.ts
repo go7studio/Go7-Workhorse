@@ -44,6 +44,8 @@ export type GrokPromptInput = GrokSessionOpenInput & {
   text: string;
   /** Exact visible user prompt, before Workhorse adds goal/skill/desk context. */
   visibleText?: string;
+  /** Current workspace and desk facts, kept separate from opening rules and history. */
+  turnContext?: string;
   images?: import("../src/lib/types").ChatImage[];
   crewModes?: CrewMode[];
   spawnNames?: string[];
@@ -230,7 +232,7 @@ export class GrokSessionHost {
     await this.ensureAgent(input, emit);
     const slot = this.slots.get(input.sessionId);
     if (!slot) throw new Error("grok agent is not running");
-    const text = composeVendorPrompt(input.text, input.preface, slot.agent.opened, {
+    const text = composeVendorPrompt(input.text, input.preface, slot.agent.promptContext, {
       mode: input.mode,
       sandbox: input.sandbox,
       computer: input.computer,
@@ -239,7 +241,7 @@ export class GrokSessionHost {
       spawnNames: input.spawnNames,
       priorUserTexts: input.priorUserTexts,
       planOpen: input.planOpen,
-    }, input.visibleText);
+    }, input.visibleText, input.turnContext);
 
     try {
       if (this.stoppedWhileStarting.delete(input.sessionId)) return stoppedBeforePrompt(input.sessionId, slot.agent, emit);

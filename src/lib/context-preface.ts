@@ -177,6 +177,13 @@ export function capabilityFromPreface(preface: string | undefined): string {
   return at >= 0 ? text.slice(at).trim() : "";
 }
 
+/** Current workspace and desk facts, without opening rules or replay history. */
+export function buildTurnContext(input: PrefaceInput): string {
+  return [buildVendorPreface(input), input.desk ? buildDeskContext(input.desk) : ""]
+    .filter((item) => item.trim())
+    .join("\n\n");
+}
+
 /** First-prompt context: desk-slot rules, live limits, extra folders/refs and this-chat map. */
 export function buildSessionPreface(input: PrefaceInput): string {
   const worker = input.role === "worker";
@@ -198,8 +205,7 @@ export function buildSessionPreface(input: PrefaceInput): string {
       ? `This chat's immutable Workhorse session ID is ${input.sessionId}. Use it exactly; never invent or alter a session ID.`
       : "",
     buildPolicyContext(input),
-    buildVendorPreface(input),
-    input.desk ? buildDeskContext(input.desk) : "",
+    buildTurnContext(input),
   ].filter((item) => item.trim());
   const extra = parts.join("\n\n");
   return extra ? `${rules}\n\n${extra}` : rules;
@@ -208,7 +214,7 @@ export function buildSessionPreface(input: PrefaceInput): string {
 export function composeVendorPrompt(
   text: string,
   preface: string | undefined,
-  opened: "session/new" | "session/load",
+  opened: "session/new" | "session/load" | "session/continue",
   limits?: {
     mode?: PermissionMode;
     sandbox?: SandboxProfile;
@@ -220,6 +226,7 @@ export function composeVendorPrompt(
     planOpen?: boolean;
   },
   visibleText?: string,
+  turnContext?: string,
 ): string {
   const roleHinted =
     withCrewStatusHint(
@@ -257,6 +264,13 @@ export function composeVendorPrompt(
       preface?.trim() ?? "",
       privateTurnContext,
     ].filter((item) => item.trim()).join("\n\n");
+  }
+  if (opened === "session/continue") {
+    // Older/direct callers may supply only a combined preface. Keep that
+    // context rather than guessing which user-authored sections to remove.
+    return [live, turnContext === undefined ? preface : turnContext, hinted]
+      .filter((item) => item?.trim())
+      .join("\n\n");
   }
   return live ? `${live}\n\n${hinted}` : hinted;
 }

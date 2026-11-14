@@ -221,6 +221,13 @@ Custom OpenAI-compatible HTTP support intentionally targets Chat Completions. Th
 
 Run `npm run build` for the production TypeScript/Vite build and `npm test` for the complete adapter and shell suite.
 
+For an opt-in live continuation check, run `npm run eval:context-smoke -- codex <model>`
+(also supports `grok`, `claude`, or `cursor`). This makes two billed turns through
+the Workhorse adapter using synthetic facts in a temporary folder. It checks
+remembered context, updated references, and the actual ACP prompt envelope, then
+disposes its runtime. The receipt separates local bytes from provider usage;
+Codex's synthetic native thread is archived after the check.
+
 ## Evaluation baseline
 
 The Workhorse-specific reusable eval kit lives in [`eval/`](eval/README.md).

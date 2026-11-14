@@ -5,6 +5,8 @@ type GrokPromptBridgeInput = {
   projectId?: string;
   text: string;
   visibleText?: string;
+  /** Current workspace and desk facts, separate from opening rules and history. */
+  turnContext?: string;
   images?: import("./lib/types").ChatImage[];
   model: string;
   effort: import("./lib/types").EffortLevel | null;

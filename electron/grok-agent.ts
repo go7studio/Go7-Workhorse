@@ -1392,6 +1392,7 @@ export class GrokAgent {
   private appliedContextWindow?: number;
   private closed = false;
   private promptTail: Promise<unknown> = Promise.resolve();
+  private promptAccepted = false;
   sessionId = "";
   opened: "session/new" | "session/load" = "session/new";
 
@@ -1403,6 +1404,11 @@ export class GrokAgent {
   /** A host may reuse this slot only while its transport can still take input. */
   get canReuse(): boolean {
     return !this.closed && Boolean(this.child?.stdin.writable);
+  }
+
+  /** Opening context belongs once to a new session; `opened` remains its provenance. */
+  get promptContext(): "session/new" | "session/load" | "session/continue" {
+    return this.opened === "session/new" && this.promptAccepted ? "session/continue" : this.opened;
   }
 
   private get isGrok(): boolean {
@@ -1489,6 +1495,7 @@ export class GrokAgent {
     if (!sessionId) throw new Error(`${this.who} agent session/new did not return a sessionId`);
     this.sessionId = sessionId;
     this.opened = "session/new";
+    this.promptAccepted = false;
     await this.applySessionConfig(sessionId, sessionNew);
     return { initialize, sessionNew, sessionId, opened: "session/new" };
   }
@@ -1633,6 +1640,10 @@ export class GrokAgent {
       sessionId: this.sessionId,
       prompt: buildAcpPrompt(text, hydrateChatImages(images)),
     });
+    // A cancelled response can arrive before the adapter submits the prompt
+    // to its model. Keep opening context for retry until a turn was accepted.
+    const stopReason = typeof result.stopReason === "string" ? result.stopReason.toLowerCase() : "";
+    if (!VENDOR_USER_INTERRUPTION_STOP_REASONS.has(stopReason)) this.promptAccepted = true;
     // PromptResponse.usage is the adapter's own total for this turn — Claude's
     // adapter sums every API call it made into it. It is the one number to
     // keep. Mid-turn snapshots are the same tokens seen early; sending the

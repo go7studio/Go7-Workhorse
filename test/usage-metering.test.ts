@@ -136,7 +136,7 @@ test("OpenAI-shaped prompt_tokens has cache inside it; Anthropic-shaped input_to
   assert.equal(bare?.cacheReadTokens, 0);
 });
 
-test("a tool loop bills each request once, and only adds prompts the vendor split from cache", () => {
+test("a tool loop bills each request once, including uncached context replay", () => {
   // Vendor splits cache: every request's fresh input is new work — add them.
   const split = sumRequestBills([
     { ...KIMI, inputTokens: 3000, outputTokens: 120, cacheReadTokens: 0, cacheWriteTokens: 0, source: "request" },
@@ -147,18 +147,16 @@ test("a tool loop bills each request once, and only adds prompts the vendor spli
   assert.equal(split.outputTokens, 1865);
   assert.equal(split.cacheReadTokens, 5936);
 
-  // Vendor sends one inclusive prompt and no cache bucket: each request
-  // re-sends the whole conversation. Adding would book it once per tool call.
-  // The last prompt contains all the earlier ones, so it stands as input;
-  // output is always new, so it still adds.
+  // Without cache reads every request bills its whole prompt, even when an
+  // earlier request contained the same text. This is spend, not occupancy.
   const inclusive = sumRequestBills([
     { ...KIMI, inputTokens: 500_000, outputTokens: 20, cacheReadTokens: 0, cacheWriteTokens: 0, source: "request" },
     { ...KIMI, inputTokens: 510_000, outputTokens: 30, cacheReadTokens: 0, cacheWriteTokens: 0, source: "request" },
     { ...KIMI, inputTokens: 520_000, outputTokens: 40, cacheReadTokens: 0, cacheWriteTokens: 0, source: "request" },
   ]);
-  assert.equal(inclusive.inputTokens, 520_000);
+  assert.equal(inclusive.inputTokens, 1_530_000);
   assert.equal(inclusive.outputTokens, 90);
-  assert.notEqual(inclusive.inputTokens, 1_530_000, "the summed-prompts number that reached the ledger");
+  assert.equal(inclusive.cacheReadTokens, 0);
 
   // finalizeTurnUsage routes tagged requests through the same rule, and a
   // trailing gauge lands its contextUsed on the stored event.
@@ -167,9 +165,51 @@ test("a tool loop bills each request once, and only adds prompts the vendor spli
     { ...KIMI, inputTokens: 520_000, outputTokens: 40, cacheReadTokens: 0, cacheWriteTokens: 0, source: "request" },
     { ...KIMI, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, contextUsed: 520_000, source: "gauge" },
   ]);
-  assert.equal(folded.inputTokens, 520_000);
+  assert.equal(folded.inputTokens, 1_020_000);
   assert.equal(folded.outputTokens, 60);
   assert.equal(folded.contextUsed, 520_000);
+});
+
+test("separate identical uncached HTTP bills add without becoming snapshots", () => {
+  const bill: UsageDraft = {
+    provider: "custom", model: "synthetic-model", inputTokens: 1000,
+    outputTokens: 20, cacheReadTokens: 0, cacheWriteTokens: 0, source: "request",
+  };
+  const summed = finalizeTurnUsage([bill, { ...bill }]);
+  assert.equal(summed.inputTokens, 2000);
+  assert.equal(summed.outputTokens, 40);
+
+  const authoritative = { ...bill, inputTokens: 1750, outputTokens: 38, source: "turn" as const };
+  const settled = finalizeTurnUsage([bill, { ...bill }, authoritative, { ...authoritative }]);
+  assert.equal(settled.inputTokens, 1750, "one authoritative turn replaces both requests and its duplicate");
+  assert.equal(settled.outputTokens, 38);
+});
+
+test("a synthetic OpenAI HTTP tool loop separates billed replay, cache and occupancy", () => {
+  const responseUsage = (prompt: number, out: number, cached = 0): UsageDraft => ({
+    provider: "custom", model: "synthetic-model", source: "request",
+    ...parseCustomUsage({ usage: {
+      prompt_tokens: prompt, completion_tokens: out,
+      prompt_tokens_details: { cached_tokens: cached },
+    } })!,
+  });
+  const fresh = responseUsage(1000, 10);
+  const replay = responseUsage(1200, 20);
+  const cacheHit = responseUsage(1400, 30, 1000);
+  const gauge: UsageDraft = {
+    provider: "custom", model: "synthetic-model", source: "gauge",
+    inputTokens: 0, outputTokens: 0, contextUsed: 1400,
+  };
+  const folded = finalizeTurnUsage([fresh, replay, cacheHit, gauge]);
+  assert.equal(folded.inputTokens, 2600);
+  assert.equal(folded.cacheReadTokens, 1000);
+  assert.equal(folded.outputTokens, 60);
+  assert.equal(folded.contextUsed, 1400, "latest prompt occupancy never becomes lifetime spend");
+
+  const uncached = finalizeTurnUsage([fresh, replay, responseUsage(1400, 30), gauge]);
+  assert.equal(uncached.inputTokens, 3600);
+  assert.equal(uncached.cacheReadTokens, 0);
+  assert.equal(uncached.contextUsed, folded.contextUsed);
 });
 
 test("persisted Cursor estimates are kept; other guessed rows stay unknown", () => {

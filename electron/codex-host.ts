@@ -155,7 +155,7 @@ export class CodexSessionHost {
     await this.ensureAgent(input, emit);
     const slot = this.slots.get(input.sessionId);
     if (!slot) throw new Error("Codex agent is not running");
-    const text = composeVendorPrompt(input.text, input.preface, slot.agent.opened, {
+    const text = composeVendorPrompt(input.text, input.preface, slot.agent.promptContext, {
       mode: input.mode,
       sandbox: input.sandbox,
       computer: input.computer,
@@ -164,7 +164,7 @@ export class CodexSessionHost {
       spawnNames: input.spawnNames,
       priorUserTexts: input.priorUserTexts,
       planOpen: input.planOpen,
-    }, input.visibleText);
+    }, input.visibleText, input.turnContext);
 
     try {
       if (this.stoppedWhileStarting.delete(input.sessionId)) return stoppedBeforePrompt(input.sessionId, slot.agent, emit);

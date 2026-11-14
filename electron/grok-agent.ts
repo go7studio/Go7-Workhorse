@@ -1640,9 +1640,10 @@ export class GrokAgent {
       sessionId: this.sessionId,
       prompt: buildAcpPrompt(text, hydrateChatImages(images)),
     });
-    // An ACP response confirms that this session took the prompt. A stopped
-    // start or failed request must still get its opening context on retry.
-    this.promptAccepted = true;
+    // A cancelled response can arrive before the adapter submits the prompt
+    // to its model. Keep opening context for retry until a turn was accepted.
+    const stopReason = typeof result.stopReason === "string" ? result.stopReason.toLowerCase() : "";
+    if (!VENDOR_USER_INTERRUPTION_STOP_REASONS.has(stopReason)) this.promptAccepted = true;
     // PromptResponse.usage is the adapter's own total for this turn — Claude's
     // adapter sums every API call it made into it. It is the one number to
     // keep. Mid-turn snapshots are the same tokens seen early; sending the

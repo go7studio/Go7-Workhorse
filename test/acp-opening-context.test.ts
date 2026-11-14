@@ -199,6 +199,32 @@ for (const label of ["Grok", "Claude", "Codex", "Cursor"]) {
       agent.dispose();
     }
   });
+
+  for (const stopReason of ["cancelled", "canceled"]) {
+    test(`${label}: ${stopReason} before the first model turn keeps opening context for retry`, async () => {
+      let cancelNext = true;
+      const vendor = fakeAcpVendor((message, self) => {
+        if (message.method !== "session/prompt" || !cancelNext) return false;
+        self.send({ id: message.id, result: { stopReason } });
+        return true;
+      });
+      const agent = new GrokAgent(spec(label), () => vendor.child);
+      try {
+        await agent.start();
+        await agent.prompt(composeVendorPrompt(opening, preface, agent.promptContext));
+        assert.equal(agent.promptContext, "session/new", "a transport reply does not prove the model kept the prompt");
+        cancelNext = false;
+        await agent.prompt(composeVendorPrompt(opening, preface, agent.promptContext));
+        assert.ok(promptTexts(vendor)[1]!.includes(historicalDecision));
+        assert.equal(agent.promptContext, "session/continue");
+        cancelNext = true;
+        await agent.prompt("A later cancelled turn.");
+        assert.equal(agent.promptContext, "session/continue", "cancelling later must not reinitialize a session that already holds opening context");
+      } finally {
+        agent.dispose();
+      }
+    });
+  }
 }
 
 test("a closed transport before any send does not consume opening context", async () => {

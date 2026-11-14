@@ -213,10 +213,9 @@ export function redactFolders(text: string, folders: readonly LinkedFolder[]): s
     const escapedRoot = escapeRegExp(root);
     // Replace escaped separators with a pattern matching either separator
     const pattern = escapedRoot.replace(/\\\\|\//g, "[\\\\/]");
-    // Windows paths are case-insensitive
-    const isWindowsPath = /^[A-Za-z]:[\\/]|^\\\\/.test(root);
-    const flags = isWindowsPath ? "gi" : "g";
-    out = out.replace(new RegExp(pattern, flags), `‹folder:${folder.label}›`);
+    // Usual macOS volumes are case-insensitive too. Keep private roots out
+    // of the journal even when their spelling differs from the linked path.
+    out = out.replace(new RegExp(pattern, "gi"), `‹folder:${folder.label}›`);
   }
   return out;
 }
@@ -228,8 +227,10 @@ export function redactFolders(text: string, folders: readonly LinkedFolder[]): s
 export function restoreFolders(text: string, folders: readonly LinkedFolder[]): string {
   if (!text.includes("‹folder:")) return text;
   return text.replace(FOLDER_TOKEN, (token, label: string) => {
-    // Case-insensitive label match for robustness
-    const folder = folders.find((item) => item.label.toLowerCase() === label.toLowerCase());
+    const exact = folders.find((item) => item.label === label);
+    const folded = exact ? [] : folders.filter((item) => item.label.toLowerCase() === label.toLowerCase());
+    // An exact label wins. A differently-cased token maps only when unique.
+    const folder = exact ?? (folded.length === 1 ? folded[0] : undefined);
     return folder ? folder.path.replace(/[\\/]+$/, "") : token;
   });
 }

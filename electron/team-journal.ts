@@ -70,8 +70,9 @@ export function appendTeamEvents(
       let existing = "";
       try {
         existing = String(fsx.readFileSync(target, "utf8"));
-      } catch {
-        // File does not exist yet; that is fine.
+      } catch (err) {
+        // A missing journal is empty; a locked or unreadable journal is not.
+        if ((err as NodeJS.ErrnoException)?.code !== "ENOENT") throw err;
       }
       const content = existing.endsWith("\n") || existing === "" ? existing : existing + "\n";
       fsx.writeFileSync(staging, content + lines.join("\n") + "\n", "utf8");

@@ -12,7 +12,7 @@ import {
   sameVendorModelCache,
   vendorModelCacheFrom,
 } from "../src/lib/advertised-models";
-import { applyVendorCatalog, findChoice, MODEL_CATALOG, resetVendorCatalog, unlistedChoice } from "../src/lib/models";
+import { advertisedCodexWindow, applyVendorCatalog, contextWindowFor, findChoice, MODEL_CATALOG, modelsFor, resetVendorCatalog, unlistedChoice } from "../src/lib/models";
 import { deskCallCatalog } from "../src/lib/watch";
 import { deskVendorCachePath, listVendorModels, readDeskCatalog, rememberDeskCatalog, rememberVendorModels } from "../electron/vendor-models";
 import { modelNotOffered } from "../electron/grok-agent";
@@ -89,6 +89,43 @@ test("a harness may name a model the way people write it", () => {
   assert.equal(findChoice("GPT-5.6 Sol")?.model, "gpt-5.6-sol", "a space where the catalog has a hyphen still matches");
   assert.notEqual(findChoice("gpt-56-sol")?.model, "gpt-5.6-sol", "dots are not folded: 5.6 is not 56");
   assert.equal(findChoice("gpt-56-sol")?.unlisted, true, "so it goes to the vendor as its own id, and the vendor's refusal is the gate");
+});
+
+test("Codex 6.1 Sol aliases and windows come from the vendor catalog", () => {
+  const home = path.join(ROOT, "synthetic-codex-home");
+  const cachePath = path.join(home, "models_cache.json");
+  try {
+    for (const window of [500_000, 872_000]) {
+      const cache = JSON.stringify({ models: [{
+        slug: "gpt-6.1-sol", display_name: "GPT-6.1 Sol", visibility: "list",
+        context_window: 272_000, max_context_window: window,
+        supported_reasoning_levels: [{ effort: "medium" }],
+      }] });
+      const listed = listVendorModels({
+        env: { CODEX_HOME: home }, homedir: home, cursorModelsOutput: null,
+        existsSync: (file) => file === cachePath,
+        readFile: (file) => file === cachePath ? cache : "",
+      });
+      applyVendorCatalog(listed);
+      assert.deepEqual(modelsFor("codex").map((model) => model.id), ["gpt-6.1-sol"]);
+      const choice = { provider: "codex", model: "gpt-6.1-sol", effort: "medium", sandbox: "off" };
+      assert.deepEqual(findChoice("GPT-6.1 Sol"), choice);
+      assert.deepEqual(findChoice("GPT 6.1 Sol"), choice);
+      assert.equal(contextWindowFor("codex", "gpt-6.1-sol"), window, "the reported maximum is used without a release-specific floor");
+    }
+  } finally {
+    resetVendorCatalog();
+  }
+});
+
+test("an unadvertised Codex 6.1 Sol is not invented as a fallback model", () => {
+  resetVendorCatalog();
+  assert.ok(!modelsFor("codex").some((model) => model.id === "gpt-6.1-sol"));
+  assert.equal(findChoice("GPT 6.1 Sol"), null, "a display alias requires a catalog row");
+  assert.deepEqual(findChoice("gpt-6.1-sol"), {
+    provider: "codex", model: "gpt-6.1-sol", effort: "medium", sandbox: "off", unlisted: true,
+  }, "an explicit id can still be put to the vendor without claiming availability");
+  assert.equal(advertisedCodexWindow("gpt-6.1-sol", 500_000), 500_000, "an absent model does not create an 872k floor");
 });
 
 test("the Link helper lists what the desk lists: the desk saves what it serves, the helper reads that", () => {

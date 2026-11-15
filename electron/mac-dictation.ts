@@ -20,9 +20,11 @@ export function macDictationCommand(input: {
   const bundledScript = path.join(input.resourcesPath, "mac-dictation.swift");
   const sourceScript = path.join(input.appPath, "electron", "mac-dictation.swift");
   const scriptPath = input.existsSync(bundledScript) ? bundledScript : input.existsSync(sourceScript) ? sourceScript : null;
+  const bundledBinary = path.join(input.resourcesPath, "mac-dictation");
+  const builtBinary = path.join(input.appPath, "build", "mac-dictation");
   return macDictationLaunch({
     platform: input.platform,
-    binaryPath: path.join(input.resourcesPath, "mac-dictation"),
+    binaryPath: input.existsSync(bundledBinary) ? bundledBinary : builtBinary,
     swiftPath: SWIFT,
     scriptPath,
     existsSync: input.existsSync,
@@ -163,7 +165,7 @@ export function startMacDictation(input: {
       if (parsed) report(parsed);
     }
   });
-  child.on("close", (code) => {
+  child.on("close", (code, signal) => {
     const pending = buffer;
     buffer = "";
     for (const line of pending.split("\n")) {
@@ -171,7 +173,10 @@ export function startMacDictation(input: {
       if (parsed) report(parsed);
     }
     if (active?.child === child) active = null;
-    if (stopped || reported || code === 0 || code === null) return;
+    // A TCC abort exits with no code and SIGABRT. Treating that as a quiet
+    // exit left the composer on Listening with a dead meter.
+    if (stopped || reported || code === 0) return;
+    if (code === null && !signal) return;
     report({ type: "error", message: "Speech recognition stopped before it heard anything." });
   });
   return { ok: true };

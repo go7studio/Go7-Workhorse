@@ -5,7 +5,7 @@ import path from "node:path";
 import { Writable } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
-import { pauseMacDictation, startMacDictation, stopMacDictation, windowsDictationCommand } from "../electron/mac-dictation";
+import { macDictationCommand, pauseMacDictation, startMacDictation, stopMacDictation, windowsDictationCommand } from "../electron/mac-dictation";
 import type { LocalArtifact, LocalJob } from "../src/lib/local-capability-contract";
 import type { LocalComputeHostSettings } from "../src/lib/types";
 import {
@@ -525,6 +525,15 @@ test("the packaged app declares mic usage strings and the hardened-runtime audio
   assert.match(windowsSource, /PostThreadMessage/);
   assert.match(read("package.json"), /build-windows-dictation\.mjs/);
   assert.match(read("scripts/build-windows-dictation.mjs"), /System\.Speech\.dll/);
+  assert.match(read("package.json"), /"dev": "node scripts\/build-mac-dictation\.mjs/);
+  assert.match(read("package.json"), /"pack:mac": "npm run build && node scripts\/build-mac-dictation\.mjs/);
+  assert.match(read("package.json"), /"package:mac": "node scripts\/build-mac-dictation\.mjs/);
+  assert.match(read("scripts/build-mac-dictation.mjs"), /__info_plist/);
+  assert.match(read("scripts/build-mac-dictation.mjs"), /mac-dictation-disclaim\.c/);
+  assert.match(read("electron/mac-dictation-Info.plist"), /NSSpeechRecognitionUsageDescription/);
+  assert.match(read("electron/mac-dictation-Info.plist"), /NSMicrophoneUsageDescription/);
+  assert.match(read("electron/mac-dictation-disclaim.c"), /responsibility_spawnattrs_setdisclaim/);
+  assert.match(read("electron/mac-dictation-disclaim.c"), /WORKHORSE_DICTATION_DISCLAIMED/);
   assert.match(read("scripts/after-pack.cjs"), /windows-dictation\.exe/);
   assert.match(read("scripts/after-pack.cjs"), /copyFileSync\(built, helper\)/);
   assert.match(read(".gitignore"), /build\/windows-dictation\.exe/);
@@ -556,6 +565,16 @@ test("the packaged app declares mic usage strings and the hardened-runtime audio
       existsSync: (file) => file === exe,
     })?.command,
     exe,
+  );
+  const builtMac = path.join(ROOT, "build", "mac-dictation");
+  assert.equal(
+    macDictationCommand({
+      platform: "darwin",
+      resourcesPath: path.join(ROOT, "missing-resources"),
+      appPath: ROOT,
+      existsSync: (file) => file === builtMac,
+    })?.command,
+    builtMac,
   );
   assert.equal(WINDOWS_SPEECH_SETTINGS_URL, "ms-settings:speech");
   assert.match(read("src/ui/Composer.tsx"), /Speech recognition is not available on this PC/);
@@ -662,5 +681,39 @@ test("a failed helper spawn reports an error instead of staying silent", () => {
   assert.equal(started.ok, true);
   child.emit("error", Object.assign(new Error("spawn ENOENT"), { code: "ENOENT" }));
   assert.deepEqual(lines, [{ type: "error", message: "On-device speech is not available on this PC." }]);
+  stopMacDictation();
+});
+
+test("a helper aborted by the system tells the composer instead of leaving it listening", () => {
+  stopMacDictation();
+  const lines: Array<{ type: string; message?: string }> = [];
+  const child = new EventEmitter() as EventEmitter & {
+    stdin: Writable;
+    stdout: EventEmitter;
+    stderr: EventEmitter;
+    exitCode: number | null;
+    killed: boolean;
+  };
+  child.stdout = new EventEmitter();
+  child.stderr = new EventEmitter();
+  child.exitCode = null;
+  child.killed = false;
+  child.stdin = new Writable({
+    write(_chunk, _encoding, done) {
+      done();
+    },
+  });
+  const spawnImpl = (() => child) as unknown as NonNullable<Parameters<typeof startMacDictation>[0]["spawnImpl"]>;
+  const started = startMacDictation({
+    platform: "darwin",
+    resourcesPath: path.join(ROOT, "missing-resources"),
+    appPath: ROOT,
+    existsSync: (file) => file.endsWith(`${path.sep}mac-dictation.swift`) || file === "/usr/bin/swift",
+    spawnImpl,
+    onLine: (line) => lines.push(line),
+  });
+  assert.equal(started.ok, true);
+  child.emit("close", null, "SIGABRT");
+  assert.deepEqual(lines, [{ type: "error", message: "Speech recognition stopped before it heard anything." }]);
   stopMacDictation();
 });

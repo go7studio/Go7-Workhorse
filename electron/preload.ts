@@ -33,6 +33,15 @@ contextBridge.exposeInMainWorld("workhorse", {
       skill?: { name: string; origin: import("../src/lib/types").SkillOrigin; dir: string; text: string };
       message?: string;
     }>,
+  deskAssign: (input: {
+    fromSessionId: string;
+    message: string;
+    provider: string;
+    model: string;
+    description?: string;
+    skills?: string[];
+    tools?: string[];
+  }) => ipcRenderer.invoke("desk:assign", input) as Promise<{ text?: string; error?: string }>,
   deleteSkill: (dir: string) =>
     ipcRenderer.invoke("desk:delete-skill", dir) as Promise<import("../src/lib/types").DeskExportResult>,
   pushSkill: (input: { dir: string; name?: string; target: "grok" | "codex" | "claude" | "cursor" }) =>

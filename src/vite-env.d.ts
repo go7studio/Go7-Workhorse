@@ -107,6 +107,15 @@ type WorkhorseBridge = {
     skill?: { name: string; origin: import("./lib/types").SkillOrigin; dir: string; text: string };
     message?: string;
   }>;
+  deskAssign?: (input: {
+    fromSessionId: string;
+    message: string;
+    provider: string;
+    model: string;
+    description?: string;
+    skills?: string[];
+    tools?: string[];
+  }) => Promise<{ text?: string; error?: string }>;
   deleteSkill: (dir: string) => Promise<import("./lib/types").DeskExportResult>;
   pushSkill: (input: {
     dir: string;

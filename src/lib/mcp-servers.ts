@@ -39,3 +39,32 @@ export function mcpServersForSession(
 export function mcpToolAllowed(server: McpServerConfig, toolName: string): boolean {
   return server.includeTools === undefined || server.includeTools.includes(toolName);
 }
+
+/**
+ * A slice that named servers or tools keeps only those on a custom HTTP worker.
+ * ACP vendors cannot enforce a subset: a restricted row is dropped, which would
+ * remove the server, so those workers keep the full list and the brief names
+ * the subset. No match keeps every server rather than handing the worker none.
+ */
+export function restrictMcpServersToTools(
+  servers: readonly McpServerConfig[],
+  tools: readonly string[] | undefined,
+  provider: string,
+): McpServerConfig[] {
+  const wanted = [...new Set((tools ?? []).map((item) => item.trim()).filter(Boolean))];
+  if (wanted.length === 0 || provider !== "custom") return [...servers];
+  const names = new Set(wanted.map((item) => item.toLowerCase()));
+  const kept: McpServerConfig[] = [];
+  for (const server of servers) {
+    const serverNamed = names.has(server.name.trim().toLowerCase());
+    const known = server.includeTools?.filter(Boolean) ?? [];
+    const matchedTools = known.filter((tool) => names.has(tool.toLowerCase()));
+    if (!serverNamed && matchedTools.length === 0) continue;
+    if (matchedTools.length === 0) {
+      kept.push(server);
+      continue;
+    }
+    kept.push({ ...server, includeTools: matchedTools });
+  }
+  return kept.length > 0 ? kept : [...servers];
+}

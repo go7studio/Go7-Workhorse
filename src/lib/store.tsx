@@ -163,9 +163,17 @@ import {
 } from "./project";
 import { isParentTakeoverTool, isWriteToolTitle, projectEdits, workerChangedFiles, writePathFromToolEvent } from "./project-edits";
 import { GEMINI_LOGIN_REMOVED, isProviderId, providerById } from "./providers";
-import { sameDeskSkills, skillsForAutoLoad } from "./skills-catalog";
+import { sameDeskSkills, skillBodyFromMarkdown, skillsForAutoLoad } from "./skills-catalog";
 import { withSkillDiscoveryHint } from "./skill-suggestions";
-import { mcpServersForSession } from "./mcp-servers";
+import { mcpServersForSession, restrictMcpServersToTools } from "./mcp-servers";
+import {
+  deskAssignRequest,
+  deskLeadPrompt,
+  deskStartedNote,
+  fillSpawnAssignment,
+  planDeskAssignment,
+  withLoadedSkills,
+} from "./desk-assignment";
 import {
   filterCandidatesBySpawnAllowlist,
   filterCatalogBySpawnAllowlist,
@@ -3755,6 +3763,68 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         };
       });
       void (async () => {
+        let promptText = vendorText;
+        const assignmentFolder = primaryFolder(project, folderExists)?.path ?? "";
+        if (!hideUser && assignmentFolder && deskRoleOf(session) === "orchestrator" && orchestrationEnabled(session.crewModes)) {
+          const snapshot = stateRef.current;
+          const plans = snapshot.deskPlans ?? plansRef.current;
+          const allowlist = spawnAllowlistForCaller(snapshot.sessions, session.id);
+          const squad = findBots(
+            { task: originalText, squad: 1 },
+            {
+              settings: snapshot.settings,
+              statuses: watchVendorStatuses({
+                settings: snapshot.settings,
+                usage: snapshot.usage,
+                plans,
+                permits: snapshot.watchPermits,
+                dayMarks: snapshot.watchDayMarks,
+              }),
+              plans,
+              sessions: snapshot.sessions,
+              recent: recentRoutesRef.current,
+              draws: measureRunDraws(snapshot.usage, snapshot.sessions),
+              ...(allowlist ? { narrow: (rows: RoutingCandidate[]) => filterCandidatesBySpawnAllowlist(rows, allowlist) } : {}),
+            },
+          ).squad;
+          const assignment = planDeskAssignment({
+            task: originalText,
+            crewModes: session.crewModes,
+            role: "orchestrator",
+            skills: skillsForAutoLoad(deskSkillsRef.current, snapshot.settings.skills ?? DEFAULT_SETTINGS.skills),
+            picks: squad,
+            servers: snapshot.settings.mcpServers.map((server) => ({ name: server.name, tools: server.includeTools })),
+            suggestFromWording: snapshot.settings.skills?.suggestFromWording !== false,
+          });
+          if (assignment?.mustStaff) {
+            const request = deskAssignRequest(assignment, session.id, originalText);
+            const started = request && window.workhorse?.deskAssign
+              ? await window.workhorse.deskAssign(request).catch((error: unknown) => ({
+                  error: error instanceof Error ? error.message : String(error),
+                }))
+              : null;
+            const failed = !started || (typeof started === "object" && "error" in started && Boolean(started.error));
+            if (!failed) {
+              const note = deskStartedNote(assignment);
+              setState((latest) => ({
+                ...latest,
+                sessions: latest.sessions.map((item) =>
+                  item.id === session.id
+                    ? {
+                        ...item,
+                        status: "idle" as const,
+                        messages: item.messages.map((entry) =>
+                          entry.id === assistantId ? { ...entry, text: note } : entry,
+                        ),
+                      }
+                    : item,
+                ),
+              }));
+              return;
+            }
+            promptText = deskLeadPrompt(assignment, originalText);
+          }
+        }
         const prefaceInput: PrefaceInput = {
           sessionId: session.id,
           cwd,
@@ -3787,7 +3857,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         const promptInput = {
           sessionId: session.id,
           projectId: session.projectId ?? undefined,
-          text: vendorText,
+          text: promptText,
           visibleText: firstUserText({ messages: working }) || originalText || images[0]?.name || "Image",
           images,
           model: session.model,
@@ -3808,7 +3878,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           spawnNames: spawnAllowlistNames(session.spawnAllowlist, stateRef.current.settings),
           priorUserTexts: spawnTurnOf({ messages: working, queue: session.queue }).priorTexts,
           planOpen: session.planRun?.status === "running",
-          mcpServers: mcpServersForSession(stateRef.current.settings.mcpServers, session),
+          mcpServers: restrictMcpServersToTools(
+            mcpServersForSession(stateRef.current.settings.mcpServers, session),
+            session.agentRun?.tools,
+            session.provider,
+          ),
           contextWindow: session.contextWindow,
           turnContext: buildTurnContext(prefaceInput),
           preface: withPortableHistory(buildSessionPreface(prefaceInput), session.provider === "custom" ? [] : messagesForPortableReplay(working, session.contextCheckpoint)),
@@ -3834,7 +3908,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           const result = await window.workhorse.customPrompt({
             sessionId: session.id,
             projectId: session.projectId ?? undefined,
-            text: vendorText,
+            text: promptText,
             images,
             model: session.model || custom.model,
             effort: session.effort,
@@ -3844,7 +3918,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             computer: session.computer,
             preface: promptInput.preface,
             history,
-            mcpServers: mcpServersForSession(stateRef.current.settings.mcpServers, session),
+            mcpServers: restrictMcpServersToTools(
+              mcpServersForSession(stateRef.current.settings.mcpServers, session),
+              session.agentRun?.tools,
+              session.provider,
+            ),
             securityPolicy: session.securityPolicy,
             permissionGrants: session.permissionGrants,
             folders: projectFolderPaths(project, folderExists),
@@ -4708,7 +4786,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           const retirementError = retiredAutoModelError(session);
           if (retirementError) throw new Error(retirementError);
           const snapshot = stateRef.current;
-          const runtimeMcpServers = mcpServersForSession(mcpServers, session);
+          const runtimeMcpServers = restrictMcpServersToTools(
+            mcpServersForSession(mcpServers, session),
+            session.agentRun?.tools,
+            session.provider,
+          );
           const hold = evaluateWatchHold({
             session,
             settings: snapshot.settings,
@@ -6844,10 +6926,26 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             let assignedPlan = parent.planRun;
             const planStepId = payload.planStepId?.trim() || "";
             const rationale = payload.rationale?.trim() || "";
-            const assignedSkills = Array.isArray(payload.skills) ? payload.skills.filter(Boolean) : [];
-            const assignedSkillFiles = Array.isArray(payload.skillFiles) ? payload.skillFiles.filter(Boolean) : [];
+            let assignedSkills = Array.isArray(payload.skills) ? payload.skills.filter(Boolean) : [];
+            let assignedSkillFiles = Array.isArray(payload.skillFiles) ? payload.skillFiles.filter(Boolean) : [];
             const assignedCapabilities = Array.isArray(payload.capabilities) ? payload.capabilities.filter(Boolean) : [];
-            const assignedTools = Array.isArray(payload.tools) ? payload.tools.filter(Boolean) : [];
+            let assignedTools = Array.isArray(payload.tools) ? payload.tools.filter(Boolean) : [];
+            if (!isNested && orchestrationEnabled(caller.crewModes)) {
+              const planned = planDeskAssignment({
+                task: String(payload.message ?? ""),
+                crewModes: caller.crewModes,
+                role: deskRoleOf(caller),
+                skills: skillsForAutoLoad(deskSkillsRef.current, latest.settings.skills ?? DEFAULT_SETTINGS.skills),
+                servers: latest.settings.mcpServers.map((server) => ({ name: server.name, tools: server.includeTools })),
+                suggestFromWording: latest.settings.skills?.suggestFromWording !== false,
+              });
+              const filled = fillSpawnAssignment({ skills: assignedSkills, tools: assignedTools }, planned);
+              if (assignedSkills.length === 0) {
+                assignedSkills = filled.skills;
+                assignedSkillFiles = filled.skillFiles;
+              }
+              if (assignedTools.length === 0) assignedTools = filled.tools;
+            }
             const assignedConstraints = Array.isArray(payload.constraints) ? payload.constraints.filter(Boolean) : [];
             const assignedPaths = nestedPolicy.mayOwnPaths
               ? normalizePathAllowlist((payload as unknown as { paths?: unknown }).paths)
@@ -7319,25 +7417,39 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 : [];
               let reply = "";
               try {
+                const brief = vendorTextForSpawn({
+                  seed: spawnSeed,
+                  handoff: spawnHandoff,
+                  fromTitle: parent.title?.trim() || "another agent",
+                  text: afterNote ? `${payload.message}\n\n${afterNote}` : payload.message,
+                  folder: childCwd,
+                  project: project?.name,
+                  slice: payload.description,
+                  vendor: vendorDisplayName(spec.provider),
+                  constraints: assignedConstraints,
+                  skills: assignedSkills.map((name, index) => ({ name, file: assignedSkillFiles[index] ?? "" })).filter((skill) => skill.file),
+                  capabilities: assignedCapabilities,
+                  paths: assignedPaths,
+                  mission: payload.mission === true,
+                  missionIteration: spawnMission,
+                  debug: parent.crewModes?.includes("debug") === true,
+                });
+                const loaded: Array<{ name: string; body: string }> = [];
+                if (assignedSkills.length > 0 && window.workhorse?.readDeskSkill) {
+                  const folders = projectFolderPaths(project, folderExists);
+                  for (const name of assignedSkills) {
+                    const read = await window.workhorse.readDeskSkill(name, folders).catch(() => null);
+                    if (read?.ok && read.skill?.text) {
+                      loaded.push({
+                        name: `${read.skill.origin}:${read.skill.name}`,
+                        body: skillBodyFromMarkdown(read.skill.text),
+                      });
+                    }
+                  }
+                }
                 reply = await promptVendor(
                   child,
-                  vendorTextForSpawn({
-                    seed: spawnSeed,
-                    handoff: spawnHandoff,
-                    fromTitle: parent.title?.trim() || "another agent",
-                    text: afterNote ? `${payload.message}\n\n${afterNote}` : payload.message,
-                    folder: childCwd,
-                    project: project?.name,
-                    slice: payload.description,
-                    vendor: vendorDisplayName(spec.provider),
-                    constraints: assignedConstraints,
-                    skills: assignedSkills.map((name, index) => ({ name, file: assignedSkillFiles[index] ?? "" })).filter((skill) => skill.file),
-                    capabilities: assignedCapabilities,
-                    paths: assignedPaths,
-                    mission: payload.mission === true,
-                    missionIteration: spawnMission,
-                    debug: parent.crewModes?.includes("debug") === true,
-                  }),
+                  withLoadedSkills(brief, loaded),
                   latest.settings.mcpServers,
                   spawnImages,
                   Boolean(priorWorker && payload.mission),

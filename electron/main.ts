@@ -1408,6 +1408,32 @@ app.whenReady().then(async () => {
       console.error("workhorse desk bridge failed", error);
     });
   setWorkhorseDeskAsk(handlePeerAsk);
+  ipcMain.handle("desk:assign", async (_event, raw: unknown) => {
+    if (!raw || typeof raw !== "object") return { error: "prompt is required" };
+    const row = raw as Record<string, unknown>;
+    const message = typeof row.message === "string" ? row.message.trim() : "";
+    const fromSessionId = typeof row.fromSessionId === "string" ? row.fromSessionId.trim() : "";
+    if (!message || !fromSessionId) return { error: "prompt is required" };
+    const skills = Array.isArray(row.skills)
+      ? row.skills.filter((item): item is string => typeof item === "string" && Boolean(item.trim()))
+      : [];
+    const tools = Array.isArray(row.tools)
+      ? row.tools.filter((item): item is string => typeof item === "string" && Boolean(item.trim()))
+      : [];
+    return handlePeerAsk({
+      fromSessionId,
+      toSessionId: "",
+      message,
+      mode: "spawn",
+      wait: false,
+      isolation: "shared",
+      ...(typeof row.provider === "string" && row.provider.trim() ? { provider: row.provider.trim() } : {}),
+      ...(typeof row.model === "string" && row.model.trim() ? { model: row.model.trim() } : {}),
+      ...(typeof row.description === "string" && row.description.trim() ? { description: row.description.trim() } : {}),
+      ...(skills.length > 0 ? { skills } : {}),
+      ...(tools.length > 0 ? { tools } : {}),
+    });
+  });
   debugStartup("desk hooks ready");
   process.env.WORKHORSE_MCP_COMMAND = process.execPath;
   process.env.WORKHORSE_MCP_SCRIPT = path.join(__dirname, "workhorse-mcp.js");

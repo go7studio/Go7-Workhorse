@@ -140,6 +140,58 @@ test("user and project Cursor files merge, and only Grok is told to skip the raw
   assert.equal(spec.sessionParams.mcpServers.some((server) => server.name === "lovart"), false);
 });
 
+test("Claude and project mcp.json expand, and a remote row does not drop Cursor stdio", () => {
+  const home = "C:\\Users\\ci";
+  const cwd = "D:\\work";
+  const files: Record<string, string> = {
+    "C:\\Users\\ci\\.cursor\\mcp.json": JSON.stringify({
+      mcpServers: {
+        shared: { command: "user-copy", args: ["${env:USERPROFILE}\\.cursor\\tool.py"] },
+      },
+    }),
+    "C:\\Users\\ci\\.claude.json": JSON.stringify({
+      numStartups: 3,
+      mcpServers: {
+        papers: { command: "py", args: ["${env:USERPROFILE}\\.papers\\server.py"] },
+      },
+    }),
+    "D:\\work\\.mcp.json": JSON.stringify({
+      mcpServers: {
+        local: { command: "node", args: ["${workspaceFolder}\\mcp.js"] },
+      },
+    }),
+    "D:\\work\\.claude\\mcp.json": JSON.stringify({
+      mcpServers: {
+        figma: { url: "https://mcp.figma.com/mcp" },
+        dropped: { command: "node", args: ["same-file.js"] },
+      },
+    }),
+  };
+  const io = {
+    home,
+    platform: "win32" as const,
+    env: { ...ENV, USERPROFILE: home, HOME: home },
+    readFile: (file: string) => {
+      const text = files[file];
+      if (text === undefined) throw new Error(`missing ${file}`);
+      return text;
+    },
+  };
+  const loaded = loadCursorMcpHandoff(cwd, io);
+  assert.equal(loaded.suppressCursorMcpImport, true);
+  assert.equal(loaded.servers.find((server) => server.name === "papers")?.args[0], "C:\\Users\\ci\\.papers\\server.py");
+  assert.equal(loaded.servers.find((server) => server.name === "local")?.args[0], "D:\\work\\mcp.js");
+  assert.equal(loaded.servers.some((server) => server.name === "figma" || server.name === "dropped"), false);
+  assert.equal(loaded.origins.papers, "claude");
+  assert.equal(loaded.origins.local, "mcp");
+  const grok = applyCursorMcpHandoff("grok", { cwd, mcpServers: [] as McpServerConfig[] }, [], io);
+  assert.ok(grok.mcpServers?.some((server) => server.name === "papers"));
+  assert.ok(grok.mcpServers?.some((server) => server.name === "local"));
+  const claude = applyCursorMcpHandoff("claude", { cwd, mcpServers: [] as McpServerConfig[] }, [], io);
+  assert.deepEqual(claude.mcpServers?.map((server) => server.name), ["shared"]);
+  assert.equal(claude.suppressCursorMcpImport, false);
+});
+
 test("home and Windows percent placeholders expand", () => {
   const home = expandMcpText("~/.lovart/server.py", { env: ENV, home: ENV.USERPROFILE, platform: "win32" });
   assert.equal(home.text, "C:\\Users\\sgovo\\.lovart/server.py");

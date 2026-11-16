@@ -202,19 +202,27 @@ internal static class WindowsDictation
         startDepth++;
         try
         {
+            // The installed desktop recognizer transcribes on this PC. Windows
+            // voice typing stays second, because it refuses to start until Online
+            // speech recognition is on.
+            if (EnsureEngine())
+            {
+                listening = true;
+                try
+                {
+                    engine.RecognizeAsync(RecognizeMode.Multiple);
+                    Emit("{\"type\":\"ready\"}");
+                    return;
+                }
+                catch (Exception)
+                {
+                    listening = false;
+                    try { if (engine != null) engine.Dispose(); } catch (Exception) { }
+                    engine = null;
+                }
+            }
             if (StartWindowsSpeech()) return;
-            if (!EnsureEngine()) return;
-            listening = true;
-            try
-            {
-                engine.RecognizeAsync(RecognizeMode.Multiple);
-                Emit("{\"type\":\"ready\"}");
-            }
-            catch (Exception)
-            {
-                listening = false;
-                FailMic();
-            }
+            FailMic();
         }
         finally
         {
@@ -223,8 +231,8 @@ internal static class WindowsDictation
     }
 
     /// <summary>
-    /// The desktop recognizer is the fallback. Leave it closed until voice typing
-    /// cannot start, so it does not hold the microphone first.
+    /// Opens the installed offline recognizer. A failure leaves the error to Start,
+    /// which can still try Windows voice typing.
     /// </summary>
     private static bool EnsureEngine()
     {
@@ -235,8 +243,7 @@ internal static class WindowsDictation
         }
         catch (Exception)
         {
-            FailMic();
-            return false;
+            engine = null;
         }
         return engine != null;
     }
@@ -262,9 +269,9 @@ internal static class WindowsDictation
     }
 
     /// <summary>
-    /// The desktop System.Speech engine can open the mic and still return no words.
-    /// Windows voice typing uses SpeechRecognizer, and that stays off until Online
-    /// speech recognition is accepted. Ask for that. Do not pretend the old engine heard anything.
+    /// Windows voice typing uses SpeechRecognizer. That recognizer stays off until
+    /// Online speech recognition is accepted, so a privacy refusal returns here
+    /// without a transcript. The desktop engine is the path that does not ask for it.
     /// </summary>
     private static bool StartWindowsSpeech()
     {

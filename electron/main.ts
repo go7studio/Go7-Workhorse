@@ -12,6 +12,7 @@ import { CustomSessionHost, type CustomPromptInput } from "./custom-host";
 import { bindDefaultComputerIo, deskComputerAnswer } from "./computer-host";
 import { observedMcpServer, probeMcpServer } from "./mcp-tool-bridge";
 import { mcpInventorySnapshot } from "./mcp-inventory";
+import { applyCursorMcpHandoff, loadCursorMcpHandoff, type HandoffVendor } from "./mcp-foreign-load";
 import { boundLinkRead } from "../src/lib/link-read";
 import { guardIpcSender, guardNavigation, isDeskPage } from "./ipc-sender";
 import { detectGrokLogin } from "./grok-login";
@@ -35,7 +36,7 @@ import { fetchCursorPlanUsage, fetchCursorLedgerEvents } from "./cursor-plan";
 import { fetchCustomPlanUsage, grokBotLeftoverPath } from "./custom-plan";
 import { fetchCustomModels } from "./custom-models";
 import type { PermissionAnswer } from "../src/lib/permissions";
-import type { PermissionMode, SandboxProfile } from "../src/lib/types";
+import type { McpServerConfig, PermissionMode, SandboxProfile } from "../src/lib/types";
 import { safeExternalUrl } from "../src/lib/open-external";
 import { startWorkhorseBridge, type PeerAskResult } from "./workhorse-bridge";
 import { readLinkInspectFile, watchLinkHistory } from "./link-history-file";
@@ -573,6 +574,15 @@ type StateLoad = {
 
 function readState(): Persistable {
   return readStateWithSource().state;
+}
+
+/** Cursor mcp.json rows, with placeholders turned into real paths, for agents that do not expand them. */
+function withCursorMcpHandoff<T extends { cwd: string; mcpServers?: McpServerConfig[] }>(
+  vendor: HandoffVendor,
+  input: T,
+): T & { suppressCursorMcpImport: boolean } {
+  const claimed = normalizeSettings(readState().settings).mcpServers.map((server) => server.name);
+  return applyCursorMcpHandoff(vendor, input, claimed);
 }
 
 function readStateWithSource(): StateLoad {
@@ -1330,7 +1340,8 @@ app.whenReady().then(async () => {
       return { text: await deskComputerAnswer(session, raw) };
     }
     if (ask.mode === "bots" && ask.action === "link-read" && ask.name === "mcp") {
-      return boundLinkRead(JSON.stringify(mcpInventorySnapshot(readViewerState(), ask.message.trim(), ask.fromSessionId ?? "", true, observedMcpServer)));
+      const state = readViewerState();
+      return boundLinkRead(JSON.stringify(mcpInventorySnapshot(state, ask.message.trim(), ask.fromSessionId ?? "", true, observedMcpServer, loadCursorMcpHandoff("").servers)));
     }
     const bots = ask.mode === "bots";
     const spawn = !bots && ask.mode === "spawn";
@@ -2762,10 +2773,10 @@ app.whenReady().then(async () => {
   });
 
   ipcMain.handle("codex:prompt", async (event, raw: CodexPromptInput) => {
-    const input: CodexPromptInput = {
+    const input: CodexPromptInput = withCursorMcpHandoff("codex", {
       ...raw,
       cwd: requireSessionCwd(raw.cwd),
-    };
+    });
     const result = await codexHost.prompt(input, (payload) => {
       try {
         sendToDesk(event.sender, "codex:event", payload);
@@ -2787,11 +2798,11 @@ app.whenReady().then(async () => {
   const claudeHost = new ClaudeSessionHost();
   disposeAtQuit("claude", () => claudeHost.disposeAll());
   ipcMain.handle("claude:prompt", async (event, raw: ClaudePromptInput) => {
-    const input: ClaudePromptInput = {
+    const input: ClaudePromptInput = withCursorMcpHandoff("claude", {
       ...raw,
       cwd: requireSessionCwd(raw.cwd),
       unlistedModel: !claudeModelListed(raw.model),
-    };
+    });
     return await claudeHost.prompt(input, (payload) => {
       if (payload.type === "vendor-models") rememberVendorModels(app.getPath("userData"), payload.provider, payload.models);
       try {
@@ -2863,7 +2874,7 @@ app.whenReady().then(async () => {
   ]);
 
   ipcMain.handle("custom:prompt", async (event, raw: CustomPromptInput) => {
-    const input = { ...raw, cwd: requireSessionCwd(raw.cwd) };
+    const input = withCursorMcpHandoff("custom", { ...raw, cwd: requireSessionCwd(raw.cwd) });
     const result = await customHost.prompt(input, (payload) => {
       try {
         sendToDesk(event.sender, "custom:event", payload);
@@ -2881,10 +2892,10 @@ app.whenReady().then(async () => {
   });
 
   ipcMain.handle("grok:prompt", async (event, raw: GrokPromptInput) => {
-    const input: GrokPromptInput = {
+    const input: GrokPromptInput = withCursorMcpHandoff("grok", {
       ...raw,
       cwd: requireSessionCwd(raw.cwd),
-    };
+    });
     const result = await grokHost.prompt(input, (payload) => {
       try {
         sendToDesk(event.sender, "grok:event", payload);
@@ -2904,10 +2915,10 @@ app.whenReady().then(async () => {
   });
 
   ipcMain.handle("grok:compact", async (event, raw: GrokCompactInput) => {
-    const input: GrokCompactInput = {
+    const input: GrokCompactInput = withCursorMcpHandoff("grok", {
       ...raw,
       cwd: requireSessionCwd(raw.cwd),
-    };
+    });
     return grokHost.compact(input, (payload) => {
       try {
         sendToDesk(event.sender, "grok:event", payload);
@@ -2927,7 +2938,7 @@ app.whenReady().then(async () => {
   });
 
   ipcMain.handle("grok:fork", async (event, raw: GrokPromptInput) => {
-    const input = { ...raw, cwd: requireSessionCwd(raw.cwd) };
+    const input = withCursorMcpHandoff("grok", { ...raw, cwd: requireSessionCwd(raw.cwd) });
     try {
       return await grokHost.fork(input, (payload) => {
         try {
@@ -2942,10 +2953,10 @@ app.whenReady().then(async () => {
   });
 
   ipcMain.handle("grok:rewind", async (event, raw: GrokPromptInput & { keepUserIndex: number }) => {
-    const input = {
+    const input = withCursorMcpHandoff("grok", {
       ...raw,
       cwd: requireSessionCwd(raw.cwd),
-    };
+    });
     try {
       return await grokHost.rewind(input, (payload) => {
         try {

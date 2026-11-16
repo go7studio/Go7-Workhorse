@@ -26,6 +26,8 @@ export type GrokSessionOpenInput = {
   computer?: "off" | "on";
   securityPolicy?: SessionSecurityPolicy;
   mcpServers?: McpServerConfig[];
+  /** Set when Workhorse is handing Cursor's MCP rows itself. */
+  suppressCursorMcpImport?: boolean;
   preface?: string;
   parentId?: string;
   hidden?: boolean;
@@ -110,7 +112,7 @@ export type GrokIpcEvent =
 export type GrokEventSink = (event: GrokIpcEvent) => void;
 
 export function launchKey(
-  input: Pick<GrokSessionOpenInput, "model" | "effort" | "fastMode" | "agentName" | "mode" | "cwd" | "sandbox" | "mcpServers">,
+  input: Pick<GrokSessionOpenInput, "model" | "effort" | "fastMode" | "agentName" | "mode" | "cwd" | "sandbox" | "mcpServers" | "suppressCursorMcpImport">,
 ): string {
   const spec = buildGrokLaunchSpec({
     model: input.model,
@@ -121,8 +123,9 @@ export function launchKey(
     mode: input.mode,
     sandbox: input.sandbox,
     mcpServers: input.mcpServers,
+    suppressCursorMcpImport: input.suppressCursorMcpImport,
   });
-  return `${spec.argv.join("\0")}\0${spec.cwd}\0${JSON.stringify(spec.sessionParams.mcpServers)}\0${spec.fastMode === true ? "fast" : "normal"}\0${spec.agentName ?? ""}`;
+  return `${spec.argv.join("\0")}\0${spec.cwd}\0${JSON.stringify(spec.sessionParams.mcpServers)}\0${spec.fastMode === true ? "fast" : "normal"}\0${spec.agentName ?? ""}\0${spec.suppressCursorMcpImport ? "cursor-mcp-owned" : ""}`;
 }
 
 /**
@@ -392,6 +395,7 @@ export class GrokSessionHost {
       mode: input.mode,
       sandbox: input.sandbox,
       mcpServers: input.mcpServers,
+      suppressCursorMcpImport: input.suppressCursorMcpImport,
       contextWindow: input.contextWindow,
     });
     const agent = new GrokAgent(spec, this.spawn);

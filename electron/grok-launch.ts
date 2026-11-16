@@ -35,6 +35,11 @@ export type GrokLaunchInput = {
   fastMode?: boolean;
   /** ACP agent persona when the session lists one. */
   agentName?: string | null;
+  /**
+   * Workhorse already handed over Cursor's mcp.json with the paths expanded.
+   * Grok's own import would launch the same rows with the placeholders intact.
+   */
+  suppressCursorMcpImport?: boolean;
 };
 
 export type GrokMcpEnvVar = { name: string; value: string };
@@ -190,6 +195,7 @@ export type GrokLaunchSpec = {
     mcpServers: GrokMcpServer[];
     _meta?: GrokSessionMeta;
   };
+  suppressCursorMcpImport?: boolean;
 };
 
 const DEFAULT_MODEL = "grok-4.7";
@@ -339,6 +345,7 @@ export function buildGrokLaunchSpec(input: GrokLaunchInput): GrokLaunchSpec {
       mcpServers,
       ...(Object.keys(meta).length > 0 ? { _meta: meta } : {}),
     },
+    ...(input.suppressCursorMcpImport ? { suppressCursorMcpImport: true } : {}),
   };
 }
 

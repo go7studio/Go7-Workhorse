@@ -449,9 +449,14 @@ function resolveGrokBinary(): string {
 
 export function spawnGrokProcess(spec: GrokLaunchSpec): ChildProcessWithoutNullStreams {
   const { args, cwd } = grokSpawnArgs(spec);
+  const env = withDeskToolEnv(withoutWorkhorsePrivateEnv(process.env));
+  // Cursor's own client expands ${env:NAME}. Grok's import does not, and the
+  // leftover path is opened under the chat folder. The desk already passed
+  // the rebuilt command, so this process must not launch the raw file too.
+  if (spec.suppressCursorMcpImport) env.GROK_CURSOR_MCPS_ENABLED = "0";
   return spawn(resolveGrokBinary(), args, {
     cwd: spawnCwd(cwd),
-    env: withDeskToolEnv(withoutWorkhorsePrivateEnv(process.env)),
+    env,
     stdio: ["pipe", "pipe", "pipe"],
     // The CLI leads its own group, so a stop reaches what the CLI started too.
     ...groupSpawnOptions(),

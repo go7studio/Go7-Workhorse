@@ -10,6 +10,7 @@ import {
 } from "../src/lib/link-read";
 import { openMainLog } from "./main-log";
 import { mcpInventorySnapshot } from "./mcp-inventory";
+import { loadCursorMcpHandoff } from "./mcp-foreign-load";
 import type { McpInventory } from "../src/lib/mcp-inventory";
 import { readTranscriptSidecar } from "./transcript-store";
 import path from "node:path";
@@ -1648,7 +1649,9 @@ export async function readSnapshot(route: LinkReadRequest | null, caller: string
     }
   }
   const saved = loadLinkState(process.env.WORKHORSE_STATE_PATH ?? "");
-  return route?.route === "mcp" ? mcpInventorySnapshot(saved, route.id, caller, false) : saved;
+  return route?.route === "mcp"
+    ? mcpInventorySnapshot(saved, route.id, caller, false, undefined, loadCursorMcpHandoff("").servers)
+    : saved;
 }
 
 /**

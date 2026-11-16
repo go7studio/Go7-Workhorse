@@ -389,6 +389,7 @@ import {
   userLockedSpawnModel,
   lockedCursorGrokSpawn,
   predecessorRun,
+  type PredecessorRun,
   predecessorStillWaiting,
   routingDecisionMatchesSpawn,
   constrainRouteCandidatesForSpawn,
@@ -7623,7 +7624,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               return undefined;
             };
             const startWhenReady = async (): Promise<string> => {
-              let finished: Array<{ name: string; status: string; report: string; changedFiles?: string[] }> = [];
+              let finished: Array<{
+                id: string;
+                name: string;
+                status: string;
+                report: string;
+                run: PredecessorRun;
+                changedFiles?: string[];
+              }> = [];
               if (waitingOn.length > 0) {
                 const deadline = Date.now() + AFTER_WAIT_MS;
                 const readFinished = () => {
@@ -7631,8 +7639,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                   const rows = sessionsNow.find((session) => session.id === parent.id)?.lineup?.rows ?? [];
                   return waitingOn.map((item) => {
                     const earlier = sessionsNow.find((session) => session.id === item.id);
-                    const run = earlier ? predecessorRun(earlier.agentRun) : { status: "completed" };
+                    const run: PredecessorRun = earlier ? predecessorRun(earlier.agentRun) : { status: "completed" };
                     return {
+                      id: item.id,
                       name: item.name,
                       status: run.status ?? "",
                       run,

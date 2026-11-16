@@ -27,10 +27,12 @@ import { sameComposerDesk, selectComposerDesk } from "../lib/store-select";
 import type { ChatImage, CrewMode } from "../lib/types";
 import { crewModeLabel, hasCrewMode, orderedCrewModes, toggleCrewMode } from "../lib/workhorse-rules";
 import {
+  beginVoiceDraft,
   composerEscapeAction,
   composerFieldPlaceholder,
   joinVoiceDraft,
   listenBarScales,
+  mergeVoiceHypothesis,
   LOCAL_SPEECH_CAPABILITY,
   MAC_SPEECH_PRIVACY_URL,
   WINDOWS_SPEECH_PRIVACY_URL,
@@ -207,8 +209,10 @@ export const Composer = memo(function Composer({
   const streamRef = useRef<MediaStream | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
-  const baseDraftRef = useRef("");
   const finalSpeechRef = useRef("");
+  const voiceLockRef = useRef(beginVoiceDraft(""));
+  const voiceCaretMovedRef = useRef(false);
+  const applyingVoiceRef = useRef(false);
   const recordingRef = useRef(false);
   const dictationRef = useRef(false);
   const micEpoch = useRef(0);
@@ -385,6 +389,8 @@ export const Composer = memo(function Composer({
     setPreserveVoiceDraft(false);
     recordingRef.current = false;
     dictationRef.current = false;
+    voiceLockRef.current = beginVoiceDraft("");
+    voiceCaretMovedRef.current = false;
     setRecording(false);
     setListenStatus("");
     setListenLevel(0);
@@ -499,6 +505,43 @@ export const Composer = memo(function Composer({
     streamRef.current = null;
   };
 
+  const noteVoiceCaret = () => {
+    if (applyingVoiceRef.current) return;
+    if (!recordingRef.current && !dictationRef.current) return;
+    const el = field.current;
+    if (!el) return;
+    const start = el.selectionStart ?? 0;
+    const end = el.selectionEnd ?? start;
+    if (start !== end || start !== voiceLockRef.current.caret) voiceCaretMovedRef.current = true;
+  };
+
+  const applyVoiceHypothesis = (hypothesis: string) => {
+    const el = field.current;
+    const draft = el?.value ?? valueRef.current;
+    const start = el?.selectionStart ?? draft.length;
+    const end = el?.selectionEnd ?? start;
+    const merged = mergeVoiceHypothesis(voiceLockRef.current, {
+      draft,
+      caret: start === end ? start : draft.length,
+      caretMoved: voiceCaretMovedRef.current || start !== end,
+      hypothesis,
+    });
+    voiceLockRef.current = merged.lock;
+    if (merged.lock.owned) voiceCaretMovedRef.current = true;
+    valueRef.current = merged.draft;
+    if (merged.draft !== draft) setValue(merged.draft);
+    if (!merged.moveCaret) return;
+    const place = () => {
+      const node = field.current;
+      if (!node) return;
+      applyingVoiceRef.current = true;
+      if (node.value !== merged.draft) node.value = merged.draft;
+      node.setSelectionRange(merged.caret, merged.caret);
+      applyingVoiceRef.current = false;
+    };
+    place();
+  };
+
   const stopMic = async () => {
     if (!recordingRef.current && !dictationRef.current && !recognitionRef.current && !recorderRef.current) return;
     recordingRef.current = false;
@@ -520,11 +563,7 @@ export const Composer = memo(function Composer({
     recorderRef.current = null;
     const chunks = chunksRef.current;
     chunksRef.current = [];
-    const spoken = finalSpeechRef.current;
-    if (spoken.trim()) {
-      setValue(joinVoiceDraft(baseDraftRef.current, spoken));
-      setPreserveVoiceDraft(true);
-    }
+    if (finalSpeechRef.current.trim() || voiceLockRef.current.hypothesis.trim()) setPreserveVoiceDraft(true);
     if (recorder && recorder.state !== "inactive") {
       await new Promise<void>((resolve) => {
         recorder.onstop = () => resolve();
@@ -546,7 +585,7 @@ export const Composer = memo(function Composer({
       mimeType: blob.type || "audio/webm",
     });
     if (result.ok && result.text.trim()) {
-      setValue(joinVoiceDraft(baseDraftRef.current, result.text));
+      applyVoiceHypothesis(result.text);
       setPreserveVoiceDraft(true);
     }
   };
@@ -570,7 +609,7 @@ export const Composer = memo(function Composer({
       if (event.type === "partial" || event.type === "final") {
         finalSpeechRef.current = event.text;
         setListenStatus("");
-        setValue(joinVoiceDraft(baseDraftRef.current, event.text));
+        applyVoiceHypothesis(event.text);
         if (event.type === "final") setPreserveVoiceDraft(true);
         return;
       }
@@ -601,7 +640,10 @@ export const Composer = memo(function Composer({
     const dictate = window.workhorse?.micDictateStart;
     if (dictate) {
       const epoch = micEpoch.current;
-      baseDraftRef.current = valueRef.current;
+      const draft = field.current?.value ?? valueRef.current;
+      valueRef.current = draft;
+      voiceLockRef.current = beginVoiceDraft(draft, field.current?.selectionStart ?? draft.length);
+      voiceCaretMovedRef.current = false;
       finalSpeechRef.current = "";
       setListenStatus("");
       setListenLevel(0.08);
@@ -628,7 +670,10 @@ export const Composer = memo(function Composer({
       return;
     }
     streamRef.current = stream;
-    baseDraftRef.current = valueRef.current;
+    const draft = field.current?.value ?? valueRef.current;
+    valueRef.current = draft;
+    voiceLockRef.current = beginVoiceDraft(draft, field.current?.selectionStart ?? draft.length);
+    voiceCaretMovedRef.current = false;
     finalSpeechRef.current = "";
     recordingRef.current = true;
     setRecording(true);
@@ -657,7 +702,7 @@ export const Composer = memo(function Composer({
           else interim += piece;
         }
         setListenStatus("");
-        setValue(joinVoiceDraft(baseDraftRef.current, joinVoiceDraft(finalSpeechRef.current, interim)));
+        applyVoiceHypothesis(joinVoiceDraft(finalSpeechRef.current, interim));
       };
       rec.onend = () => {
         if (!recordingRef.current) return;
@@ -711,7 +756,7 @@ export const Composer = memo(function Composer({
       pick(matches[active]);
       return;
     }
-    const spoken = recordingRef.current ? joinVoiceDraft(baseDraftRef.current, finalSpeechRef.current) : text;
+    const spoken = recordingRef.current ? valueRef.current : text;
     if (recordingRef.current) void stopMic();
     if (!spoken.trim() && images.length === 0) return;
     send(spoken, { images, steer: running && mode === "steer" });
@@ -899,7 +944,6 @@ export const Composer = memo(function Composer({
           data-composer-field="true"
           rows={1}
           value={value}
-          readOnly={recording}
           placeholder={composerFieldPlaceholder({
             recording,
             dropping: over,
@@ -912,7 +956,13 @@ export const Composer = memo(function Composer({
             event.preventDefault();
             void addFiles(files);
           }}
-          onChange={(event) => setValue(event.target.value)}
+          onMouseUp={noteVoiceCaret}
+          onKeyUp={noteVoiceCaret}
+          onChange={(event) => {
+            const next = event.target.value;
+            valueRef.current = next;
+            setValue(next);
+          }}
           onKeyDown={(event) => {
             if (open && (event.key === "ArrowDown" || event.key === "ArrowUp")) {
               event.preventDefault();

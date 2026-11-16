@@ -15,8 +15,10 @@ import {
   composerFieldPlaceholder,
   getMicrophoneAccessStatus,
   installDeskMediaPermissions,
+  beginVoiceDraft,
   joinVoiceDraft,
   LISTENING_PLACEHOLDER,
+  mergeVoiceHypothesis,
   listenBarScales,
   LOCAL_SPEECH_CAPABILITY,
   macDictationLaunch,
@@ -459,6 +461,103 @@ test("voice draft join and Escape keep a just-recorded draft", () => {
   assert.equal(composerEscapeAction({ recording: false, plusOpen: true, preserveVoiceDraft: true }), "close-menu");
   assert.equal(composerEscapeAction({ recording: false, plusOpen: false, preserveVoiceDraft: true }), "keep-draft");
   assert.equal(composerEscapeAction({ recording: false, plusOpen: false, preserveVoiceDraft: false }), "clear");
+});
+
+test("an untouched draft replaces the dictated span and stays editable in the composer", () => {
+  let lock = beginVoiceDraft("Hi");
+  let draft = "Hi";
+  let caret = draft.length;
+  const speak = (hypothesis: string) => {
+    const merged = mergeVoiceHypothesis(lock, { draft, caret, caretMoved: false, hypothesis });
+    lock = merged.lock;
+    draft = merged.draft;
+    caret = merged.caret;
+    return merged;
+  };
+  assert.equal(speak("hello").draft, "Hi hello");
+  assert.equal(speak("hello world").draft, "Hi hello world");
+  assert.equal(speak("hello word").draft, "Hi hello word");
+  assert.equal(lock.owned, false);
+  assert.equal(speak("hello word today").draft, "Hi hello word today");
+  const noted = mergeVoiceHypothesis(beginVoiceDraft("Hi\n"), {
+    draft: "Hi\n",
+    caret: 3,
+    caretMoved: false,
+    hypothesis: "there",
+  });
+  assert.equal(noted.draft, "Hi\nthere");
+  const composer = read("src/ui/Composer.tsx");
+  assert.match(composer, /mergeVoiceHypothesis/);
+  assert.doesNotMatch(composer, /readOnly=\{recording\}/);
+  assert.doesNotMatch(composer, /baseDraftRef/);
+  assert.match(read("docs/FEATURES.md"), /The draft stays editable while listening/);
+});
+
+test("a user edit wins and later speech appends without restoring deleted words", () => {
+  let lock = beginVoiceDraft("Hi");
+  const first = mergeVoiceHypothesis(lock, {
+    draft: "Hi",
+    caret: 2,
+    caretMoved: false,
+    hypothesis: "hello world",
+  });
+  assert.equal(first.draft, "Hi hello world");
+  const deleted = mergeVoiceHypothesis(first.lock, {
+    draft: "Hi hello",
+    caret: "Hi hello".length,
+    caretMoved: false,
+    hypothesis: "hello world there",
+  });
+  assert.equal(deleted.draft, "Hi hello there");
+  assert.equal(deleted.lock.owned, true);
+  const again = mergeVoiceHypothesis(deleted.lock, {
+    draft: deleted.draft,
+    caret: deleted.caret,
+    caretMoved: true,
+    hypothesis: "hello world there",
+  });
+  assert.equal(again.draft, "Hi hello there");
+  assert.equal(again.moveCaret, false);
+  const rewritten = mergeVoiceHypothesis(again.lock, {
+    draft: again.draft,
+    caret: again.draft.length,
+    caretMoved: true,
+    hypothesis: "hello word",
+  });
+  assert.equal(rewritten.draft, "Hi hello there");
+  const cleared = mergeVoiceHypothesis(first.lock, {
+    draft: "",
+    caret: 0,
+    caretMoved: false,
+    hypothesis: "hello world there",
+  });
+  assert.equal(cleared.draft, "there");
+});
+
+test("moving the caret keeps the draft and inserts later speech there", () => {
+  const first = mergeVoiceHypothesis(beginVoiceDraft("Hi"), {
+    draft: "Hi",
+    caret: 2,
+    caretMoved: false,
+    hypothesis: "hello",
+  });
+  assert.equal(first.draft, "Hi hello");
+  const moved = mergeVoiceHypothesis(first.lock, {
+    draft: first.draft,
+    caret: 2,
+    caretMoved: true,
+    hypothesis: "hello there",
+  });
+  assert.equal(moved.draft, "Hi there hello");
+  assert.equal(moved.caret, "Hi there".length);
+  assert.equal(moved.lock.owned, true);
+  const typed = mergeVoiceHypothesis(first.lock, {
+    draft: "Hi hello!",
+    caret: "Hi hello!".length,
+    caretMoved: false,
+    hypothesis: "hello now",
+  });
+  assert.equal(typed.draft, "Hi hello! now");
 });
 
 test("a live mic fills the text area from on-device lines and says Listening until words arrive", () => {

@@ -236,6 +236,80 @@ export function joinVoiceDraft(existing: string, spoken: string): string {
   return `${existing} ${speech}`;
 }
 
+/**
+ * Listening remembers the draft it last wrote. A hypothesis is the recognizer's
+ * full phrase, so an edit has to win before the next partial is merged.
+ */
+export type VoiceDraftLock = {
+  /** Composer text when listening started. Untouched hypotheses rebuild from here. */
+  base: string;
+  /** Last full hypothesis. After an edit, only words beyond this are new speech. */
+  hypothesis: string;
+  /** Draft last written by speech. A different field means the user edited. */
+  expected: string;
+  /** Caret speech last left. A different caret, once the user moved it, is where new words go. */
+  caret: number;
+  /** The user changed the text, moved the caret, or deleted. Their draft stays. */
+  owned: boolean;
+};
+
+export function beginVoiceDraft(draft: string, caret = draft.length): VoiceDraftLock {
+  const at = Math.max(0, Math.min(Number.isFinite(caret) ? caret : draft.length, draft.length));
+  return { base: draft, hypothesis: "", expected: draft, caret: at, owned: false };
+}
+
+function hypothesisWords(text: string): string[] {
+  const trimmed = text.trim();
+  if (!trimmed) return [];
+  return trimmed.split(/\s+/);
+}
+
+/** Words added after the hypothesis already applied. A rewrite of earlier words is not new speech. */
+export function voiceHypothesisGrowth(previous: string, next: string): string {
+  const prev = hypothesisWords(previous);
+  const curr = hypothesisWords(next);
+  if (curr.length <= prev.length) return "";
+  return curr.slice(prev.length).join(" ");
+}
+
+function insertVoiceGrowth(draft: string, caret: number, growth: string): { draft: string; caret: number } {
+  const speech = growth.trim();
+  const at = Math.max(0, Math.min(Number.isFinite(caret) ? caret : draft.length, draft.length));
+  if (!speech) return { draft, caret: at };
+  const before = draft.slice(0, at);
+  const after = draft.slice(at);
+  const lead = before && !/\s$/.test(before) ? " " : "";
+  const trail = after && !/^\s/.test(after) ? " " : "";
+  const next = `${before}${lead}${speech}${trail}${after}`;
+  return { draft: next, caret: before.length + lead.length + speech.length };
+}
+
+export function mergeVoiceHypothesis(
+  lock: VoiceDraftLock,
+  input: { draft: string; caret: number; caretMoved: boolean; hypothesis: string },
+): { draft: string; caret: number; moveCaret: boolean; lock: VoiceDraftLock } {
+  const hypothesis = input.hypothesis.trim();
+  const owned = lock.owned || input.draft !== lock.expected || input.caretMoved;
+  if (!owned) {
+    const draft = joinVoiceDraft(lock.base, hypothesis);
+    const caret = draft.length;
+    return {
+      draft,
+      caret,
+      moveCaret: draft !== input.draft || input.caret !== caret,
+      lock: { base: lock.base, hypothesis, expected: draft, caret, owned: false },
+    };
+  }
+  const inserted = insertVoiceGrowth(input.draft, input.caret, voiceHypothesisGrowth(lock.hypothesis, hypothesis));
+  const caret = inserted.caret;
+  return {
+    draft: inserted.draft,
+    caret,
+    moveCaret: inserted.draft !== input.draft,
+    lock: { base: lock.base, hypothesis, expected: inserted.draft, caret, owned: true },
+  };
+}
+
 /** Electron's web speech engine often starts and then reports one of these. */
 export function osSpeechGaveUp(error: string | undefined): boolean {
   return error === "network" || error === "not-allowed" || error === "service-not-allowed" || error === "audio-capture";

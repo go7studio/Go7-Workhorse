@@ -63,6 +63,40 @@ function trailingJoins(cwd: string, file: string, p: MediaPathApi = path): strin
   return out;
 }
 
+const SESSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * A Grok session file whose folder lost its percent signs, with them put back.
+ *
+ * Grok files a session under `encodeURIComponent(cwd)`, so the folder really
+ * is named `D%3A%5Cproj`. A reply that hands the picture over as
+ * `file:///C:/…/sessions/D%3A%5Cproj/<id>/images/1.jpg` is decoded once, like
+ * any file URL, and then names `…/sessions/D:\proj/<id>/images/1.jpg`. That
+ * file is not there, and with no session id on the chat nothing else finds it.
+ * Empty when the path is not one of those.
+ */
+function grokSessionFile(file: string, p: MediaPathApi = path): string {
+  const marker = "/.grok/sessions/";
+  const at = file.replace(/\\/g, "/").indexOf(marker);
+  if (at < 0) return "";
+  const rest = file.slice(at + marker.length);
+  let from = 0;
+  for (const part of rest.split(/[\\/]/)) {
+    if (SESSION_ID.test(part)) {
+      const cwd = rest.slice(0, Math.max(0, from - 1));
+      // One plain segment is the folder's stored name already.
+      if (!/[\\/:]/.test(cwd)) return "";
+      try {
+        return p.join(file.slice(0, at + marker.length), encodeURIComponent(cwd), rest.slice(from));
+      } catch {
+        return "";
+      }
+    }
+    from += part.length + 1;
+  }
+  return "";
+}
+
 function listGrokSessionNames(root: string): string[] {
   if (isNetworkPath(root)) return [];
   const hit = grokNameCache.get(root);
@@ -161,7 +195,10 @@ export function mediaFileCandidates(
     if (out.length >= MEDIA_CANDIDATE_LIMIT) return;
     if (value && !isNetworkPath(value) && !out.includes(value)) out.push(value);
   };
-  if (p.isAbsolute(file)) add(file);
+  if (p.isAbsolute(file)) {
+    add(file);
+    add(grokSessionFile(file, p));
+  }
   if (opts.cwd) {
     for (const extra of trailingJoins(opts.cwd, file, p)) add(extra);
   }
@@ -336,4 +373,60 @@ export function openableHtmlPath(input: unknown, io: LocalPathIo = {}): string |
   const ext = p.extname(entry.resolved).toLowerCase();
   if (ext !== ".html" && ext !== ".htm") return null;
   return entry.resolved;
+}
+
+const STREAM_TYPE: Record<string, string> = {
+  mp4: "video/mp4",
+  m4v: "video/x-m4v",
+  mov: "video/quicktime",
+  webm: "video/webm",
+  avi: "video/x-msvideo",
+  mkv: "video/x-matroska",
+  mp3: "audio/mpeg",
+  wav: "audio/wav",
+  m4a: "audio/mp4",
+  aac: "audio/aac",
+  flac: "audio/flac",
+  ogg: "audio/ogg",
+  opus: "audio/opus",
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  gif: "image/gif",
+  webp: "image/webp",
+  bmp: "image/bmp",
+  svg: "image/svg+xml",
+};
+
+/** Content type for a file the media protocol streams. Unknown extensions stay generic. */
+export function mediaContentType(file: string): string {
+  const ext = file.split(/[\\/]/).pop()?.split(".").pop()?.toLowerCase() ?? "";
+  return STREAM_TYPE[ext] ?? "application/octet-stream";
+}
+
+/**
+ * A `Range: bytes=` span, or `"bad"` when the header cannot be satisfied.
+ * An absent header is not a range. The end is inclusive, as in the header.
+ */
+export function mediaByteRange(
+  header: string | null | undefined,
+  size: number,
+): { start: number; end: number } | "bad" | null {
+  if (header == null || header.trim() === "") return null;
+  if (!Number.isFinite(size) || size < 0) return "bad";
+  const match = /^bytes=(\d*)-(\d*)$/i.exec(header.trim());
+  if (!match || size === 0) return "bad";
+  const startRaw = match[1] ?? "";
+  const endRaw = match[2] ?? "";
+  if (!startRaw && !endRaw) return "bad";
+  if (!startRaw) {
+    const suffix = Number(endRaw);
+    if (!Number.isInteger(suffix) || suffix <= 0) return "bad";
+    return { start: Math.max(0, size - suffix), end: size - 1 };
+  }
+  const start = Number(startRaw);
+  if (!Number.isInteger(start) || start < 0 || start >= size) return "bad";
+  const end = endRaw === "" ? size - 1 : Number(endRaw);
+  if (!Number.isInteger(end) || end < start) return "bad";
+  return { start, end: Math.min(end, size - 1) };
 }

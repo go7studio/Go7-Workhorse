@@ -2,6 +2,7 @@ import { app, BrowserWindow, crashReporter, dialog, ipcMain, nativeImage, native
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { Readable } from "node:stream";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { GrokSessionHost, resolveOrBaseSessionCwd, resolveSessionCwd, type GrokCompactInput, type GrokPromptInput } from "./grok-host";
 import { CodexSessionHost, type CodexPromptInput } from "./codex-host";
@@ -57,7 +58,7 @@ import {
 import { pauseMacDictation, startMacDictation, stopMacDictation } from "./mac-dictation";
 import { LocalCapabilityHostClient } from "./local-capability-host";
 
-import { displaySrcForHref, openableHtmlPath, openableMediaPath, resolveMediaProtocolFile, safeLocalPath } from "./media-src";
+import { displaySrcForHref, mediaByteRange, mediaContentType, openableHtmlPath, openableMediaPath, resolveMediaProtocolFile, safeLocalPath } from "./media-src";
 import { watchViewerFolder } from "./viewer-watch";
 import { createViewerHost, viewerSession, resolveViewerWatchFolder } from "./viewer-host";
 import { pathToMediaUrl } from "../src/lib/media-display";
@@ -669,6 +670,33 @@ function readMediaSrc(href: string, cwd?: string, vendorSessionId?: string): str
 function handleMediaProtocol(request: Request): Promise<Response> | Response {
   const file = resolveMediaProtocolFile(request.url);
   if (!file) return new Response(null, { status: 404 });
+  const range = request.headers.get("range");
+  if (range) {
+    let size = 0;
+    try {
+      const stat = fs.statSync(file);
+      if (!stat.isFile()) return new Response(null, { status: 404 });
+      size = stat.size;
+    } catch {
+      return new Response(null, { status: 404 });
+    }
+    const parsed = mediaByteRange(range, size);
+    if (parsed === "bad") {
+      return new Response(null, { status: 416, headers: { "Content-Range": `bytes */${size}` } });
+    }
+    if (parsed) {
+      const stream = fs.createReadStream(file, { start: parsed.start, end: parsed.end });
+      return new Response(Readable.toWeb(stream) as ReadableStream, {
+        status: 206,
+        headers: {
+          "Accept-Ranges": "bytes",
+          "Content-Type": mediaContentType(file),
+          "Content-Length": String(parsed.end - parsed.start + 1),
+          "Content-Range": `bytes ${parsed.start}-${parsed.end}/${size}`,
+        },
+      });
+    }
+  }
   try {
     return net.fetch(pathToFileURL(file).href);
   } catch {

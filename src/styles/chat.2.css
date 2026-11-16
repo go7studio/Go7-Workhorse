@@ -1628,6 +1628,21 @@
   border: 1px solid rgba(255, 255, 255, 0.2);
 }
 
+.md-video {
+  display: block;
+  width: min(880px, 100%);
+  max-height: 480px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-14);
+  background: #111;
+}
+
+.md-audio {
+  display: block;
+  width: min(480px, 100%);
+  margin: 8px 0 2px;
+}
+
 .md-figure figcaption,
 .md-image-fallback {
   margin-top: 6px;

@@ -50,6 +50,38 @@ function MdImage({
   );
 }
 
+function MdPlayable({
+  href,
+  alt,
+  kind,
+  cwd,
+  vendorSessionId,
+  caption,
+}: {
+  href: string;
+  alt: string;
+  kind: "video" | "audio";
+  cwd?: string;
+  vendorSessionId?: string;
+  caption: boolean;
+}) {
+  const src = mdImageInitialSrc(href, { cwd, vendorSessionId });
+  if (!src) return <span className="md-image-pending" aria-hidden="true" />;
+  const media =
+    kind === "audio" ? (
+      <audio className="md-audio" src={src} controls preload="metadata" aria-label={alt || undefined} />
+    ) : (
+      <video className="md-video" src={src} controls preload="metadata" playsInline aria-label={alt || undefined} />
+    );
+  if (!caption) return media;
+  return (
+    <figure className="md-figure">
+      {media}
+      {alt ? <figcaption>{alt}</figcaption> : null}
+    </figure>
+  );
+}
+
 function CodeBlock({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
   return (
@@ -130,6 +162,19 @@ function Inlines({
         }
         if (part.type === "image") {
           return <MdImage key={index} href={part.href} alt={part.text} cwd={cwd} vendorSessionId={vendorSessionId} />;
+        }
+        if (part.type === "video" || part.type === "audio") {
+          return (
+            <MdPlayable
+              key={index}
+              href={part.href}
+              alt={part.text}
+              kind={part.type}
+              cwd={cwd}
+              vendorSessionId={vendorSessionId}
+              caption={false}
+            />
+          );
         }
         if (part.type === "link") {
           return (
@@ -235,6 +280,19 @@ export const MessageBody = memo(function MessageBody({
         }
         if (block.type === "image") {
           return <MdImage key={index} href={block.href} alt={block.alt} cwd={cwd} vendorSessionId={vendorSessionId} />;
+        }
+        if (block.type === "video" || block.type === "audio") {
+          return (
+            <MdPlayable
+              key={index}
+              href={block.href}
+              alt={block.alt}
+              kind={block.type}
+              cwd={cwd}
+              vendorSessionId={vendorSessionId}
+              caption
+            />
+          );
         }
         if (block.type === "facts") {
           return (

@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildAnthropicBody, buildOpenAiBody } from "../electron/custom-http";
-import { displaySrcForHref, resolveDisplayFile, resolveMediaProtocolFile } from "../electron/media-src";
+import { displaySrcForHref, mediaFileCandidates, resolveDisplayFile, resolveMediaProtocolFile } from "../electron/media-src";
 import {
   attachmentKind,
   attachmentPromptBlock,
@@ -19,6 +19,7 @@ import {
   modelImagePayloadBytes,
   normalizeImages,
 } from "../src/lib/images";
+import { parseChatMarkdown } from "../src/lib/markdown";
 import { mdImageInitialSrc, mediaUrlContext, mediaUrlToPath, pathToMediaUrl } from "../src/lib/media-display";
 import type { AttachmentKind, ChatImage } from "../src/lib/types";
 import { hydrateChatImages, offloadStateAttachments } from "../electron/attachment-store";
@@ -293,6 +294,48 @@ test("first-paint media URL carries cwd so the protocol can resolve a relative f
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("a Grok session picture shows from its full path, however the reply spelled it", () => {
+  // Grok names a session's folder encodeURIComponent(cwd), so the real name
+  // holds percent signs. No disk is read: the one file that exists is named
+  // here, and the chat carries no session id, so nothing else can find it.
+  const id = "01a1e4a1-732f-7590-81d2-51fcfbb2947e";
+  const shown = (href: string, p: typeof path.win32, home: string, file: string) => {
+    const block = parseChatMarkdown(`Here it is:\n\n![A cat](${href})`)[1];
+    assert.equal(block?.type, "image", href);
+    if (block?.type !== "image") return;
+    const resolved = resolveMediaProtocolFile(mdImageInitialSrc(block.href), {
+      path: p,
+      home,
+      existsSync: (candidate) => p.normalize(candidate) === file,
+    });
+    assert.equal(resolved && p.normalize(resolved), file, href);
+  };
+
+  // Windows: the drive colon and the backslashes are what got encoded.
+  const win = `C:\\Users\\me\\.grok\\sessions\\D%3A%5Cproj\\${id}\\images\\1.jpg`;
+  const winSlashes = win.replace(/\\/g, "/");
+  const winHome = "C:\\Users\\me";
+  shown(win, path.win32, winHome, win);
+  shown(winSlashes, path.win32, winHome, win);
+  shown(`/${winSlashes}`, path.win32, winHome, win);
+  // A file URL made properly escapes the folder's percent signs…
+  shown(`file:///${winSlashes.replace(/%/g, "%25")}`, path.win32, winHome, win);
+  // …and one written by hand does not. Decoded once, it named D:\proj.
+  shown(`file:///${winSlashes}`, path.win32, winHome, win);
+
+  // macOS: every slash of the cwd got encoded.
+  const mac = `/Users/me/.grok/sessions/%2FUsers%2Fme%2Fproj/${id}/images/1.jpg`;
+  shown(mac, path.posix, "/Users/me", mac);
+  shown(`file://${mac.replace(/%/g, "%25")}`, path.posix, "/Users/me", mac);
+  shown(`file://${mac}`, path.posix, "/Users/me", mac);
+
+  // A path with an id in it that is not a Grok session file gains no second guess.
+  const plain = `C:\\out\\${id}\\render.png`;
+  const guesses = mediaFileCandidates(plain, { home: winHome }, path.win32);
+  assert.equal(guesses[0], plain);
+  assert.equal(guesses.some((guess) => guess.includes("%")), false);
 });
 
 test("Codex Windows image paths keep their own file under the project folder", () => {

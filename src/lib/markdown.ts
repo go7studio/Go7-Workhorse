@@ -4,7 +4,9 @@ export type Inline =
   | { type: "em"; text: string }
   | { type: "code"; text: string }
   | { type: "link"; text: string; href: string; children?: Inline[] }
-  | { type: "image"; text: string; href: string };
+  | { type: "image"; text: string; href: string }
+  | { type: "video"; text: string; href: string }
+  | { type: "audio"; text: string; href: string };
 
 export type MdAlign = "left" | "right" | "center";
 
@@ -16,7 +18,9 @@ export type MdBlock =
   | { type: "table"; headers: Inline[][]; rows: Inline[][][]; aligns: MdAlign[] }
   | { type: "pre"; text: string }
   | { type: "facts"; rows: { label: string; value: string }[] }
-  | { type: "image"; alt: string; href: string };
+  | { type: "image"; alt: string; href: string }
+  | { type: "video"; alt: string; href: string }
+  | { type: "audio"; alt: string; href: string };
 
 const FACT =
   /^\s*[-*]\s+\*\*([^*]+?):\*\*\s*(.+?)\s*$|^\s*[-*]\s+\*\*([^*]+?)\*\*:\s*(.+?)\s*$/;
@@ -97,9 +101,36 @@ export function isLocalHtmlHref(href: string): boolean {
   return /\.html?$/i.test(file);
 }
 
+const VIDEO_FILE = /\.(mp4|m4v|mov|webm|avi|mkv)(\?|#|$)/i;
+const AUDIO_FILE = /\.(mp3|wav|m4a|aac|flac|ogg|opus)(\?|#|$)/i;
+
+function pathLooksLikeMedia(value: string, pattern: RegExp): boolean {
+  if (/^https?:\/\//i.test(value)) {
+    try {
+      return pattern.test(new URL(value).pathname);
+    } catch {
+      return false;
+    }
+  }
+  return pattern.test(value);
+}
+
+/** A local or https file the bubble can play. Webm is a clip, not an audio note. */
+export function looksLikeVideoHref(href: string): boolean {
+  const value = normalizeLocalFileHref(href);
+  if (!value || isHollowHref(value)) return false;
+  return pathLooksLikeMedia(value, VIDEO_FILE);
+}
+
+export function looksLikeAudioHref(href: string): boolean {
+  const value = normalizeLocalFileHref(href);
+  if (!value || isHollowHref(value) || looksLikeVideoHref(value)) return false;
+  return pathLooksLikeMedia(value, AUDIO_FILE);
+}
+
 export function looksLikeImageHref(href: string): boolean {
   const value = normalizeLocalFileHref(href);
-  if (!value) return false;
+  if (!value || looksLikeVideoHref(value) || looksLikeAudioHref(value)) return false;
   if (/^data:image\//i.test(value)) return true;
   if (/^https?:\/\//i.test(value)) return webImageHref(value);
   if (/\.(png|jpe?g|gif|webp|bmp|svg)(\?|#|$)/i.test(value)) return true;
@@ -121,6 +152,8 @@ function cleanHref(href: string): string {
 
 function asLinkedMedia(label: string, href: string, forcedImage: boolean): Inline {
   const target = cleanHref(href);
+  if (looksLikeVideoHref(target)) return { type: "video", text: label, href: target };
+  if (looksLikeAudioHref(target)) return { type: "audio", text: label, href: target };
   if (forcedImage || looksLikeImageHref(target) || isHollowHref(target)) {
     return { type: "image", text: label, href: target };
   }
@@ -838,13 +871,20 @@ export function parseChatMarkdown(source: string): MdBlock[] {
       blocks.push({ type: "pre", text: body.join("\n") });
       continue;
     }
-    // `![alt](href)` is a picture. A bare `[label](page)` on its own line is a
-    // link; only an image href (or a hollow target) paints as a picture.
+    // `![alt](href)` is a picture. A clip or a sound on its own line is a
+    // player, even with the picture mark, so a video is not a broken image.
+    // A bare `[label](page)` stays a link.
     const picture = lines[i].trim().match(/^(!?)\[([^\]]*)\]\(((?:[^()]|\([^()]*\))*)\)\.?$/);
     if (picture) {
       const href = cleanHref(picture[3] ?? "");
+      const alt = picture[2] ?? "";
+      if (looksLikeVideoHref(href) || looksLikeAudioHref(href)) {
+        blocks.push({ type: looksLikeVideoHref(href) ? "video" : "audio", alt, href });
+        i += 1;
+        continue;
+      }
       if (picture[1] === "!" || looksLikeImageHref(href) || isHollowHref(href)) {
-        blocks.push({ type: "image", alt: picture[2] ?? "", href });
+        blocks.push({ type: "image", alt, href });
         i += 1;
         continue;
       }

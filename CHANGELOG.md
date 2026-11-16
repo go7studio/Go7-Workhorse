@@ -8,6 +8,13 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.7.14](https://github.com/go7studio/Go7-Workhorse/compare/v0.7.13...v0.7.14) (2026-11-16)
+
+
+### Bug Fixes
+
+* bind a spawn to its folder and wait for the current run ([84f3c69](https://github.com/go7studio/Go7-Workhorse/commit/84f3c699a127bed7c6a71739786cdde016f2d386))
+
 ## [0.7.13](https://github.com/go7studio/Go7-Workhorse/compare/v0.7.12...v0.7.13) (2026-11-16)
 
 

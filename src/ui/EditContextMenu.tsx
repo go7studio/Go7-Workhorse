@@ -10,6 +10,7 @@ import {
   clampMenuPosition,
   EDIT_MENU_ITEMS,
   isTextEditElement,
+  readClipboardText,
   selectedText,
   type EditFieldState,
   type EditMenuAction,
@@ -97,9 +98,12 @@ export function EditContextMenu() {
       } else if (action === "copy" && canCopy(live)) {
         await navigator.clipboard?.writeText(selectedText(live)).catch(() => undefined);
       } else if (action === "paste" && canPaste(live)) {
-        const text = (await navigator.clipboard?.readText().catch(() => "")) ?? "";
-        const next = applyPaste(live, text);
-        writeField(field, next.value, next.caret);
+        const read = navigator.clipboard ? () => navigator.clipboard.readText() : undefined;
+        const text = await readClipboardText(read);
+        if (text !== null) {
+          const next = applyPaste(live, text);
+          writeField(field, next.value, next.caret);
+        }
       } else if (action === "selectAll" && canSelectAll(live)) {
         const next = applySelectAll(live);
         field.focus();

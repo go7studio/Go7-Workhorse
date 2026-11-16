@@ -199,6 +199,7 @@ import {
   canSelectAll,
   clampMenuPosition,
   EDIT_MENU_ITEMS,
+  readClipboardText,
   selectedText,
 } from "../src/lib/edit-menu";
 import {
@@ -10766,7 +10767,7 @@ test("desk builds one named join prompt and syncs idle children", () => {
   assert.match(readFileSync(path.join(ROOT, "electron", "custom-host.ts"), "utf8"), /shouldEndDispatchTurn\(results\)/);
 });
 
-test("composer edit menu matches Codex cut copy paste select all", () => {
+test("composer edit menu matches Codex cut copy paste select all", async () => {
   assert.deepEqual(
     EDIT_MENU_ITEMS.map((item) => item.label),
     ["Copy", "Cut", "Paste", "Select All"],
@@ -10787,6 +10788,15 @@ test("composer edit menu matches Codex cut copy paste select all", () => {
   assert.deepEqual(applySelectAll(selected), { start: 0, end: 11 });
   assert.equal(canCut({ ...selected, readOnly: true }), false);
   assert.equal(canPaste({ ...selected, disabled: true }), false);
+  assert.equal(await readClipboardText(undefined), null);
+  assert.equal(await readClipboardText(async () => "from the clipboard"), "from the clipboard");
+  assert.equal(await readClipboardText(async () => ""), "");
+  assert.equal(
+    await readClipboardText(async () => {
+      throw new Error("Read permission denied.");
+    }),
+    null,
+  );
 
   const pinned = clampMenuPosition(2000, 2000, 188, 136, 1280, 840);
   assert.ok(pinned.x < 1280);

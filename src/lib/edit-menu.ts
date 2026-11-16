@@ -52,6 +52,16 @@ export function applyCut(field: EditFieldState): { value: string; caret: number;
   };
 }
 
+/** A denied clipboard read must not become an empty paste that deletes the selection. */
+export async function readClipboardText(read: (() => Promise<string>) | undefined): Promise<string | null> {
+  if (!read) return null;
+  try {
+    return await read();
+  } catch {
+    return null;
+  }
+}
+
 export function applyPaste(field: EditFieldState, text: string): { value: string; caret: number } {
   const start = Math.min(field.selectionStart, field.selectionEnd);
   const end = Math.max(field.selectionStart, field.selectionEnd);

@@ -9,6 +9,7 @@ import { macDictationCommand, pauseMacDictation, startMacDictation, stopMacDicta
 import type { LocalArtifact, LocalJob } from "../src/lib/local-capability-contract";
 import type { LocalComputeHostSettings } from "../src/lib/types";
 import {
+  allowDeskClipboardPermission,
   allowDeskMediaPermission,
   composerEscapeAction,
   composerFieldPlaceholder,
@@ -279,6 +280,10 @@ test("desk media permission allows microphone and refuses camera or a foreign pa
   assert.equal(allowDeskMediaPermission("media", { mediaType: "video" }, true), false);
   assert.equal(allowDeskMediaPermission("display-capture", { mediaTypes: ["audio"] }, true), false);
   assert.equal(allowDeskMediaPermission("media", { mediaTypes: ["audio"] }, false), false);
+  assert.equal(allowDeskClipboardPermission("clipboard-read", true), true);
+  assert.equal(allowDeskClipboardPermission("clipboard-sanitized-write", true), true);
+  assert.equal(allowDeskClipboardPermission("clipboard-read", false), false);
+  assert.equal(allowDeskClipboardPermission("media", true), false);
 });
 
 test("the session handler answers from the injected isDesk check", () => {
@@ -302,6 +307,45 @@ test("the session handler answers from the injected isDesk check", () => {
   installDeskMediaPermissions(ses, (url) => url.startsWith("file:///app/dist/index.html"));
   assert.equal(requestAllow, true);
   assert.equal(checkAllow, true);
+});
+
+test("the session handler allows clipboard read on the desk page and nowhere else", () => {
+  const requests: { permission: string; allow: boolean }[] = [];
+  const checks: { permission: string; allow: boolean }[] = [];
+  let onRequest: Parameters<MediaPermissionSession["setPermissionRequestHandler"]>[0] = () => undefined;
+  let onCheck: Parameters<MediaPermissionSession["setPermissionCheckHandler"]>[0] = () => false;
+  const ses: MediaPermissionSession = {
+    setPermissionRequestHandler(handler) {
+      onRequest = handler;
+    },
+    setPermissionCheckHandler(handler) {
+      onCheck = handler;
+    },
+  };
+  installDeskMediaPermissions(ses, (url) => url.startsWith("file:///app/dist/index.html"));
+  for (const permission of ["clipboard-read", "clipboard-sanitized-write", "display-capture"]) {
+    onRequest({ getURL: () => "file:///app/dist/index.html" }, permission, (allow) => requests.push({ permission, allow }), {
+      requestingUrl: "file:///app/dist/index.html",
+    });
+    checks.push({
+      permission,
+      allow: onCheck({ getURL: () => "file:///app/dist/index.html" }, permission, "file://", {}),
+    });
+  }
+  onRequest({ getURL: () => "https://evil.example/" }, "clipboard-read", (allow) => requests.push({ permission: "foreign", allow }), {
+    requestingUrl: "https://evil.example/",
+  });
+  assert.deepEqual(requests, [
+    { permission: "clipboard-read", allow: true },
+    { permission: "clipboard-sanitized-write", allow: true },
+    { permission: "display-capture", allow: false },
+    { permission: "foreign", allow: false },
+  ]);
+  assert.deepEqual(checks, [
+    { permission: "clipboard-read", allow: true },
+    { permission: "clipboard-sanitized-write", allow: true },
+    { permission: "display-capture", allow: false },
+  ]);
 });
 
 test("a thrown OS speech start falls back to a granted advertised local host", async () => {

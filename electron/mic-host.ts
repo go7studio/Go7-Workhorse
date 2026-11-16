@@ -127,14 +127,27 @@ export function allowDeskMediaPermission(
   return true;
 }
 
+/**
+ * This session handler is the only one Electron consults after it is installed.
+ * Clipboard read is one of those checks. Denying it makes the edit menu's Paste
+ * fail on Windows, while Ctrl+V still works because that is the field's own paste.
+ */
+export function allowDeskClipboardPermission(permission: string, deskPage: boolean): boolean {
+  return deskPage && (permission === "clipboard-read" || permission === "clipboard-sanitized-write");
+}
+
 export function installDeskMediaPermissions(ses: MediaPermissionSession, isDesk: (url: string) => boolean): void {
   ses.setPermissionRequestHandler((contents, permission, callback, details) => {
     const url = details?.requestingUrl || contents.getURL();
-    callback(allowDeskMediaPermission(permission, details, isDesk(url)));
+    const deskPage = isDesk(url);
+    callback(
+      allowDeskClipboardPermission(permission, deskPage) || allowDeskMediaPermission(permission, details, deskPage),
+    );
   });
   ses.setPermissionCheckHandler((contents, permission, requestingOrigin, details) => {
     const url = contents?.getURL() || requestingOrigin;
-    return allowDeskMediaPermission(permission, details, isDesk(url));
+    const deskPage = isDesk(url);
+    return allowDeskClipboardPermission(permission, deskPage) || allowDeskMediaPermission(permission, details, deskPage);
   });
 }
 

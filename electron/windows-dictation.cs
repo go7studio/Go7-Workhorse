@@ -202,9 +202,8 @@ internal static class WindowsDictation
         startDepth++;
         try
         {
-            // The installed desktop recognizer transcribes on this PC. Windows
-            // voice typing stays second, because it refuses to start until Online
-            // speech recognition is on.
+            // This PC already has a local recognizer. Do not fall through to
+            // online voice typing.
             if (EnsureEngine())
             {
                 listening = true;
@@ -221,7 +220,6 @@ internal static class WindowsDictation
                     engine = null;
                 }
             }
-            if (StartWindowsSpeech()) return;
             FailMic();
         }
         finally
@@ -231,8 +229,7 @@ internal static class WindowsDictation
     }
 
     /// <summary>
-    /// Opens the installed offline recognizer. A failure leaves the error to Start,
-    /// which can still try Windows voice typing.
+    /// Opens the installed offline recognizer. Start does not try online voice typing.
     /// </summary>
     private static bool EnsureEngine()
     {

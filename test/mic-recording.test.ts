@@ -687,6 +687,8 @@ test("the packaged app declares mic usage strings and the hardened-runtime audio
   assert.match(windowsSource, /SpeechRecognitionScenario\.Dictation/);
   assert.match(windowsSource, /PumpUntilSettled/);
   assert.match(windowsSource, /privacy policy/);
+  assert.doesNotMatch(windowsSource, /if \(StartWindowsSpeech\(\)\) return;/);
+  assert.match(windowsSource, /RecognizeAsync\(RecognizeMode\.Multiple\)/);
   assert.match(read("src/ui/Composer.tsx"), /WINDOWS_SPEECH_PRIVACY_URL/);
   assert.match(read("src/ui/Composer.tsx"), /micEpoch/);
   assert.match(windowsSource, /RecognizeCompleted/);

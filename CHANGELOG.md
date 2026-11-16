@@ -8,6 +8,22 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.7.13](https://github.com/go7studio/Go7-Workhorse/compare/v0.7.12...v0.7.13) (2026-11-16)
+
+
+### Features
+
+* desk assigns the worker and loads foreign MCP configs ([cc85a2f](https://github.com/go7studio/Go7-Workhorse/commit/cc85a2f89af4a1d006cb5ef6099e3c722f4541c9))
+* hand Cursor MCP servers to agents with real paths ([a8bb0e4](https://github.com/go7studio/Go7-Workhorse/commit/a8bb0e4d532f7c92fb75984511fb092836f9b582))
+
+
+### Bug Fixes
+
+* allow a spawn when the orchestrator perceives the ask ([315ef2c](https://github.com/go7studio/Go7-Workhorse/commit/315ef2c671d7e3e46880a47bb8a5bb17084090fd))
+* ask Windows for Online speech recognition before the mic goes quiet ([117fb9d](https://github.com/go7studio/Go7-Workhorse/commit/117fb9d592a7d5230c48fb7b5ffa13c3c42c368d))
+* keep the composer editable while dictation is listening ([5cf98dd](https://github.com/go7studio/Go7-Workhorse/commit/5cf98dd59fa120e4ec9326b968f78feda9530823))
+* let Windows right-click Paste read the clipboard ([61b5016](https://github.com/go7studio/Go7-Workhorse/commit/61b50160cb00809afa722becd3c8ed1ca499b9e9))
+
 ## [0.7.12](https://github.com/go7studio/Go7-Workhorse/compare/v0.7.11...v0.7.12) (2026-11-13)
 
 ### Features

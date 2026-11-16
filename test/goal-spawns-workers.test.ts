@@ -60,6 +60,13 @@ test("helpers are recognised in the words people use, not one house phrasing", (
     "fan out the review",
     "spin up agents",
     "dispatch a worker per lane",
+    "assign out the work to agents",
+    "assign out the work to agents and work through each piece we identified on grok 4.7 agent tasks",
+    "orchestrate updates with agents",
+    "Use grok models 4.7 only, orchestrate updates with agents.",
+    "assign the audit tasks to agents",
+    "hand this work off to agents",
+    "hand off the fixes to workers",
   ]) {
     assert.equal(looksLikeSpawnRequest(asked), true, `should ask for helpers: ${asked}`);
   }
@@ -73,6 +80,7 @@ test("ordinary code talk about agents, bots and workers starts nobody", () => {
     "run the agent tests",
     "refactor the bot parser",
     "read agents.md",
+    "send the notes to agents.md",
     "rename the project",
     "the vendor list is stale",
     "fix the login bug",

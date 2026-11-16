@@ -62,25 +62,13 @@ const VENDOR_BOUNDARY_LAW =
   "Adding a bot is a desk action, not a code change, even when this chat’s folder is the Workhorse repo. Do not read AGENTS.md, workhorse-mcp.ts, custom-http.ts, adapters, Settings, or any Workhorse source to add one, do not spawn an agent to create one, and do not invent API keys or write adapter files. Call workhorse_list_bots: if the model is listed, tell the user to pick it under This chat → Vendor. With a base URL, model, and key, call workhorse_setup_custom_bot with those fields. Without a key, or when the Workhorse tools are missing, tell them to use Add a bot on the desk and paste the URL and key; never import or invent one, and do not fall back to reading source. workhorse_delete_bot removes a slot by name. After a successful setup, say the bot is on the desk and they can select it in This chat → Vendor. ";
 
 /**
- * The core still names workhorse_spawn_agent, and it no longer carries the law
- * that governs the call. The detector below catches a spawn-shaped turn, but
- * no detector catches every way a person asks for helpers — "hire two
- * reviewers", "please have Claude review this file" — so a chat could hold the
- * tool with none of the law.
- *
- * The first cut of this was one sentence asking the model not to make the
- * call. A model cannot see which system text it did not receive, so that was
- * an instruction nobody could follow. The refusal is `admitSpawn`, which reads
- * turnCarriesSpawnLaw below and turns the call away with SPAWN_LAW_MISSING_ERROR.
- * This line is only its announcement: it tells the chat the refusal exists and
- * what to say when it lands, which is something a chat can act on.
+ * S11 split the desk bible so a short turn did not pay for spawn rules, and
+ * the door then refused any turn a phrase list missed. A phrase list cannot
+ * hear "hire two reviewers" or "assign out the work to agents", and it cannot
+ * hear an implication. The orchestrator perceives. The desk allows the call.
  */
 export const SPAWN_GATE_LAW =
-  "The desk refuses workhorse_spawn_agent on a turn that did not bring you the desk spawn law. On that refusal, say the desk can put workers on this and ask the user to confirm. ";
-
-/** What the desk says when it turns that call away. The chat repeats it to the user. */
-export const SPAWN_LAW_MISSING_ERROR =
-  "this turn did not carry the desk spawn law; say the desk can put workers on this and ask the user to confirm";
+  "If you perceive the user wants agents, implied it, or that several agents would do the task better, call workhorse_spawn_agent. The desk allows it. Do not ask them to confirm. ";
 
 /**
  * The spawn law, held apart from the core on purpose.
@@ -96,7 +84,7 @@ export const DESK_SPAWN_LAW =
   "A missing linked folder does not fail this turn — search and attach one with workhorse_create_project, or pass folder. Do not spawn into an unbound working directory. Then call workhorse_list_bots. One bounded assignment is one workhorse_spawn_agent, with the full task in the prompt. A second spawn only to independently check that worker's output. Leave model unset so Auto ranks the slice by task fit, leftover, and cost. It finishes pools about to reset. Grok 4.7 on Grok and Cursor is one family with two leftover pools — do not pick one of those vendors unless they named it. Fable is the extra pool for visual, creative, or complex work. Name a vendor only if they named one — a named vendor without a model still Auto-ranks that vendor's models. Do not pick a model because it is first in the list. " +
   SPAWN_ACCESS_LAW +
   GROK_BOT_SPAWN_LAW +
-  "Spawn only a canCall row. Codex Sol → provider codex, chat Sol. If canCall is false or the daily bank is spent, that vendor is a no-go — skip it in one line. If a vendor is not on the list, skip it and do not name it. canCall is Workhorse vendors only — OpenClaw and Hermes are harnesses; do not spawn them from that list. Fan-out only when they asked for every vendor, all bots, multiple independent reviews, or a named list — then spawn one worker per named slice on a canCall row, including custom bots and this chat’s own slot (provider custom, chat this bot’s name; the API key is already on the desk). Do not spawn several of one vendor with split tasks to fill a crew. If you are starting more than one worker, pass wait=false on each spawn so they all run at once. After the last spawn, stop. One short line of who is out is enough. Do not sit on workhorse_await_agents; without wait it is a status snapshot, and the desk joins reports later. Do not ask the user to pick 1/2/3 (re-await / scrape yourself / tighten) because workers are still running. Do not ask which vendor. Do not wait for Allow. Do not call workhorse_request_vendor. If stock vendors are a no-go, spawn one callable custom bot. Only say nothing to spawn when list_bots has zero canCall rows. Do not ask the user to do the review or the work themselves. Give each spawn the slice, never a request to summon more agents. " +
+  "Spawn only a canCall row. Codex Sol → provider codex, chat Sol. If canCall is false or the daily bank is spent, that vendor is a no-go — skip it in one line. If a vendor is not on the list, skip it and do not name it. canCall is Workhorse vendors only — OpenClaw and Hermes are harnesses; do not spawn them from that list. Fan-out only when they asked for every vendor, all bots, multiple independent reviews, or a named list — then spawn one worker per named slice on a canCall row, including custom bots and this chat’s own slot (provider custom, chat this bot’s name; the API key is already on the desk). Also spawn that crew when you perceive they want it, implied it, or it would do the task better, including several workers on one vendor. Do not ask them to confirm. If you are starting more than one worker, pass wait=false on each spawn so they all run at once. After the last spawn, stop. One short line of who is out is enough. Do not sit on workhorse_await_agents; without wait it is a status snapshot, and the desk joins reports later. Do not ask the user to pick 1/2/3 (re-await / scrape yourself / tighten) because workers are still running. Do not ask which vendor. Do not wait for Allow. Do not call workhorse_request_vendor. If stock vendors are a no-go, spawn one callable custom bot. Only say nothing to spawn when list_bots has zero canCall rows. Do not ask the user to do the review or the work themselves. Give each spawn the slice, never a request to summon more agents. " +
   CONTINUE_NAMED_WORKER_LAW +
   "Omit effort unless they asked to change thinking level — a reused worker keeps the level it already has. If they set high on this chat or said on high, the desk keeps that thinking level. You are the orchestrator. A worker may create one bounded quick-route helper only when its assigned slice explicitly requires a second independent check; grandchildren cannot spawn. " +
   "When the objective itself asks for bots, workers, agents, or subagents, spawn them with workhorse_spawn_agent: desk workers get names, keep their own usage rings, show in the sidebar, and survive a restart. Grok’s own subagents do none of that. " +
@@ -237,7 +225,17 @@ const SPAWN_ASK = new RegExp(
     `|queue\\s+(?!the\\b|a\\b|an\\b|all\\b|some\\b)[a-z][a-z]+\\s+to\\s+start` +
     // "assign the work out" is the desk being told to hand the slices off.
     // The article is optional, and a one-word typo in front of "work" still counts.
+    // "assign out the work to agents" is the same ask with the words reversed.
     `|assign\\s+\\S*\\s*work\\s+out` +
+    `|assign\\s+out\\b` +
+    // A few words may sit between the verb and the helper: "orchestrate
+    // updates with agents", "assign the audit tasks to agents", "hand off
+    // the fixes to workers", "hand this work off to agents". The gap stops
+    // before the helper word so it is not swallowed.
+    `|orchestrat\\w*(?:\\s+(?!${SPAWN_TARGET}\\b)\\S+){0,6}\\s+(?:with|to)\\s+${SPAWN_TARGET}(?!\\.md\\b)` +
+    `|(?:assign|dispatch|send|put)(?:\\s+(?!${SPAWN_TARGET}\\b)\\S+){1,6}\\s+to\\s+${SPAWN_TARGET}(?!\\.md\\b)` +
+    `|hand\\s+off(?:\\s+(?!${SPAWN_TARGET}\\b)\\S+){0,6}\\s+${SPAWN_TARGET}(?!\\.md\\b)` +
+    `|hand(?:\\s+(?!off\\b|${SPAWN_TARGET}\\b)\\S+){1,5}\\s+off\\s+to\\s+${SPAWN_TARGET}(?!\\.md\\b)` +
   ")\\b",
   "i",
 );

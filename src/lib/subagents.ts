@@ -37,9 +37,6 @@ import { beginAssignmentBudget } from "./worker-budget";
 import { isTerminalRunStatus } from "./worker-settled";
 import {
   looksLikeWorkerBrief,
-  normalizeCrewModes,
-  SPAWN_LAW_MISSING_ERROR,
-  turnCarriesSpawnLaw,
   type DeskRole,
 } from "./workhorse-rules";
 
@@ -2017,21 +2014,10 @@ export function admitSpawn(input: SpawnAdmissionInput): SpawnAdmission {
   if (parentRole === "auditor") return { ok: false, error: "Auditors cannot spawn." };
   if (parentRole === "helper") return { ok: false, error: WORKER_SPAWN_ERROR };
   if (parentRole === "worker" && !input.allowNested) return { ok: false, error: WORKER_SPAWN_ERROR };
-  // The refusal behind SPAWN_GATE_LAW. A chat whose turn never carried the
-  // spawn law still holds the tool and still reads a core that names it, and
-  // it cannot see which system text it did not receive, so the desk is the
-  // only thing that can turn the call away. A worker is exempt by role: its
-  // own rules carry the one-helper licence, and it never receives the law.
-  //
-  // Read for every caller, and an absent turn is an empty one. Held to the
-  // doors that asked to be held, this refused a model calling the spawn tool
-  // and admitted the same model calling workhorse_delegate one line later.
-  if (parentRole === "orchestrator" && !input.deskLoop) {
-    const turn = input.turn ?? { text: "" };
-    if (!turnCarriesSpawnLaw({ text: turn.text, priorTexts: turn.priorTexts, crewMode: normalizeCrewModes(turn.crewModes), planOpen: turn.planOpen })) {
-      return { ok: false, error: SPAWN_LAW_MISSING_ERROR };
-    }
-  }
+  // An orchestrator's call is the perception. A phrase list cannot hear
+  // "assign out the work to agents", and it cannot hear an implication.
+  // Auditors, helpers, and workers stay limited above. The folder check below
+  // still refuses an unbound spawn.
   if (isSpawnOnlyPrompt(input.prompt)) return { ok: false, error: SPAWN_ONLY_PROMPT_ERROR };
   const cwd = (input.folder ?? "").trim() || (input.projectFolder ?? "").trim();
   if (!cwd) return { ok: false, error: UNBOUND_SPAWN_ERROR };

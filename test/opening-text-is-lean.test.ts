@@ -48,7 +48,6 @@ import {
   HELPER_SESSION_RULES,
   MISSION_MODE_HINT,
   SPAWN_GATE_LAW,
-  SPAWN_LAW_MISSING_ERROR,
   SPAWN_TURN_HINT,
   WORKER_SESSION_RULES,
   WORKHORSE_SESSION_RULES,
@@ -242,10 +241,10 @@ test("the spawn law reaches a chat that can spawn, and no other", () => {
   }
 });
 
-test("a chat that never got the spawn law is refused at the door", () => {
-  // The core still names workhorse_spawn_agent, and the detector below it
-  // only fires on the phrasings someone thought of. These are the ones it
-  // misses, and each of them is an ordinary way to ask for workers.
+test("an orchestrator who perceives the ask is allowed through the door", () => {
+  // The phrase list still decides when the long spawn manual is injected.
+  // It does not decide whether the call is allowed. These five never matched
+  // the list, and each one is an ordinary way to ask for workers.
   const missed = [
     "hire two reviewers",
     "please have Claude review this file",
@@ -257,30 +256,25 @@ test("a chat that never got the spawn law is refused at the door", () => {
     assert.equal(withSpawnHint(text), text, `${text} now reaches the detector — move it to the covered set`);
   }
 
-  // Asking the model not to make the call was the first cut of this and it
-  // could not work: a model cannot see which system text it did not receive.
-  // The desk refuses instead. Widening the detector would close these five
-  // phrasings and leave the sixth open; this closes the call.
   const spawn = (turn: { text: string; crewModes?: string[] }) =>
     admitSpawn({ parent: { parentId: null }, prompt: "review the auth diff", folder: "/proj", turn });
 
-  const refused = spawn({ text: "hire two reviewers" });
-  assert.equal(refused.ok, false);
-  assert.equal(refused.ok === false && refused.error, SPAWN_LAW_MISSING_ERROR);
-  // The refusal is the chat's next line, so it has to say what to do next.
-  assert.match(SPAWN_LAW_MISSING_ERROR, /say the desk can put workers on this and ask the user to confirm/);
-
-  // And the cases it must not break: either pin, and a turn that asked.
+  for (const text of missed) {
+    assert.equal(spawn({ text }).ok, true, text);
+  }
+  assert.equal(spawn({ text: "review this" }).ok, true);
   assert.equal(spawn({ text: "review this", crewModes: ["orchestrate"] }).ok, true);
   assert.equal(spawn({ text: "review this", crewModes: ["mission"] }).ok, true);
   assert.equal(spawn({ text: "review this", crewModes: ["orchestrate", "mission"] }).ok, true);
   assert.equal(spawn({ text: "Spawn two agents to review this." }).ok, true);
-  // A follow-up that confirms an earlier ask, and "new agents", carry the law.
-  // The five missed phrasings above still do not.
+  assert.equal(
+    spawn({ text: "assign out the work to agents and work through each piece we identified on grok 4.7 agent tasks" }).ok,
+    true,
+  );
+  assert.equal(spawn({ text: "Use grok models 4.7 only, orchestrate updates with agents." }).ok, true);
   assert.equal(spawn({ text: "You have my confirmation that you can do it." }).ok, true);
   assert.equal(spawn({ text: "I already told you to hand this to agents." }).ok, true);
   assert.equal(spawn({ text: "Repair the blockers with new agents." }).ok, true);
-  assert.equal(spawn({ text: "get a reviewer on this" }).ok, false);
   assert.equal(spawn({ text: "confirm and also fix that, I should nto ened to confirm" }).ok, true);
   const resumed = admitSpawn({
     parent: { parentId: null },
@@ -298,7 +292,7 @@ test("a chat that never got the spawn law is refused at the door", () => {
     folder: "/proj",
     turn: { text: "the lane is incomplete and not working, resume it" },
   });
-  assert.equal(unfinishedAlone.ok, false);
+  assert.equal(unfinishedAlone.ok, true);
   const heard = spawnTurnOf({
     messages: [
       { role: "user", text: "Spawn two agents to review this." },
@@ -309,14 +303,10 @@ test("a chat that never got the spawn law is refused at the door", () => {
   assert.equal(heard.text, "the lane is incomplete and not working, resume it");
   assert.deepEqual(heard.priorTexts, ["Spawn two agents to review this."]);
 
-  // A door that hands over no turn at all is refused, and that is the point of
-  // the inversion. While the law was something a door opted into, the doors
-  // that opted into nothing — delegate, an ask that resolves to a spawn, a
-  // mission continuation — were admitted without anybody deciding they should
-  // be. An absent turn carried nothing, so it is treated as nothing.
+  // A door with no turn text is still an orchestrator call. The perception
+  // already happened: they called the tool. Workers and auditors stay limited.
   const forgetful = admitSpawn({ parent: { parentId: null }, prompt: "review the auth diff", folder: "/proj" });
-  assert.equal(forgetful.ok, false);
-  assert.equal(forgetful.ok === false && forgetful.error, SPAWN_LAW_MISSING_ERROR);
+  assert.equal(forgetful.ok, true);
 
   // The exempt set, whole: a Link harness never opened with a desk core, so it
   // never had the law to lose, and the desk's own loops have no model turn
@@ -351,8 +341,9 @@ test("a chat that never got the spawn law is refused at the door", () => {
   for (const core of [WORKHORSE_SESSION_RULES, CUSTOM_HTTP_SESSION_RULES, CURSOR_SESSION_RULES]) {
     assert.ok(core.includes(SPAWN_GATE_LAW), "a core names workhorse_spawn_agent without the gate on it");
   }
-  assert.match(SPAWN_GATE_LAW, /The desk refuses workhorse_spawn_agent on a turn that did not bring you the desk spawn law/);
-  assert.match(SPAWN_GATE_LAW, /say the desk can put workers on this and ask the user to confirm/);
+  assert.match(SPAWN_GATE_LAW, /If you perceive the user wants agents/);
+  assert.match(SPAWN_GATE_LAW, /The desk allows it/);
+  assert.match(SPAWN_GATE_LAW, /Do not ask them to confirm/);
   // And no core may order the call the desk refuses. That sentence rode the
   // custom HTTP core one line under the gate; it belongs with the spawn law,
   // which reaches only a turn that may spawn.
@@ -375,6 +366,13 @@ test("one predicate decides who gets the law and who may spawn", () => {
     { text: "yes confirmed... goddamn we need this fixed in the new version I hate repeating myself so much", carried: true },
     { text: "Complete the rest please, assign hte work out", carried: true },
     { text: "assign the work out", carried: true },
+    { text: "assign out the work to agents and work through each piece we identified on grok 4.7 agent tasks", carried: true },
+    { text: "assign out the work to agents", carried: true },
+    { text: "orchestrate updates with agents", carried: true },
+    { text: "Use grok models 4.7 only, orchestrate updates with agents.", carried: true },
+    { text: "assign the audit tasks to agents", carried: true },
+    { text: "hand this work off to agents", carried: true },
+    { text: "hand off the fixes to workers", carried: true },
     { text: "I hate repeating myself", carried: false },
     {
       text: "I hate repeating myself",
@@ -575,16 +573,17 @@ test("every desk tool that can reach a spawn is held to the same law", async (t)
       ["workhorse_ask_chat", { chat: "claude", message: "Review the auth diff and report." }],
     ];
     for (const [name, args] of held) {
-      assert.equal(await call(name, args), SPAWN_LAW_MISSING_ERROR, `${name} spawned on a turn without the law`);
+      const error = await call(name, args);
+      assert.equal(error, "", `${name} was refused on a plain turn: ${error}`);
     }
-    assert.deepEqual(asks, [], "a refused spawn still reached the desk");
+    assert.equal(asks.length, held.length, "a perceived spawn did not reach the desk");
 
-    // The same three calls on a pinned chat, which carries the law on every
-    // turn: the door lets them through and the desk is asked for a worker.
+    // A pinned chat takes the same door. Clear the counter and send the wave again.
+    asks.length = 0;
     writeDesk(["orchestrate"]);
     for (const [name, args] of held) {
       const error = await call(name, args);
-      assert.notEqual(error, SPAWN_LAW_MISSING_ERROR, `${name} refused a pinned chat`);
+      assert.equal(error, "", `${name} was refused on a pinned chat: ${error}`);
     }
     assert.equal(asks.length, held.length, "a pinned chat's spawns did not reach the desk");
   } finally {

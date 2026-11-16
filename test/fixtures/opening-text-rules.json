@@ -1119,6 +1119,14 @@
       ]
     },
     {
+      "was": "Do not spawn several of one vendor with split tasks to fill a crew.",
+      "now": "Also spawn that crew when you perceive they want it, implied it, or it would do the task better, including several workers on one vendor.",
+      "keeps": [
+        "several workers on one vendor",
+        "would do the task better"
+      ]
+    },
+    {
       "was": "Fan-out only when they asked for every vendor, all bots, multiple independent reviews, or a named list — then spawn one worker per named slice on a canCall row, including this chat’s own custom bot (provider custom, chat this bot’s name; the API key is on the desk).",
       "now": "Fan-out only when they asked for every vendor, all bots, multiple independent reviews, or a named list — then spawn one worker per named slice on a canCall row, including custom bots and this chat’s own slot (provider custom, chat this bot’s name; the API key is already on the desk).",
       "keeps": [

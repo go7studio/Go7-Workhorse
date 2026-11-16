@@ -10209,7 +10209,8 @@ test("desk-enforced orchestrator vs worker lineup", async () => {
   assert.match(DESK_SPAWN_LAW, /a named vendor without a model still Auto-ranks that vendor's models/);
   assert.match(DESK_SPAWN_LAW, /Do not pick a model because it is first in the list/);
   assert.match(DESK_SPAWN_LAW, /Fan-out only when they asked for every vendor/);
-  assert.match(DESK_SPAWN_LAW, /Do not spawn several of one vendor with split tasks to fill a crew/);
+  assert.match(DESK_SPAWN_LAW, /several workers on one vendor/);
+  assert.match(DESK_SPAWN_LAW, /Do not ask them to confirm/);
   assert.match(SPAWN_TURN_HINT, /One bounded assignment is one workhorse_spawn_agent/);
   assert.match(readFileSync(path.join(ROOT, "skills", "desk", "SKILL.md"), "utf8"), /One bounded assignment is one/);
   assert.match(DESK_SPAWN_LAW, /one bounded quick-route helper/);

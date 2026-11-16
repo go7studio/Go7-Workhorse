@@ -147,6 +147,34 @@ test("a queued slice starts with the earlier reports, and does not start on a fa
   assert.match(spawnContinuationHowToUse("Marlow", false), /^Worker is running in its own chat\./);
 });
 
+test("a checker queued on a reused worker waits for the new run, not the finished slice", () => {
+  const oldSlice = { status: "completed", runId: "run-old", startedAt: 1 };
+  assert.equal(
+    predecessorStillWaiting(oldSlice, oldSlice),
+    true,
+    "a previously completed slice does not release the checker",
+  );
+  const started = { status: "running", runId: "run-new", startedAt: 50 };
+  assert.equal(predecessorStillWaiting(started, oldSlice), true, "the new run still holds the checker");
+  assert.equal(
+    predecessorStillWaiting({ status: "completed", runId: "run-new", startedAt: 50 }, oldSlice),
+    false,
+    "the checker starts when that new run completes",
+  );
+  assert.equal(
+    predecessorStillWaiting({ status: "failed", runId: "run-new", startedAt: 50 }, oldSlice),
+    false,
+    "a new run that failed has ended, so the follower can be blocked on it",
+  );
+  const underway = { status: "running", runId: "run-live", startedAt: 10 };
+  assert.equal(predecessorStillWaiting(underway, underway), true, "a run in progress at the request holds the checker");
+  assert.equal(
+    predecessorStillWaiting({ status: "completed", runId: "run-live", startedAt: 10 }, underway),
+    false,
+    "that same run releases the checker when it completes",
+  );
+});
+
 test("after reaches the desk from both spawn doors and holds the row as queued", () => {
   const mcp = readFileSync(path.join(ROOT, "electron", "workhorse-mcp.ts"), "utf8");
   assert.match(mcp, /after: \{\s*type: "array",\s*items: \{ type: "string" \},\s*description:\s*"Names of this chat's workers that must finish first/);
@@ -160,7 +188,8 @@ test("after reaches the desk from both spawn doors and holds the row as queued",
   assert.match(store, /fallback = await startWhenReady\(\);/);
   assert.match(store, /text: afterNote \? `\$\{payload\.message\}\\n\\n\$\{afterNote\}` : payload\.message,/, "the waiting worker gets the earlier reports under its brief");
   assert.match(store, /deferTo: waitingOn\.map\(\(item\) => item\.id\)/, "a queue accepts a path held only by the worker it waits on");
-  assert.match(store, /predecessorStillWaiting\(item\.status\)/);
+  assert.match(store, /predecessorStillWaiting\(seen, seen\)/);
+  assert.match(store, /predecessorStillWaiting\(item\.run, afterSeen\.get\(item\.id\)\)/);
   assert.match(store, /cursorGrokLock\?\.provider \?\? routeDecision\?\.provider \?\? payload\.provider/);
 });
 

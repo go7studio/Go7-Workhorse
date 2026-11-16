@@ -334,6 +334,8 @@ import {
   workerReportText,
   applyCancelWorker,
   admitSpawn,
+  callerExecutionFolder,
+  spawnChildFolder,
   alwaysSkipsPathAllowlist,
   assertAgentPathWrite,
   pathOwnershipViolation,
@@ -386,6 +388,7 @@ import {
   parseProviderId,
   userLockedSpawnModel,
   lockedCursorGrokSpawn,
+  predecessorRun,
   predecessorStillWaiting,
   routingDecisionMatchesSpawn,
   constrainRouteCandidatesForSpawn,
@@ -3276,7 +3279,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           return;
         }
         const project = snapshot.projects.find((item) => item.id === session.projectId);
-        const cwd = sessionExecutionCwd(session.environment, primaryFolder(project, folderExists)?.path ?? "");
+        const cwd = callerExecutionFolder(session, primaryFolder(project, folderExists)?.path ?? "");
         setState((latest) => ({
           ...latest,
           sessions: latest.sessions.map((item) =>
@@ -3704,7 +3707,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           hiddenWorker: Boolean(session.hidden),
         },
       });
-      const cwd = sessionExecutionCwd(session.environment, primaryFolder(project, folderExists)?.path ?? "");
+      const cwd = callerExecutionFolder(session, primaryFolder(project, folderExists)?.path ?? "");
       setState((latest) => {
         const queued = grokChunkQueue.current[session.id] ?? "";
         delete grokChunkQueue.current[session.id];
@@ -4801,7 +4804,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           });
           if (hold) throw new Error(watchHoldMessage(hold));
           const project = snapshot.projects.find((item) => item.id === session.projectId);
-          const cwd = sessionExecutionCwd(session.environment, primaryFolder(project, folderExists)?.path ?? "");
+          const cwd = callerExecutionFolder(session, primaryFolder(project, folderExists)?.path ?? "");
           const live = vendorSendTarget(session.provider);
           const role = deskRoleOf(session);
           const prefaceInput: PrefaceInput = {
@@ -6434,8 +6437,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 routing: latest.settings.routing,
                 prompt: payload.message,
                 fromSessionId: caller.id,
-                workspace: sessionExecutionCwd(
-                  caller.environment,
+                workspace: callerExecutionFolder(
+                  caller,
                   (() => {
                     const project = latest.projects.find((item) => item.id === caller.projectId);
                     return project ? primaryFolder(project, folderExists)?.path ?? "" : "";
@@ -6541,11 +6544,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                   dayMarks: latest.watchDayMarks,
                 })
               : [];
-            const projectFolder = primaryFolder(boundProject, folderExists)?.path ?? "";
+            const linkedFolder = primaryFolder(boundProject, folderExists)?.path ?? "";
+            const parentCwd = callerExecutionFolder(caller, linkedFolder);
             const nestedPolicy = nestedWorkerPolicy({
               nested: isNested,
               parentEnvironment: caller.environment,
-              projectFolder,
+              projectFolder: isNested ? parentCwd : linkedFolder,
             });
             // Permission and Sandbox are the person's settings. A coordinator
             // may pick who works, not what they are allowed to do: permission
@@ -6895,9 +6899,18 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             const startedAt = Date.now();
             // A slice that comes after others is queued on the lineup until they end.
             const waitingOn = spawnAfter.waitFor.filter((item) => item.id !== childId);
+            // The run each named worker is on at this request. A finish that
+            // belongs to an earlier slice is not the run this checker waits for.
+            const afterSeen = new Map(
+              waitingOn.map((item) => {
+                const earlier = latest.sessions.find((session) => session.id === item.id);
+                return [item.id, predecessorRun(earlier?.agentRun)] as const;
+              }),
+            );
             const waitingAtStart = waitingOn.some((item) => {
               const earlier = latest.sessions.find((session) => session.id === item.id);
-              return Boolean(earlier) && predecessorStillWaiting(earlier?.agentRun?.status);
+              const seen = afterSeen.get(item.id);
+              return Boolean(earlier) && predecessorStillWaiting(seen, seen);
             });
             // The caller learns its child's seat from the spawn result, not
             // from a card the person has to answer. `log` is the main-log line
@@ -6986,6 +6999,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             const root = admitted.cwd;
             let environment: SessionEnvironment = { kind: "local" };
             let isolation: "worktree" | "shared" = spawnIsolation === "worktree" ? "worktree" : "shared";
+            const folderPlan = spawnChildFolder({
+              admittedCwd: root,
+              requestedFolder: typeof payload.folder === "string" ? payload.folder : undefined,
+              parentEnvironment: caller.environment,
+              parentCwd,
+              projectFolder: linkedFolder,
+              isolation,
+            });
             const priorWorker = reusedWorker
               ? latest.sessions.find((item) => item.id === reusedWorker.id)
               : undefined;
@@ -7024,6 +7045,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 }
                 environment = { kind: "worktree", path: again.path, gitRoot: again.gitRoot, head: again.head };
               }
+            } else if (folderPlan.outsideParent) {
+              // The named folder is the cwd, even when it sits outside this project.
+              isolation = "shared";
+              environment = folderPlan.environment;
             } else if (isolation === "worktree") {
               if (!root || !window.workhorse?.ensureWorktree) {
                 await replyAsk({ error: "Worktree isolation is unavailable for this folder." });
@@ -7041,9 +7066,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               environment = { kind: "worktree", path: isolated.path, gitRoot: isolated.gitRoot, head: isolated.head };
             } else {
               isolation = "shared";
-              environment = caller.environment ?? { kind: "local" };
+              environment = folderPlan.environment;
             }
-            const childCwd = sessionExecutionCwd(environment, root);
+            const childCwd = priorWorker
+              ? environment.kind === "local"
+                ? callerExecutionFolder(priorWorker, linkedFolder)
+                : sessionExecutionCwd(environment, root)
+              : isolation === "worktree" && !folderPlan.outsideParent
+                ? sessionExecutionCwd(environment, root)
+                : folderPlan.cwd;
+            const childBound = !priorWorker && environment.kind === "local" ? folderPlan.boundFolder : undefined;
             let claimedLeases = releaseSessionLeases(pathLeasesRef.current, childId);
             let deferredPathClaim = false;
             if (assignedPaths.length > 0) {
@@ -7231,6 +7263,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               computer: computerForSpawnedWorker(priorWorker?.computer),
               securityPolicy: parent.securityPolicy,
               environment,
+              ...(childBound ? { boundFolder: childBound } : {}),
               status: "running",
               contextUsed: 0,
               agentRun: {
@@ -7558,11 +7591,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               return finalReport;
             };
             /*
-             * A slice that comes after others starts when they have all ended.
-             * Failed still blocks the follower: its ground was never laid.
-             * Cancelled does not. If that same session is running again, keep
-             * waiting. If it stays cancelled, start and put the cancellation
-             * in the after brief. A worker stopped while it waited stays stopped.
+             * A slice that comes after others starts when the run named at this
+             * request has ended, or a later run on that worker has. A slice
+             * already completed then does not release the checker. Failed still
+             * blocks the follower. Cancelled does not: start, and put the
+             * cancellation in the after brief. A worker stopped while it waited
+             * stays stopped.
              */
             const claimDeferredPaths = async (): Promise<string | undefined> => {
               if (!deferredPathClaim) return undefined;
@@ -7597,20 +7631,22 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                   const rows = sessionsNow.find((session) => session.id === parent.id)?.lineup?.rows ?? [];
                   return waitingOn.map((item) => {
                     const earlier = sessionsNow.find((session) => session.id === item.id);
+                    const run = earlier ? predecessorRun(earlier.agentRun) : { status: "completed" };
                     return {
                       name: item.name,
-                      status: earlier ? (earlier.agentRun?.status ?? "") : "completed",
+                      status: run.status ?? "",
+                      run,
                       report: rows.find((row) => row.childId === item.id)?.report ?? childReportText(earlier) ?? "",
                       ...(earlier?.agentRun?.changedFiles?.length ? { changedFiles: earlier.agentRun.changedFiles } : {}),
                     };
                   });
                 };
                 finished = readFinished();
-                while (finished.some((item) => predecessorStillWaiting(item.status)) && Date.now() < deadline) {
+                while (finished.some((item) => predecessorStillWaiting(item.run, afterSeen.get(item.id))) && Date.now() < deadline) {
                   await new Promise((resolve) => setTimeout(resolve, AFTER_POLL_MS));
                   finished = readFinished();
                 }
-                const open = finished.filter((item) => predecessorStillWaiting(item.status));
+                const open = finished.filter((item) => predecessorStillWaiting(item.run, afterSeen.get(item.id)));
                 notStarted = open.length > 0
                   ? `Did not start: ${open.map((item) => item.name).join(", ")} had not finished after ${Math.round(AFTER_WAIT_MS / 3_600_000)} hours.`
                   : afterBlockedReason(finished);
@@ -7643,11 +7679,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               const startedBoard = boundLinkReply({
                 crew: spawnCrew,
                 lineup: lineupSnapshot(
-                  addLineupRow(parent.lineup ?? emptyLineup(admitted.cwd, startedAt), {
+                  addLineupRow(parent.lineup ?? emptyLineup(childCwd, startedAt), {
                     childId,
                     title: spec.title,
                     slice: payload.description?.trim() || spec.title,
-                    folder: admitted.cwd,
+                    folder: childCwd,
                     vendor: vendorDisplayName(spec.provider),
                     ...(spawnModelLabel ? { model: spawnModelLabel } : {}),
                     status: waitingAtStart ? "queued" : "running",
@@ -7667,7 +7703,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                     // back to the caller that had just sent it.
                     title: linkLabel(spec.title),
                     childSessionId: childId,
-                    folder: admitted.cwd,
+                    folder: childCwd,
                     lineup: startedBoard.lineup,
                     worker: workerName,
                     // Which bot took the slice, so the caller never has to infer it.
@@ -8474,8 +8510,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               }));
             };
             const project = stateRef.current.projects.find((item) => item.id === owner.projectId);
-            const root = sessionExecutionCwd(
-              owner.environment,
+            const root = callerExecutionFolder(
+              owner,
               project ? primaryFolder(project, folderExists)?.path ?? "" : "",
             );
             if (alwaysSkipsPathAllowlist({
@@ -8595,7 +8631,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               // Where this worker actually runs, so a `..` inside a command is
               // measured from there. A worktree session is not its project
               // folder, and resolving against the wrong one moves the boundary.
-              cwd: sessionExecutionCwd(owner.environment, primaryFolder(ownerProject, folderExists)?.path ?? ""),
+              cwd: callerExecutionFolder(owner, primaryFolder(ownerProject, folderExists)?.path ?? ""),
             })
           : { answer: null };
         const forced = security.answer ?? (owner

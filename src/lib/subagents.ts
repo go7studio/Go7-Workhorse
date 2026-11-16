@@ -650,13 +650,53 @@ export function afterBlockedReason(
   return `Did not start: ${broken.map((item) => `${item.name} ${item.status}`).join(", ")}, and this slice was to come after ${broken.length === 1 ? "it" : "them"}.`;
 }
 
+/** The run a checker can see on a worker it named in `after`. */
+export type PredecessorRun = {
+  status?: string;
+  runId?: string;
+  startedAt?: number;
+};
+
+export function predecessorRun(
+  run: { status?: string; runId?: string; startedAt?: number } | null | undefined,
+): PredecessorRun {
+  if (!run) return {};
+  return {
+    ...(typeof run.status === "string" ? { status: run.status } : {}),
+    ...(typeof run.runId === "string" && run.runId ? { runId: run.runId } : {}),
+    ...(typeof run.startedAt === "number" ? { startedAt: run.startedAt } : {}),
+  };
+}
+
+function samePredecessorRun(seen: PredecessorRun, current: PredecessorRun): boolean {
+  if (seen.runId && current.runId) return seen.runId === current.runId;
+  if (typeof seen.startedAt === "number" && typeof current.startedAt === "number") {
+    return seen.startedAt === current.startedAt;
+  }
+  return !seen.runId && !current.runId && seen.startedAt == null && current.startedAt == null;
+}
+
 /**
- * Keep waiting while a predecessor is still at work. Cancelled is an end.
- * Running, including a session that was cancelled and started again, is not.
+ * Keep waiting while the predecessor run this checker is bound to is still open.
+ *
+ * `seen` is the run on that worker when the checker was requested. A slice
+ * already completed then does not release the checker: a reused worker's old
+ * finish is not the run just asked for. A run that is in progress at the
+ * request holds the checker until that same run ends. A later run, with a new
+ * id, is the one the checker waits for, and it starts when that run completes.
+ * Cancelled is an end. With no `seen` run, a terminal status is an end too.
  */
-export function predecessorStillWaiting(status: string | undefined): boolean {
-  if (status === "cancelled") return false;
-  return !isTerminalRunStatus(status);
+export function predecessorStillWaiting(
+  current: string | PredecessorRun | undefined,
+  seen?: PredecessorRun,
+): boolean {
+  const now: PredecessorRun = typeof current === "string" || current == null
+    ? (typeof current === "string" ? { status: current } : {})
+    : current;
+  if (now.status === "cancelled") return false;
+  if (!seen) return !isTerminalRunStatus(now.status);
+  if (samePredecessorRun(seen, now) && seen.status === "completed") return true;
+  return !isTerminalRunStatus(now.status);
 }
 
 /**
@@ -3001,6 +3041,90 @@ export function resolveWorkerIsolation(input: {
   if (input.parentEnvironment?.kind === "worktree") return "worktree";
   if (input.parentEnvironment) return "shared";
   return "worktree";
+}
+
+/** Slash-insensitive, and case-insensitive for a Windows drive path. */
+export function sameSpawnFolder(left: string, right: string): boolean {
+  const normalize = (value: string) => {
+    const trimmed = value.trim().replace(/[\\/]+$/, "").replace(/\\/g, "/");
+    return /^[a-z]:/i.test(trimmed) ? trimmed.toLowerCase() : trimmed;
+  };
+  return normalize(left) === normalize(right);
+}
+
+/**
+ * The folder a vendor process for this chat starts in.
+ *
+ * A spawn folder stored on the chat wins over the linked project. A worktree
+ * or cloud environment still wins over that stored folder. After the chat
+ * moves onto another project, the stored folder is gone and this returns the
+ * new project's folder.
+ */
+export function callerExecutionFolder(
+  session: { environment?: SessionEnvironment; boundFolder?: string } | null | undefined,
+  projectFolder: string,
+): string {
+  const environment = session?.environment;
+  if (environment?.kind === "worktree" || environment?.kind === "cloud") {
+    return sessionExecutionCwd(environment, projectFolder);
+  }
+  const bound = session?.boundFolder?.trim() ?? "";
+  if (bound) return bound;
+  return sessionExecutionCwd(environment, projectFolder);
+}
+
+export type SpawnChildFolder = {
+  /** Process cwd, lineup folder, and the child chat's bound folder. */
+  cwd: string;
+  environment: SessionEnvironment;
+  /** Set when this local chat runs outside its linked project folder. */
+  boundFolder?: string;
+  /** The call named a folder other than the one the parent is running in. */
+  outsideParent: boolean;
+};
+
+/**
+ * One path for a spawn.
+ *
+ * An existing folder on the call is the child's cwd, including a folder
+ * outside the parent project. The parent project is left alone. With no
+ * folder on the call, the child runs where the parent runs now, which is
+ * the project folder the parent was moved onto.
+ */
+export function spawnChildFolder(input: {
+  admittedCwd: string;
+  requestedFolder?: string;
+  parentEnvironment?: SessionEnvironment;
+  parentCwd: string;
+  projectFolder: string;
+  isolation: "worktree" | "shared";
+}): SpawnChildFolder {
+  const requested = (input.requestedFolder ?? "").trim();
+  const admitted = input.admittedCwd.trim();
+  const parentCwd = input.parentCwd.trim();
+  const projectFolder = input.projectFolder.trim();
+  const outsideParent = Boolean(requested) && !sameSpawnFolder(requested, parentCwd);
+  if (outsideParent) {
+    const cwd = admitted || requested;
+    return {
+      cwd,
+      environment: { kind: "local" },
+      boundFolder: cwd,
+      outsideParent: true,
+    };
+  }
+  const environment = input.parentEnvironment ?? { kind: "local" };
+  const cwd = input.isolation === "worktree"
+    ? admitted || parentCwd
+    : sessionExecutionCwd(environment, admitted || parentCwd);
+  const boundFolder =
+    input.isolation !== "worktree" &&
+    environment.kind === "local" &&
+    cwd &&
+    !sameSpawnFolder(cwd, projectFolder)
+      ? cwd
+      : undefined;
+  return { cwd, environment, ...(boundFolder ? { boundFolder } : {}), outsideParent: false };
 }
 
 export function nestedWorkerPolicy(input: {

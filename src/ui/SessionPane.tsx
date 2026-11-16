@@ -3,7 +3,7 @@ import { canPlaceInProject, omitQueuedUserMessages } from "../lib/chats";
 import { mergeTranscriptRows, type TranscriptSidecar } from "../lib/transcript-sidecar";
 import { primaryFolder } from "../lib/project";
 import { editListKey, fileFolderFromPath, fileNameFromPath, holdEditStats, markStatsFetched, mergeEdits, projectEdits, projectWritesKey, sameEditPath, startEditStatsHarvest, type ProjectEdit } from "../lib/project-edits";
-import { sessionExecutionCwd } from "../lib/session-environment";
+import { callerExecutionFolder } from "../lib/subagents";
 import { peelPlanningPreamble, unsquashSentences } from "../lib/markdown";
 import { nextPromptForReply } from "../lib/next-prompt";
 import { brainCaption, messageBrain } from "../lib/session";
@@ -263,7 +263,7 @@ export function SessionPane() {
   const working = session ? vendorTurnWorking(session) : false;
   const project = desk.projects.find((item) => item.id === session?.projectId);
   const localCwd = primaryFolder(project, desk.folderExists)?.path ?? "";
-  const cwd = session ? sessionExecutionCwd(session.environment, localCwd) : localCwd;
+  const cwd = session ? callerExecutionFolder(session, localCwd) : localCwd;
   const roots = useMemo(() => (cwd ? [cwd] : []), [cwd]);
   const fileRoots = roots;
   const fileRootKey = cwd;

@@ -178,9 +178,16 @@ export function moveChat(sessions: Session[], id: string, projectId: string): Se
   // the old project's list and showed there as a chat of its own. A worker
   // bound to some other project by its folder stays bound there.
   const crew = withDescendants(sessions, [id]);
-  return sessions.map((item) =>
-    item.id === id || (crew.has(item.id) && item.projectId === session.projectId) ? { ...item, projectId } : item,
-  );
+  return sessions.map((item) => {
+    if (item.id === id) {
+      // The folder this chat runs in is the project it just joined.
+      const next = { ...item, projectId };
+      delete next.boundFolder;
+      return next;
+    }
+    if (crew.has(item.id) && item.projectId === session.projectId) return { ...item, projectId };
+    return item;
+  });
 }
 
 export type ListedChatHit = { id: string; title: string; provider?: string };

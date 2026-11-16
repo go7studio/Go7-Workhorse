@@ -324,6 +324,9 @@ export function normalizeSession(raw: unknown, liveRunIds?: ReadonlySet<string>)
     ...(record.computer === "on" ? { computer: "on" as const } : {}),
     securityPolicy: normalizeSessionSecurityPolicy(record.securityPolicy),
     environment: normalizeSessionEnvironment(record.environment),
+    ...(typeof record.boundFolder === "string" && record.boundFolder.trim()
+      ? { boundFolder: record.boundFolder.trim() }
+      : {}),
     ...(normalizePresets(record.presets) ? { presets: normalizePresets(record.presets) } : {}),
     ...(record.previewUsed === true ? { previewUsed: true as const } : {}),
     folders: (() => {

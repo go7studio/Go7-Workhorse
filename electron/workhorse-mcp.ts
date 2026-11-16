@@ -51,6 +51,7 @@ import { isVendorDeclinedResult, vendorDeclinedForBot } from "../src/lib/vendor-
 import { catalogSessions, matchListedChat, sessionTranscript } from "../src/lib/session-bridge";
 import {
   admitSpawn,
+  callerExecutionFolder,
   deskRoleOf,
   isSpawnOnlyPrompt,
   nestedSpawnError,
@@ -70,7 +71,6 @@ import {
   workerProgressCheckpoint,
 } from "../src/lib/subagents";
 import { normalizeSession } from "../src/lib/session";
-import { sessionExecutionCwd } from "../src/lib/session-environment";
 import { uid } from "../src/lib/id";
 import { deskToolEnv } from "./desk-path";
 import { readDeskCatalog } from "./vendor-models";
@@ -2312,6 +2312,7 @@ type SpawnCaller = {
   lineup?: { mission?: MissionIteration; rows?: Array<{ childId?: string; status?: string }> };
   agentRun?: { mission?: MissionIteration; paths?: string[]; tokenBudget?: number; usedTokens?: number };
   environment?: SessionEnvironment;
+  boundFolder?: string;
 };
 
 /**
@@ -2559,10 +2560,11 @@ async function spawnAgent(
       }
     : undefined;
   const projectFolder = callerProjectFolder(caller);
+  const parentCwd = callerExecutionFolder(caller, projectFolder);
   const nestedPolicy = nestedWorkerPolicy({
     nested: isNested,
     parentEnvironment: caller?.environment,
-    projectFolder,
+    projectFolder: isNested ? parentCwd : projectFolder,
   });
   const inheritedInput = {
     ...input,
@@ -2645,7 +2647,9 @@ async function spawnAgent(
     isolation: spawnInput.isolation,
     seed: spawnInput.seed,
     handoff: spawnInput.handoff,
-    folder: admitted.cwd,
+    // Only a folder the caller named. The admitted fallback is the project
+    // folder, and sending it made a worktree parent look like a request to leave it.
+    folder: spawnInput.folder?.trim() ? admitted.cwd : undefined,
     wait: spawnInput.wait,
     mission: spawnInput.mission,
     missionIteration: spawnInput.missionIteration,
@@ -2689,7 +2693,7 @@ async function spawnAgent(
       timeoutSeconds: spawnInput.timeoutSeconds,
       tokenBudget: spawnInput.tokenBudget,
       isolation: spawnInput.isolation,
-      folder: admitted.cwd,
+      folder: spawnInput.folder?.trim() ? admitted.cwd : undefined,
       wait: spawnInput.wait,
       mission: spawnInput.mission,
       missionIteration: spawnInput.missionIteration,
@@ -2880,7 +2884,7 @@ function missionContinuationPrompt(input: {
 function missionContinuationSourceFolder(session: Session | undefined): string {
   if (!session) return "";
   if (session.environment?.kind === "worktree") return session.environment.gitRoot.trim();
-  return sessionExecutionCwd(session.environment, callerProjectFolder(session));
+  return callerExecutionFolder(session, callerProjectFolder(session));
 }
 
 async function continueMission(args: Record<string, unknown>, from?: string): Promise<string> {

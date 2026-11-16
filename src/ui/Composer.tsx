@@ -33,7 +33,7 @@ import {
   listenBarScales,
   LOCAL_SPEECH_CAPABILITY,
   MAC_SPEECH_PRIVACY_URL,
-  WINDOWS_MICROPHONE_PRIVACY_URL,
+  WINDOWS_SPEECH_PRIVACY_URL,
   osSpeechGaveUp,
   pickLocalSpeechHost,
   pickSpeechEngine,
@@ -211,6 +211,7 @@ export const Composer = memo(function Composer({
   const finalSpeechRef = useRef("");
   const recordingRef = useRef(false);
   const dictationRef = useRef(false);
+  const micEpoch = useRef(0);
   const filePicker = useRef<HTMLInputElement>(null);
   const wrap = useRef<HTMLDivElement>(null);
   const crewInner = useRef<HTMLDivElement>(null);
@@ -578,9 +579,15 @@ export const Composer = memo(function Composer({
         return;
       }
       if (event.type === "error") {
+        micEpoch.current += 1;
+        recordingRef.current = false;
+        dictationRef.current = false;
+        setRecording(false);
+        setListenLevel(0);
         setListenStatus(event.message);
+        void window.workhorse?.micDictateStop?.();
         if (event.openSettings) {
-          const fallback = /Win/.test(navigator.platform) ? WINDOWS_MICROPHONE_PRIVACY_URL : MAC_SPEECH_PRIVACY_URL;
+          const fallback = /Win/.test(navigator.platform) ? WINDOWS_SPEECH_PRIVACY_URL : MAC_SPEECH_PRIVACY_URL;
           void window.workhorse?.openExternal?.(event.settingsUrl || fallback);
         }
       }
@@ -593,24 +600,23 @@ export const Composer = memo(function Composer({
     if (access && !access.granted) return;
     const dictate = window.workhorse?.micDictateStart;
     if (dictate) {
+      const epoch = micEpoch.current;
       baseDraftRef.current = valueRef.current;
       finalSpeechRef.current = "";
       setListenStatus("");
       setListenLevel(0.08);
       dictationRef.current = true;
       const started = await dictate();
+      if (epoch !== micEpoch.current) return;
       if (started.ok) {
         recordingRef.current = true;
         setRecording(true);
         return;
       }
       dictationRef.current = false;
-      if (/Win/.test(navigator.platform)) {
-        recordingRef.current = true;
-        setRecording(true);
-        setListenStatus(started.reason || "Speech recognition is not available on this PC.");
-        return;
-      }
+      setListenLevel(0);
+      setListenStatus(started.reason || "Speech recognition is not available on this PC.");
+      if (/Win/.test(navigator.platform)) return;
     }
     const Ctor = speechRecognitionCtor();
     const localHostId = Ctor ? null : await resolveGrantedLocalSpeechHost();

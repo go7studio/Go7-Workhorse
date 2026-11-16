@@ -32,6 +32,7 @@ import {
   speechEngineAfterOsStartFailure,
   transcribeLocalSpeech,
   WINDOWS_MICROPHONE_PRIVACY_URL,
+  WINDOWS_SPEECH_PRIVACY_URL,
   WINDOWS_SPEECH_SETTINGS_URL,
   windowsDictationLaunch,
   type MediaPermissionSession,
@@ -429,6 +430,15 @@ test("a live mic fills the text area from on-device lines and says Listening unt
     composerFieldPlaceholder({ recording: false, dropping: false, running: true }),
     "Queue for next, or Steer to redirect",
   );
+  assert.equal(
+    composerFieldPlaceholder({
+      recording: false,
+      dropping: false,
+      running: false,
+      status: "Online speech recognition is off. Turn it on in Windows Speech privacy, then try the mic again.",
+    }),
+    "Online speech recognition is off. Turn it on in Windows Speech privacy, then try the mic again.",
+  );
   assert.equal(osSpeechGaveUp("network"), true);
   assert.equal(osSpeechGaveUp("no-speech"), false);
   assert.deepEqual(parseDictationLine('{"type":"partial","text":"hello desk"}'), { type: "partial", text: "hello desk" });
@@ -447,6 +457,17 @@ test("a live mic fills the text area from on-device lines and says Listening unt
       message: "mic",
       openSettings: true,
       settingsUrl: WINDOWS_MICROPHONE_PRIVACY_URL,
+    },
+  );
+  assert.deepEqual(
+    parseDictationLine(
+      '{"type":"error","message":"Online speech recognition is off.","openSettings":true,"settingsUrl":"ms-settings:privacy-speech"}',
+    ),
+    {
+      type: "error",
+      message: "Online speech recognition is off.",
+      openSettings: true,
+      settingsUrl: WINDOWS_SPEECH_PRIVACY_URL,
     },
   );
   assert.deepEqual(
@@ -517,6 +538,14 @@ test("the packaged app declares mic usage strings and the hardened-runtime audio
   assert.match(windowsSource, /command == "stop"/);
   assert.match(windowsSource, /ms-settings:privacy-microphone/);
   assert.match(windowsSource, /ms-settings:speech/);
+  assert.match(windowsSource, /ms-settings:privacy-speech/);
+  assert.match(windowsSource, /SpeechRecognizer/);
+  assert.match(windowsSource, /SpeechRecognitionTopicConstraint/);
+  assert.match(windowsSource, /SpeechRecognitionScenario\.Dictation/);
+  assert.match(windowsSource, /PumpUntilSettled/);
+  assert.match(windowsSource, /privacy policy/);
+  assert.match(read("src/ui/Composer.tsx"), /WINDOWS_SPEECH_PRIVACY_URL/);
+  assert.match(read("src/ui/Composer.tsx"), /micEpoch/);
   assert.match(windowsSource, /RecognizeCompleted/);
   assert.match(windowsSource, /PeekMessage/);
   assert.match(windowsSource, /GetMessage/);

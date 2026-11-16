@@ -8,6 +8,8 @@ using System.Speech.Recognition;
 using System.Speech.Synthesis;
 using System.Text;
 using System.Threading;
+using Windows.Foundation;
+using Windows.Media.SpeechRecognition;
 
 internal static class WindowsDictation
 {
@@ -57,6 +59,9 @@ internal static class WindowsDictation
     private static string committed = "";
     private static bool listening;
     private static SpeechRecognitionEngine engine;
+    private static Windows.Media.SpeechRecognition.SpeechRecognizer winrt;
+    private static bool winrtActive;
+    private static int startDepth;
     private static DateTime lastLevel = DateTime.MinValue;
     private static uint staThreadId;
 
@@ -71,16 +76,6 @@ internal static class WindowsDictation
         catch (Exception)
         {
             /* stdin already bound */
-        }
-
-        try
-        {
-            engine = CreateEngine();
-        }
-        catch (Exception)
-        {
-            FailMic();
-            return 3;
         }
 
         staThreadId = GetCurrentThreadId();
@@ -158,7 +153,7 @@ internal static class WindowsDictation
         if (infos == null || infos.Count == 0)
         {
             Emit("{\"type\":\"error\",\"message\":\"Speech recognition is off. Turn it on in Windows Speech settings, then try the mic again.\",\"openSettings\":true,\"settingsUrl\":\"ms-settings:speech\"}");
-            Environment.Exit(2);
+            return null;
         }
 
         var culture = CultureInfo.CurrentUICulture.Name;
@@ -203,23 +198,59 @@ internal static class WindowsDictation
             Emit("{\"type\":\"ready\"}");
             return;
         }
-        listening = true;
+        if (startDepth > 0) return;
+        startDepth++;
         try
         {
-            engine.RecognizeAsync(RecognizeMode.Multiple);
-            Emit("{\"type\":\"ready\"}");
+            if (StartWindowsSpeech()) return;
+            if (!EnsureEngine()) return;
+            listening = true;
+            try
+            {
+                engine.RecognizeAsync(RecognizeMode.Multiple);
+                Emit("{\"type\":\"ready\"}");
+            }
+            catch (Exception)
+            {
+                listening = false;
+                FailMic();
+            }
+        }
+        finally
+        {
+            startDepth--;
+        }
+    }
+
+    /// <summary>
+    /// The desktop recognizer is the fallback. Leave it closed until voice typing
+    /// cannot start, so it does not hold the microphone first.
+    /// </summary>
+    private static bool EnsureEngine()
+    {
+        if (engine != null) return true;
+        try
+        {
+            engine = CreateEngine();
         }
         catch (Exception)
         {
-            listening = false;
             FailMic();
+            return false;
         }
+        return engine != null;
     }
 
     private static void Stop()
     {
         if (!listening) return;
         listening = false;
+        if (winrtActive)
+        {
+            winrtActive = false;
+            try { winrt.ContinuousRecognitionSession.StopAsync(); } catch (Exception) { }
+            return;
+        }
         try
         {
             engine.RecognizeAsyncCancel();
@@ -228,6 +259,140 @@ internal static class WindowsDictation
         {
             /* not listening */
         }
+    }
+
+    /// <summary>
+    /// The desktop System.Speech engine can open the mic and still return no words.
+    /// Windows voice typing uses SpeechRecognizer, and that stays off until Online
+    /// speech recognition is accepted. Ask for that. Do not pretend the old engine heard anything.
+    /// </summary>
+    private static bool StartWindowsSpeech()
+    {
+        try
+        {
+            winrt = new Windows.Media.SpeechRecognition.SpeechRecognizer();
+            winrt.Constraints.Add(new SpeechRecognitionTopicConstraint(SpeechRecognitionScenario.Dictation, "dictation"));
+            var compiled = Wait(winrt.CompileConstraintsAsync());
+            if (compiled.Status != SpeechRecognitionResultStatus.Success)
+                throw new InvalidOperationException("Speech recognition did not start.");
+            winrt.HypothesisGenerated += OnWindowsHypothesis;
+            winrt.ContinuousRecognitionSession.ResultGenerated += OnWindowsResult;
+            Wait(winrt.ContinuousRecognitionSession.StartAsync());
+            winrtActive = true;
+            listening = true;
+            Emit("{\"type\":\"ready\"}");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            CloseWindowsSpeech();
+            if (!SpeechPrivacyBlocked(ex)) return false;
+            Emit("{\"type\":\"error\",\"message\":\"Online speech recognition is off. Turn it on in Windows Speech privacy, then try the mic again.\",\"openSettings\":true,\"settingsUrl\":\"ms-settings:privacy-speech\"}");
+            return true;
+        }
+    }
+
+    private static void OnWindowsHypothesis(Windows.Media.SpeechRecognition.SpeechRecognizer sender, SpeechRecognitionHypothesisGeneratedEventArgs e)
+    {
+        try
+        {
+            var piece = e.Hypothesis == null ? "" : e.Hypothesis.Text;
+            var text = Join(piece);
+            if (text.Length == 0) return;
+            Emit("{\"type\":\"partial\",\"text\":" + Json(text) + "}");
+        }
+        catch (Exception ex)
+        {
+            Note(ex);
+        }
+    }
+
+    private static void OnWindowsResult(SpeechContinuousRecognitionSession sender, SpeechContinuousRecognitionResultGeneratedEventArgs e)
+    {
+        try
+        {
+            if (e.Result == null || e.Result.Status != SpeechRecognitionResultStatus.Success) return;
+            var text = Join(e.Result.Text);
+            if (text.Length == 0) return;
+            lock (Gate) committed = text;
+            Emit("{\"type\":\"final\",\"text\":" + Json(text) + "}");
+        }
+        catch (Exception ex)
+        {
+            Note(ex);
+        }
+    }
+
+    private static void CloseWindowsSpeech()
+    {
+        winrtActive = false;
+        var current = winrt;
+        winrt = null;
+        if (current == null) return;
+        try { current.Dispose(); } catch (Exception) { }
+    }
+
+    private static bool SpeechPrivacyBlocked(Exception ex)
+    {
+        for (var cursor = ex; cursor != null; cursor = cursor.InnerException)
+        {
+            var text = cursor.Message ?? "";
+            if (text.IndexOf("privacy policy", StringComparison.OrdinalIgnoreCase) >= 0) return true;
+            if (text.IndexOf("speech recognition", StringComparison.OrdinalIgnoreCase) >= 0 &&
+                text.IndexOf("not accepted", StringComparison.OrdinalIgnoreCase) >= 0) return true;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// WinRT completes IAsyncOperation on this STA thread. Sleeping here drops the
+    /// completion, so the session never reaches ready and the mic looks dead.
+    /// </summary>
+    private static void PumpUntilSettled(Func<bool> pending)
+    {
+        var until = DateTime.UtcNow.AddSeconds(8);
+        MSG msg;
+        while (pending() && DateTime.UtcNow < until)
+        {
+            if (!PeekMessage(out msg, IntPtr.Zero, 0, 0, PM_REMOVE))
+            {
+                Thread.Sleep(10);
+                continue;
+            }
+            if (msg.message == WM_QUIT)
+            {
+                PostThreadMessage(staThreadId, WM_QUIT, IntPtr.Zero, IntPtr.Zero);
+                return;
+            }
+            if (msg.message == WM_APP)
+            {
+                DrainCommands();
+                continue;
+            }
+            TranslateMessage(ref msg);
+            DispatchMessage(ref msg);
+        }
+    }
+
+    private static void ThrowIfIncomplete(AsyncStatus status, Exception error)
+    {
+        if (status == AsyncStatus.Completed) return;
+        if (status == AsyncStatus.Started) throw new TimeoutException("Speech recognition did not start.");
+        if (error != null) throw error;
+        throw new InvalidOperationException("Speech recognition did not start.");
+    }
+
+    private static T Wait<T>(IAsyncOperation<T> operation)
+    {
+        PumpUntilSettled(() => operation.Status == AsyncStatus.Started);
+        ThrowIfIncomplete(operation.Status, operation.ErrorCode);
+        return operation.GetResults();
+    }
+
+    private static void Wait(IAsyncAction operation)
+    {
+        PumpUntilSettled(() => operation.Status == AsyncStatus.Started);
+        ThrowIfIncomplete(operation.Status, operation.ErrorCode);
     }
 
     private static void OnHypothesized(object sender, SpeechHypothesizedEventArgs e)

@@ -14,20 +14,30 @@ if (fs.existsSync(output) && fs.statSync(output).mtimeMs >= sourceTime) process.
 const windows = process.env.WINDIR || "C:\\Windows";
 const programFilesX86 = process.env["ProgramFiles(x86)"] || "C:\\Program Files (x86)";
 const csc = path.join(windows, "Microsoft.NET", "Framework64", "v4.0.30319", "csc.exe");
+const framework = path.join(windows, "Microsoft.NET", "Framework64", "v4.0.30319");
+const facades = path.join(programFilesX86, "Reference Assemblies", "Microsoft", "Framework", ".NETFramework", "v4.8", "Facades");
+const winmd = path.join(windows, "System32", "WinMetadata");
 const speech = [
   path.join(programFilesX86, "Reference Assemblies", "Microsoft", "Framework", ".NETFramework", "v4.8", "System.Speech.dll"),
-  path.join(windows, "Microsoft.NET", "Framework64", "v4.0.30319", "WPF", "System.Speech.dll"),
+  path.join(framework, "WPF", "System.Speech.dll"),
   path.join(windows, "Microsoft.NET", "Framework", "v4.0.30319", "WPF", "System.Speech.dll"),
 ].find((file) => fs.existsSync(file));
+const refs = [
+  speech,
+  path.join(facades, "System.Runtime.dll"),
+  path.join(framework, "System.Runtime.InteropServices.WindowsRuntime.dll"),
+  path.join(winmd, "Windows.Foundation.winmd"),
+  path.join(winmd, "Windows.Media.winmd"),
+];
 
-if (!fs.existsSync(csc) || !speech) {
-  console.error("Windows dictation needs the .NET Framework compiler and System.Speech.dll.");
+if (!fs.existsSync(csc) || refs.some((file) => !file || !fs.existsSync(file))) {
+  console.error("Windows dictation needs the .NET Framework compiler, System.Speech, and the Windows speech metadata.");
   process.exit(1);
 }
 
 fs.mkdirSync(path.dirname(output), { recursive: true });
 execFileSync(
   csc,
-  ["/nologo", "/optimize+", "/target:winexe", `/out:${output}`, `/reference:${speech}`, source],
+  ["/nologo", "/optimize+", "/target:winexe", `/out:${output}`, ...refs.map((file) => `/reference:${file}`), source],
   { stdio: "inherit" },
 );

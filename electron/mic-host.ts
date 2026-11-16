@@ -16,6 +16,8 @@ export const MAC_SPEECH_PRIVACY_URL =
   "x-apple.systempreferences:com.apple.preference.security?Privacy_SpeechRecognition";
 export const WINDOWS_MICROPHONE_PRIVACY_URL = "ms-settings:privacy-microphone";
 export const WINDOWS_SPEECH_SETTINGS_URL = "ms-settings:speech";
+/** Online speech recognition. The desktop recognizer stays silent until this is on. */
+export const WINDOWS_SPEECH_PRIVACY_URL = "ms-settings:privacy-speech";
 export const LISTENING_PLACEHOLDER = "Listening…";
 
 const LISTEN_BAR_WEIGHTS = [0.55, 0.9, 1, 0.7] as const;
@@ -233,10 +235,9 @@ export function composerFieldPlaceholder(input: {
   status?: string;
 }): string {
   if (input.dropping) return "Drop files or folders";
-  if (input.recording) {
-    const status = input.status?.trim();
-    return status || LISTENING_PLACEHOLDER;
-  }
+  const status = input.status?.trim();
+  if (input.recording) return status || LISTENING_PLACEHOLDER;
+  if (status) return status;
   if (input.running) return "Queue for next, or Steer to redirect";
   return "Message, drop a file or folder, or type /";
 }
@@ -253,6 +254,7 @@ const DICTATION_SETTINGS_URLS = new Set<string>([
   MAC_SPEECH_PRIVACY_URL,
   WINDOWS_MICROPHONE_PRIVACY_URL,
   WINDOWS_SPEECH_SETTINGS_URL,
+  WINDOWS_SPEECH_PRIVACY_URL,
 ]);
 
 export function parseDictationLine(line: string): DictationLine | null {

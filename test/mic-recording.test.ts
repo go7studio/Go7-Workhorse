@@ -16,8 +16,10 @@ import {
   getMicrophoneAccessStatus,
   installDeskMediaPermissions,
   beginVoiceDraft,
+  dictationStartLine,
   joinVoiceDraft,
   LISTENING_PLACEHOLDER,
+  listeningDeviceLabel,
   mergeVoiceHypothesis,
   listenBarScales,
   LOCAL_SPEECH_CAPABILITY,
@@ -458,6 +460,10 @@ test("voice draft join and Escape keep a just-recorded draft", () => {
   assert.equal(joinVoiceDraft("Hi ", "there"), "Hi there");
   assert.equal(joinVoiceDraft("Hi\n", "there"), "Hi\nthere");
   assert.equal(composerEscapeAction({ recording: true, plusOpen: false, preserveVoiceDraft: false }), "stop-recording");
+  assert.equal(
+    composerEscapeAction({ recording: true, plusOpen: false, micMenuOpen: true, preserveVoiceDraft: false }),
+    "close-menu",
+  );
   assert.equal(composerEscapeAction({ recording: false, plusOpen: true, preserveVoiceDraft: true }), "close-menu");
   assert.equal(composerEscapeAction({ recording: false, plusOpen: false, preserveVoiceDraft: true }), "keep-draft");
   assert.equal(composerEscapeAction({ recording: false, plusOpen: false, preserveVoiceDraft: false }), "clear");
@@ -582,8 +588,24 @@ test("a live mic fills the text area from on-device lines and says Listening unt
     }),
     "Online speech recognition is off. Turn it on in Windows Speech privacy, then try the mic again.",
   );
+  assert.equal(listeningDeviceLabel("Microphone (Razer Kraken Ultimate)"), "Listening · Microphone (Razer Kraken Ultimate)");
+  assert.equal(listeningDeviceLabel("  "), LISTENING_PLACEHOLDER);
+  assert.equal(dictationStartLine(""), "start\n");
+  assert.equal(dictationStartLine(" {0.0.1.00000000}.{abc} "), "start {0.0.1.00000000}.{abc}\n");
+  assert.equal(dictationStartLine("bad\nid"), "start\n");
   assert.equal(osSpeechGaveUp("network"), true);
   assert.equal(osSpeechGaveUp("no-speech"), false);
+  assert.deepEqual(parseDictationLine('{"type":"ready","device":"Microphone (Razer Kraken Ultimate)","deviceId":"{0.0.1.00000000}.{90a9e327-e6a9-4f41-92d4-8e0162e9633d}"}'), {
+    type: "ready",
+    device: "Microphone (Razer Kraken Ultimate)",
+    deviceId: "{0.0.1.00000000}.{90a9e327-e6a9-4f41-92d4-8e0162e9633d}",
+  });
+  assert.deepEqual(
+    parseDictationLine(
+      '{"type":"devices","selected":"mic-a","devices":[{"id":"mic-a","name":"Headset","default":true},{"id":"bad"}]}',
+    ),
+    { type: "devices", devices: [{ id: "mic-a", name: "Headset", default: true }], selected: "mic-a" },
+  );
   assert.deepEqual(parseDictationLine('{"type":"partial","text":"hello desk"}'), { type: "partial", text: "hello desk" });
   assert.deepEqual(parseDictationLine('{"type":"level","value":1.4}'), { type: "level", value: 1 });
   assert.deepEqual(parseDictationLine('{"type":"error","message":"off","openSettings":true}'), {
@@ -677,6 +699,10 @@ test("the packaged app declares mic usage strings and the hardened-runtime audio
   assert.match(read("package.json"), /"to": "windows-dictation.exe"/);
   const windowsSource = read("electron/windows-dictation.cs");
   assert.match(windowsSource, /DictationGrammar/);
+  assert.match(windowsSource, /SetInputToAudioStream/);
+  assert.match(windowsSource, /16000/);
+  assert.match(windowsSource, /steam streaming/);
+  assert.doesNotMatch(windowsSource, /SetInputToDefaultAudioDevice/);
   assert.match(windowsSource, /command == "start"/);
   assert.match(windowsSource, /command == "stop"/);
   assert.match(windowsSource, /ms-settings:privacy-microphone/);
@@ -771,6 +797,9 @@ test("main, preload, and composer wire the mic control after the tools spacer", 
   assert.match(composer, /aria-label=\{recording \? "Stop listening" : "Listen"\}/);
   assert.match(composer, /composerFieldPlaceholder/);
   assert.match(composer, /micDictateStart/);
+  assert.match(composer, /Choose microphone/);
+  assert.match(read("electron/preload.ts"), /micListDevices/);
+  assert.match(read("electron/main.ts"), /mic:list-devices/);
   assert.match(read("electron/preload.ts"), /micDictateStart/);
   assert.match(read("electron/main.ts"), /mic:dictate-start/);
   assert.match(main, /pauseMacDictation\(\)/);
@@ -821,6 +850,41 @@ test("a second mic tap reuses the helper instead of starting another one", () =>
   assert.equal(startMacDictation(input).ok, true);
   assert.equal(spawns, 1);
   assert.deepEqual(writes, ["start\n", "stop\n", "start\n"]);
+  stopMacDictation();
+});
+
+test("a chosen microphone is sent on the helper start line", () => {
+  stopMacDictation();
+  const writes: string[] = [];
+  const child = new EventEmitter() as EventEmitter & {
+    stdin: Writable;
+    stdout: EventEmitter;
+    stderr: EventEmitter;
+    exitCode: number | null;
+    killed: boolean;
+  };
+  child.stdout = new EventEmitter();
+  child.stderr = new EventEmitter();
+  child.exitCode = null;
+  child.killed = false;
+  child.stdin = new Writable({
+    write(chunk, _encoding, done) {
+      writes.push(String(chunk));
+      done();
+    },
+  });
+  const spawnImpl = (() => child) as unknown as NonNullable<Parameters<typeof startMacDictation>[0]["spawnImpl"]>;
+  const started = startMacDictation({
+    platform: "win32",
+    resourcesPath: path.join(ROOT, "resources"),
+    appPath: ROOT,
+    deviceId: "{0.0.1.00000000}.{90a9e327-e6a9-4f41-92d4-8e0162e9633d}",
+    existsSync: (file) => file.endsWith(`${path.sep}windows-dictation.exe`),
+    spawnImpl,
+    onLine: () => undefined,
+  });
+  assert.equal(started.ok, true);
+  assert.deepEqual(writes, ["start {0.0.1.00000000}.{90a9e327-e6a9-4f41-92d4-8e0162e9633d}\n"]);
   stopMacDictation();
 });
 

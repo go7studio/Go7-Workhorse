@@ -55,7 +55,7 @@ import {
   requestMicrophoneAccess,
   transcribeLocalSpeech,
 } from "./mic-host";
-import { pauseMacDictation, startMacDictation, stopMacDictation } from "./mac-dictation";
+import { listWindowsMics, pauseMacDictation, startMacDictation, stopMacDictation } from "./mac-dictation";
 import { LocalCapabilityHostClient } from "./local-capability-host";
 
 import { displaySrcForHref, mediaByteRange, mediaContentType, openableHtmlPath, openableMediaPath, resolveMediaProtocolFile, safeLocalPath } from "./media-src";
@@ -1760,6 +1760,21 @@ app.whenReady().then(async () => {
     return result.filePaths[0];
   });
 
+  const readMicrophoneId = (): string => {
+    try {
+      const raw = JSON.parse(fs.readFileSync(path.join(app.getPath("userData"), "microphone.json"), "utf8")) as {
+        deviceId?: unknown;
+      };
+      return typeof raw.deviceId === "string" ? raw.deviceId.trim() : "";
+    } catch {
+      return "";
+    }
+  };
+  const writeMicrophoneId = (deviceId: string): void => {
+    const file = path.join(app.getPath("userData"), "microphone.json");
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, JSON.stringify({ deviceId }));
+  };
   let microphoneGrantedThisRun = false;
   ipcMain.handle("mic:request-access", async () => {
     const result = await requestMicrophoneAccess({
@@ -1788,16 +1803,35 @@ app.whenReady().then(async () => {
           : "granted",
     }),
   );
-  ipcMain.handle("mic:dictate-start", (event) =>
-    startMacDictation({
+  ipcMain.handle("mic:dictate-start", (event, raw: unknown) => {
+    const requested = typeof raw === "string" ? raw.trim() : "";
+    const deviceId = requested || readMicrophoneId();
+    return startMacDictation({
+      deviceId,
       resourcesPath: process.resourcesPath,
       appPath: app.getAppPath(),
       onLine: (line) => {
         if (event.sender.isDestroyed()) return;
         event.sender.send("mic:dictation", line);
       },
+    });
+  });
+  ipcMain.handle("mic:list-devices", (event) =>
+    listWindowsMics({
+      resourcesPath: process.resourcesPath,
+      appPath: app.getAppPath(),
+      onLine: (line) => {
+        if (line.type === "devices" || event.sender.isDestroyed()) return;
+        event.sender.send("mic:dictation", line);
+      },
     }),
   );
+  ipcMain.handle("mic:choose-device", (_event, raw: unknown) => {
+    const deviceId = typeof raw === "string" ? raw.trim() : "";
+    if (!deviceId || deviceId.length > 512 || /[\u0000-\u001f]/.test(deviceId)) return false;
+    writeMicrophoneId(deviceId);
+    return true;
+  });
   ipcMain.handle("mic:dictate-stop", () => {
     pauseMacDictation();
     return true;

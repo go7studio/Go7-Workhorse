@@ -3,9 +3,11 @@ import fs from "node:fs";
 import path from "node:path";
 import {
   macDictationLaunch,
+  dictationStartLine,
   parseDictationLine,
   windowsDictationLaunch,
   type DictationLine,
+  type MicDeviceInfo,
 } from "./mic-host";
 import { groupSpawnOptions, stopProcessTree } from "./process-registry";
 
@@ -64,6 +66,7 @@ type DictationHandle = {
 };
 
 let active: DictationHandle | null = null;
+let devicesWaiter: ((line: DictationLine) => void) | null = null;
 
 function helperIsLive(handle: DictationHandle | null): handle is DictationHandle {
   if (!handle) return false;
@@ -90,10 +93,13 @@ export function startMacDictation(input: {
   existsSync?: (file: string) => boolean;
   spawnImpl?: typeof spawn;
   onLine: (line: DictationLine) => void;
+  deviceId?: string | null;
+  bootLine?: string;
 }): { ok: true } | { ok: false; reason: string } {
+  const bootLine = input.bootLine ?? dictationStartLine(input.deviceId);
   if (helperIsLive(active)) {
     active.onLine = input.onLine;
-    active.child.stdin?.write("start\n");
+    active.child.stdin?.write(bootLine);
     return { ok: true };
   }
   stopMacDictation();
@@ -129,6 +135,11 @@ export function startMacDictation(input: {
   };
   const report = (line: DictationLine) => {
     if (line.type === "error") reported = true;
+    if (line.type === "devices" && devicesWaiter) {
+      const waiter = devicesWaiter;
+      devicesWaiter = null;
+      waiter(line);
+    }
     handle.onLine(line);
   };
   const stop = () => {
@@ -139,7 +150,7 @@ export function startMacDictation(input: {
   handle.stop = stop;
   active = handle;
   try {
-    child.stdin?.write("start\n");
+    child.stdin?.write(bootLine);
   } catch {
     /* spawn already failed */
   }
@@ -180,4 +191,52 @@ export function startMacDictation(input: {
     report({ type: "error", message: "Speech recognition stopped before it heard anything." });
   });
   return { ok: true };
+}
+
+export function listWindowsMics(input: {
+  platform?: NodeJS.Platform;
+  resourcesPath: string;
+  appPath: string;
+  existsSync?: (file: string) => boolean;
+  spawnImpl?: typeof spawn;
+  onLine?: (line: DictationLine) => void;
+}): Promise<{ ok: true; devices: MicDeviceInfo[]; selected: string } | { ok: false; reason: string }> {
+  if ((input.platform ?? process.platform) !== "win32") {
+    return Promise.resolve({ ok: true, devices: [], selected: "" });
+  }
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      if (devicesWaiter === finish) devicesWaiter = null;
+      resolve({ ok: false, reason: "The microphone list did not arrive." });
+    }, 4000);
+    const finish = (line: DictationLine) => {
+      clearTimeout(timer);
+      if (line.type !== "devices") {
+        resolve({ ok: false, reason: "The microphone list did not arrive." });
+        return;
+      }
+      resolve({ ok: true, devices: line.devices, selected: line.selected });
+    };
+    devicesWaiter = finish;
+    if (helperIsLive(active)) {
+      try {
+        active.child.stdin?.write("devices\n");
+      } catch {
+        clearTimeout(timer);
+        devicesWaiter = null;
+        resolve({ ok: false, reason: "The microphone list did not arrive." });
+      }
+      return;
+    }
+    const launched = startMacDictation({
+      ...input,
+      onLine: input.onLine ?? (() => undefined),
+      bootLine: "devices\n",
+    });
+    if (!launched.ok) {
+      clearTimeout(timer);
+      devicesWaiter = null;
+      resolve(launched);
+    }
+  });
 }

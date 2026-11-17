@@ -20,6 +20,20 @@ export const WINDOWS_SPEECH_SETTINGS_URL = "ms-settings:speech";
 export const WINDOWS_SPEECH_PRIVACY_URL = "ms-settings:privacy-speech";
 export const LISTENING_PLACEHOLDER = "Listening…";
 
+/** Placeholder while the microphone is open. Names the endpoint so a virtual mix is obvious. */
+export function listeningDeviceLabel(name?: string | null): string {
+  const trimmed = name?.replace(/\s+/g, " ").trim() ?? "";
+  if (!trimmed) return LISTENING_PLACEHOLDER;
+  return `Listening · ${trimmed}`;
+}
+
+/** Stdin line for the Windows helper. An empty id lets the helper pick a real microphone. */
+export function dictationStartLine(deviceId?: string | null): string {
+  const id = deviceId?.trim() ?? "";
+  if (!id || id.length > 512 || /[\u0000-\u001f]/.test(id)) return "start\n";
+  return `start ${id}\n`;
+}
+
 const LISTEN_BAR_WEIGHTS = [0.55, 0.9, 1, 0.7] as const;
 
 /** Four short bars beside the mic. Quiet at rest, taller as the voice gets louder. */
@@ -329,8 +343,11 @@ export function composerFieldPlaceholder(input: {
   return "Message, drop a file or folder, or type /";
 }
 
+export type MicDeviceInfo = { id: string; name: string; default?: boolean };
+
 export type DictationLine =
-  | { type: "ready" }
+  | { type: "ready"; device?: string; deviceId?: string }
+  | { type: "devices"; devices: MicDeviceInfo[]; selected: string }
   | { type: "partial"; text: string }
   | { type: "final"; text: string }
   | { type: "level"; value: number }
@@ -361,8 +378,34 @@ export function parseDictationLine(line: string): DictationLine | null {
     message?: unknown;
     openSettings?: unknown;
     settingsUrl?: unknown;
+    device?: unknown;
+    deviceId?: unknown;
+    devices?: unknown;
+    selected?: unknown;
   };
-  if (record.type === "ready") return { type: "ready" };
+  if (record.type === "ready") {
+    const device = typeof record.device === "string" ? record.device.trim() : "";
+    const deviceId = typeof record.deviceId === "string" ? record.deviceId.trim() : "";
+    return {
+      type: "ready",
+      ...(device ? { device } : {}),
+      ...(deviceId && deviceId.length <= 512 ? { deviceId } : {}),
+    };
+  }
+  if (record.type === "devices" && Array.isArray(record.devices)) {
+    const devices: MicDeviceInfo[] = [];
+    for (const item of record.devices) {
+      if (!item || typeof item !== "object") continue;
+      const row = item as { id?: unknown; name?: unknown; default?: unknown };
+      const id = typeof row.id === "string" ? row.id.trim() : "";
+      const name = typeof row.name === "string" ? row.name.trim() : "";
+      if (!id || id.length > 512 || !name || name.length > 200) continue;
+      devices.push({ id, name, ...(row.default === true ? { default: true } : {}) });
+      if (devices.length >= 32) break;
+    }
+    const selected = typeof record.selected === "string" ? record.selected.trim() : "";
+    return { type: "devices", devices, selected: selected.length <= 512 ? selected : "" };
+  }
   if ((record.type === "partial" || record.type === "final") && typeof record.text === "string") {
     return { type: record.type, text: record.text };
   }
@@ -412,8 +455,10 @@ export function macDictationLaunch(input: {
 export function composerEscapeAction(input: {
   recording: boolean;
   plusOpen: boolean;
+  micMenuOpen?: boolean;
   preserveVoiceDraft: boolean;
 }): ComposerEscapeAction {
+  if (input.micMenuOpen) return "close-menu";
   if (input.recording) return "stop-recording";
   if (input.plusOpen) return "close-menu";
   if (input.preserveVoiceDraft) return "keep-draft";

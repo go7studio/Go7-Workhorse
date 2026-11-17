@@ -42,6 +42,67 @@
   color: var(--danger);
 }
 
+.composer-mic-device {
+  flex-shrink: 0;
+  width: 18px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  background: transparent;
+  color: var(--text-tertiary);
+  padding: 0;
+}
+
+.composer-mic-device:hover,
+.composer-mic-device[aria-expanded="true"] {
+  color: var(--text);
+}
+
+.composer-mic-name {
+  max-width: 168px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-12);
+  color: var(--text-tertiary);
+}
+
+.composer-mic-menu {
+  position: absolute;
+  right: 8px;
+  bottom: 48px;
+  z-index: var(--z-sticky);
+  width: min(280px, calc(100% - 16px));
+  padding: 6px;
+  background: var(--bg-solid);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-14);
+  box-shadow: var(--shadow);
+}
+
+.composer-mic-menu p {
+  margin: 4px 10px 6px;
+  font-size: var(--text-12);
+  color: var(--text-tertiary);
+}
+
+.composer-mic-menu button {
+  width: 100%;
+  display: block;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: var(--radius-10);
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+}
+
+.composer-mic-menu button:hover,
+.composer-mic-menu button[aria-checked="true"] {
+  background: var(--bg-hover);
+}
+
 .composer-listen {
   display: none;
   align-items: center;

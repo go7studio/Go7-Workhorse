@@ -33,6 +33,7 @@ import {
   composerFieldPlaceholder,
   joinVoiceDraft,
   listenBarScales,
+  listeningDeviceLabel,
   mergeVoiceHypothesis,
   LOCAL_SPEECH_CAPABILITY,
   MAC_SPEECH_PRIVACY_URL,
@@ -203,6 +204,9 @@ export const Composer = memo(function Composer({
   const [recording, setRecording] = useState(false);
   const [listenStatus, setListenStatus] = useState("");
   const [listenLevel, setListenLevel] = useState(0);
+  const [micMenuOpen, setMicMenuOpen] = useState(false);
+  const [micDevices, setMicDevices] = useState<Array<{ id: string; name: string; default?: boolean }>>([]);
+  const [micDeviceName, setMicDeviceName] = useState("");
   const [preserveVoiceDraft, setPreserveVoiceDraft] = useState(false);
   const field = useRef<HTMLTextAreaElement>(null);
   const stagedId = useRef<number | null>(null);
@@ -452,6 +456,23 @@ export const Composer = memo(function Composer({
   }, [spawnOpen]);
 
   useEffect(() => {
+    if (!micMenuOpen) return;
+    const onDown = (event: PointerEvent) => {
+      const dock = wrap.current;
+      if (!(event.target instanceof Node) || !dock) {
+        setMicMenuOpen(false);
+        return;
+      }
+      const menu = dock.querySelector(".composer-mic-menu");
+      const caret = dock.querySelector(".composer-mic-device");
+      if (menu?.contains(event.target) || caret?.contains(event.target)) return;
+      setMicMenuOpen(false);
+    };
+    document.addEventListener("pointerdown", onDown);
+    return () => document.removeEventListener("pointerdown", onDown);
+  }, [micMenuOpen]);
+
+  useEffect(() => {
     const root = dropRoot?.current ?? wrap.current;
     if (!root) return;
     const hover = (on: boolean) => {
@@ -607,6 +628,10 @@ export const Composer = memo(function Composer({
   useEffect(() => {
     return window.workhorse?.onMicDictation?.((event) => {
       if (!dictationRef.current && !recordingRef.current) return;
+      if (event.type === "ready") {
+        if (event.device) setMicDeviceName(event.device);
+        return;
+      }
       if (event.type === "partial" || event.type === "final") {
         finalSpeechRef.current = event.text;
         setListenStatus("");
@@ -949,7 +974,7 @@ export const Composer = memo(function Composer({
             recording,
             dropping: over,
             running,
-            status: listenStatus,
+            status: listenStatus || (recording ? listeningDeviceLabel(micDeviceName) : ""),
           })}
           onPaste={(event) => {
             const files = filesFromClipboard(event.clipboardData);
@@ -1013,6 +1038,7 @@ export const Composer = memo(function Composer({
               const action = composerEscapeAction({
                 recording: recordingRef.current,
                 plusOpen,
+                micMenuOpen,
                 preserveVoiceDraft,
               });
               if (action === "stop-recording") {
@@ -1023,6 +1049,7 @@ export const Composer = memo(function Composer({
               if (action === "close-menu") {
                 event.preventDefault();
                 setPlusOpen(false);
+                setMicMenuOpen(false);
                 return;
               }
               if (action === "keep-draft") {
@@ -1343,6 +1370,65 @@ export const Composer = memo(function Composer({
             <span key={index} style={{ transform: `scaleY(${scale})` }} />
           ))}
         </span>
+        {recording && micDeviceName ? (
+          <span className="composer-mic-name" title={micDeviceName}>
+            {micDeviceName}
+          </span>
+        ) : null}
+        {/Win/.test(navigator.platform) ? (
+          <button
+            className="composer-mic-device"
+            type="button"
+            aria-label="Choose microphone"
+            aria-haspopup="menu"
+            aria-expanded={micMenuOpen}
+            title={micDeviceName ? `Microphone · ${micDeviceName}` : "Choose microphone"}
+            onClick={(event) => {
+              event.stopPropagation();
+              if (micMenuOpen) {
+                setMicMenuOpen(false);
+                return;
+              }
+              setMicMenuOpen(true);
+              void window.workhorse?.micListDevices?.().then((listed) => {
+                if (!listed?.ok) return;
+                setMicDevices(listed.devices);
+                const selected = listed.devices.find((device) => device.id === listed.selected);
+                if (selected) setMicDeviceName(selected.name);
+              });
+            }}
+          >
+            <svg width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden="true">
+              <path d="M2 3.5 5 6.5 8 3.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+            </svg>
+          </button>
+        ) : null}
+        {micMenuOpen ? (
+          <div className="composer-mic-menu" role="menu" aria-label="Microphones">
+            <p>Recording from</p>
+            {micDevices.length === 0 ? (
+              <p className="composer-mic-empty">No microphone is connected.</p>
+            ) : (
+              micDevices.map((device) => (
+                <button
+                  key={device.id}
+                  type="button"
+                  role="menuitemradio"
+                  aria-checked={device.name === micDeviceName}
+                  onClick={() => {
+                    setMicMenuOpen(false);
+                    setMicDeviceName(device.name);
+                    void window.workhorse?.micChooseDevice?.(device.id);
+                    if (!recordingRef.current) return;
+                    void window.workhorse?.micDictateStop?.().then(() => window.workhorse?.micDictateStart?.(device.id));
+                  }}
+                >
+                  {device.name}
+                </button>
+              ))
+            )}
+          </div>
+        ) : null}
         <button
           className={`composer-mic${recording ? " recording" : ""}`}
           type="button"

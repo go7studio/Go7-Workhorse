@@ -144,8 +144,13 @@ type WorkhorseBridge = {
     audioBase64: string;
     mimeType: string;
   }) => Promise<import("../electron/mic-host").MicTranscriptResult>;
-  micDictateStart?: () => Promise<{ ok: true } | { ok: false; reason: string }>;
+  micDictateStart?: (deviceId?: string) => Promise<{ ok: true } | { ok: false; reason: string }>;
   micDictateStop?: () => Promise<boolean>;
+  micListDevices?: () => Promise<
+    | { ok: true; devices: import("../electron/mic-host").MicDeviceInfo[]; selected: string }
+    | { ok: false; reason: string }
+  >;
+  micChooseDevice?: (deviceId: string) => Promise<boolean>;
   onMicDictation?: (handler: (event: import("../electron/mic-host").DictationLine) => void) => () => void;
   pickLocalComputeTokenFile?: () => Promise<string | null>;
   mediaSrc: (href: string, cwd?: string, vendorSessionId?: string) => Promise<string | null>;

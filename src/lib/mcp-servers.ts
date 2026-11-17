@@ -45,6 +45,9 @@ export function mcpToolAllowed(server: McpServerConfig, toolName: string): boole
  * ACP vendors cannot enforce a subset: a restricted row is dropped, which would
  * remove the server, so those workers keep the full list and the brief names
  * the subset. No match keeps every server rather than handing the worker none.
+ *
+ * Custom results carry `sliceTools` so the list can be restricted again after
+ * foreign servers are merged. ACP results do not.
  */
 export function restrictMcpServersToTools(
   servers: readonly McpServerConfig[],
@@ -66,5 +69,6 @@ export function restrictMcpServersToTools(
     }
     kept.push({ ...server, includeTools: matchedTools });
   }
-  return kept.length > 0 ? kept : [...servers];
+  const chosen = kept.length > 0 ? kept : [...servers];
+  return chosen.map((server) => ({ ...server, sliceTools: wanted }));
 }

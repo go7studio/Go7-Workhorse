@@ -245,29 +245,37 @@ export class McpToolBridge {
   constructor(private readonly configs: McpServerConfig[], private readonly options: { cwd?: string; sessionId?: string } = {}) {}
 
   async tools(): Promise<CustomHttpTool[]> {
-    const definitions: CustomHttpTool[] = [];
-    for (const config of this.configs) {
-      if (config.enabled === false) continue;
-      if (!config.name?.trim() || !config.command?.trim()) continue;
+    // One turn starts its servers together. Each request is still capped at 15s.
+    // A failure is swallowed so the rest of the turn still runs.
+    const listed = await Promise.all(this.configs.map(async (config) => {
+      if (config.enabled === false) return null;
+      if (!config.name?.trim() || !config.command?.trim()) return null;
+      // An empty allow-list means no tool is allowed. Do not start the server.
+      if (Array.isArray(config.includeTools) && config.includeTools.length === 0) return null;
       const client = new McpStdioClient(config, this.options.cwd, this.options.sessionId);
       this.clients.push(client);
       try {
-        const listed = await client.listTools();
-        for (const tool of listed) {
-          if (!mcpToolAllowed(config, tool.name)) continue;
-          const definition = mcpToolDefinition(config.name, tool);
-          let exposed = definition.name;
-          let suffix = 2;
-          while (this.routes.has(exposed)) {
-            const tail = `_${suffix++}`;
-            exposed = `${definition.name.slice(0, MCP_TOOL_NAME_MAX - tail.length)}${tail}`;
-          }
-          definitions.push({ ...definition, name: exposed });
-          this.routes.set(exposed, { client, server: config.name, tool: tool.name });
-        }
+        return { config, client, tools: await client.listTools() };
       } catch {
         observe(config, null);
         client.dispose();
+        return null;
+      }
+    }));
+    const definitions: CustomHttpTool[] = [];
+    for (const row of listed) {
+      if (!row) continue;
+      for (const tool of row.tools) {
+        if (!mcpToolAllowed(row.config, tool.name)) continue;
+        const definition = mcpToolDefinition(row.config.name, tool);
+        let exposed = definition.name;
+        let suffix = 2;
+        while (this.routes.has(exposed)) {
+          const tail = `_${suffix++}`;
+          exposed = `${definition.name.slice(0, MCP_TOOL_NAME_MAX - tail.length)}${tail}`;
+        }
+        definitions.push({ ...definition, name: exposed });
+        this.routes.set(exposed, { client: row.client, server: row.config.name, tool: tool.name });
       }
     }
     return definitions;

@@ -20,7 +20,9 @@ import {
   resolveInboundParent,
   resolveMcpSpawnFrom,
 } from "../electron/mcp-exposure";
-import { WORKHORSE_MCP_INSTRUCTIONS, handleWorkhorseRpc, inlineExclusionTerms, mcpToolInputSchema, setWorkhorseDeskAsk } from "../electron/workhorse-mcp";
+import { WORKHORSE_MCP_INSTRUCTIONS, handleWorkhorseRpc, inlineExclusionTerms, mcpInitializeInstructions, mcpToolInputSchema, setWorkhorseDeskAsk } from "../electron/workhorse-mcp";
+import { resetLinkStateCache } from "../electron/link-state";
+import { AUDITOR_SESSION_RULES, HELPER_SESSION_RULES, WORKER_SESSION_RULES } from "../src/lib/workhorse-rules";
 import { LINK_BASE_TOOLS, LINK_TOOLS } from "../src/lib/workhorse-link";
 import { AUDITOR_DESK_TOOLS, WORKER_DESK_TOOLS, isWorkerOmittedTool, spawnChildFolder } from "../src/lib/subagents";
 import {
@@ -296,6 +298,9 @@ test("handleWorkhorseRpc rejects forbidden tools and parentless spawn on externa
 });
 
 test("MCP initialize identifies Workhorse as an execution desk", async () => {
+  const previousFrom = process.env.WORKHORSE_FROM_SESSION;
+  delete process.env.WORKHORSE_FROM_SESSION;
+  try {
   const initialized = (await handleWorkhorseRpc({ jsonrpc: "2.0", id: 9, method: "initialize" })) as {
     result?: { instructions?: string; capabilities?: { tools?: unknown } };
   };
@@ -316,6 +321,10 @@ test("MCP initialize identifies Workhorse as an execution desk", async () => {
   assert.doesNotMatch(initialized.result?.instructions ?? "", /workhorse_spawn_agent/);
   assert.doesNotMatch(initialized.result?.instructions ?? "", /workhorse_await_agents/);
   assert.ok(initialized.result?.capabilities?.tools);
+  } finally {
+    if (previousFrom === undefined) delete process.env.WORKHORSE_FROM_SESSION;
+    else process.env.WORKHORSE_FROM_SESSION = previousFrom;
+  }
 });
 
 test("delegate normalizes a harness-collapsed exclusion clause without provider-specific logic", async () => {
@@ -1855,4 +1864,128 @@ test("Link install judges only its own entry for a bearer, not the person's serv
   const refused = install(seeded(), path.join(path.sep, "WORKHORSE_BRIDGE_TOKEN", "node"));
   assert.deepEqual(refused.written, []);
   assert.equal(refused.skipped.length, 3);
+});
+
+test("MCP initialize gives a worker seat its short rules and leaves the parent text for Link", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "wh-mcp-seat-rules-"));
+  const statePath = path.join(dir, "state.json");
+  writeFileSync(statePath, JSON.stringify({
+    sessions: [
+      { id: "parent", title: "Parent", provider: "grok", messages: [] },
+      { id: "worker", title: "Wren", parentId: "parent", hidden: true, agentRun: { status: "running", isolation: "shared" }, messages: [] },
+      { id: "auditor", title: "Audit", parentId: "parent", hidden: true, agentRun: { status: "running", isolation: "shared", role: "auditor" }, messages: [] },
+      { id: "helper", title: "Help", parentId: "worker", hidden: true, agentRun: { status: "running", isolation: "shared", role: "helper" }, messages: [] },
+    ],
+  }));
+  const previous = { state: process.env.WORKHORSE_STATE_PATH, from: process.env.WORKHORSE_FROM_SESSION };
+  process.env.WORKHORSE_STATE_PATH = statePath;
+  resetLinkStateCache();
+  const instructions = async (from?: string) => {
+    if (from) process.env.WORKHORSE_FROM_SESSION = from;
+    else delete process.env.WORKHORSE_FROM_SESSION;
+    const reply = (await handleWorkhorseRpc({ jsonrpc: "2.0", id: 1, method: "initialize" })) as {
+      result?: { instructions?: string };
+    };
+    return reply.result?.instructions ?? "";
+  };
+  try {
+    assert.equal(await instructions(), WORKHORSE_MCP_INSTRUCTIONS);
+    assert.equal(await instructions("parent"), WORKHORSE_MCP_INSTRUCTIONS);
+    assert.equal(await instructions("missing"), WORKHORSE_MCP_INSTRUCTIONS);
+    assert.equal(await instructions("worker"), WORKER_SESSION_RULES);
+    assert.equal(await instructions("auditor"), AUDITOR_SESSION_RULES);
+    const helper = await instructions("helper");
+    assert.equal(helper, HELPER_SESSION_RULES);
+    assert.equal(helper, mcpInitializeInstructions("helper"));
+    assert.doesNotMatch(helper, /Do not write files/);
+    assert.doesNotMatch(helper, /read-only helper/);
+    assert.match(helper, /Writes follow the parent seat/);
+    assert.doesNotMatch(helper, /workhorse_delegate before doing the task directly/);
+  } finally {
+    if (previous.state === undefined) delete process.env.WORKHORSE_STATE_PATH;
+    else process.env.WORKHORSE_STATE_PATH = previous.state;
+    if (previous.from === undefined) delete process.env.WORKHORSE_FROM_SESSION;
+    else process.env.WORKHORSE_FROM_SESSION = previous.from;
+    resetLinkStateCache();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("delegate and spawn keep an auditor role, and a nested helper role is not dropped", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "wh-mcp-seat-role-"));
+  const linked = path.join(dir, "linked");
+  mkdirSync(linked);
+  const statePath = path.join(dir, "state.json");
+  writeFileSync(statePath, JSON.stringify({
+    projects: [{ id: "project", folders: [{ path: linked }] }],
+    sessions: [
+      { id: "parent", title: "Parent", provider: "grok", projectId: "project", messages: [{ id: "u", role: "user", text: "Review the diff" }] },
+      {
+        id: "worker",
+        title: "Wren",
+        provider: "grok",
+        projectId: "project",
+        parentId: "parent",
+        hidden: true,
+        agentRun: { status: "running", isolation: "shared" },
+        messages: [],
+      },
+    ],
+  }));
+  const previous = { state: process.env.WORKHORSE_STATE_PATH, profile: process.env.WORKHORSE_MCP_PROFILE, from: process.env.WORKHORSE_FROM_SESSION };
+  delete process.env.WORKHORSE_MCP_PROFILE;
+  delete process.env.WORKHORSE_FROM_SESSION;
+  process.env.WORKHORSE_STATE_PATH = statePath;
+  resetLinkStateCache();
+  const seen: Array<{ role?: string; mission?: boolean; missionIteration?: unknown }> = [];
+  setWorkhorseDeskAsk(async (ask) => {
+    if (ask.mode === "spawn") seen.push({ role: ask.role, mission: ask.mission, missionIteration: ask.missionIteration });
+    return { text: JSON.stringify({ childSessionId: "child" }) };
+  });
+  const call = (name: string, args: Record<string, unknown>) =>
+    handleWorkhorseRpc({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: { name, arguments: args },
+    }) as Promise<{ error?: { message?: string } }>;
+  try {
+    const delegated = await call("workhorse_delegate", {
+      task: "Check the other worker's output",
+      fromSessionId: "parent",
+      folder: linked,
+      role: "auditor",
+    });
+    assert.equal(delegated.error, undefined, delegated.error?.message);
+    assert.equal(seen.at(-1)?.role, "auditor");
+    assert.equal(seen.at(-1)?.mission, true);
+    assert.equal(seen.at(-1)?.missionIteration, undefined);
+
+    const spawned = await call("workhorse_spawn_agent", {
+      prompt: "Check the other worker's output",
+      fromSessionId: "parent",
+      folder: linked,
+      role: "auditor",
+    });
+    assert.equal(spawned.error, undefined, spawned.error?.message);
+    assert.equal(seen.at(-1)?.role, "auditor");
+
+    const nested = await call("workhorse_spawn_agent", {
+      prompt: "Independently check the result",
+      fromSessionId: "worker",
+      role: "auditor",
+    });
+    assert.equal(nested.error, undefined, nested.error?.message);
+    assert.equal(seen.at(-1)?.role, "helper", "a nested helper role is kept even when the call said auditor");
+  } finally {
+    setWorkhorseDeskAsk(null);
+    if (previous.state === undefined) delete process.env.WORKHORSE_STATE_PATH;
+    else process.env.WORKHORSE_STATE_PATH = previous.state;
+    if (previous.profile === undefined) delete process.env.WORKHORSE_MCP_PROFILE;
+    else process.env.WORKHORSE_MCP_PROFILE = previous.profile;
+    if (previous.from === undefined) delete process.env.WORKHORSE_FROM_SESSION;
+    else process.env.WORKHORSE_FROM_SESSION = previous.from;
+    resetLinkStateCache();
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

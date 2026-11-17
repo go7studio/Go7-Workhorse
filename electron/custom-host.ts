@@ -33,6 +33,7 @@ import {
   type CustomToolUse,
 } from "./custom-tools";
 import { McpToolBridge } from "./mcp-tool-bridge";
+import { restrictMcpServersToTools } from "../src/lib/mcp-servers";
 
 export type CustomPromptInput = {
   sessionId: string;
@@ -59,6 +60,22 @@ export type CustomPromptInput = {
   customBotId?: string;
   config: CustomHttpConfig;
 };
+
+/**
+ * Foreign rows are merged onto a custom list after the slice filter. Run the
+ * filter again here. ACP cannot enforce a subset, so this is custom only.
+ */
+export function customTurnMcpServers(servers: readonly McpServerConfig[] | undefined): McpServerConfig[] {
+  const list = servers ?? [];
+  const wanted = [...new Set(list.flatMap((server) => server.sliceTools ?? []).map((item) => item.trim()).filter(Boolean))];
+  const restricted = wanted.length > 0 ? restrictMcpServersToTools(list, wanted, "custom") : list;
+  return restricted.map((server) => {
+    if (server.sliceTools === undefined) return server;
+    const next = { ...server };
+    delete next.sliceTools;
+    return next;
+  });
+}
 
 export function customPrefaceForLimits(
   preface: string | undefined,
@@ -434,8 +451,13 @@ export class CustomSessionHost {
      * part-way through a turn is caught on the next call rather than never.
      */
     const toolCwd = () => spawnCwd(input.cwd) ?? input.cwd;
-    const mcp = new McpToolBridge(input.mcpServers ?? [], { cwd: toolCwd(), sessionId: input.sessionId });
-    const mcpTools = await mcp.tools();
+    // Auditor and helper are not offered MCP schemas, and a guessed call is refused.
+    // Building the bridge would still start every server.
+    const skipMcp = role === "auditor" || role === "helper";
+    const mcp = skipMcp
+      ? null
+      : new McpToolBridge(customTurnMcpServers(input.mcpServers), { cwd: toolCwd(), sessionId: input.sessionId });
+    const mcpTools = mcp ? await mcp.tools() : [];
     let text = "";
     const startedAt = this.now();
     let modelCalls = 0;
@@ -787,7 +809,7 @@ export class CustomSessionHost {
           });
           const decision = security.answer === "deny"
             ? "deny"
-            : mcp.has(use.name)
+            : mcp?.has(use.name)
             ? mode === "always-approve"
               ? "once"
               : mode === "plan" || sandbox === "read-only" || sandbox === "strict"
@@ -814,7 +836,7 @@ export class CustomSessionHost {
           // to approve `execute_command` without the command. The arguments ride
           // beside it for reading only: the detail, which the classifiers judge
           // and a session grant is keyed on, stays as it was.
-          const preview = mcp.has(use.name) ? mcpArgumentsPreview(use.input) : undefined;
+          const preview = mcp?.has(use.name) ? mcpArgumentsPreview(use.input) : undefined;
           if (answer === "deny" && blocked) {
             const requestId = uid("perm");
             emit({
@@ -875,7 +897,7 @@ export class CustomSessionHost {
           }
           // An Allow that lands in the same moment as Stop does not run the call.
           if (abort.signal.aborted) throw new Error("cancelled");
-          const executed = limitCustomToolResult(mcp.has(use.name)
+          const executed = limitCustomToolResult(mcp !== null && mcp.has(use.name)
             ? await mcp.call(use)
             : await this.executeTool(use, {
                 mode,
@@ -964,7 +986,7 @@ export class CustomSessionHost {
       emit({ type: "error", sessionId: input.sessionId, message: message || CUSTOM_NOT_CONFIGURED });
       throw error;
     } finally {
-      mcp.dispose();
+      mcp?.dispose();
       if (this.aborts.get(input.sessionId) === abort) this.aborts.delete(input.sessionId);
     }
   }

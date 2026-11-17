@@ -153,7 +153,7 @@ export const AUDITOR_SESSION_RULES =
   "Reply with HEAD (git rev-parse HEAD, 40 hex), GATE (the command), LAST (the gate’s literal last line), and STATUS pass or fail.";
 
 export const HELPER_SESSION_RULES =
-  "You are a read-only helper on the Workhorse desk. Perform the assigned independent check in the bound folder. Do not write files. Do not spawn. Do not ask the user. Do not review any other tree. " +
+  "You are a helper on the Workhorse desk. Perform the assigned check in the bound folder. Writes follow the parent seat. Do not spawn. Do not ask the user. Do not review any other tree. " +
   WORKER_LOAD_RULE +
   "Return the report as plain text.";
 

@@ -48,6 +48,11 @@ export type McpServerConfig = {
   runtimeIds?: McpRuntimeId[];
   /** Missing means every tool reported by the server; an empty list means none. */
   includeTools?: string[];
+  /**
+   * Slice names from the custom filter, so a foreign merge can be restricted
+   * again. Not saved. ACP lists do not carry it.
+   */
+  sliceTools?: string[];
 };
 
 export type McpRuntimeId = ProviderId | `custom:${string}`;

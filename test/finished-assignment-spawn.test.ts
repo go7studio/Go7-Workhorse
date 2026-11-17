@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { finishedAssignmentSpawnError, lineupJoinPrompt, queueOpenPlanResume } from "../src/lib/lineup";
-import type { Session } from "../src/lib/types";
+import { readyAfterCancel } from "../src/lib/plan";
+import type { PlanRun, Session } from "../src/lib/types";
 
 const parent = (patch: Partial<Session> = {}) => ({
   id: "parent", status: "idle", crewModes: ["orchestrate"],
@@ -121,4 +123,34 @@ test("an idle chat with a running plan and a cancelled lane is resumed once", ()
   assert.equal(once[0]?.lineup?.openResumeAt, 20);
   const twice = queueOpenPlanResume(once, 30);
   assert.equal(twice[0]?.queue?.length, 1);
+});
+
+test("a cancelled running step is ready for the next assign", () => {
+  const plan = {
+    id: "p",
+    status: "running",
+    title: "Ship",
+    markdown: "",
+    steps: [{
+      id: "s1",
+      title: "Build",
+      details: "",
+      status: "running",
+      dependsOn: [],
+      evidence: [],
+      evidenceRequired: false,
+      assignedSessionId: "worker",
+    }],
+    events: [],
+    createdAt: 1,
+    updatedAt: 1,
+  } as PlanRun;
+  const next = readyAfterCancel(plan, "s1", 50);
+  assert.ok(next);
+  assert.equal(next?.steps[0]?.status, "ready");
+  assert.equal(next?.steps[0]?.assignedSessionId, undefined);
+  const store = readFileSync(new URL("../src/lib/store.tsx", import.meta.url), "utf8");
+  const body = store.slice(store.indexOf("const cancelRun"), store.indexOf("const quit"));
+  assert.match(body, /readyAfterCancel/);
+  assert.match(body, /queueOpenPlanResume/);
 });

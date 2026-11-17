@@ -257,6 +257,7 @@ import {
   grantExternalAgents,
   normalizePlanRun,
   pausePlanRun,
+  readyAfterCancel,
   readyPlanStepIds,
   recordPlanEvidence,
   recordPlanEvent,
@@ -10413,7 +10414,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         if (!targets.has(session.id) || !session.parentId) continue;
         if (!active(session)) continue;
         sessions = applyChildIdleSync(sessions, session.id, "cancelled", { now });
+        const stepId = session.agentRun?.planStepId;
+        const parentId = session.parentId;
+        if (!stepId || !parentId) continue;
+        sessions = sessions.map((item) => {
+          if (item.id !== parentId || item.planRun?.status !== "running") return item;
+          const plan = readyAfterCancel(item.planRun, stepId, now);
+          return plan ? { ...item, planRun: plan } : item;
+        });
       }
+      sessions = queueOpenPlanResume(sessions, now);
       return { ...current, sessions };
     });
   }, []);

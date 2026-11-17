@@ -660,6 +660,30 @@ export function recordPlanEvidence(
   return succeeded(changed(plan, { steps }, now));
 }
 
+/**
+ * A cancelled lane is unfinished work. The step has to be ready again or the
+ * next assign is refused with "Only a ready step can be assigned."
+ */
+export function readyAfterCancel(plan: PlanRun, stepId: string, now = Date.now()): PlanRun | null {
+  const step = plan.steps.find((item) => item.id === stepId);
+  if (!step || plan.status !== "running") return null;
+  if (step.status !== "running" && step.status !== "cancelled") return null;
+  let current = plan;
+  if (step.status === "running") {
+    const cancelled = setPlanStepStatus(current, stepId, "cancelled", { now, error: "Lane cancelled." });
+    if (!cancelled.ok) return null;
+    current = cancelled.plan;
+  }
+  const ready = setPlanStepStatus(current, stepId, "ready", { now });
+  if (!ready.ok) return null;
+  return {
+    ...ready.plan,
+    steps: ready.plan.steps.map((item) => item.id === stepId
+      ? { ...item, assignedSessionId: undefined, assignment: undefined, startedAt: undefined, finishedAt: undefined }
+      : item),
+  };
+}
+
 export function setPlanStepStatus(
   plan: PlanRun,
   stepId: string,

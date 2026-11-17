@@ -23,17 +23,8 @@ export function ChromeAccessCard() {
           <span className="eyebrow">Browser · Chrome access</span>
         </div>
         <strong>{CHROME_ACCESS_QUESTION}</strong>
-        <span className="permission-detail">
-          {label} asked for a browser. This chat keeps that allow after a restart. All chats allows every chat and stays on after a restart. Both use installed Chrome with navigate, snapshot, click, fill, screenshot, and console, in a profile under Workhorse. Your Chrome profile is used only when a chat explicitly asks for it. Decline stays on this chat and keeps a headless browser. Always permission does not attach your Chrome profile.
-        </span>
+        <span className="permission-detail">{label}</span>
         <div className="actions">
-          <button
-            className="tiny deny"
-            type="button"
-            onClick={() => answerChromeAccess(chromeAccessPrompt.sessionId, "declined")}
-          >
-            Decline
-          </button>
           <button
             className="primary"
             type="button"
@@ -46,6 +37,13 @@ export function ChromeAccessCard() {
             onClick={() => answerChromeAccess(chromeAccessPrompt.sessionId, "granted", "always")}
           >
             All chats
+          </button>
+          <button
+            className="tiny deny"
+            type="button"
+            onClick={() => answerChromeAccess(chromeAccessPrompt.sessionId, "declined")}
+          >
+            Decline
           </button>
         </div>
       </div>

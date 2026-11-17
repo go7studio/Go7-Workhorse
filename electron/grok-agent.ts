@@ -1991,6 +1991,8 @@ export class GrokAgent {
       sandbox: this.seatSandbox,
       platform: process.platform,
     });
+    // osascript, screencapture, Start-Process, and Explorer stay on this
+    // permission request and are denied here. Other shells still ask.
     if (guiBlock) {
       this.handlers.onTool?.({
         toolCallId: requestId,

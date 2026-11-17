@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { WORKHORSE_SESSION_RULES, sessionRulesFor, type DeskRole } from "../src/lib/workhorse-rules";
+import type { ComputerSeat } from "../src/lib/computer-seat";
 import type { EffortLevel, McpServerConfig, PermissionMode, SandboxProfile } from "../src/lib/types";
 import { APP_VERSION } from "../src/lib/app-info";
 
@@ -22,6 +23,8 @@ export type GrokLaunchInput = {
   cwd: string;
   mode: PermissionMode;
   sandbox?: SandboxProfile;
+  /** Off keeps GUI launches on the permission channel. Omitted leaves Always as it was. */
+  computer?: ComputerSeat | null;
   mcpServers?: McpServerConfig[];
   /** Which rules the CLI is launched with. A worker gets worker rules. */
   role?: DeskRole;
@@ -262,11 +265,13 @@ export type GrokPermissionMode = "default" | "acceptEdits" | "auto" | "dontAsk" 
 export function resolveGrokPermissionMode(
   mode: PermissionMode,
   sandbox?: SandboxProfile | string | null,
+  computer?: ComputerSeat | null,
 ): GrokPermissionMode {
   const boxed = sandbox === "read-only" || sandbox === "strict";
   if (mode === "plan") return "plan";
   if (boxed) return "dontAsk";
-  if (mode === "always-approve") return "bypassPermissions";
+  // Computer off: Always still asks, and the permission handler denies the four GUI launchers.
+  if (mode === "always-approve" && computer !== "off") return "bypassPermissions";
   if (mode === "accept-edits") return "acceptEdits";
   return "default";
 }
@@ -299,8 +304,9 @@ export function buildGrokLaunchSpec(input: GrokLaunchInput): GrokLaunchSpec {
   const model = resolveGrokModel(input.model);
   const effort = resolveGrokEffort(input.effort);
   const sandbox = resolveGrokSandbox(input.sandbox);
-  const permissionMode = resolveGrokPermissionMode(input.mode, sandbox);
-  const alwaysApprove = input.mode === "always-approve" && sandbox !== "read-only" && sandbox !== "strict";
+  const permissionMode = resolveGrokPermissionMode(input.mode, sandbox, input.computer);
+  const alwaysApprove =
+    input.mode === "always-approve" && sandbox !== "read-only" && sandbox !== "strict" && input.computer !== "off";
   // `--sandbox` and `--permission-mode` are top-level `grok` flags.
   // Current grok agent rejects them after `agent` (`unexpected argument '--sandbox'`).
   // Always pass both so ~/.grok/config.toml and GROK_SANDBOX cannot override This chat.

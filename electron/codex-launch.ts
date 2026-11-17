@@ -1,3 +1,4 @@
+import type { ComputerSeat } from "../src/lib/computer-seat";
 import type { EffortLevel, McpServerConfig, PermissionMode, SandboxProfile, SessionSecurityPolicy } from "../src/lib/types";
 import { sessionRulesFor, type DeskRole } from "../src/lib/workhorse-rules";
 import {
@@ -26,6 +27,8 @@ export type CodexLaunchInput = {
   cwd: string;
   mode: PermissionMode;
   sandbox?: SandboxProfile;
+  /** Off keeps GUI launches on the permission channel. Omitted leaves Always as it was. */
+  computer?: ComputerSeat | null;
   securityPolicy?: SessionSecurityPolicy;
   mcpServers?: McpServerConfig[];
   detect?: CodexLoginDetectInput;
@@ -81,9 +84,13 @@ export function resolveCodexSandboxMode(
   return "danger-full-access";
 }
 
-export function resolveCodexApprovalPolicy(mode: PermissionMode, root?: SessionSecurityPolicy["root"]): CodexApprovalPolicy {
+export function resolveCodexApprovalPolicy(
+  mode: PermissionMode,
+  root?: SessionSecurityPolicy["root"],
+  computer?: ComputerSeat | null,
+): CodexApprovalPolicy {
   if (root === "ask") return "on-request";
-  if (mode === "always-approve") return "never";
+  if (mode === "always-approve" && computer !== "off") return "never";
   if (mode === "plan") return "untrusted";
   return "on-request";
 }
@@ -101,9 +108,9 @@ export function buildCodexLaunchSpec(input: CodexLaunchInput): CodexLaunchSpec {
     ? input.sandbox
     : "off";
   const sandboxMode = resolveCodexSandboxMode(sandbox, input.securityPolicy?.root);
-  const approvalPolicy = resolveCodexApprovalPolicy(input.mode, input.securityPolicy?.root);
+  const approvalPolicy = resolveCodexApprovalPolicy(input.mode, input.securityPolicy?.root, input.computer);
   const agentMode = resolveCodexAgentMode(input.mode, sandbox);
-  const alwaysApprove = input.mode === "always-approve";
+  const alwaysApprove = input.mode === "always-approve" && input.computer !== "off";
   const launch = resolveCodexAcpLaunch(input.detect);
   if (!launch) throw new Error(CODEX_ACP_NOT_INSTALLED);
   const command = launch.command;

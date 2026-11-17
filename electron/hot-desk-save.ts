@@ -1,3 +1,4 @@
+import { noteResidentDesk } from "../src/lib/computer-seat";
 import type { PersistableState } from "./state-persistence";
 
 /**
@@ -169,11 +170,13 @@ export function mergeDeskSave(
   if (!Array.isArray(order)) {
     const state = { ...incoming };
     delete state.sessionOrder;
+    noteResidentDesk(state);
     return { state, refuse: false };
   }
   if (incomingSessions && incomingSessions.length === order.length) {
     const state = { ...incoming };
     delete state.sessionOrder;
+    noteResidentDesk(state);
     return { state, refuse: false };
   }
   const previousSessions = previous && Array.isArray(previous.sessions) ? previous.sessions : null;
@@ -198,5 +201,6 @@ export function mergeDeskSave(
   }
   const state: PersistableState = { ...previous, ...incoming, sessions };
   delete state.sessionOrder;
+  noteResidentDesk(state);
   return { state, refuse: false };
 }

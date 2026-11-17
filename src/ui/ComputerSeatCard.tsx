@@ -36,7 +36,7 @@ export function ComputerSeatCard({
       </div>
       <p className="setup-lede">
         {worker
-          ? "Spawn leaves Computer off. Turn it on here if this worker should drive the desktop."
+          ? "Spawn leaves Computer off. This worker does not get the computer tool."
           : "Drive Finder, Explorer, and System Settings from this chat. Workers do not inherit it."}
       </p>
     </div>

@@ -19,6 +19,7 @@ import { cursorFamilyId, rememberedCursorBases } from "../src/lib/cursor-catalog
 import { listVendorModels } from "./vendor-models";
 import { composeVendorPrompt } from "../src/lib/context-preface";
 import { titleFromRecord } from "./grok-title";
+import { answerComputerPermission } from "./computer-host";
 import type { PermissionAnswer } from "../src/lib/permissions";
 
 export type CursorPromptInput = GrokPromptInput;
@@ -252,7 +253,7 @@ export class CursorSessionHost {
     for (const item of this.slots.values()) {
       if (item.agent.answerPermission(requestId, answer)) return true;
     }
-    return false;
+    return answerComputerPermission(requestId, answer);
   }
 
   cancel(sessionId: string): void {

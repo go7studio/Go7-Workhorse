@@ -11,6 +11,8 @@ import { CODEX_ACP_NOT_INSTALLED } from "./codex-login";
 import { buildCodexLaunchSpec, codexSpawnArgs } from "./codex-launch";
 import { composeVendorPrompt } from "../src/lib/context-preface";
 import { titleFromRecord } from "./grok-title";
+import { launchedComputer } from "../src/lib/computer-seat";
+import { answerComputerPermission } from "./computer-host";
 import type { PermissionAnswer } from "../src/lib/permissions";
 
 export type CodexPromptInput = GrokPromptInput;
@@ -70,7 +72,7 @@ export function createCodexChunkFilter(emit: (text: string) => void) {
 }
 
 export function codexLaunchKey(
-  input: Pick<GrokSessionOpenInput, "model" | "effort" | "mode" | "cwd" | "sandbox" | "securityPolicy" | "mcpServers">,
+  input: Pick<GrokSessionOpenInput, "model" | "effort" | "mode" | "cwd" | "sandbox" | "computer" | "securityPolicy" | "mcpServers">,
 ): string {
   const spec = buildCodexLaunchSpec({
     model: input.model,
@@ -78,6 +80,7 @@ export function codexLaunchKey(
     cwd: input.cwd,
     mode: input.mode,
     sandbox: input.sandbox,
+    computer: launchedComputer(input.computer),
     securityPolicy: input.securityPolicy,
     mcpServers: input.mcpServers,
   });
@@ -277,6 +280,7 @@ export class CodexSessionHost {
       cwd: input.cwd,
       mode: input.mode,
       sandbox: input.sandbox,
+      computer: launchedComputer(input.computer),
       securityPolicy: input.securityPolicy,
       mcpServers: input.mcpServers,
     });
@@ -311,7 +315,7 @@ export class CodexSessionHost {
     for (const item of this.slots.values()) {
       if (item.agent.answerPermission(requestId, answer)) return true;
     }
-    return false;
+    return answerComputerPermission(requestId, answer);
   }
 
   cancel(sessionId: string): void {

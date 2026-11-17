@@ -694,3 +694,75 @@ test("a win32 host still asks for Chrome and does not launch", async () => {
   assert.equal(events.some((event) => event.type === "chrome-prompt"), true);
   assert.equal(launched, 0);
 });
+
+test("Chrome does not fill a real profile from home, and an early exit does not wait out the port", async () => {
+  let lookedUp = 0;
+  const launch = createGrantedChromeLauncher({
+    spawnImpl: (() => {
+      throw new Error("spawn must not run without a profile directory");
+    }) as typeof import("node:child_process").spawn,
+    executable: "/opt/chrome-test",
+    resolveRealProfile: () => {
+      lookedUp += 1;
+      return "/tmp/from-home";
+    },
+  });
+  await assert.rejects(
+    () =>
+      launch({
+        mode: "chrome",
+        userDataDir: path.join(DESK, "desk-profile"),
+        deskUserDataDir: path.join(DESK, "desk-profile"),
+        url: "about:blank",
+        headless: false,
+        env: {},
+        spawnOptions: {},
+        chromeAccess: "granted",
+        permissionMode: "always-approve",
+        attachRealProfile: true,
+      }),
+    /home directory/,
+  );
+  assert.equal(lookedUp, 0);
+
+  const child = fakeChild();
+  const dying = createGrantedChromeLauncher({
+    spawnImpl: (() => {
+      queueMicrotask(() => child.emit("exit", 1, null));
+      return child;
+    }) as typeof import("node:child_process").spawn,
+    executable: "/opt/chrome-test",
+    connect: async () => {
+      throw new Error("connect must not run");
+    },
+  });
+  const started = Date.now();
+  await assert.rejects(
+    () =>
+      dying({
+        mode: "chrome",
+        userDataDir: path.join(DESK, "dead-profile"),
+        deskUserDataDir: path.join(DESK, "dead-profile"),
+        url: "about:blank",
+        headless: false,
+        env: {},
+        spawnOptions: {},
+        chromeAccess: "granted",
+        permissionMode: "ask",
+      }),
+    /Chrome exited before a debugging port opened \(code 1\)/,
+  );
+  assert.ok(Date.now() - started < 2_000);
+
+  const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  const card = readFileSync(path.join(root, "src/ui/ChromeAccessCard.tsx"), "utf8");
+  assert.match(card, /This chat/);
+  assert.match(card, /All chats/);
+  assert.match(card, /Decline/);
+  assert.doesNotMatch(card, /\b(bot|harness)\b/i);
+  const settings = readFileSync(path.join(root, "src/ui/Settings.tsx"), "utf8");
+  const chromeAt = settings.indexOf("<strong>Chrome</strong>");
+  const chromeRow = settings.slice(chromeAt, chromeAt + 700);
+  assert.match(chromeRow, /Ask each chat shows the card on a chat that has not answered/);
+  assert.doesNotMatch(chromeRow, /\b(bot|harness)\b/i);
+});

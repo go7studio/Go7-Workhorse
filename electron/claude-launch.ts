@@ -1,3 +1,4 @@
+import type { ComputerSeat } from "../src/lib/computer-seat";
 import type { EffortLevel, McpServerConfig, PermissionMode, SandboxProfile } from "../src/lib/types";
 import { sessionRulesFor, type DeskRole } from "../src/lib/workhorse-rules";
 import {
@@ -30,6 +31,8 @@ export type ClaudeLaunchInput = {
   cwd: string;
   mode: PermissionMode;
   sandbox?: SandboxProfile;
+  /** Off keeps GUI launches on the permission channel. Omitted leaves Always as it was. */
+  computer?: ComputerSeat | null;
   mcpServers?: McpServerConfig[];
   detect?: ClaudeLoginDetectInput;
   /** Which rules the CLI is launched with. A worker gets worker rules. */
@@ -136,10 +139,11 @@ export function resolveClaudeSandbox(sandbox: SandboxProfile | string | null | u
 export function resolveClaudePermissionMode(
   mode: PermissionMode,
   sandbox?: SandboxProfile | string | null,
+  computer?: ComputerSeat | null,
 ): ClaudePermissionMode {
   if (mode === "plan") return "plan";
   if (sandbox === "read-only" || sandbox === "strict") return "default";
-  if (mode === "always-approve") return "bypassPermissions";
+  if (mode === "always-approve" && computer !== "off") return "bypassPermissions";
   if (mode === "accept-edits") return "acceptEdits";
   return "default";
 }
@@ -148,9 +152,9 @@ export function buildClaudeLaunchSpec(input: ClaudeLaunchInput): ClaudeLaunchSpe
   const model = resolveClaudeModel(input.model);
   const effort = resolveClaudeEffort(input.effort);
   const sandbox = resolveClaudeSandbox(input.sandbox);
-  const permissionMode = resolveClaudePermissionMode(input.mode, sandbox);
+  const permissionMode = resolveClaudePermissionMode(input.mode, sandbox, input.computer);
   const boxed = sandbox === "read-only" || sandbox === "strict";
-  const alwaysApprove = input.mode === "always-approve" && !boxed;
+  const alwaysApprove = input.mode === "always-approve" && !boxed && input.computer !== "off";
   const launch = resolveClaudeAcpLaunch(input.detect);
   if (!launch) throw new Error(CLAUDE_ACP_NOT_INSTALLED);
   const command = launch.command;

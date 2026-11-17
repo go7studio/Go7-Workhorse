@@ -35,13 +35,16 @@ const TERMINALS = [
   "wezterm",
   "warp",
   "kitty",
+  "ghostty",
   "hyper",
+  "tabby",
   "pwsh",
   "cmd",
 ];
 
 const IDES = [
   "visual studio code",
+  "code - insiders",
   "android studio",
   "visual studio",
   "sublime text",
@@ -229,10 +232,97 @@ export function computerSettingsUrl(platform: NodeJS.Platform, grant: ComputerOs
   return null;
 }
 
+/**
+ * Missing computer is off. A launch helper passes that explicit off so Always
+ * does not skip the permission channel. Callers that omit it keep today's Always launch.
+ */
+export function launchedComputer(value: unknown): ComputerSeat {
+  return value === "on" ? "on" : "off";
+}
+
 export function computerLine(computer?: ComputerSeat | null): string {
   return computer === "on"
-    ? "On — this chat may drive desktop apps when Sandbox is Off. Plan, Read-only, and Strict still refuse."
-    : "Off — desktop apps stay closed. osascript, screencapture, Start-Process, and Explorer launches do not run.";
+    ? "On — this chat may drive desktop apps when Sandbox is Off. Plan, Read-only, Strict, and Workspace still refuse."
+    : "Off — this chat does not drive desktop apps.";
+}
+
+export type ComputerWindowHit = { name: string; pid: number };
+
+/** Click and type run only when this window is the granted app. Our own pid is Workhorse. */
+export function windowMatchesGrant(input: {
+  grantedApp: string;
+  window: ComputerWindowHit | null;
+  ownPid?: number;
+  focus?: boolean;
+}): { ok: true } | { ok: false; message: string } {
+  const where = input.focus ? "focused window" : "window under the point";
+  if (!input.window?.name.trim()) {
+    return { ok: false, message: `No ${where}. This call did not run.` };
+  }
+  if (input.ownPid != null && input.window.pid === input.ownPid) {
+    return { ok: false, message: "Workhorse is not a click target. This call did not run." };
+  }
+  if (appClass(input.window.name) === "workhorse") {
+    return { ok: false, message: "Workhorse is not a click target. This call did not run." };
+  }
+  if (!sameComputerApp(input.window.name, input.grantedApp)) {
+    const label = input.window.name.trim();
+    return {
+      ok: false,
+      message: `The ${where} is ${label}. Computer was asked for ${input.grantedApp}. This call did not run.`,
+    };
+  }
+  return { ok: true };
+}
+
+/** A Windows click error is a privacy block only when the OS denied access. */
+export function windowsAccessDenied(message: string): boolean {
+  return /access is denied|access denied|0x80070005|e_accessdenied/i.test(message);
+}
+
+export type WindowRect = { x: number; y: number; width: number; height: number };
+
+/** No bounds means no picture. A full desktop is not a stand-in for the granted window. */
+export function planDeskScreenshot(bounds: WindowRect | null): { ok: true; bounds: WindowRect } | { ok: false; message: string } {
+  if (!bounds || bounds.width <= 0 || bounds.height <= 0) {
+    return { ok: false, message: "The granted window has no bounds. This call did not run." };
+  }
+  return { ok: true, bounds };
+}
+
+/** The desk returns a PNG path. Base64 and a dropped picture are not a screenshot. */
+export function acceptDeskScreenshot(value: string): { ok: true; path: string } | { ok: false; message: string } {
+  const text = value.trim();
+  if (!text) return { ok: false, message: "The screenshot came back empty. This call did not run." };
+  if (!text.toLowerCase().endsWith(".png") || text.includes("\n") || text.startsWith("data:")) {
+    return { ok: false, message: "A desk screenshot is a PNG of the granted window, not a desktop image. This call did not run." };
+  }
+  return { ok: true, path: text };
+}
+
+type ResidentSession = {
+  id?: string;
+  computer?: ComputerSeat;
+  mode?: PermissionMode;
+  sandbox?: SandboxProfile;
+  permissionGrants?: Array<{ key: string; expiresAt?: number }>;
+  provider?: string;
+};
+
+let residentSessions: ResidentSession[] | null = null;
+
+/** The desk main process holds this between saves. The file can be a save behind. */
+export function noteResidentDesk(state: { sessions?: unknown } | null): void {
+  if (!state || !Array.isArray(state.sessions)) {
+    residentSessions = null;
+    return;
+  }
+  residentSessions = state.sessions.filter((item): item is ResidentSession => Boolean(item) && typeof item === "object");
+}
+
+export function residentComputerSeat(id: string): ResidentSession | null {
+  if (!id || !residentSessions) return null;
+  return residentSessions.find((session) => session.id === id) ?? null;
 }
 
 function commandText(detail: string): string {

@@ -6,6 +6,8 @@ import { buildGrokLaunchSpec } from "./grok-launch";
 import { readGrokGeneratedTitle, titleFromRecord } from "./grok-title";
 import { parseSessionContext, type ChatContextStats } from "../src/lib/context-stats";
 import { composeVendorPrompt } from "../src/lib/context-preface";
+import { launchedComputer } from "../src/lib/computer-seat";
+import { answerComputerPermission } from "./computer-host";
 import type { PermissionAnswer } from "../src/lib/permissions";
 import type { CrewMode, EffortLevel, McpServerConfig, PermissionMode, SandboxProfile, SessionSecurityPolicy } from "../src/lib/types";
 
@@ -112,7 +114,7 @@ export type GrokIpcEvent =
 export type GrokEventSink = (event: GrokIpcEvent) => void;
 
 export function launchKey(
-  input: Pick<GrokSessionOpenInput, "model" | "effort" | "fastMode" | "agentName" | "mode" | "cwd" | "sandbox" | "mcpServers" | "suppressCursorMcpImport">,
+  input: Pick<GrokSessionOpenInput, "model" | "effort" | "fastMode" | "agentName" | "mode" | "cwd" | "sandbox" | "computer" | "mcpServers" | "suppressCursorMcpImport">,
 ): string {
   const spec = buildGrokLaunchSpec({
     model: input.model,
@@ -122,6 +124,7 @@ export function launchKey(
     cwd: input.cwd,
     mode: input.mode,
     sandbox: input.sandbox,
+    computer: launchedComputer(input.computer),
     mcpServers: input.mcpServers,
     suppressCursorMcpImport: input.suppressCursorMcpImport,
   });
@@ -394,6 +397,7 @@ export class GrokSessionHost {
       cwd: input.cwd,
       mode: input.mode,
       sandbox: input.sandbox,
+      computer: launchedComputer(input.computer),
       mcpServers: input.mcpServers,
       suppressCursorMcpImport: input.suppressCursorMcpImport,
       contextWindow: input.contextWindow,
@@ -429,7 +433,7 @@ export class GrokSessionHost {
     for (const item of this.slots.values()) {
       if (item.agent.answerPermission(requestId, answer)) return true;
     }
-    return false;
+    return answerComputerPermission(requestId, answer);
   }
 
   async fork(

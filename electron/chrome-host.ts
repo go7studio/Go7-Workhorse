@@ -117,7 +117,6 @@ async function readDevToolsActivePort(userDataDir: string, failed: () => Error |
   const deadline = Date.now() + PORT_WAIT_MS;
   while (Date.now() < deadline) {
     const error = failed();
-    if (error) throw error;
     try {
       const port = fs.readFileSync(file, "utf8").split(/\r?\n/, 1)[0]?.trim() ?? "";
       if (chromeDebugEndpoint(port)) return port;
@@ -127,6 +126,7 @@ async function readDevToolsActivePort(userDataDir: string, failed: () => Error |
     } catch (error) {
       if (error instanceof Error && error.message.startsWith("Refused:")) throw error;
     }
+    if (error) throw error;
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
   const error = failed();
@@ -142,9 +142,7 @@ export function createGrantedChromeLauncher(deps: ChromeLauncherDeps = {}) {
   const stop = deps.stop ?? ((child: ChildProcess) => stopProcessTree(child));
 
   return async (request: BackgroundBrowserLaunchRequest): Promise<ChromeLaunchHandle> => {
-    const realProfileDir =
-      request.realProfileDir?.trim() ||
-      (request.attachRealProfile === true ? deps.resolveRealProfile?.() ?? "" : "");
+    const realProfileDir = request.realProfileDir?.trim() ?? "";
     const plan = planChromeLaunch({
       deskUserDataDir: request.deskUserDataDir || request.userDataDir,
       url: request.url,
@@ -188,11 +186,20 @@ export function createGrantedChromeLauncher(deps: ChromeLauncherDeps = {}) {
     };
     const child = spawnImpl(executable, plan.args, spawnOptions);
     let spawnError: Error | undefined;
+    let closed: Error | undefined;
     child.once("error", (error) => {
       spawnError = error instanceof Error ? error : new Error(String(error));
     });
+    child.once("exit", (code, signal) => {
+      if (closed || spawnError) return;
+      closed = new Error(
+        signal
+          ? `Chrome exited before a debugging port opened (signal ${signal}).`
+          : `Chrome exited before a debugging port opened (code ${code ?? "unknown"}).`,
+      );
+    });
     const readPort =
-      deps.readDebuggingPort ?? ((dir: string) => readDevToolsActivePort(dir, () => spawnError));
+      deps.readDebuggingPort ?? ((dir: string) => readDevToolsActivePort(dir, () => spawnError ?? closed));
     try {
       const port = await readPort(plan.userDataDir);
       if (spawnError) throw spawnError;

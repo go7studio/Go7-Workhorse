@@ -10,6 +10,7 @@ import {
   computerForSpawnedWorker,
   computerGrantCovers,
   computerGrantKey,
+  acceptDeskScreenshot,
   computerLine,
   computerSeatAllows,
   computerSettingsUrl,
@@ -17,10 +18,18 @@ import {
   guiLaunchName,
   guiShellRefusal,
   judgeComputerTool,
+  launchedComputer,
+  noteResidentDesk,
+  planDeskScreenshot,
   sameComputerApp,
   userDeclinedComputer,
   vendorGuiShellBlock,
+  windowMatchesGrant,
+  windowsAccessDenied,
 } from "../src/lib/computer-seat";
+import { buildClaudeLaunchSpec, resolveClaudePermissionMode } from "../electron/claude-launch";
+import { buildCodexLaunchSpec, resolveCodexApprovalPolicy } from "../electron/codex-launch";
+import { buildGrokLaunchSpec, resolveGrokPermissionMode } from "../electron/grok-launch";
 import {
   computerInputCommand,
   deskComputerAnswer,
@@ -40,7 +49,7 @@ function io(platform: NodeJS.Platform, patch: Partial<ComputerIo> = {}): Compute
     accessibility: () => true,
     screenCapture: () => true,
     frontmost: () => "Finder",
-    screenshot: () => "iVBORw0KGgo",
+    screenshot: () => "/tmp/finder.png",
     perform: (input) => {
       calls.push(input);
     },
@@ -63,7 +72,9 @@ test("Computer stays off unless this chat turns it on, and Plan, Read-only, Stri
   assert.match(computerSeatAllows({ computer: "on", mode: "ask", sandbox: "strict" }).ok ? "" : "Strict", /Strict/);
   assert.match(computerSeatAllows({ computer: "on", mode: "ask", sandbox: "workspace" }).ok ? "" : "Workspace", /Workspace/);
   assert.match(computerLine("on"), /Sandbox is Off/);
-  assert.match(computerLine("off"), /osascript/);
+  assert.match(computerLine("on"), /Workspace/);
+  assert.match(computerLine("off"), /does not drive desktop apps/);
+  assert.doesNotMatch(computerLine("off"), /stay closed/);
 });
 
 test("spawn cannot turn Computer on, and a worker the person already enabled keeps it", () => {
@@ -191,6 +202,7 @@ test("a blocked OS grant opens the Mac or Windows settings pane and does not cli
   assert.equal(shot.ran, false);
   assert.equal(win.calls.length, 0);
   assert.deepEqual(win.urls, [computerSettingsUrl("win32", "privacy")]);
+  assert.match(shot.message, /Privacy page/);
 });
 
 test("Computer does not click Workhorse, type into a terminal, or touch a browser", async () => {
@@ -231,8 +243,9 @@ test("an allowed Finder click records the input and a deny does not", async () =
   assert.equal(ran.ran, true);
   assert.deepEqual(mac.calls, [{ kind: "click", x: 20, y: 30 }]);
   const command = computerInputCommand("darwin", mac.calls[0]!);
-  assert.equal(command.command, "swift");
-  assert.match(command.args.join(" "), /leftMouseDown/);
+  assert.equal(command.command, "workhorse-computer-helper");
+  assert.deepEqual(command.args, ["click", "20", "30"]);
+  assert.doesNotMatch(command.args.join(" "), /swiftc|leftMouseDown/);
 
   const denied = io("darwin");
   const no = await runComputerAction(
@@ -379,7 +392,8 @@ test("a desk chat names the frontmost app only when Computer is on", async () =>
     { action: "screenshot", app: "Finder" },
     mac,
   );
-  assert.match(asked, /permission card/);
+  assert.match(asked, /could not ask/);
+  assert.equal(mac.calls.length, 0);
   const shot = await deskComputerAnswer(
     {
       computer: "on",
@@ -390,7 +404,7 @@ test("a desk chat names the frontmost app only when Computer is on", async () =>
     { action: "screenshot", app: "Finder" },
     mac,
   );
-  assert.equal(shot, "screenshot captured");
+  assert.equal(shot, "/tmp/finder.png");
   const main = readFileSync(path.join(ROOT, "electron", "main.ts"), "utf8");
   const bridge = readFileSync(path.join(ROOT, "electron", "workhorse-bridge.ts"), "utf8");
   assert.match(main, /ask\.action === "computer"/);
@@ -410,4 +424,266 @@ test("main checks GUI launches before a shell runs, and the seat card is not a n
   const mcp = readFileSync(path.join(ROOT, "electron", "workhorse-mcp.ts"), "utf8");
   assert.match(mcp, /computerUse: false/);
   assert.doesNotMatch(mcp, /computer\|desktop\|screen/);
+  assert.match(card, /Spawn leaves Computer off/);
+  assert.match(card, /does not get the computer tool/);
+  assert.doesNotMatch(card, /Turn it on here/);
+});
+
+test("a desk Computer ask uses the live seat and waits for the permission card", async () => {
+  noteResidentDesk({
+    sessions: [
+      {
+        id: "chat",
+        computer: "on",
+        mode: "always-approve",
+        sandbox: "off",
+        provider: "custom",
+      },
+    ],
+  });
+  const mac = io("darwin");
+  let asked = false;
+  const pending = deskComputerAnswer(
+    { id: "chat", computer: "off", mode: "always-approve", sandbox: "off" },
+    { action: "click", app: "Finder", x: 4, y: 5 },
+    mac,
+    async (card) => {
+      asked = true;
+      assert.equal(card.sessionId, "chat");
+      assert.equal(card.app, "Finder");
+      assert.equal(mac.calls.length, 0);
+      return "once";
+    },
+  );
+  assert.equal(mac.calls.length, 0);
+  const ran = await pending;
+  assert.equal(asked, true);
+  assert.equal(ran, "click Finder");
+  assert.deepEqual(mac.calls, [{ kind: "click", x: 4, y: 5 }]);
+
+  const denied = await deskComputerAnswer(
+    { id: "chat", computer: "off", mode: "ask", sandbox: "off" },
+    { action: "click", app: "Finder", x: 1, y: 1 },
+    io("darwin"),
+    async () => "deny",
+  );
+  assert.match(denied, /^USER DECLINED:/);
+  noteResidentDesk(null);
+
+  const staleOff = await deskComputerAnswer(
+    { id: "chat", computer: "on", mode: "always-approve", sandbox: "off" },
+    { action: "frontmost" },
+    io("darwin"),
+  );
+  noteResidentDesk({
+    sessions: [{ id: "chat", computer: "off", mode: "always-approve", sandbox: "off" }],
+  });
+  const liveOff = await deskComputerAnswer(
+    { id: "chat", computer: "on", mode: "always-approve", sandbox: "off" },
+    { action: "frontmost" },
+    io("darwin"),
+  );
+  noteResidentDesk(null);
+  assert.equal(staleOff, "Finder");
+  assert.match(liveOff, /Computer is off/);
+});
+
+test("Always still runs an ordinary shell, and Computer off keeps the four GUI launches on the permission channel", () => {
+  const off = { computer: "off" as const, mode: "always-approve" as const, sandbox: "off" as const };
+  assert.equal(guiShellRefusal({ command: "git status", ...off, platform: "darwin" }), null);
+  assert.equal(guiShellRefusal({ command: "npm test", ...off, platform: "win32" }), null);
+  assert.match(
+    guiShellRefusal({ command: "osascript -e beep", ...off, platform: "darwin" }) ?? "",
+    /osascript does not run/,
+  );
+  assert.equal(resolveGrokPermissionMode("always-approve", "off", "off"), "default");
+  assert.equal(resolveGrokPermissionMode("always-approve", "off", "on"), "bypassPermissions");
+  assert.equal(resolveGrokPermissionMode("always-approve"), "bypassPermissions");
+  assert.equal(resolveClaudePermissionMode("always-approve", "off", "off"), "default");
+  assert.equal(resolveClaudePermissionMode("always-approve", "off", "on"), "bypassPermissions");
+  assert.equal(resolveCodexApprovalPolicy("always-approve", undefined, "off"), "on-request");
+  assert.equal(resolveCodexApprovalPolicy("always-approve", undefined, "on"), "never");
+  assert.equal(launchedComputer(undefined), "off");
+  assert.equal(launchedComputer("on"), "on");
+
+  const grokOff = buildGrokLaunchSpec({ model: "grok-4.7", effort: "low", cwd: ROOT, mode: "always-approve", sandbox: "off", computer: "off" });
+  assert.equal(grokOff.argv.includes("--always-approve"), false);
+  assert.equal(grokOff.argv[grokOff.argv.indexOf("--permission-mode") + 1], "default");
+  const grokOn = buildGrokLaunchSpec({ model: "grok-4.7", effort: "low", cwd: ROOT, mode: "always-approve", sandbox: "off", computer: "on" });
+  assert.equal(grokOn.argv.includes("--always-approve"), true);
+  assert.equal(grokOn.argv[grokOn.argv.indexOf("--permission-mode") + 1], "bypassPermissions");
+
+  const detect = {
+    env: { CLAUDE_ACP_BIN: "/opt/claude-acp-test", CODEX_ACP_BIN: "/opt/codex-acp-test", PATH: "" },
+    homedir: "/tmp/wh-computer-home",
+    pathDirs: [] as string[],
+    existsSync: (file: string) => file === "/opt/claude-acp-test" || file === "/opt/codex-acp-test",
+    platform: "linux" as const,
+    readFile: () => {
+      throw new Error("test must not read a credential file");
+    },
+    keychainHasLogin: () => false,
+    storedToken: () => null,
+  };
+  const claudeOff = buildClaudeLaunchSpec({
+    model: "claude-sonnet-5",
+    effort: "low",
+    cwd: ROOT,
+    mode: "always-approve",
+    sandbox: "off",
+    computer: "off",
+    detect,
+    storedToken: () => null,
+  });
+  assert.equal(claudeOff.permissionMode, "default");
+  assert.equal(claudeOff.sessionParams._meta?.yoloMode, undefined);
+  const claudeOn = buildClaudeLaunchSpec({
+    model: "claude-sonnet-5",
+    effort: "low",
+    cwd: ROOT,
+    mode: "always-approve",
+    sandbox: "off",
+    computer: "on",
+    detect,
+    storedToken: () => null,
+  });
+  assert.equal(claudeOn.permissionMode, "bypassPermissions");
+  assert.equal(claudeOn.sessionParams._meta?.yoloMode, true);
+
+  const codexOff = buildCodexLaunchSpec({
+    model: "gpt-5.4",
+    effort: "low",
+    cwd: ROOT,
+    mode: "always-approve",
+    sandbox: "off",
+    computer: "off",
+    detect,
+  });
+  assert.equal(codexOff.approvalPolicy, "on-request");
+  assert.equal(codexOff.alwaysApprove, false);
+  assert.equal(codexOff.sessionParams._meta?.yoloMode, undefined);
+  const codexOn = buildCodexLaunchSpec({
+    model: "gpt-5.4",
+    effort: "low",
+    cwd: ROOT,
+    mode: "always-approve",
+    sandbox: "off",
+    computer: "on",
+    detect,
+  });
+  assert.equal(codexOn.approvalPolicy, "never");
+  assert.equal(codexOn.alwaysApprove, true);
+});
+
+test("a click or type runs only when the window is the granted app, and Ghostty, Tabby, and Code - Insiders block type", async () => {
+  assert.equal(appClass("Ghostty"), "terminal");
+  assert.equal(appClass("Tabby"), "terminal");
+  assert.equal(appClass("Code - Insiders"), "ide");
+  assert.equal(actionOnApp("type", "Ghostty").ok, false);
+  assert.equal(actionOnApp("type", "Tabby").ok, false);
+  assert.equal(actionOnApp("key", "Code - Insiders").ok, false);
+  assert.equal(windowMatchesGrant({ grantedApp: "Finder", window: { name: "Finder", pid: 9 }, ownPid: 4 }).ok, true);
+  assert.equal(windowMatchesGrant({ grantedApp: "Finder", window: { name: "Notes", pid: 3 }, ownPid: 4 }).ok, false);
+  assert.match(
+    windowMatchesGrant({ grantedApp: "Finder", window: { name: "Helper", pid: 4 }, ownPid: 4 }).ok
+      ? ""
+      : "Workhorse",
+    /Workhorse/,
+  );
+
+  const missed = io("darwin", { windowAt: () => ({ name: "Notes", pid: 8 }) });
+  const click = await runComputerAction(
+    { action: "click", app: "Finder", x: 12, y: 14, computer: "on", mode: "ask", sandbox: "off", allowed: true },
+    missed,
+  );
+  assert.equal(click.ran, false);
+  assert.match(click.message, /window under the point is Notes/);
+  assert.equal(missed.calls.length, 0);
+
+  const own = io("darwin", { windowAt: () => ({ name: "Finder", pid: 4 }), ownPid: 4 });
+  const self = await runComputerAction(
+    { action: "click", app: "Finder", x: 1, y: 1, computer: "on", mode: "ask", sandbox: "off", allowed: true },
+    own,
+  );
+  assert.match(self.message, /Workhorse/);
+  assert.equal(own.calls.length, 0);
+
+  const typed = io("darwin", { focusedWindow: () => ({ name: "TextEdit", pid: 6 }) });
+  const type = await runComputerAction(
+    { action: "type", app: "Finder", text: "hello", computer: "on", mode: "ask", sandbox: "off", allowed: true },
+    typed,
+  );
+  assert.equal(type.ran, false);
+  assert.match(type.message, /focused window is TextEdit/);
+  assert.equal(typed.calls.length, 0);
+});
+
+test("a desk screenshot is a PNG path for the granted window, not a dropped picture or a full desktop", async () => {
+  assert.equal(planDeskScreenshot(null).ok, false);
+  assert.equal(planDeskScreenshot({ x: 1, y: 2, width: 30, height: 40 }).ok, true);
+  assert.equal(acceptDeskScreenshot("iVBORw0KGgo").ok, false);
+  assert.equal(acceptDeskScreenshot("/tmp/finder.png").ok, true);
+
+  const empty = io("darwin", { windowBounds: () => null });
+  const missed = await runComputerAction(
+    { action: "screenshot", app: "Finder", computer: "on", mode: "always-approve", sandbox: "off", allowed: true },
+    empty,
+  );
+  assert.equal(missed.ran, false);
+  assert.match(missed.message, /no bounds/);
+
+  let seen: { app?: string; bounds?: { width: number } } = {};
+  const shot = io("darwin", {
+    windowBounds: () => ({ x: 8, y: 9, width: 200, height: 100 }),
+    screenshot: async (app, bounds) => {
+      seen = { app, bounds: bounds ?? undefined };
+      return "/tmp/finder-window.png";
+    },
+  });
+  const ran = await runComputerAction(
+    { action: "screenshot", app: "Finder", computer: "on", mode: "always-approve", sandbox: "off", allowed: true },
+    shot,
+  );
+  assert.equal(ran.ok, true);
+  assert.equal(ran.message, "/tmp/finder-window.png");
+  assert.equal(seen.app, "Finder");
+  assert.equal(seen.bounds?.width, 200);
+
+  const host = readFileSync(path.join(ROOT, "electron", "computer-host.ts"), "utf8");
+  assert.doesNotMatch(host, /spawnSync\(\s*["']swift["']/);
+  assert.match(host, /askMacHelper/);
+  assert.doesNotMatch(host, /captureDesktopPng/);
+});
+
+test("a Windows click error opens Privacy only for an access denial", async () => {
+  assert.equal(windowsAccessDenied("Access is denied."), true);
+  assert.equal(windowsAccessDenied("powershell exited 1"), false);
+  const denied = io("win32", {
+    frontmost: () => "File Explorer",
+    perform: () => {
+      throw new Error("Access is denied.");
+    },
+  });
+  const blocked = await runComputerAction(
+    { action: "click", app: "File Explorer", x: 3, y: 4, computer: "on", mode: "ask", sandbox: "off", allowed: true },
+    denied,
+  );
+  assert.equal(blocked.ran, false);
+  assert.match(blocked.message, /Privacy page/);
+  assert.deepEqual(denied.urls, [computerSettingsUrl("win32", "privacy")]);
+
+  const other = io("win32", {
+    frontmost: () => "File Explorer",
+    perform: () => {
+      throw new Error("powershell exited 1");
+    },
+  });
+  const failed = await runComputerAction(
+    { action: "click", app: "File Explorer", x: 3, y: 4, computer: "on", mode: "ask", sandbox: "off", allowed: true },
+    other,
+  );
+  assert.equal(failed.ran, false);
+  assert.equal(other.urls.length, 0);
+  assert.match(failed.message, /powershell exited 1/);
+  assert.doesNotMatch(failed.message, /Privacy page/);
 });

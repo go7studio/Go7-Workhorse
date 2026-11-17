@@ -1699,7 +1699,7 @@ export function toolsForDeskRole<T extends { name: string }>(tools: T[], role: D
     return tools.filter((tool) => (AUDITOR_DESK_TOOLS as readonly string[]).includes(tool.name));
   }
   if (role !== "worker") return tools;
-  return tools.filter((tool) => !isWorkerOmittedTool(tool.name));
+  return tools.filter((tool) => tool.name !== "computer" && !isWorkerOmittedTool(tool.name));
 }
 
 export type WorkerBriefInput = {

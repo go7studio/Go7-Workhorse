@@ -21,6 +21,8 @@ import { advertisedModelIds } from "../src/lib/advertised-models";
 import { titleFromRecord } from "./grok-title";
 import { claudeAuthFailure } from "../src/lib/claude-auth-failure";
 import { clearClaudeCredentialRejection, markClaudeCredentialRejected } from "./claude-stored-token";
+import { launchedComputer } from "../src/lib/computer-seat";
+import { answerComputerPermission } from "./computer-host";
 import type { PermissionAnswer } from "../src/lib/permissions";
 
 export type ClaudePromptInput = GrokPromptInput;
@@ -28,7 +30,7 @@ export type ClaudeEventSink = GrokEventSink;
 type ClaudeSpawnFn = (spec: ReturnType<typeof buildClaudeLaunchSpec>) => ChildProcessWithoutNullStreams;
 
 export function claudeLaunchKey(
-  input: Pick<GrokSessionOpenInput, "model" | "effort" | "fastMode" | "agentName" | "mode" | "cwd" | "sandbox" | "mcpServers">,
+  input: Pick<GrokSessionOpenInput, "model" | "effort" | "fastMode" | "agentName" | "mode" | "cwd" | "sandbox" | "computer" | "mcpServers">,
   spec: ClaudeLaunchSpec = buildClaudeLaunchSpec({
     model: input.model,
     effort: input.effort,
@@ -37,6 +39,7 @@ export function claudeLaunchKey(
     cwd: input.cwd,
     mode: input.mode,
     sandbox: input.sandbox,
+    computer: launchedComputer(input.computer),
     mcpServers: input.mcpServers,
   }),
 ): string {
@@ -119,6 +122,7 @@ export class ClaudeSessionHost {
     for (let attempt = 0; attempt < 2; attempt++) {
       const spec = this.build({
         ...input,
+        computer: launchedComputer(input.computer),
         unlistedModel: input.unlistedModel,
         role: input.role ?? deskRoleOf({ parentId: input.parentId, hidden: input.hidden }),
       });
@@ -264,7 +268,7 @@ export class ClaudeSessionHost {
     for (const item of this.slots.values()) {
       if (item.agent.answerPermission(requestId, answer)) return true;
     }
-    return false;
+    return answerComputerPermission(requestId, answer);
   }
 
   cancel(sessionId: string): void {

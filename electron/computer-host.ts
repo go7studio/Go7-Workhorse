@@ -1,5 +1,9 @@
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import {
+  acceptDeskScreenshot,
   actionOnApp,
   computerSeatAllows,
   computerSettingsUrl,
@@ -7,11 +11,17 @@ import {
   guiShellRefusal,
   isComputerAction,
   judgeComputerTool,
+  planDeskScreenshot,
+  residentComputerSeat,
   sameComputerApp,
   userDeclinedComputer,
+  windowsAccessDenied,
+  windowMatchesGrant,
   type ComputerAction,
   type ComputerOsGrant,
   type ComputerSeat,
+  type ComputerWindowHit,
+  type WindowRect,
 } from "../src/lib/computer-seat";
 import type { PermissionMode, SandboxProfile } from "../src/lib/types";
 
@@ -26,8 +36,17 @@ export type ComputerIo = {
   accessibility: () => boolean;
   screenCapture: () => boolean;
   frontmost: () => string;
-  screenshot: () => string | Promise<string>;
-  perform: (input: ComputerPerform) => void;
+  /** PNG path of the granted window. Not a desktop image. */
+  screenshot: (app?: string, bounds?: WindowRect | null) => string | Promise<string>;
+  /** Bounds of the granted window. Missing means this caller does not crop. */
+  windowBounds?: (app: string) => WindowRect | null;
+  /** Window under a screen point. Missing means this caller does not hit-test. */
+  windowAt?: (x: number, y: number) => ComputerWindowHit | null | Promise<ComputerWindowHit | null>;
+  /** Window that would receive type. Missing means the frontmost name is enough. */
+  focusedWindow?: () => ComputerWindowHit | null | Promise<ComputerWindowHit | null>;
+  /** This process. A hit with this pid is Workhorse. */
+  ownPid?: number;
+  perform: (input: ComputerPerform) => void | Promise<void>;
   openSettings: (url: string) => void;
 };
 
@@ -82,10 +101,31 @@ function finite(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
+function blockedPane(platform: NodeJS.Platform, grant: ComputerOsGrant): string {
+  if (platform === "win32") return "The Privacy page is open.";
+  if (grant === "screen") return "The Screen Recording settings pane is open.";
+  return "The Accessibility settings pane is open.";
+}
+
 function openBlocked(io: ComputerIo, grant: ComputerOsGrant, message: string): ComputerActionResult {
   const url = computerSettingsUrl(io.platform, grant);
   if (url) io.openSettings(url);
   return { ok: false, message, ran: false };
+}
+
+async function windowForAction(
+  action: ComputerAction,
+  input: ComputerActionInput,
+  io: ComputerIo,
+): Promise<ComputerWindowHit | null | undefined> {
+  if (action === "click" && io.windowAt) {
+    const x = finite(input.x);
+    const y = finite(input.y);
+    if (x == null || y == null) return null;
+    return io.windowAt(x, y);
+  }
+  if ((action === "type" || action === "key") && io.focusedWindow) return io.focusedWindow();
+  return undefined;
 }
 
 /**
@@ -107,26 +147,31 @@ export async function runComputerAction(
     return { ok: false, message: "Computer runs on macOS and Windows.", ran: false };
   }
   if (!io.accessibility()) {
-    const pane = io.platform === "win32" ? "Windows Privacy settings are open." : "The Accessibility settings pane is open.";
-    return openBlocked(io, io.platform === "win32" ? "privacy" : "accessibility", `The OS is blocking Computer. ${pane} This call did not run.`);
+    const grant = io.platform === "win32" ? "privacy" : "accessibility";
+    return openBlocked(io, grant, `The OS is blocking Computer. ${blockedPane(io.platform, grant)} This call did not run.`);
   }
 
   let front = "";
   try {
     front = io.frontmost().trim();
   } catch (error) {
-    const pane = io.platform === "win32" ? "Windows Privacy settings are open." : "The Accessibility settings pane is open.";
+    const message = error instanceof Error ? error.message : String(error);
+    if (io.platform === "win32" && !windowsAccessDenied(message)) {
+      return { ok: false, message: `The OS did not name the frontmost app (${message}). This call did not run.`, ran: false };
+    }
+    const grant = io.platform === "win32" ? "privacy" : "accessibility";
     return openBlocked(
       io,
-      io.platform === "win32" ? "privacy" : "accessibility",
-      `The OS did not name the frontmost app (${error instanceof Error ? error.message : String(error)}). ${pane} This call did not run.`,
+      grant,
+      `The OS did not name the frontmost app (${message}). ${blockedPane(io.platform, grant)} This call did not run.`,
     );
   }
   if (!front) {
+    const grant = io.platform === "win32" ? "privacy" : "accessibility";
     return openBlocked(
       io,
-      io.platform === "win32" ? "privacy" : "accessibility",
-      "The OS did not name the frontmost app. This call did not run.",
+      grant,
+      `The OS did not name the frontmost app. ${blockedPane(io.platform, grant)} This call did not run.`,
     );
   }
   const frontLabel = io.platform === "win32" ? displayComputerApp(front) : front;
@@ -146,35 +191,49 @@ export async function runComputerAction(
       app: frontLabel,
     };
   }
+  if (action === "click" || action === "type" || action === "key") {
+    const hit = await windowForAction(action, input, io);
+    if (hit !== undefined) {
+      const match = windowMatchesGrant({
+        grantedApp: app,
+        window: hit,
+        ownPid: io.ownPid,
+        focus: action !== "click",
+      });
+      if (!match.ok) return { ok: false, message: match.message, ran: false, app };
+    }
+  }
   if (!input.allowed) {
     return { ok: false, message: `${app} needs a permission card before Computer runs.`, ran: false, app };
   }
 
   if (action === "screenshot") {
     if (!io.screenCapture()) {
-      const pane = io.platform === "win32" ? "Windows Privacy settings are open." : "The Screen Recording settings pane is open.";
-      return openBlocked(io, io.platform === "win32" ? "privacy" : "screen", `Screen recording is blocking Computer. ${pane} This call did not run.`);
+      const grant = io.platform === "win32" ? "privacy" : "screen";
+      return openBlocked(io, grant, `Screen recording is blocking Computer. ${blockedPane(io.platform, grant)} This call did not run.`);
     }
-    const png = await io.screenshot();
-    if (!png) return { ok: false, message: "The screenshot came back empty. This call did not run.", ran: false, app };
-    return { ok: true, message: png, ran: true, app };
+    const bounds = io.windowBounds ? io.windowBounds(app) : undefined;
+    if (io.windowBounds) {
+      const plan = planDeskScreenshot(bounds ?? null);
+      if (!plan.ok) return { ok: false, message: plan.message, ran: false, app };
+    }
+    const accepted = acceptDeskScreenshot(await io.screenshot(app, bounds));
+    if (!accepted.ok) return { ok: false, message: accepted.message, ran: false, app };
+    return { ok: true, message: accepted.path, ran: true, app };
   }
 
   const perform = performInput(action, input);
   if ("error" in perform) return { ok: false, message: perform.error, ran: false, app };
   try {
-    io.perform(perform.input);
+    await io.perform(perform.input);
   } catch (error) {
-    if (io.platform === "win32") {
-      return openBlocked(
-        io,
-        "privacy",
-        `The OS is blocking Computer. Windows Privacy settings are open. This call did not run.`,
-      );
+    const message = error instanceof Error ? error.message : String(error);
+    if (io.platform === "win32" && windowsAccessDenied(message)) {
+      return openBlocked(io, "privacy", `The OS is blocking Computer. ${blockedPane(io.platform, "privacy")} This call did not run.`);
     }
     return {
       ok: false,
-      message: `Computer did not ${action} ${app}: ${error instanceof Error ? error.message : String(error)}`,
+      message: `Computer did not ${action} ${app}: ${message}`,
       ran: false,
       app,
     };
@@ -237,22 +296,9 @@ export function computerInputCommand(
     return { command: "osascript", args: ["-e", macKeyScript(input.key)] };
   }
   if (input.kind === "click") {
-    const script = [
-      "import CoreGraphics",
-      `let point = CGPoint(x: ${input.x}, y: ${input.y})`,
-      "let down = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: point, mouseButton: .left)",
-      "let up = CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: point, mouseButton: .left)",
-      "down?.post(tap: .cghidEventTap)",
-      "up?.post(tap: .cghidEventTap)",
-    ].join("; ");
-    return { command: "swift", args: ["-e", script] };
+    return { command: "workhorse-computer-helper", args: ["click", String(input.x), String(input.y)] };
   }
-  const script = [
-    "import CoreGraphics",
-    `let event = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 2, wheel1: ${-input.dy}, wheel2: ${input.dx}, wheel3: 0)`,
-    "event?.post(tap: .cghidEventTap)",
-  ].join("; ");
-  return { command: "swift", args: ["-e", script] };
+  return { command: "workhorse-computer-helper", args: ["scroll", String(input.dx), String(input.dy)] };
 }
 
 function windowsInputScript(input: ComputerPerform): string {
@@ -367,18 +413,258 @@ type ElectronLike = {
   };
   desktopCapturer: {
     getSources: (options: { types: Array<"screen">; thumbnailSize: { width: number; height: number } }) => Promise<
-      Array<{ thumbnail: { toPNG: () => Buffer; isEmpty?: () => boolean } }>
+      Array<{
+        thumbnail: {
+          toPNG: () => Buffer;
+          isEmpty?: () => boolean;
+          getSize?: () => { width: number; height: number };
+          crop?: (rect: WindowRect) => { toPNG: () => Buffer; isEmpty?: () => boolean };
+        };
+      }>
     >;
   };
+  screen?: {
+    getPrimaryDisplay: () => { size: { width: number; height: number }; scaleFactor: number; bounds: WindowRect };
+  };
   shell: { openExternal: (url: string) => Promise<void> };
+  BrowserWindow?: {
+    getAllWindows: () => Array<{ webContents: { isDestroyed: () => boolean; send: (channel: string, payload: unknown) => void } }>;
+  };
 };
+
+const MAC_INPUT_HELPER = [
+  "import CoreGraphics",
+  "import Foundation",
+  "import Darwin",
+  "func owner(_ window: [String: Any]) -> String {",
+  "  let name = window[kCGWindowOwnerName as String] as? String ?? \"\"",
+  "  let pid = window[kCGWindowOwnerPID as String] as? Int ?? 0",
+  "  return name + \"\\t\" + String(pid)",
+  "}",
+  "func windows() -> [[String: Any]] {",
+  "  CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []",
+  "}",
+  "func hit(_ x: Double, _ y: Double) -> String {",
+  "  for window in windows() {",
+  "    if (window[kCGWindowLayer as String] as? Int ?? 0) != 0 { continue }",
+  "    guard let bounds = window[kCGWindowBounds as String] as? [String: Any] else { continue }",
+  "    func num(_ key: String) -> Double {",
+  "      if let value = bounds[key] as? Double { return value }",
+  "      if let value = bounds[key] as? Int { return Double(value) }",
+  "      if let value = bounds[key] as? CGFloat { return Double(value) }",
+  "      return -1",
+  "    }",
+  "    let wx = num(\"X\"), wy = num(\"Y\"), ww = num(\"Width\"), wh = num(\"Height\")",
+  "    if ww > 0 && wh > 0 && x >= wx && y >= wy && x < wx + ww && y < wy + wh { return owner(window) }",
+  "  }",
+  "  return \"none\"",
+  "}",
+  "func front() -> String {",
+  "  for window in windows() {",
+  "    if (window[kCGWindowLayer as String] as? Int ?? 0) != 0 { continue }",
+  "    let line = owner(window)",
+  "    if !line.hasPrefix(\"\\t\") { return line }",
+  "  }",
+  "  return \"none\"",
+  "}",
+  "while let line = readLine() {",
+  "  let parts = line.split(separator: \" \")",
+  "  if parts.count >= 3, parts[0] == \"hit\", let x = Double(parts[1]), let y = Double(parts[2]) { print(hit(x, y)); fflush(stdout); continue }",
+  "  if parts.first == \"front\" { print(front()); fflush(stdout); continue }",
+  "  if parts.count >= 3, parts[0] == \"click\", let x = Double(parts[1]), let y = Double(parts[2]) {",
+  "    let point = CGPoint(x: x, y: y)",
+  "    if let down = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: point, mouseButton: .left),",
+  "       let up = CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: point, mouseButton: .left) {",
+  "      down.post(tap: .cghidEventTap); up.post(tap: .cghidEventTap)",
+  "    }",
+  "    print(\"ok\"); fflush(stdout); continue",
+  "  }",
+  "  if parts.count >= 3, parts[0] == \"scroll\", let dx = Int32(parts[1]), let dy = Int32(parts[2]) {",
+  "    if let event = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 2, wheel1: -dy, wheel2: dx, wheel3: 0) {",
+  "      event.post(tap: .cghidEventTap)",
+  "    }",
+  "    print(\"ok\"); fflush(stdout); continue",
+  "  }",
+  "  print(\"bad\"); fflush(stdout)",
+  "}",
+].join("\n");
+
+let macHelper: ChildProcessWithoutNullStreams | null = null;
+let macChain: Promise<void> = Promise.resolve();
+let macBuffer = "";
+
+function ensureMacHelper(): ChildProcessWithoutNullStreams {
+  if (macHelper && macHelper.exitCode == null && !macHelper.killed) return macHelper;
+  macBuffer = "";
+  const child = spawn("swift", ["-e", MAC_INPUT_HELPER], { stdio: ["pipe", "pipe", "pipe"] });
+  macHelper = child;
+  child.once("exit", () => {
+    if (macHelper === child) macHelper = null;
+  });
+  return child;
+}
+
+/** One line to the resident helper. The main process does not spawnSync swiftc per click. */
+export function askMacHelper(line: string): Promise<string> {
+  const run = macChain.then(
+    () =>
+      new Promise<string>((resolve, reject) => {
+        let child: ChildProcessWithoutNullStreams;
+        try {
+          child = ensureMacHelper();
+        } catch (error) {
+          reject(error instanceof Error ? error : new Error(String(error)));
+          return;
+        }
+        const fail = (error: Error) => {
+          child.stdout.off("data", onData);
+          reject(error);
+        };
+        const onData = (chunk: Buffer) => {
+          macBuffer += chunk.toString("utf8");
+          const nl = macBuffer.indexOf("\n");
+          if (nl < 0) return;
+          const reply = macBuffer.slice(0, nl).trim();
+          macBuffer = macBuffer.slice(nl + 1);
+          child.stdout.off("data", onData);
+          resolve(reply);
+        };
+        child.once("error", fail);
+        child.stdout.on("data", onData);
+        child.stdin.write(`${line}\n`, (error) => {
+          if (error) fail(error);
+        });
+      }),
+  );
+  macChain = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  return run;
+}
+
+function parseWindowLine(reply: string): ComputerWindowHit | null {
+  if (!reply || reply === "none" || reply === "bad") return null;
+  const [name, pidText] = reply.split("\t");
+  const pid = Number(pidText);
+  if (!name?.trim() || !Number.isFinite(pid)) return null;
+  return { name: name.trim(), pid };
+}
+
+export async function macWindowAt(x: number, y: number): Promise<ComputerWindowHit | null> {
+  return parseWindowLine(await askMacHelper(`hit ${Math.round(x)} ${Math.round(y)}`));
+}
+
+export async function macFrontWindow(): Promise<ComputerWindowHit | null> {
+  return parseWindowLine(await askMacHelper("front"));
+}
+
+function readWindowBounds(platform: NodeJS.Platform, app: string): WindowRect | null {
+  if (platform === "darwin") {
+    const script = `tell application "System Events" to tell (first application process whose name is "${osascriptQuote(app)}") to get {position, size} of window 1`;
+    const result = spawnSync("osascript", ["-e", script], { encoding: "utf8", timeout: 8_000 });
+    if ((result.status ?? 1) !== 0) return null;
+    const nums = (result.stdout ?? "").match(/-?\d+/g)?.map(Number) ?? [];
+    if (nums.length < 4 || nums[2]! <= 0 || nums[3]! <= 0) return null;
+    return { x: nums[0]!, y: nums[1]!, width: nums[2]!, height: nums[3]! };
+  }
+  if (platform !== "win32") return null;
+  const name = app.replace(/'/g, "''");
+  const script = [
+    "$p = Get-Process | Where-Object { $_.MainWindowTitle -ne '' -and ($_.ProcessName -eq '" + name + "' -or $_.MainWindowTitle -like '*" + name + "*') } | Select-Object -First 1;",
+    "if (-not $p) { exit 1 };",
+    "Add-Type -AssemblyName UIAutomationClient;",
+    "$el = [System.Windows.Automation.AutomationElement]::FromHandle($p.MainWindowHandle);",
+    "$r = $el.Current.BoundingRectangle;",
+    "Write-Output \"$([int]$r.X) $([int]$r.Y) $([int]$r.Width) $([int]$r.Height)\"",
+  ].join(" ");
+  const result = spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], {
+    encoding: "utf8",
+    timeout: 8_000,
+    windowsHide: true,
+  });
+  if ((result.status ?? 1) !== 0) return null;
+  const nums = (result.stdout ?? "").trim().split(/\s+/).map(Number);
+  if (nums.length < 4 || !nums.every(Number.isFinite) || nums[2]! <= 0 || nums[3]! <= 0) return null;
+  return { x: nums[0]!, y: nums[1]!, width: nums[2]!, height: nums[3]! };
+}
+
+async function captureGrantedWindowPng(
+  electron: ElectronLike,
+  bounds: WindowRect,
+): Promise<string> {
+  const display = electron.screen?.getPrimaryDisplay();
+  const scale = display?.scaleFactor && display.scaleFactor > 0 ? display.scaleFactor : 1;
+  const width = Math.max(1, Math.round((display?.size.width ?? bounds.x + bounds.width) * scale));
+  const height = Math.max(1, Math.round((display?.size.height ?? bounds.y + bounds.height) * scale));
+  const sources = await electron.desktopCapturer.getSources({ types: ["screen"], thumbnailSize: { width, height } });
+  const image = sources[0]?.thumbnail;
+  if (!image || image.isEmpty?.()) return "";
+  const rect = {
+    x: Math.max(0, Math.round(bounds.x * scale)),
+    y: Math.max(0, Math.round(bounds.y * scale)),
+    width: Math.max(1, Math.round(bounds.width * scale)),
+    height: Math.max(1, Math.round(bounds.height * scale)),
+  };
+  const cropped = image.crop ? image.crop(rect) : image;
+  const png = cropped.toPNG();
+  if (!png.length) return "";
+  const file = path.join(os.tmpdir(), `workhorse-computer-${process.pid}-${Date.now()}.png`);
+  fs.writeFileSync(file, png);
+  return file;
+}
+
+export type ComputerCardAsk = (input: { sessionId: string; app: string; detail: string }) => Promise<"once" | "session" | "deny">;
+
+let boundComputerAsk: ComputerCardAsk | null = null;
+const computerWaits = new Map<string, (answer: "once" | "session" | "deny") => void>();
+
+export function bindComputerCardAsk(ask: ComputerCardAsk | null): void {
+  boundComputerAsk = ask;
+}
+
+export function answerComputerPermission(requestId: string, answer: "once" | "session" | "deny"): boolean {
+  const wait = computerWaits.get(requestId);
+  if (!wait) return false;
+  computerWaits.delete(requestId);
+  wait(answer);
+  return true;
+}
 
 /** Binds the real OS. Call this from Electron main only. Tests never call it. */
 export async function bindDefaultComputerIo(): Promise<void> {
   const electron = (await import("electron")) as unknown as ElectronLike;
   const io = electronComputerIo(electron);
-  io.screenshot = () => captureDesktopPng(electron);
+  io.windowBounds = (app) => readWindowBounds(io.platform, app);
+  io.screenshot = async (_app, bounds) => {
+    const plan = planDeskScreenshot(bounds ?? null);
+    if (!plan.ok) return "";
+    return captureGrantedWindowPng(electron, plan.bounds);
+  };
+  if (io.platform === "darwin") {
+    io.windowAt = (x, y) => macWindowAt(x, y);
+    io.focusedWindow = () => macFrontWindow();
+  }
+  io.ownPid = process.pid;
   bindComputerIo(io);
+  bindComputerCardAsk(async (input) => {
+    const windows = (electron.BrowserWindow?.getAllWindows() ?? []).filter((item) => !item.webContents.isDestroyed());
+    if (!windows.length || !input.sessionId.trim()) throw new Error("Computer could not ask this chat.");
+    const requestId = `cmp_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+    const answer = new Promise<"once" | "session" | "deny">((resolve) => {
+      computerWaits.set(requestId, resolve);
+    });
+    const payload = {
+      type: "permission",
+      sessionId: input.sessionId,
+      requestId,
+      tool: "computer",
+      rawTool: "computer",
+      detail: input.app.trim() || input.detail,
+    };
+    for (const window of windows) window.webContents.send("grok:event", payload);
+    return answer;
+  });
 }
 
 export function electronComputerIo(electron: ElectronLike, platform: NodeJS.Platform = process.platform): ComputerIo {
@@ -409,7 +695,13 @@ export function electronComputerIo(electron: ElectronLike, platform: NodeJS.Plat
       return platform === "win32" ? displayComputerApp(raw) : raw;
     },
     screenshot: () => "",
-    perform: (input) => {
+    perform: async (input) => {
+      if (platform === "darwin" && (input.kind === "click" || input.kind === "scroll")) {
+        const line = input.kind === "click" ? `click ${input.x} ${input.y}` : `scroll ${input.dx} ${input.dy}`;
+        const reply = await askMacHelper(line);
+        if (reply !== "ok") throw new Error(reply || "Computer input did not run.");
+        return;
+      }
       const spec = computerInputCommand(platform, input);
       run(spec.command, spec.args);
     },
@@ -420,33 +712,40 @@ export function electronComputerIo(electron: ElectronLike, platform: NodeJS.Plat
 }
 
 export type DeskComputerSession = {
+  id?: string;
   computer?: ComputerSeat | null;
   mode?: PermissionMode | null;
   sandbox?: SandboxProfile | null;
   permissionGrants?: Array<{ key: string; expiresAt?: number }>;
+  provider?: string;
 };
 
 /**
- * One Computer call for a desk chat. The MCP helper cannot see the OS grant,
- * so Electron main runs this. A screenshot stays a short line: the bridge
- * cannot carry the image.
+ * One Computer call for a desk chat. The seat is the live desk when this
+ * process has one, not the file the bridge just read. An ask raises the same
+ * permission card a custom bot gets, and the click runs only after allow.
  */
 export async function deskComputerAnswer(
   session: DeskComputerSession | null,
   raw: Record<string, unknown>,
   io: ComputerIo = activeComputerIo(),
+  ask: ComputerCardAsk | null = boundComputerAsk,
 ): Promise<string> {
-  if (!session) return "This chat is not on the desk.";
+  const id = session?.id?.trim() ?? "";
+  const live = id ? residentComputerSeat(id) : null;
+  const seat = live ?? session;
+  if (!seat) return "This chat is not on the desk.";
   const verdict = judgeComputerTool(raw, {
-    computer: session.computer,
-    mode: session.mode,
-    sandbox: session.sandbox,
-    grants: session.permissionGrants,
+    computer: seat.computer,
+    mode: seat.mode,
+    sandbox: seat.sandbox,
+    grants: seat.permissionGrants,
   });
   if (verdict.kind === "block") return verdict.message;
   if (verdict.kind === "ask") {
-    const app = verdict.app.trim() || "That app";
-    return `${app} needs a permission card before Computer runs.`;
+    if (!ask || !id) return "Computer could not ask this chat. This call did not run.";
+    const answer = await ask({ sessionId: id, app: verdict.app, detail: verdict.detail });
+    if (answer === "deny") return userDeclinedComputer(verdict.app.trim() || "that app");
   }
   const action = typeof raw.action === "string" ? raw.action : "";
   const result = await runComputerAction(
@@ -459,21 +758,12 @@ export async function deskComputerAnswer(
       key: typeof raw.key === "string" ? raw.key : undefined,
       dx: typeof raw.dx === "number" ? raw.dx : undefined,
       dy: typeof raw.dy === "number" ? raw.dy : undefined,
-      computer: session.computer,
-      mode: session.mode,
-      sandbox: session.sandbox,
+      computer: seat.computer,
+      mode: seat.mode,
+      sandbox: seat.sandbox,
       allowed: true,
     },
     io,
   );
-  if (result.ok && action === "screenshot") return "screenshot captured";
   return result.message;
-}
-
-/** Screenshot uses Electron's capturer, which the synchronous IO shape cannot await. */
-export async function captureDesktopPng(electron: ElectronLike): Promise<string> {
-  const sources = await electron.desktopCapturer.getSources({ types: ["screen"], thumbnailSize: { width: 1280, height: 800 } });
-  const png = sources[0]?.thumbnail?.toPNG();
-  if (!png || png.length === 0) return "";
-  return png.toString("base64");
 }

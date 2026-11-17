@@ -11,6 +11,7 @@ import { uid } from "../src/lib/id";
 import { deskRoleOf, parseProviderId } from "../src/lib/subagents";
 import { vendorDeclinedForBot } from "../src/lib/vendor-decline";
 import { judgeComputerTool, userDeclinedComputer } from "../src/lib/computer-seat";
+import { answerComputerPermission } from "./computer-host";
 import type { ComputerSeat } from "../src/lib/computer-seat";
 import { withCrewModeHint, withCustomPeerHint, withLooseDeleteHint, withPermissionHint, withSpawnHint, withWriteLimitHint } from "../src/lib/workhorse-rules";
 import { hydrateChatImages, hydrateHistoryMessage } from "./attachment-store";
@@ -349,7 +350,7 @@ export class CustomSessionHost {
 
   answerPermission(requestId: string, answer: PermissionAnswer): boolean {
     const wait = this.waiting.get(requestId);
-    if (!wait) return false;
+    if (!wait) return answerComputerPermission(requestId, answer);
     this.waiting.delete(requestId);
     wait.resolve(answer);
     return true;

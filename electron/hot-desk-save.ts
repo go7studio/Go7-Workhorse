@@ -8,15 +8,19 @@ import type { PersistableState } from "./state-persistence";
  * That held the loop for about 1.4 seconds, which is the window hang.
  *
  * The first save still reads every chat, because the file has to contain a
- * complete desk. A later save, while any chat is running or waiting, reads a
- * chat only when that object is not the one already prepared. Idle chats stay
- * the bytes from last time. Those bytes are kept as separate pieces: joining
- * them into one string was another full copy of the desk on the main thread.
+ * complete desk. A later save reads a chat only when that object is not the
+ * one already prepared. Idle chats stay the bytes from last time. The same
+ * memory keeps each other top-level value: an unchanged usage log or settings
+ * object is not stringified again. Those bytes are kept as separate pieces:
+ * joining them into one string was another full copy of the desk on the main
+ * thread.
  */
 
 export type HotDeskMemory = {
   primed: boolean;
   byId: Map<string, { ref: unknown; json: string }>;
+  /** Last JSON of each top-level value, keyed by field, matched by object identity. */
+  byKey: Map<string, { ref: unknown; json: string }>;
 };
 
 export type PreparedDesk = {
@@ -33,7 +37,7 @@ export type PreparedDesk = {
 };
 
 export function createHotDeskMemory(): HotDeskMemory {
-  return { primed: false, byId: new Map() };
+  return { primed: false, byId: new Map(), byKey: new Map() };
 }
 
 export type DeskSaveHooks = {
@@ -64,11 +68,13 @@ function deskPieces(state: PersistableState, memory: HotDeskMemory): { parts: st
   if (!sessions) {
     delete view.sessions;
     memory.byId = new Map();
+    memory.byKey = new Map();
     memory.primed = true;
     return { parts: [JSON.stringify(view)], chatsRead: 0 };
   }
   const sessionJson: string[] = [];
   const nextById = new Map<string, { ref: unknown; json: string }>();
+  const nextByKey = new Map<string, { ref: unknown; json: string }>();
   let chatsRead = 0;
   for (const session of sessions) {
     const id = sessionId(session);
@@ -101,12 +107,16 @@ function deskPieces(state: PersistableState, memory: HotDeskMemory): { parts: st
       parts.push("]");
       continue;
     }
-    const encoded = JSON.stringify(view[key]);
+    const value = view[key];
+    const hit = memory.byKey.get(key);
+    const encoded = hit && hit.ref === value ? hit.json : JSON.stringify(value);
     if (encoded === undefined) continue;
+    nextByKey.set(key, { ref: value, json: encoded });
     if (emitted) parts.push(",");
     emitted = true;
     parts.push(`${JSON.stringify(key)}:${encoded}`);
   }
+  memory.byKey = nextByKey;
   parts.push("}");
   return { parts, chatsRead };
 }

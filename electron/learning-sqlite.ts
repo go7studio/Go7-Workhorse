@@ -4,14 +4,18 @@ import { DatabaseSync } from "node:sqlite";
 import { learningDatabasePath } from "../src/lib/learning-paths";
 import {
   ABANDONED_INPUT,
+  AGENT_INTELLIGENCE_LANE,
+  boundedCompilerMemories,
   capRetrieved,
   DEFAULT_ITEM_CAP,
   DEFAULT_TOKEN_CAP,
+  HUMAN_INTELLIGENCE_LANE,
   lexicalScore,
   matchesForgetTarget,
+  MISMATCH_INTELLIGENCE_LANE,
   rankMemories,
 } from "../src/lib/learning-policy";
-import { LEARNING_SCHEMA_VERSION, type CompilerRun, type EventFilter, type ForgetTarget, type IntelligenceLane, type LearningEvent, type LearningExportPayload, type LearningProbeResult, type MemoryFilter, type MemoryItem, type PurgeResult, type RankedMemory, type RetrievalAudit, type RetrievalQuery } from "../src/lib/learning-types";
+import { LEARNING_SCHEMA_VERSION, type CompilerRun, type EventFilter, type ForgetTarget, type IntelligenceLane, type LearningEvent, type LearningExportPayload, type LearningIndexStats, type LearningProbeResult, type MemoryFilter, type MemoryItem, type PurgeResult, type RankedMemory, type RetrievalAudit, type RetrievalQuery } from "../src/lib/learning-types";
 import { boundedReplace, expandDependentMemoryIds, removeSidecars, type MemoryStore } from "../src/lib/learning-store";
 
 const BUSY_MS = 5_000;
@@ -19,6 +23,54 @@ const BUSY_MS = 5_000;
 /** Equality on status so the planner can use idx_runs_lane_status_started. */
 export const COMPLETED_SETTLED_LOOKUP_SQL =
   "SELECT *, rowid AS settled_rowid FROM compiler_runs WHERE intelligence_lane = ? AND status = 'completed' ORDER BY started_at DESC LIMIT 1";
+
+/** Same order `boundedCompilerMemories` sorts a durable or proposed group, then rowid. */
+const COMPILER_MEMORY_RECENT =
+  "(CASE WHEN last_confirmed_at IS NOT NULL AND last_confirmed_at != 0 THEN last_confirmed_at ELSE created_at END)";
+
+export const COMPILER_MEMORY_SQL =
+  `SELECT * FROM memory_items WHERE intelligence_lane = ? AND status = ? AND IFNULL(deleted_at, 0) = 0 ORDER BY ${COMPILER_MEMORY_RECENT} DESC, rowid ASC`;
+
+/**
+ * Lane and status through the existing memory index, oldest row first.
+ * `INDEXED BY` keeps the compiler-order index from changing which pair is first.
+ */
+export const PAIR_LANE_STATUS_SQL =
+  "SELECT * FROM memory_items INDEXED BY idx_memory_lane_status WHERE intelligence_lane = ? AND status = ? AND IFNULL(deleted_at, 0) = 0 ORDER BY rowid ASC";
+
+export const RUN_MENTIONS_MEMORY_SQL =
+  "SELECT 1 AS hit FROM compiler_runs WHERE intelligence_lane = ? AND status = 'completed' AND instr(input_memory_ids, ?) > 0 LIMIT 1";
+
+export const RUN_ABANDONED_MENTIONS_SQL =
+  "SELECT 1 AS hit FROM compiler_runs WHERE intelligence_lane = ? AND status = 'failed' AND error_class = ? AND instr(input_memory_ids, ?) > 0 LIMIT 1";
+
+export const PANE_EVENT_COUNT_SQL =
+  "SELECT COUNT(*) AS n, MAX(created_at) AS latest FROM learning_events WHERE actor_class = ? AND tombstone = 0 AND purged = 0";
+
+export const PANE_MEMORY_COUNT_SQL =
+  "SELECT COUNT(*) AS n FROM memory_items WHERE intelligence_lane = ? AND status = ? AND IFNULL(deleted_at, 0) = 0";
+
+export const PANE_RUN_COUNT_SQL =
+  "SELECT COUNT(*) AS n, MAX(IFNULL(ended_at, 0)) AS latest FROM compiler_runs WHERE intelligence_lane = ? AND status = 'completed'";
+
+export const PANE_LAST_COMPLETED_SQL =
+  "SELECT event_watermark FROM compiler_runs WHERE intelligence_lane = ? AND status = 'completed' ORDER BY started_at DESC, rowid DESC LIMIT 1";
+
+export const PANE_COMPILED_COUNT_SQL =
+  `SELECT COUNT(*) AS n FROM learning_events
+   WHERE tombstone = 0 AND purged = 0 AND actor_class = ?
+     AND EXISTS (
+       SELECT 1 FROM learning_events AS mark
+       WHERE mark.id = ? AND mark.tombstone = 0 AND mark.purged = 0 AND mark.actor_class = ?
+     )
+     AND (
+       created_at < (SELECT created_at FROM learning_events WHERE id = ?)
+       OR (created_at = (SELECT created_at FROM learning_events WHERE id = ?) AND id <= ?)
+     )`;
+
+const PAIR_STATUSES = ["active", "approved", "proposed"] as const;
+const VISIBLE_MEMORY_STATUSES = ["active", "approved", "proposed", "superseded"] as const;
+const PANE_ACTORS = ["human", "agent", "system"] as const;
 
 /**
  * The later `started_at` of the two equality lookups. NULL loses to any
@@ -347,6 +399,12 @@ export class SqliteMemoryStore implements MemoryStore {
       if (!columns("compiler_runs").has("input_memory_ids")) {
         db.exec("ALTER TABLE compiler_runs ADD COLUMN input_memory_ids TEXT");
       }
+      if (!columns("memory_items").has("last_confirmed_at")) {
+        db.exec("ALTER TABLE memory_items ADD COLUMN last_confirmed_at INTEGER");
+      }
+      if (!columns("memory_items").has("deleted_at")) {
+        db.exec("ALTER TABLE memory_items ADD COLUMN deleted_at INTEGER");
+      }
       // A desk that has compiled for weeks holds tens of thousands of runs and
       // memories. The attempt budget, the watermark, a lane's memories, and the
       // event scan are read on every quiet tick, so those reads must be index
@@ -355,6 +413,9 @@ export class SqliteMemoryStore implements MemoryStore {
       db.exec("CREATE INDEX IF NOT EXISTS idx_runs_lane_status_started ON compiler_runs (intelligence_lane, status, started_at)");
       db.exec("CREATE INDEX IF NOT EXISTS idx_memory_lane_status ON memory_items (intelligence_lane, status)");
       db.exec("CREATE INDEX IF NOT EXISTS idx_events_actor_time ON learning_events (actor_class, tombstone, purged, created_at, id)");
+      db.exec(
+        `CREATE INDEX IF NOT EXISTS idx_memory_compiler_recent ON memory_items (intelligence_lane, status, ${COMPILER_MEMORY_RECENT} DESC)`,
+      );
       db.prepare("INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('schema_version', ?)").run(String(LEARNING_SCHEMA_VERSION));
       db.exec("COMMIT");
     } catch (error) {
@@ -867,6 +928,144 @@ export class SqliteMemoryStore implements MemoryStore {
 
   listAudits(): RetrievalAudit[] {
     return (this.conn().prepare("SELECT * FROM retrieval_audit").all() as Record<string, unknown>[]).map(rowAudit);
+  }
+
+  /**
+   * The memory block a compile embeds. Read in the order
+   * `boundedCompilerMemories` sorts, and stop once a group's cost passes the
+   * same ceiling, so a lane that only grows is not loaded whole.
+   */
+  compilerMemories(lane: IntelligenceLane, maxMemoryChars: number): MemoryItem[] {
+    return boundedCompilerMemories(
+      [
+        ...this.readCompilerStatus(lane, "active", maxMemoryChars),
+        ...this.readCompilerStatus(lane, "approved", maxMemoryChars),
+        ...this.readCompilerStatus(lane, "proposed", maxMemoryChars),
+      ],
+      maxMemoryChars,
+    );
+  }
+
+  private readCompilerStatus(lane: IntelligenceLane, status: string, maxMemoryChars: number): MemoryItem[] {
+    const kept: MemoryItem[] = [];
+    let used = 0;
+    for (const raw of this.conn().prepare(COMPILER_MEMORY_SQL).iterate(lane, status) as Iterable<Record<string, unknown>>) {
+      const item = rowMemory(raw);
+      const cost = (item.statement ?? "").length + (item.id ?? "").length + 64;
+      if (kept.length > 0 && used + cost > maxMemoryChars) break;
+      kept.push(item);
+      used += cost;
+    }
+    return kept;
+  }
+
+  /**
+   * One human record and one agent record that still share a project and a
+   * correlation and are not both already settled. Status seeks use
+   * `idx_memory_lane_status`. Whether an id was settled uses
+   * `idx_runs_lane_status_started`. The walk stops at the first such pair.
+   */
+  unreconciledPair(): MemoryItem[] {
+    const db = this.conn();
+    for (const status of PAIR_STATUSES) {
+      for (const raw of db.prepare(PAIR_LANE_STATUS_SQL).iterate(HUMAN_INTELLIGENCE_LANE, status) as Iterable<Record<string, unknown>>) {
+        const human = rowMemory(raw);
+        if (!human.projectId) continue;
+        const agent = this.firstUnreconciledAgent(human);
+        if (agent) return [human, agent];
+      }
+    }
+    return [];
+  }
+
+  private firstUnreconciledAgent(human: MemoryItem): MemoryItem | undefined {
+    const db = this.conn();
+    for (const status of PAIR_STATUSES) {
+      for (const raw of db.prepare(PAIR_LANE_STATUS_SQL).iterate(AGENT_INTELLIGENCE_LANE, status) as Iterable<Record<string, unknown>>) {
+        const agent = rowMemory(raw);
+        if (agent.projectId !== human.projectId) continue;
+        if (!(human.correlationIds ?? []).some((id) => agent.correlationIds?.includes(id))) continue;
+        if (this.bothReconciled(human.id, agent.id)) continue;
+        return agent;
+      }
+    }
+    return undefined;
+  }
+
+  private bothReconciled(humanId: string, agentId: string): boolean {
+    return this.idReconciled(humanId) && this.idReconciled(agentId);
+  }
+
+  private idReconciled(id: string): boolean {
+    const needle = `"${id}"`;
+    const db = this.conn();
+    if (db.prepare(RUN_MENTIONS_MEMORY_SQL).get(MISMATCH_INTELLIGENCE_LANE, needle)) return true;
+    return Boolean(db.prepare(RUN_ABANDONED_MENTIONS_SQL).get(MISMATCH_INTELLIGENCE_LANE, ABANDONED_INPUT, needle));
+  }
+
+  /** Counts for the Learning pane. Aggregates only: the tables are not loaded. */
+  paneStats(): LearningIndexStats {
+    const db = this.conn();
+    const eventCount = db.prepare(PANE_EVENT_COUNT_SQL);
+    let indexedEvents = 0;
+    let indexedHumanEvents = 0;
+    let indexedAgentEvents = 0;
+    let latestEventAt: number | undefined;
+    for (const actor of PANE_ACTORS) {
+      const row = eventCount.get(actor) as { n?: number | bigint; latest?: number | null };
+      const count = Number(row?.n ?? 0);
+      indexedEvents += count;
+      if (actor === "human") indexedHumanEvents = count;
+      if (actor === "agent") indexedAgentEvents = count;
+      if (typeof row?.latest === "number" && (latestEventAt === undefined || row.latest > latestEventAt)) {
+        latestEventAt = row.latest;
+      }
+    }
+    const memoryCount = db.prepare(PANE_MEMORY_COUNT_SQL);
+    const memoriesIn = (lane: IntelligenceLane) => {
+      let count = 0;
+      for (const status of VISIBLE_MEMORY_STATUSES) {
+        count += Number((memoryCount.get(lane, status) as { n?: number | bigint } | undefined)?.n ?? 0);
+      }
+      return count;
+    };
+    const runCount = db.prepare(PANE_RUN_COUNT_SQL);
+    let completedRuns = 0;
+    let latestCompileAt = 0;
+    for (const lane of [HUMAN_INTELLIGENCE_LANE, AGENT_INTELLIGENCE_LANE, MISMATCH_INTELLIGENCE_LANE]) {
+      const row = runCount.get(lane) as { n?: number | bigint; latest?: number | null };
+      completedRuns += Number(row?.n ?? 0);
+      if (typeof row?.latest === "number" && row.latest > latestCompileAt) latestCompileAt = row.latest;
+    }
+    return {
+      indexedEvents,
+      indexedHumanEvents,
+      indexedAgentEvents,
+      compiledEvents: this.compiledCount(HUMAN_INTELLIGENCE_LANE, "human"),
+      compiledAgentEvents: this.compiledCount(AGENT_INTELLIGENCE_LANE, "agent"),
+      memories: memoriesIn(HUMAN_INTELLIGENCE_LANE),
+      agentMemories: memoriesIn(AGENT_INTELLIGENCE_LANE),
+      mismatchMemories: memoriesIn(MISMATCH_INTELLIGENCE_LANE),
+      completedRuns,
+      latestEventAt: indexedEvents > 0 ? latestEventAt : undefined,
+      latestCompileAt: latestCompileAt > 0 ? latestCompileAt : undefined,
+    };
+  }
+
+  private compiledCount(lane: IntelligenceLane, actor: "human" | "agent"): number {
+    const db = this.conn();
+    const last = db.prepare(PANE_LAST_COMPLETED_SQL).get(lane) as { event_watermark?: unknown } | undefined;
+    const watermark = typeof last?.event_watermark === "string" ? last.event_watermark : "";
+    if (!watermark) return 0;
+    const row = db.prepare(PANE_COMPILED_COUNT_SQL).get(
+      actor,
+      watermark,
+      actor,
+      watermark,
+      watermark,
+      watermark,
+    ) as { n?: number | bigint } | undefined;
+    return Number(row?.n ?? 0);
   }
 
   exportAll(): LearningExportPayload {

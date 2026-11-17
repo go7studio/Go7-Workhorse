@@ -1,13 +1,17 @@
 import { uid } from "./id";
 import { learningSidecarPaths } from "./learning-paths";
 import {
+  ABANDONED_INPUT,
+  AGENT_INTELLIGENCE_LANE,
+  boundedCompilerMemories,
   capRetrieved,
   DEFAULT_ITEM_CAP,
   DEFAULT_TOKEN_CAP,
+  HUMAN_INTELLIGENCE_LANE,
   matchesForgetTarget,
+  MISMATCH_INTELLIGENCE_LANE,
   rankMemories,
 } from "./learning-policy";
-import { ABANDONED_INPUT } from "./learning-policy";
 import { boundStatement } from "./learning-redact";
 import type {
   CompilerRun,
@@ -16,6 +20,7 @@ import type {
   ForgetTarget,
   LearningEvent,
   LearningExportPayload,
+  LearningIndexStats,
   LearningProbeResult,
   MemoryFilter,
   MemoryItem,
@@ -118,6 +123,12 @@ export interface MemoryStore {
   lastSettledRun(lane: IntelligenceLane): CompilerRun | undefined;
   /** Every run that settled a batch in one lane, oldest first. */
   listSettledRuns(lane: IntelligenceLane): CompilerRun[];
+  /** Memories a compile embeds, stopped at the same ceiling `boundedCompilerMemories` uses. */
+  compilerMemories(lane: IntelligenceLane, maxMemoryChars: number): MemoryItem[];
+  /** One unsettled human/agent pair, or none. Does not delete rows. */
+  unreconciledPair(): MemoryItem[];
+  /** Learning pane counts. */
+  paneStats(): LearningIndexStats;
   unfinishedCompilerRun(): CompilerRun | undefined;
   putRetrievalAudit(audit: RetrievalAudit): void;
   listAudits(): RetrievalAudit[];
@@ -363,6 +374,86 @@ export class InMemoryStore implements MemoryStore {
 
   unfinishedCompilerRun(): CompilerRun | undefined {
     return this.listCompilerRuns().find((run) => run.status === "running" || run.status === "interrupted" || run.status === "pending");
+  }
+
+  compilerMemories(lane: IntelligenceLane, maxMemoryChars: number): MemoryItem[] {
+    return boundedCompilerMemories(
+      this.listMemories({
+        intelligenceLane: lane,
+        statuses: ["active", "approved", "proposed"],
+      }),
+      maxMemoryChars,
+    );
+  }
+
+  unreconciledPair(): MemoryItem[] {
+    const statuses = ["active", "approved", "proposed"] as const;
+    const rows = [...this.state.memories.values()];
+    const laneStatus = (lane: IntelligenceLane, status: (typeof statuses)[number]) =>
+      rows.filter((item) => item.intelligenceLane === lane && item.status === status && !item.deletedAt);
+    const reconciled = new Set<string>();
+    for (const run of this.state.runs.values()) {
+      if (run.intelligenceLane !== MISMATCH_INTELLIGENCE_LANE) continue;
+      const settled = run.status === "completed" || (run.status === "failed" && run.errorClass === ABANDONED_INPUT);
+      if (!settled) continue;
+      for (const id of run.inputMemoryIds ?? []) reconciled.add(id);
+    }
+    for (const status of statuses) {
+      for (const human of laneStatus(HUMAN_INTELLIGENCE_LANE, status)) {
+        if (!human.projectId) continue;
+        for (const agentStatus of statuses) {
+          for (const agent of laneStatus(AGENT_INTELLIGENCE_LANE, agentStatus)) {
+            if (human.projectId !== agent.projectId) continue;
+            if (!(human.correlationIds ?? []).some((id) => agent.correlationIds?.includes(id))) continue;
+            if (reconciled.has(human.id) && reconciled.has(agent.id)) continue;
+            return [this.copyMemory(human), this.copyMemory(agent)];
+          }
+        }
+      }
+    }
+    return [];
+  }
+
+  private copyMemory(item: MemoryItem): MemoryItem {
+    return {
+      ...item,
+      sourceEventIds: [...item.sourceEventIds],
+      sourceMemoryIds: item.sourceMemoryIds ? [...item.sourceMemoryIds] : undefined,
+      correlationIds: item.correlationIds ? [...item.correlationIds] : undefined,
+    };
+  }
+
+  paneStats(): LearningIndexStats {
+    const events = this.listEvents();
+    const humanEvents = events.filter((event) => event.actorClass === "human");
+    const agentEvents = events.filter((event) => event.actorClass === "agent");
+    const memories = this.listMemories({ includeDeleted: false, intelligenceLane: HUMAN_INTELLIGENCE_LANE });
+    const agentMemories = this.listMemories({ includeDeleted: false, intelligenceLane: AGENT_INTELLIGENCE_LANE });
+    const mismatchMemories = this.listMemories({ includeDeleted: false, intelligenceLane: MISMATCH_INTELLIGENCE_LANE });
+    const completedRuns = this.listCompilerRuns().filter(
+      (run) => run.status === "completed" && run.intelligenceLane !== "legacy-unclassified",
+    );
+    const lastHuman = completedRuns.filter((run) => run.intelligenceLane === HUMAN_INTELLIGENCE_LANE).at(-1);
+    const lastAgent = completedRuns.filter((run) => run.intelligenceLane === AGENT_INTELLIGENCE_LANE).at(-1);
+    const humanWatermarkIndex = lastHuman?.eventWatermark
+      ? humanEvents.findIndex((event) => event.id === lastHuman.eventWatermark)
+      : -1;
+    const agentWatermarkIndex = lastAgent?.eventWatermark
+      ? agentEvents.findIndex((event) => event.id === lastAgent.eventWatermark)
+      : -1;
+    return {
+      indexedEvents: events.length,
+      indexedHumanEvents: humanEvents.length,
+      indexedAgentEvents: agentEvents.length,
+      compiledEvents: humanWatermarkIndex + 1,
+      compiledAgentEvents: agentWatermarkIndex + 1,
+      memories: memories.length,
+      agentMemories: agentMemories.length,
+      mismatchMemories: mismatchMemories.length,
+      completedRuns: completedRuns.length,
+      latestEventAt: events.at(-1)?.createdAt,
+      latestCompileAt: completedRuns.map((run) => run.endedAt ?? 0).reduce((latest, at) => Math.max(latest, at), 0) || undefined,
+    };
   }
 
   putRetrievalAudit(audit: RetrievalAudit): void {

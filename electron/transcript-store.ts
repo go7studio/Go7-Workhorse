@@ -216,6 +216,14 @@ const verifiedSidecars = new Map<string, string>();
  * A new array — another thought or tool — is checked again.
  */
 const settledLiveTails = new WeakSet<object>();
+/**
+ * Message ids already spilled for a sidecar path.
+ *
+ * The weak set above only recognises the same array. The next save hands a
+ * new array with the same tail. When that tail is still inside the inline cap
+ * and does not contain these ids, the sidecar is not read.
+ */
+const liveSpilledIds = new Map<string, Set<string>>();
 
 function sidecarShape(sidecar: TranscriptSidecar): string {
   return `${sidecar.total}:${sidecar.rows.length}`;
@@ -362,6 +370,38 @@ function commitOffload(
  * back short all return the session still holding every inline row. Prose
  * stays. The message list is never cleared.
  */
+function offloadableCount(messages: readonly ChatMessage[]): number {
+  let count = 0;
+  for (const message of messages) {
+    if (isOffloadableMessage(message)) count += 1;
+  }
+  return count;
+}
+
+/** Null when an id-less row means a later tail cannot be cleared without reading. */
+function spilledIdSet(rows: TranscriptSidecar["rows"]): Set<string> | null {
+  const ids = new Set<string>();
+  for (const entry of rows) {
+    const id = entry.message?.id;
+    if (typeof id !== "string" || !id) return null;
+    ids.add(id);
+  }
+  return ids;
+}
+
+function rememberSpilled(file: string, rows: TranscriptSidecar["rows"]) {
+  const ids = spilledIdSet(rows);
+  if (ids) liveSpilledIds.set(file, ids);
+}
+
+function holdsSpilledId(messages: readonly ChatMessage[], ids: ReadonlySet<string>): boolean {
+  for (const message of messages) {
+    const id = message?.id;
+    if (typeof id === "string" && ids.has(id)) return true;
+  }
+  return false;
+}
+
 function offloadLiveOverflow(
   session: unknown,
   row: Record<string, unknown>,
@@ -373,6 +413,15 @@ function offloadLiveOverflow(
   if (settledLiveTails.has(messages)) return session;
   let source: ChatMessage[] = messages;
   const existing = typeof row.transcriptSidecar === "string" ? row.transcriptSidecar.trim() : "";
+  const known = existing ? liveSpilledIds.get(existing) : undefined;
+  if (
+    known &&
+    offloadableCount(messages) <= TRANSCRIPT_INLINE_STEP_LIMIT &&
+    !holdsSpilledId(messages, known)
+  ) {
+    settledLiveTails.add(messages);
+    return session;
+  }
   if (existing) {
     const held = readTranscriptSidecar(existing, io);
     if (!held || held.sessionId !== sessionId) return session;
@@ -395,6 +444,7 @@ function offloadLiveOverflow(
         if (isOffloadableMessage(message)) inlineOffloadable += 1;
       }
       if (inlineOffloadable <= TRANSCRIPT_INLINE_STEP_LIMIT) {
+        rememberSpilled(existing, held.rows);
         settledLiveTails.add(messages);
         return session;
       }
@@ -422,7 +472,9 @@ function offloadLiveOverflow(
     if (spill.has(index)) rows.push({ index, message });
     else inline.push(message);
   });
-  return commitOffload(session, row, source, inline, rows, sessionId, userData, io);
+  const saved = commitOffload(session, row, source, inline, rows, sessionId, userData, io);
+  if (saved !== session) rememberSpilled(transcriptSidecarPath(userData, sessionId), rows);
+  return saved;
 }
 
 /**

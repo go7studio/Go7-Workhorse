@@ -3,7 +3,7 @@ import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import type { Annotation, AnnotationCamera, ViewerAsset } from "../lib/viewer";
-import { buildAnnotation, formatMarksForChat, nextAnnotationMark, viewerRenderUrl, viewerResourceUrl } from "../lib/viewer";
+import { buildAnnotation, formatMarksForChat, nextAnnotationMark, previewFileName, viewerRenderUrl, viewerResourceUrl } from "../lib/viewer";
 import { uid } from "../lib/id";
 
 type ViewerMode = "3d" | "2d";
@@ -560,7 +560,7 @@ export function ViewerPanel({
       <div className="viewer-panel-head">
         <strong>Preview</strong>
         <span className="row-meta">
-          {asset ? asset.path.split("/").pop() : "No file"}
+          {asset ? previewFileName(asset.path) : "No file"}
         </span>
         <div className="viewer-panel-actions">
           <button className="tiny" type="button" onClick={onOpenFile}>
@@ -588,7 +588,7 @@ export function ViewerPanel({
           />
         ) : (
           <div className="viewer-empty">
-            <p>{asset ? asset.path.split("/").pop() : "No file open."}</p>
+            <p>{asset ? previewFileName(asset.path) : "No file open."}</p>
             <p className="row-meta">
               {asset
                 ? "This preview draws GLB, glTF, PNG, and JPG. The path can still go to the chat, and the model picks the tool."

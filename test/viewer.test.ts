@@ -11,6 +11,7 @@ import {
   formatAnnotationForModel,
   formatMarksForChat,
   previewAsset,
+  previewFileName,
   previewFormat,
   viewerResourceUrl,
   viewerRenderUrl,
@@ -19,6 +20,11 @@ import {
   gltfToBlender,
   type Annotation,
 } from "../src/lib/viewer";
+
+test("a Windows preview path shows the file name", () => {
+  assert.equal(previewFileName("C:\\Users\\steve\\model.glb"), "model.glb");
+  assert.equal(previewFileName("/Users/steve/model.glb"), "model.glb");
+});
 
 describe("viewer annotation schema", () => {
   test("buildAnnotation creates valid annotation", () => {

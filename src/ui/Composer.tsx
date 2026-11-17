@@ -1,5 +1,6 @@
 import { memo, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { commandNeedsInput, commandsForSession, filterPalette } from "../lib/commands";
+import { applyPaste } from "../lib/edit-menu";
 import {
   collectDroppedFiles,
   dataTransferLooksLikeFiles,
@@ -953,7 +954,20 @@ export const Composer = memo(function Composer({
           onPaste={(event) => {
             const files = filesFromClipboard(event.clipboardData);
             if (files.length === 0) return;
+            const text = event.clipboardData?.getData("text/plain") ?? "";
             event.preventDefault();
+            if (text) {
+              const el = event.currentTarget;
+              const start = el.selectionStart ?? valueRef.current.length;
+              const end = el.selectionEnd ?? start;
+              const next = applyPaste(
+                { value: valueRef.current, selectionStart: start, selectionEnd: end },
+                text,
+              );
+              valueRef.current = next.value;
+              setValue(next.value);
+              window.requestAnimationFrame(() => el.setSelectionRange(next.caret, next.caret));
+            }
             void addFiles(files);
           }}
           onMouseUp={noteVoiceCaret}

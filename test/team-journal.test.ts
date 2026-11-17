@@ -21,6 +21,7 @@ import {
   sanitizeTeamEvent,
   startTeam,
   syncTeamProject,
+  sharedCeilingUsd,
   teamCeilingStop,
   teamProjectTotal,
   whoIsInChat,
@@ -470,6 +471,10 @@ test("project usage sums across seats, is partial while a desk is off, and the c
   assert.deepEqual(capped.ceiling, { usd: 5 });
   assert.match(teamCeilingStop(total, capped.ceiling) ?? "", /over its shared ceiling/);
   assert.equal(teamCeilingStop({ tokens: 0, costUsd: 4.99 }, capped.ceiling), null);
+  assert.equal(sharedCeilingUsd("12.5"), 12.5);
+  assert.equal(sharedCeilingUsd(""), null);
+  assert.equal(sharedCeilingUsd("nope"), null);
+  assert.equal(sharedCeilingUsd("0"), null);
 
   // A send already in progress on Ana's desk finishes: nothing the journal brings stops or rewrites it.
   ana.sessions = ana.sessions.map((item) =>

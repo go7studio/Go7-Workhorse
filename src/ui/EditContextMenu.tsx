@@ -8,7 +8,10 @@ import {
   canPaste,
   canSelectAll,
   clampMenuPosition,
+  clipboardInsert,
   EDIT_MENU_ITEMS,
+  editMenuIsMac,
+  editMenuShortcut,
   isTextEditElement,
   readClipboardText,
   selectedText,
@@ -99,7 +102,7 @@ export function EditContextMenu() {
         await navigator.clipboard?.writeText(selectedText(live)).catch(() => undefined);
       } else if (action === "paste" && canPaste(live)) {
         const read = navigator.clipboard ? () => navigator.clipboard.readText() : undefined;
-        const text = await readClipboardText(read);
+        const text = clipboardInsert(await readClipboardText(read));
         if (text !== null) {
           const next = applyPaste(live, text);
           writeField(field, next.value, next.caret);
@@ -188,7 +191,7 @@ export function EditContextMenu() {
             onClick={() => void run(item.id, menu)}
           >
             <span>{item.label}</span>
-            <kbd>{item.shortcut}</kbd>
+            <kbd>{editMenuShortcut(item.id, editMenuIsMac(navigator.platform))}</kbd>
           </button>
       ))}
     </div>

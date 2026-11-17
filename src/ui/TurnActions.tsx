@@ -53,7 +53,7 @@ function ActionGlyph({ id, done }: { id: string; done: boolean }) {
 export function TurnActions({
   actions,
 }: {
-  actions: { id: string; label: string; run: () => void | Promise<void> }[];
+  actions: { id: string; label: string; run: () => void | boolean | Promise<void | boolean> }[];
 }) {
   const [done, setDone] = useState<string | null>(null);
   if (actions.length === 0) return null;
@@ -70,7 +70,8 @@ export function TurnActions({
             title={copied ? "Copied" : action.label}
             aria-label={copied ? "Copied" : action.label}
             onClick={() => {
-              void Promise.resolve(action.run()).then(() => {
+              void Promise.resolve(action.run()).then((result) => {
+                if (result === false) return;
                 setDone(action.id);
                 window.setTimeout(() => setDone((current) => (current === action.id ? null : current)), 1200);
               });

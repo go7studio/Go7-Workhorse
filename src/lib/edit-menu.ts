@@ -8,12 +8,22 @@ export type EditFieldState = {
 
 export type EditMenuAction = "cut" | "copy" | "paste" | "selectAll";
 
-export const EDIT_MENU_ITEMS: { id: EditMenuAction; label: string; shortcut: string }[] = [
-  { id: "copy", label: "Copy", shortcut: "Ctrl+C" },
-  { id: "cut", label: "Cut", shortcut: "Ctrl+X" },
-  { id: "paste", label: "Paste", shortcut: "Ctrl+V" },
-  { id: "selectAll", label: "Select All", shortcut: "Ctrl+A" },
+export const EDIT_MENU_ITEMS: { id: EditMenuAction; label: string }[] = [
+  { id: "copy", label: "Copy" },
+  { id: "cut", label: "Cut" },
+  { id: "paste", label: "Paste" },
+  { id: "selectAll", label: "Select All" },
 ];
+
+/** The menu shows the keys this computer actually uses. Ctrl+C is not Copy on a Mac. */
+export function editMenuShortcut(id: EditMenuAction, mac: boolean): string {
+  const key = id === "copy" ? "C" : id === "cut" ? "X" : id === "paste" ? "V" : "A";
+  return mac ? `⌘${key}` : `Ctrl+${key}`;
+}
+
+export function editMenuIsMac(platform: string): boolean {
+  return /Mac|iPhone|iPad/.test(platform);
+}
 
 export function selectedText(field: Pick<EditFieldState, "value" | "selectionStart" | "selectionEnd">): string {
   const start = Math.max(0, Math.min(field.selectionStart, field.selectionEnd));
@@ -60,6 +70,12 @@ export async function readClipboardText(read: (() => Promise<string>) | undefine
   } catch {
     return null;
   }
+}
+
+/** Null or an empty read leaves the selection alone. */
+export function clipboardInsert(text: string | null): string | null {
+  if (text == null || text.length === 0) return null;
+  return text;
 }
 
 export function applyPaste(field: EditFieldState, text: string): { value: string; caret: number } {

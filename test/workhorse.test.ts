@@ -198,7 +198,9 @@ import {
   canPaste,
   canSelectAll,
   clampMenuPosition,
+  clipboardInsert,
   EDIT_MENU_ITEMS,
+  editMenuShortcut,
   readClipboardText,
   selectedText,
 } from "../src/lib/edit-menu";
@@ -1009,6 +1011,8 @@ test("dropped images become ACP image blocks and stay on the user turn", () => {
   const mic = readFileSync(path.join(ROOT, "electron", "mic-host.ts"), "utf8");
   assert.match(composer, /collectDroppedFiles/);
   assert.match(composer, /filesFromClipboard/);
+  assert.match(composer, /getData\("text\/plain"\)/);
+  assert.match(composer, /applyPaste/);
   assert.match(composer, /readChatAttachment/);
   assert.match(composer, /collectDroppedFiles/);
   assert.match(composer, /composerFieldPlaceholder/);
@@ -10789,6 +10793,11 @@ test("composer edit menu matches Codex cut copy paste select all", async () => {
   assert.deepEqual(applySelectAll(selected), { start: 0, end: 11 });
   assert.equal(canCut({ ...selected, readOnly: true }), false);
   assert.equal(canPaste({ ...selected, disabled: true }), false);
+  assert.equal(editMenuShortcut("copy", true), "⌘C");
+  assert.equal(editMenuShortcut("paste", false), "Ctrl+V");
+  assert.equal(clipboardInsert(null), null);
+  assert.equal(clipboardInsert(""), null);
+  assert.equal(clipboardInsert("kept"), "kept");
   assert.equal(await readClipboardText(undefined), null);
   assert.equal(await readClipboardText(async () => "from the clipboard"), "from the clipboard");
   assert.equal(await readClipboardText(async () => ""), "");

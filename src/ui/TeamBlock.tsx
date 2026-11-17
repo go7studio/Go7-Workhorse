@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { copyText } from "../lib/copy-text";
 import { useStore, useStoreSelector, type Store } from "../lib/store";
-import { whoIsInChat } from "../lib/team";
+import { sharedCeilingUsd, whoIsInChat } from "../lib/team";
 import type { Project } from "../lib/types";
 
 const selectTeam = (store: Store) => store.team;
@@ -165,8 +165,12 @@ export function TeamBlock({ project }: { project: Project }) {
           className="tiny"
           type="button"
           onClick={() => {
-            const usd = Number(ceiling);
-            void team.setCeiling(project.id, Number.isFinite(usd) && usd > 0 ? usd : null).then(say);
+            const usd = sharedCeilingUsd(ceiling);
+            if (usd == null) {
+              setNote("Enter a dollar amount.");
+              return;
+            }
+            void team.setCeiling(project.id, usd).then(say);
           }}
         >
           Set ceiling

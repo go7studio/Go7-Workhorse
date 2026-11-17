@@ -1063,6 +1063,13 @@ export function teamProjectTotal(input: {
   };
 }
 
+/** A Set ceiling click. Empty or invalid does not clear the ceiling. */
+export function sharedCeilingUsd(raw: string): number | null {
+  const usd = Number(raw.trim());
+  if (!Number.isFinite(usd) || usd <= 0) return null;
+  return usd;
+}
+
 /** Why the next send must stop, or null. Checked only when a send starts, so one in progress finishes. */
 export function teamCeilingStop(total: Pick<TeamTotal, "tokens" | "costUsd">, ceiling: TeamCeiling | null): string | null {
   if (!ceiling) return null;

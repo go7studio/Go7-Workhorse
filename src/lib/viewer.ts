@@ -11,8 +11,14 @@ function previewPath(projectRoot: string, ...parts: string[]): string {
   return [root, ...parts].join("/");
 }
 
-function fileExtension(filePath: string): string {
+/** The file name, including a Windows path. */
+export function previewFileName(filePath: string): string {
   const base = filePath.replace(/\\/g, "/").split("/").pop() ?? "";
+  return base || filePath;
+}
+
+function fileExtension(filePath: string): string {
+  const base = previewFileName(filePath);
   const dot = base.lastIndexOf(".");
   return dot <= 0 ? "" : base.slice(dot).toLowerCase();
 }

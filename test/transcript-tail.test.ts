@@ -288,6 +288,57 @@ test("a stripped tail stays inline when the saved sidecar cannot be read", () =>
   }
 });
 
+test("a new inline array does not read the sidecar while the tail stays inside the cap", () => {
+  const dir = scratch("transcript-skip-read");
+  try {
+    assert.equal(TRANSCRIPT_INLINE_STEP_LIMIT, 240);
+    const thoughts = Array.from({ length: 250 }, (_, index) => thought(`t${index}`));
+    const messages: ChatMessage[] = [
+      { id: "u", role: "user", text: "the brief stays", createdAt: 1 },
+      ...thoughts,
+      { id: "a", role: "assistant", text: "the answer stays", createdAt: 4 },
+    ];
+    const offloaded = offloadSessionTranscript(visibleChat("sess_skip_read", messages), dir) as {
+      messages: ChatMessage[];
+      transcriptSidecar: string;
+    };
+    assert.equal(offloaded.messages.filter((message) => message.kind === "thought").length, 240);
+    assert.ok(offloaded.messages.some((message) => message.id === "u"));
+    assert.ok(offloaded.messages.some((message) => message.text === "the answer stays"));
+    const sidecar = offloaded.transcriptSidecar;
+    let reads = 0;
+    const original = fs.readFileSync;
+    fs.readFileSync = ((file: fs.PathOrFileDescriptor, options?: unknown) => {
+      if (String(file) === sidecar) reads += 1;
+      return original(file, options as never);
+    }) as typeof fs.readFileSync;
+    try {
+      const copy = { ...offloaded, messages: offloaded.messages.map((message) => message) };
+      const again = offloadSessionTranscript(copy, dir);
+      assert.equal(again, copy);
+      assert.equal(reads, 0, "the sidecar is not read when the tail is inside the cap and holds none of the spilled ids");
+      assert.ok(copy.messages.some((message) => message.text === "the brief stays"));
+      assert.ok(copy.messages.some((message) => message.text === "the answer stays"));
+      assert.equal(copy.messages.filter((message) => message.kind === "thought").length, 240);
+
+      const swapped = offloaded.messages.map((message) =>
+        message.kind === "thought" && message.id === offloaded.messages.find((row) => row.kind === "thought")?.id
+          ? { ...message, id: "t0" }
+          : message,
+      );
+      reads = 0;
+      const brought = offloadSessionTranscript({ ...offloaded, messages: swapped }, dir) as { messages: ChatMessage[] };
+      assert.ok(reads > 0, "a tail that holds a spilled id still reads the sidecar");
+      assert.ok(brought.messages.some((message) => message.text === "the brief stays"));
+      assert.ok(brought.messages.some((message) => message.text === "the answer stays"));
+    } finally {
+      fs.readFileSync = original;
+    }
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("opening a chat that still has its tail does not copy spilled rows onto the session", () => {
   assert.equal(transcriptTailStaysInline([{ kind: "thought" }]), true);
   assert.equal(transcriptTailStaysInline([{ kind: "tool" }]), true);

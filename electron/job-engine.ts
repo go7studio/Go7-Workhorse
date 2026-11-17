@@ -54,6 +54,8 @@ export class DurableJobEngine {
   private goals: JobJournal["goals"] = [];
   private emitted = new Set<string>();
   private timer: NodeJS.Timeout | null = null;
+  /** Jobs and goals last written. `updatedAt` is not part of it: nothing reads that field back. */
+  private persistedBody: string | null = null;
 
   constructor(private readonly file: string, private readonly onDue?: (events: DurableJobEvent[]) => void) {
     this.load();
@@ -79,6 +81,7 @@ export class DurableJobEngine {
       if (candidate !== this.file) {
         try { atomicWriteJson(this.file, parsed); } catch { /* backup remains valid */ }
       }
+      this.persistedBody = JSON.stringify(this.journalBody());
       return;
       } catch {
         continue;
@@ -88,11 +91,19 @@ export class DurableJobEngine {
     this.goals = [];
   }
 
+  private journalBody(): Pick<JobJournal, "jobs" | "goals"> {
+    return { jobs: [...this.jobs.values()], goals: this.goals };
+  }
+
   private persist() {
+    const body = this.journalBody();
+    const encoded = JSON.stringify(body);
+    // A tick that did not change a job or a goal used to rewrite the file
+    // anyway, because `updatedAt` is a fresh clock. Nothing reads it back.
+    if (this.persistedBody === encoded && fs.existsSync(this.file)) return;
     const journal: JobJournal = {
       version: 1,
-      jobs: [...this.jobs.values()],
-      goals: this.goals,
+      ...body,
       updatedAt: Date.now(),
     };
     try {
@@ -102,6 +113,7 @@ export class DurableJobEngine {
       /* first write or corrupt primary */
     }
     atomicWriteJson(this.file, journal);
+    this.persistedBody = encoded;
   }
 
   sync(rawSessions: unknown): DurableJobEvent[] {

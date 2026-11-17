@@ -115,11 +115,12 @@ type DeskSession = AppState["sessions"][number];
  * What the renderer sends when the save timer fires.
  *
  * The first save of a run carries every listed chat, so the main process has
- * a complete desk. After that, while any chat is running or waiting, only the
- * chats whose object moved go across. The main process still holds the rest
- * from the previous save; shipping them again is a structured clone of every
- * transcript on that process, and that clone is what froze the window for
- * about 1.4 seconds every ten seconds while several chats streamed.
+ * a complete desk. After that, only the chats whose object moved go across,
+ * whether or not a chat is running. The main process still holds the rest
+ * from the previous save and still offloads transcripts; shipping the idle
+ * chats again is a structured clone of every transcript on that process, and
+ * that clone is what froze the window for about 1.4 seconds every ten seconds
+ * while several chats streamed.
  */
 export function hotSavePayload(input: {
   state: AppState;
@@ -128,8 +129,11 @@ export function hotSavePayload(input: {
   sent: ReadonlyMap<string, DeskSession>;
   busy: boolean;
 }): { body: Record<string, unknown>; sent: Map<string, DeskSession>; hot: boolean } {
+  // The store still says whether a chat is running. A partial list no longer
+  // waits for that: main folds it either way.
+  void input.busy;
   const sent = new Map(input.sessions.map((session) => [session.id, session]));
-  const hot = input.busy && input.sent.size > 0;
+  const hot = input.sent.size > 0;
   const changed = hot ? input.sessions.filter((session) => input.sent.get(session.id) !== session) : input.sessions;
   const body: Record<string, unknown> = {
     ...(input.state as unknown as Record<string, unknown>),

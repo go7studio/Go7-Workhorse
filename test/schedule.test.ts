@@ -61,6 +61,50 @@ test("durable job engine journals, recovers, and chains recurring occurrences", 
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
+test("an unchanged job journal is not rewritten or flushed", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "workhorse-jobs-quiet-"));
+  const file = path.join(dir, "jobs.json");
+  const sessions = [{
+    id: "session-1",
+    goal: { status: "active" as const, objective: "finish the release" },
+    scheduledRuns: [{
+      id: "run-later",
+      prompt: "check later",
+      dueAt: Date.now() + 86_400_000,
+      createdAt: 1,
+      status: "pending" as const,
+    }],
+  }];
+  const engine = new DurableJobEngine(file);
+  engine.sync(sessions);
+  const first = JSON.parse(fs.readFileSync(file, "utf8")) as { updatedAt: number; jobs: unknown[]; goals: unknown[] };
+  let flushes = 0;
+  const original = fs.fsyncSync;
+  fs.fsyncSync = ((fd: number) => {
+    flushes += 1;
+    return original(fd);
+  }) as typeof fs.fsyncSync;
+  try {
+    engine.sync(sessions);
+    engine.dispose();
+  } finally {
+    fs.fsyncSync = original;
+  }
+  const second = JSON.parse(fs.readFileSync(file, "utf8")) as { updatedAt: number; jobs: unknown[]; goals: unknown[] };
+  assert.equal(flushes, 0, "an unchanged journal must not fsync");
+  assert.equal(second.updatedAt, first.updatedAt);
+  assert.deepEqual(second.jobs, first.jobs);
+  assert.deepEqual(second.goals, first.goals);
+
+  const changed = new DurableJobEngine(file);
+  changed.sync([{ ...sessions[0]!, goal: { status: "paused" as const, objective: "finish the release" } }]);
+  const third = JSON.parse(fs.readFileSync(file, "utf8")) as { updatedAt: number; goals: Array<{ status: string }> };
+  assert.notEqual(third.updatedAt, first.updatedAt);
+  assert.equal(third.goals[0]?.status, "paused");
+  changed.dispose();
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
 test("a running scheduled occurrence without a queued prompt is re-queued after restart", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "workhorse-running-job-"));
   const engine = new DurableJobEngine(path.join(dir, "jobs.json"));

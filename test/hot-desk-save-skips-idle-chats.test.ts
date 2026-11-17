@@ -181,6 +181,114 @@ test("a prepared hot save is written without stringifying the desk again", async
   }
 });
 
+test("after the first save a quiet desk sends only the chats that moved", () => {
+  const idle = [chat("a", "idle", "body-a"), chat("b", "idle", "body-b"), chat("c", "idle", "body-c")];
+  const opening = hotSavePayload({
+    state: { sessions: idle } as AppState,
+    sessions: idle as AppState["sessions"],
+    activeSessionId: "a",
+    sent: new Map(),
+    busy: false,
+  });
+  assert.equal(opening.hot, false, "the first save is not skipped");
+  assert.equal(opening.body.sessionOrder, undefined);
+  assert.equal((opening.body.sessions as unknown[]).length, idle.length);
+
+  const movedB = { ...idle[1]!, messages: [...idle[1]!.messages, { id: "b2", role: "assistant", text: "moved-b" }] };
+  const moved = [idle[0]!, movedB, idle[2]!];
+  const quiet = hotSavePayload({
+    state: { sessions: moved } as AppState,
+    sessions: moved as AppState["sessions"],
+    activeSessionId: "b",
+    sent: opening.sent,
+    busy: false,
+  });
+  assert.equal(quiet.hot, true);
+  assert.deepEqual((quiet.body.sessions as Chat[]).map((session) => session.id), ["b"]);
+  assert.equal(JSON.stringify(quiet.body).includes("body-a"), false);
+  assert.equal(JSON.stringify(quiet.body).includes("moved-b"), true);
+  assert.deepEqual(quiet.body.sessionOrder, ["a", "b", "c"]);
+
+  const movedA = { ...idle[0]!, messages: [...idle[0]!.messages, { id: "a2", role: "assistant", text: "moved-a" }] };
+  const both = hotSavePayload({
+    state: { sessions: [movedA, movedB, idle[2]!] } as AppState,
+    sessions: [movedA, movedB, idle[2]!] as AppState["sessions"],
+    activeSessionId: null,
+    sent: opening.sent,
+    busy: false,
+  });
+  assert.deepEqual((both.body.sessions as Chat[]).map((session) => session.id).sort(), ["a", "b"]);
+
+  const added = hotSavePayload({
+    state: { sessions: [...moved, chat("d", "idle", "body-d")] } as AppState,
+    sessions: [...moved, chat("d", "idle", "body-d")] as AppState["sessions"],
+    activeSessionId: "d",
+    sent: quiet.sent,
+    busy: false,
+  });
+  assert.deepEqual((added.body.sessions as Chat[]).map((session) => session.id), ["d"]);
+
+  const resident = mergeDeskSave(null, opening.body).state;
+  const folded = mergeDeskSave(resident, quiet.body);
+  assert.equal(folded.refuse, false);
+  const foldedSessions = folded.state.sessions as Chat[];
+  assert.equal(foldedSessions[0], idle[0]);
+  assert.equal(foldedSessions[1], movedB);
+  assert.equal(foldedSessions.length, 3);
+  const dropped = hotSavePayload({
+    state: { sessions: [idle[0]!, movedB] } as AppState,
+    sessions: [idle[0]!, movedB] as AppState["sessions"],
+    activeSessionId: null,
+    sent: quiet.sent,
+    busy: false,
+  });
+  assert.deepEqual(dropped.body.sessions, []);
+  const withoutC = mergeDeskSave(folded.state, dropped.body);
+  assert.deepEqual((withoutC.state.sessions as Chat[]).map((session) => session.id), ["a", "b"]);
+});
+
+test("an unchanged usage log or settings object is not stringified again", () => {
+  const usage = [{ id: "use-1", tokens: 10, note: "usage-body" }];
+  const settings = { theme: "ink", customBots: [] as unknown[] };
+  const memory = createHotDeskMemory();
+  const hooks: DeskSaveHooks = {
+    protectSecrets: (state) => state,
+    offloadFull: (state) => state,
+    offloadOne: (session) => session,
+  };
+  let usageReads = 0;
+  let settingsReads = 0;
+  const original = JSON.stringify;
+  JSON.stringify = ((value: unknown, replacer?: unknown, space?: unknown) => {
+    if (value === usage) usageReads += 1;
+    if (value === settings) settingsReads += 1;
+    return original(value, replacer as never, space as never);
+  }) as typeof JSON.stringify;
+  try {
+    const live = chat("a", "running", "one");
+    const desk: PersistableState = { usage, settings, sessions: [live] };
+    const first = prepareDeskSaveText(desk, memory, hooks);
+    assert.equal(usageReads, 1);
+    assert.equal(settingsReads, 1);
+    assert.equal(first.parts.join(""), original(first.state));
+    const moved = { ...live, messages: [...live.messages, { id: "tok", role: "assistant", text: "more" }] };
+    const second = prepareDeskSaveText({ usage, settings, sessions: [moved] }, memory, hooks);
+    assert.equal(usageReads, 1, "the same usage object is not stringified again");
+    assert.equal(settingsReads, 1, "the same settings object is not stringified again");
+    assert.equal(second.chatsRead, 1);
+    assert.equal(second.parts.join(""), original(second.state));
+    assert.equal(second.parts.join("").includes("usage-body"), true);
+    const changedUsage = [{ id: "use-1", tokens: 11, note: "usage-next" }];
+    const third = prepareDeskSaveText({ usage: changedUsage, settings, sessions: [moved] }, memory, hooks);
+    assert.equal(settingsReads, 1);
+    assert.equal(third.parts.join("").includes("usage-next"), true);
+    assert.equal(third.parts.join("").includes("usage-body"), false);
+    assert.equal(third.parts.join(""), original(third.state));
+  } finally {
+    JSON.stringify = original;
+  }
+});
+
 test("the store and the main process both use the hot tick", () => {
   const store = fs.readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
   const effect = store.slice(store.indexOf("if (previous && deskPersistBodyEqual(previous, state)) return;"), store.indexOf("}, [ready, state]);"));

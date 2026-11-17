@@ -4,7 +4,6 @@ import {
   ABANDONED_INPUT,
   abandonMarkerFor,
   boundedCompilerBatch,
-  boundedCompilerMemories,
   compileAttemptsSpent,
   compileBackoffMs,
   trimmedCompilerEvent,
@@ -218,38 +217,7 @@ export class LearningService {
 
   indexStats(): LearningIndexStats {
     this.ingestInbound();
-    const events = this.options.store.listEvents();
-    const humanEvents = events.filter((event) => event.actorClass === "human");
-    const agentEvents = events.filter((event) => event.actorClass === "agent");
-    const memories = this.options.store.listMemories({ includeDeleted: false, intelligenceLane: HUMAN_INTELLIGENCE_LANE });
-    const agentMemories = this.options.store.listMemories({ includeDeleted: false, intelligenceLane: AGENT_INTELLIGENCE_LANE });
-    const mismatchMemories = this.options.store.listMemories({ includeDeleted: false, intelligenceLane: MISMATCH_INTELLIGENCE_LANE });
-    const completedRuns = this.options.store
-      .listCompilerRuns()
-      .filter((run) => run.status === "completed" && run.intelligenceLane !== "legacy-unclassified");
-    const humanCompleted = completedRuns.filter((run) => run.intelligenceLane === HUMAN_INTELLIGENCE_LANE);
-    const agentCompleted = completedRuns.filter((run) => run.intelligenceLane === AGENT_INTELLIGENCE_LANE);
-    const lastHuman = humanCompleted.at(-1);
-    const lastAgent = agentCompleted.at(-1);
-    const humanWatermarkIndex = lastHuman?.eventWatermark
-      ? humanEvents.findIndex((event) => event.id === lastHuman.eventWatermark)
-      : -1;
-    const agentWatermarkIndex = lastAgent?.eventWatermark
-      ? agentEvents.findIndex((event) => event.id === lastAgent.eventWatermark)
-      : -1;
-    return {
-      indexedEvents: events.length,
-      indexedHumanEvents: humanEvents.length,
-      indexedAgentEvents: agentEvents.length,
-      compiledEvents: humanWatermarkIndex + 1,
-      compiledAgentEvents: agentWatermarkIndex + 1,
-      memories: memories.length,
-      agentMemories: agentMemories.length,
-      mismatchMemories: mismatchMemories.length,
-      completedRuns: completedRuns.length,
-      latestEventAt: events.at(-1)?.createdAt,
-      latestCompileAt: completedRuns.map((run) => run.endedAt ?? 0).reduce((latest, at) => Math.max(latest, at), 0) || undefined,
-    };
+    return this.options.store.paneStats();
   }
 
   approve(id: string): MemoryItem | undefined {
@@ -393,30 +361,7 @@ export class LearningService {
   }
 
   private mismatchInputs(): MemoryItem[] {
-    const statuses: MemoryItem["status"][] = ["active", "approved", "proposed"];
-    const humans = this.options.store.listMemories({ intelligenceLane: HUMAN_INTELLIGENCE_LANE, statuses });
-    const agents = this.options.store.listMemories({ intelligenceLane: AGENT_INTELLIGENCE_LANE, statuses });
-    // A pair the compiler reconciled, or one the desk gave up on, is not
-    // offered again; otherwise an abandoned pair would recur on every tick.
-    const reconciled = new Set(
-      this.options.store.listSettledRuns(MISMATCH_INTELLIGENCE_LANE).flatMap((run) => run.inputMemoryIds ?? []),
-    );
-    const humanIds = new Set<string>();
-    const agentIds = new Set<string>();
-    for (const human of humans) {
-      for (const agent of agents) {
-        if (!human.projectId || human.projectId !== agent.projectId) continue;
-        if (!(human.correlationIds ?? []).some((id) => agent.correlationIds?.includes(id))) continue;
-        if (reconciled.has(human.id) && reconciled.has(agent.id)) continue;
-        humanIds.add(human.id);
-        agentIds.add(agent.id);
-      }
-    }
-    const byTime = (a: MemoryItem, b: MemoryItem) => a.createdAt - b.createdAt || a.id.localeCompare(b.id);
-    return [
-      ...humans.filter((item) => humanIds.has(item.id)).sort(byTime),
-      ...agents.filter((item) => agentIds.has(item.id)).sort(byTime),
-    ];
+    return this.options.store.unreconciledPair();
   }
 
   async compile(input: { resume?: string } = {}): Promise<CompileResult> {
@@ -443,13 +388,7 @@ export class LearningService {
     const batchSource = quietLeading.length > 0 ? quietLeading : pendingEvents;
     const memories = quietLeading.length > 0
       ? []
-      : boundedCompilerMemories(
-          this.options.store.listMemories({
-            intelligenceLane: lane,
-            statuses: ["active", "approved", "proposed"],
-          }),
-          policy.maxMemoryChars,
-        );
+      : this.options.store.compilerMemories(lane, policy.maxMemoryChars);
     const events = boundedCompilerBatch(batchSource, memories, policy.maxPayloadChars, lane).map((event) =>
       trimmedCompilerEvent(event, policy.maxPayloadChars),
     );

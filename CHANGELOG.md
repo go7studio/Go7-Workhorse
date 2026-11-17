@@ -14,6 +14,10 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 ### Bug Fixes
 
 * bind a spawn to its folder and wait for the current run ([84f3c69](https://github.com/go7studio/Go7-Workhorse/commit/84f3c699a127bed7c6a71739786cdde016f2d386))
+* keep Windows dictation on the local recognizer ([68f58e2](https://github.com/go7studio/Go7-Workhorse/commit/68f58e26db620d0cbdd46e3a204ef97cf28101ab))
+* play a local clip in the chat bubble ([f7d25d1](https://github.com/go7studio/Go7-Workhorse/commit/f7d25d1a9b13e198a05fbee22263937d8facfb66))
+* try the offline Windows recognizer before voice typing ([3909a0a](https://github.com/go7studio/Go7-Workhorse/commit/3909a0a5a932464d3904683eca5f09bf356d8add))
+* type the checker wait row with its run ([0bc2b77](https://github.com/go7studio/Go7-Workhorse/commit/0bc2b7728c58e6203d27e576afa6261cc89578c3))
 
 ## [0.7.13](https://github.com/go7studio/Go7-Workhorse/compare/v0.7.12...v0.7.13) (2026-11-16)
 

@@ -22,7 +22,7 @@ import {
 } from "../electron/mcp-exposure";
 import { WORKHORSE_MCP_INSTRUCTIONS, handleWorkhorseRpc, inlineExclusionTerms, mcpToolInputSchema, setWorkhorseDeskAsk } from "../electron/workhorse-mcp";
 import { LINK_BASE_TOOLS, LINK_TOOLS } from "../src/lib/workhorse-link";
-import { AUDITOR_DESK_TOOLS, WORKER_DESK_TOOLS, isWorkerOmittedTool } from "../src/lib/subagents";
+import { AUDITOR_DESK_TOOLS, WORKER_DESK_TOOLS, isWorkerOmittedTool, spawnChildFolder } from "../src/lib/subagents";
 import {
   cursorMcpConfigPath,
   hermesConfigPath,
@@ -97,7 +97,19 @@ test("a nested helper defaults to its parent worktree and stays local and shared
       params: { name: "workhorse_spawn_agent", arguments: { prompt: "Independently check the result", fromSessionId: "worker" } },
     }) as { error?: { message?: string } };
     assert.equal(result.error, undefined, result.error?.message);
-    assert.equal(seen?.folder, workerTree);
+    // The caller did not name a folder. Posting the admitted path made a
+    // worktree parent look like a request to leave it, so the payload omits
+    // folder and the desk keeps the parent's worktree.
+    assert.equal(seen?.folder, undefined);
+    const inherited = spawnChildFolder({
+      admittedCwd: workerTree,
+      parentEnvironment: { kind: "worktree", path: workerTree, gitRoot: linked, head: "abc" },
+      parentCwd: workerTree,
+      projectFolder: linked,
+      isolation: "shared",
+    });
+    assert.equal(inherited.cwd, workerTree);
+    assert.equal(inherited.environment.kind, "worktree");
     assert.equal(seen?.isolation, "shared");
     // Nested stays a helper for routing bounds. The seat is inherited; the
     // call cannot clamp it read-only.

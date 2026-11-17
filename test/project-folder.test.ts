@@ -90,7 +90,12 @@ test("the store never picks a folder without asking whether it is there", () => 
   // bug returning.
   const store = readFileSync(new URL("../src/lib/store.tsx", import.meta.url), "utf8");
   const picks = [...store.matchAll(/sessionExecutionCwd\(/g)].length;
-  assert.ok(picks >= 4, `expected the execution-cwd sites, found ${picks}`);
+  const callers = [...store.matchAll(/callerExecutionFolder\(/g)].length;
+  // The vendor start and a local spawn child go through callerExecutionFolder,
+  // which asks sessionExecutionCwd when the chat is a worktree. Three direct
+  // calls remain: the Grok fork, a reused non-local worker, and a new worktree.
+  assert.ok(picks >= 3, `expected the execution-cwd sites, found ${picks}`);
+  assert.ok(callers >= 4, `expected the caller-folder sites, found ${callers}`);
   const bare = [...store.matchAll(/\?\.folders\[0\]\?\.path/g)];
   assert.equal(bare.length, 0, "a folder that may be gone was chosen without a check");
 });

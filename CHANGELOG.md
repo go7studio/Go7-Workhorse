@@ -8,6 +8,22 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.7.15](https://github.com/go7studio/Go7-Workhorse/compare/v0.7.14...v0.7.15) (2026-11-17)
+
+
+### Bug Fixes
+
+* a cancelled plan lane is ready to run again ([674b394](https://github.com/go7studio/Go7-Workhorse/commit/674b39421afef4eb612c27b6c6120ab92d0a7443))
+* ask before a Computer click, and keep GUI launches off while Computer is off ([ed9aa9c](https://github.com/go7studio/Go7-Workhorse/commit/ed9aa9c16c16fa966dd75537be4952d4a09f0708))
+* feed the Windows recognizer 16 kHz speech from a chosen microphone ([a232135](https://github.com/go7studio/Go7-Workhorse/commit/a232135a4edb5899f275eea88c2ea6d811f74055))
+* keep the custom host folder check on the filtered MCP list ([9e5dc3b](https://github.com/go7studio/Go7-Workhorse/commit/9e5dc3bcaaba6c71a30561393043026969b7336d))
+* load slash skills and stop guessing context windows ([7944dc5](https://github.com/go7studio/Go7-Workhorse/commit/7944dc53c7dfbb3fab05769af74e4a8e4039cb27))
+* paste keeps the words, and a preview names the file ([6ba9b92](https://github.com/go7studio/Go7-Workhorse/commit/6ba9b9218846cae0cedec67d554e3b1588220b0d))
+* retry a late picture, and play a dropped clip ([0c16be3](https://github.com/go7studio/Go7-Workhorse/commit/0c16be3eaddc9924b3921a4c171c8a64021623b8))
+* satisfy the test typecheck after the computer and plan repairs ([c10d455](https://github.com/go7studio/Go7-Workhorse/commit/c10d455468823de1d74725dd4d645f8d106722ac))
+* skip MCP servers a seat cannot call ([9046b77](https://github.com/go7studio/Go7-Workhorse/commit/9046b77b6f8b3913884d812f933961fa04ca3954))
+* skip unchanged desk, transcript, and learning work on save ([296102e](https://github.com/go7studio/Go7-Workhorse/commit/296102eb4b80cfb3a6b8fba1177e4e07f46f1b64))
+
 ## [0.7.14](https://github.com/go7studio/Go7-Workhorse/compare/v0.7.13...v0.7.14) (2026-11-16)
 
 

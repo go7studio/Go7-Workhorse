@@ -977,6 +977,22 @@ export function vendorTidePercent(
   return Math.min(100, Math.max(0, 100 - vendorUsedPercent(row, plans, events, budget, bot)));
 }
 
+/**
+ * Session setup paints a leftover percent only when that meter is known.
+ * Cursor keeps its budget fallback. Grok, Claude, Codex, and a custom bot
+ * with no settled plan paint nothing. The two Cursor pools stay separate.
+ */
+export function setupPaintsTide(
+  provider: string,
+  plan: { leftPercent?: number } | undefined,
+): boolean {
+  if (provider === "cursor") return true;
+  if (provider === "grok" || provider === "claude" || provider === "codex" || provider === "custom") {
+    return typeof plan?.leftPercent === "number" && Number.isFinite(plan.leftPercent);
+  }
+  return true;
+}
+
 export function leftoverForCard(
   row: Pick<DeskUsageCard, "focus" | "provider" | "key">,
   plans: {

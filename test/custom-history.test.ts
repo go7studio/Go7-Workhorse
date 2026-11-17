@@ -135,6 +135,6 @@ test("replayed history is valid in both dialects, with no tool pairing to break"
 
 test("the store sends the conversation instead of an empty array", () => {
   const store = read("src/lib/store.tsx");
-  assert.match(store, /history: customChatHistory\(session\.messages\)/);
+  assert.match(store, /history: customReplaySlice\(\s*session\.messages/);
   assert.doesNotMatch(store, /^\s*history: \[\],$/m, "the empty array is gone");
 });

@@ -46,6 +46,12 @@ export function skillSlashName(name: string): string {
   return trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
 }
 
+const WORKHORSE_PALETTE_NAMES = new Set(["desk", "setup", "workhorse-workshop-pack"]);
+
+export function isWorkhorsePaletteSkill(skill: Pick<DeskSkill, "origin" | "name">): boolean {
+  return skill.origin === "workhorse" && WORKHORSE_PALETTE_NAMES.has(skill.name.trim().toLowerCase());
+}
+
 export function commandsFromSkills(skills: DeskSkill[], run: Command["run"] = "skill"): Command[] {
   return skills.map((skill) => ({
     id: `skill-${skill.origin}-${skill.name}`,
@@ -53,6 +59,8 @@ export function commandsFromSkills(skills: DeskSkill[], run: Command["run"] = "s
     hint: skill.description || `${skill.origin} skill`,
     run,
     source: run === "grok" ? "grok" : "skill",
+    skillOrigin: skill.origin,
+    ...(skill.text?.trim() ? { skillBody: skill.text } : {}),
   }));
 }
 
@@ -131,7 +139,14 @@ export function commandsForSession(
 ): Command[] {
   const origin = vendorSkillOrigin(session?.provider);
   const skillRun = session?.provider === "grok" ? "grok" : "skill";
-  const skillCmds = origin ? commandsFromSkills(skills.filter((skill) => skill.origin === origin), skillRun) : [];
+  const shared = commandsFromSkills(skills.filter((skill) => isWorkhorsePaletteSkill(skill)), "skill");
+  const own = origin
+    ? commandsFromSkills(
+        skills.filter((skill) => skill.origin === origin && !isWorkhorsePaletteSkill(skill)),
+        skillRun,
+      )
+    : [];
+  const skillCmds = mergeCommands(shared, own);
   const common = capabilitiesFor(session?.provider).conversation.compact === "unavailable"
     ? COMMANDS.filter((command) => command.id !== "compact")
     : COMMANDS;

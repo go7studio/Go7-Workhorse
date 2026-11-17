@@ -39,20 +39,37 @@ export function workhorseSkillsHome(homedir = os.homedir()): string {
   return path.join(homedir, ".workhorse", "skills");
 }
 
+function envRoot(env: NodeJS.Dict<string>, key: string, fallback: string): string {
+  const value = env[key]?.trim();
+  return (value || fallback).replace(/[\\/]+$/, "");
+}
+
 export function skillHomes(
-  input: { homedir?: string; projectFolders?: string[]; bundled?: string[] } = {},
+  input: { homedir?: string; projectFolders?: string[]; bundled?: string[]; env?: NodeJS.Dict<string> } = {},
 ): SkillHome[] {
   const home = input.homedir ?? os.homedir();
+  const env = input.env ?? process.env;
+  const grokRoot = envRoot(env, "GROK_HOME", path.join(home, ".grok"));
+  const codexRoot = envRoot(env, "CODEX_HOME", path.join(home, ".codex"));
+  const claudeRoot = (
+    env.CLAUDE_CONFIG_DIR?.trim() ||
+    env.CLAUDE_HOME?.trim() ||
+    path.join(home, ".claude")
+  ).replace(/[\\/]+$/, "");
   const homes: SkillHome[] = [
-    { origin: "grok", root: path.join(home, ".grok", "skills") },
-    { origin: "grok", root: path.join(home, ".grok", "bundled", "skills") },
-    { origin: "codex", root: path.join(home, ".codex", "skills") },
-    { origin: "claude", root: path.join(home, ".claude", "skills") },
+    { origin: "grok", root: path.join(grokRoot, "skills") },
+    { origin: "grok", root: path.join(grokRoot, "bundled", "skills") },
+    { origin: "codex", root: path.join(codexRoot, "skills") },
+    { origin: "claude", root: path.join(claudeRoot, "skills") },
     { origin: "cursor", root: path.join(home, ".cursor", "skills") },
     { origin: "workhorse", root: workhorseSkillsHome(home), managed: true },
-    { origin: "codex", root: path.join(home, ".codex", "plugins"), source: "plugin" },
-    { origin: "grok", root: path.join(home, ".grok", "plugins"), source: "plugin" },
-    { origin: "claude", root: path.join(home, ".claude", "plugins"), source: "plugin" },
+    {
+      origin: "codex",
+      root: env.CODEX_HOME?.trim() ? path.join(codexRoot, "plugins") : path.join(home, ".codex", "plugins"),
+      source: "plugin",
+    },
+    { origin: "grok", root: path.join(grokRoot, "plugins"), source: "plugin" },
+    { origin: "claude", root: path.join(claudeRoot, "plugins"), source: "plugin" },
     { origin: "cursor", root: path.join(home, ".cursor", "plugins"), source: "plugin" },
     { origin: "workhorse", root: path.join(home, ".agents", "skills") },
   ];
@@ -112,10 +129,15 @@ export function catalogSkills(
     homedir?: string;
     projectFolders?: string[];
     fs?: SkillFs;
+    env?: NodeJS.Dict<string>;
   } = {},
 ): DeskSkill[] {
   const io = input.fs ?? nodeSkillFs();
-  const homes = input.homes ?? skillHomes({ homedir: input.homedir, projectFolders: input.projectFolders });
+  const homes = input.homes ?? skillHomes({
+    homedir: input.homedir,
+    projectFolders: input.projectFolders,
+    env: input.env,
+  });
   const seen = new Set<string>();
   const skills: DeskSkill[] = [];
   for (const home of homes) {
@@ -156,6 +178,7 @@ function walk(
         skillFile,
         managed,
         source,
+        ...(raw.trim() ? { text: raw } : {}),
       });
     }
     return;
@@ -194,6 +217,7 @@ export function sameDeskSkills(left: DeskSkill[], right: DeskSkill[]): boolean {
       skill.description === other.description &&
       skill.origin === other.origin &&
       skill.managed === other.managed &&
+      skill.text === other.text &&
       skillSource(skill) === skillSource(other)
     );
   });
@@ -279,6 +303,42 @@ export function skillsForAutoLoad(
 ): DeskSkill[] {
   if (policy.includePluginPacks === true) return skills;
   return skills.filter((skill) => skillSource(skill) !== "plugin");
+}
+
+export function requiredSkillNotInstalled(names: readonly string[]): string {
+  const list = [...new Set(names.map((name) => name.trim()).filter(Boolean))];
+  return (
+    `Required skill${list.length === 1 ? "" : "s"} not installed: ${list.join(", ")}. ` +
+    "Call workhorse_list_skills for exact names, or pass free-form expertise under capabilities."
+  );
+}
+
+export type SpawnSkillRead = {
+  name: string;
+  text?: string;
+  origin?: string;
+  skillName?: string;
+};
+
+/** A named skill with no readable body fails the spawn. Empty frontmatter is not a body. */
+export function settleSpawnSkillReads(reads: readonly SpawnSkillRead[]): {
+  loaded: { name: string; body: string }[];
+  missing: string[];
+} {
+  const loaded: { name: string; body: string }[] = [];
+  const missing: string[] = [];
+  for (const read of reads) {
+    const text = read.text?.trim() ?? "";
+    const body = text ? skillBodyFromMarkdown(text).trim() : "";
+    if (!body) {
+      missing.push(read.name);
+      continue;
+    }
+    const skillName = read.skillName?.trim() || read.name;
+    const origin = read.origin?.trim();
+    loaded.push({ name: origin ? `${origin}:${skillName}` : skillName, body });
+  }
+  return { loaded, missing };
 }
 
 export function nodeSkillFs(): SkillFs {

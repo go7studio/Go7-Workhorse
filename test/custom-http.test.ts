@@ -1594,7 +1594,7 @@ test("MiniMax Anthropic request and stream usage parse", async () => {
       }),
   );
   assert.equal(probe.ok, true);
-  assert.equal(probe.contextWindow, 1_000_000);
+  assert.equal(probe.contextWindow, undefined);
 });
 
 test("Anthropic prompt cache marks the tool prefix, the system block, and the prior turn", () => {

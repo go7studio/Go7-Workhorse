@@ -113,6 +113,10 @@
   z-index: var(--z-raised);
 }
 
+.session-setup.tide-unknown .setup-tide {
+  display: none;
+}
+
 .setup-tide {
   position: absolute;
   inset: 0;

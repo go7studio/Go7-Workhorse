@@ -17,8 +17,33 @@ import type { ChatMessage } from "./types";
  */
 export type CustomHistoryMessage = { role: "user" | "assistant"; text: string };
 
-/** Roughly 4 characters a token; a generous slice that still leaves room to answer. */
+/** Roughly 4 characters a token. Used only when the bot's window is not known. */
 export const CUSTOM_HISTORY_MAX_CHARS = 60_000;
+
+/** Tokens held back so the model can still answer. */
+export const CUSTOM_HISTORY_REPLY_RESERVE = 8_192;
+
+const CUSTOM_HISTORY_CHARS_PER_TOKEN = 4;
+
+/**
+ * Character cap for one custom replay.
+ * A known window leaves a reserve. An unknown window stays on the old cap.
+ * This does not invent a token window.
+ */
+export function customHistoryCharCap(windowTokens?: number): number {
+  if (typeof windowTokens !== "number" || !Number.isFinite(windowTokens) || windowTokens <= 0) {
+    return CUSTOM_HISTORY_MAX_CHARS;
+  }
+  const window = Math.floor(windowTokens);
+  const reserve = Math.min(CUSTOM_HISTORY_REPLY_RESERVE, Math.max(1, Math.floor(window / 2)));
+  const usable = Math.max(1, window - reserve);
+  return usable * CUSTOM_HISTORY_CHARS_PER_TOKEN;
+}
+
+/** The messages a custom bot will see again. The context estimate uses this same slice. */
+export function customReplaySlice(messages: ChatMessage[], windowTokens?: number): CustomHistoryMessage[] {
+  return customChatHistory(messages, { maxChars: customHistoryCharCap(windowTokens) });
+}
 
 /**
  * Desk-authored lines that were never the model speaking. Replaying them

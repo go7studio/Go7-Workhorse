@@ -169,6 +169,9 @@ export type Command = {
   source?: CommandSource;
   inputHint?: string;
   aliases?: string[];
+  /** SKILL.md text for a slash skill. Absent when the file was not read. */
+  skillBody?: string;
+  skillOrigin?: SkillOrigin;
 };
 
 export type QueuedPrompt = {
@@ -804,6 +807,8 @@ export type DeskSkill = {
   managed?: boolean;
   /** Plugin trees are listed in Settings; auto-load omits them unless the person opts in. */
   source?: SkillSource;
+  /** SKILL.md as read. Slash send loads this. Empty when the file had no text. */
+  text?: string;
 };
 
 export type DeskExportKind = "skills" | "chats";

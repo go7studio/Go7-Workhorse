@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { customReplaySlice } from "../lib/custom-history";
 import { estimateChatContext, formatRetainedPct, retainedContextStats, type ChatContextStats, type ContextCategory } from "../lib/context-stats";
 import { contextWindowFor, formatWindow } from "../lib/models";
 import { deskInk } from "../lib/settings";
@@ -133,10 +134,14 @@ export function ContextMeter({
   const ink = session ? deskInk(session, settings) : undefined;
   const estimate = useMemo(() => {
     if (!session) return null;
+    const messages =
+      session.provider === "custom"
+        ? customReplaySlice(session.messages, windowSize).map((item) => ({ text: item.text }))
+        : session.messages;
     return estimateChatContext({
       contextUsed: session.contextUsed,
       windowSize,
-      messages: session.messages,
+      messages,
     });
   }, [session, windowSize]);
 

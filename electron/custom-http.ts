@@ -1350,19 +1350,21 @@ export async function probeCustomHttp(
       parsed = null;
     }
     const root = parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : {};
+    const nested = root.model && typeof root.model === "object" ? (root.model as { context_window?: unknown }) : undefined;
     let listed =
-      typeof root.context_window === "number"
+      typeof root.context_window === "number" && root.context_window > 0
         ? root.context_window
-        : typeof (root.model as { context_window?: number } | undefined)?.context_window === "number"
-          ? (root.model as { context_window: number }).context_window
-          : knownContextWindow(model);
+        : typeof nested?.context_window === "number" && nested.context_window > 0
+          ? nested.context_window
+          : undefined;
     if (!listed) {
       listed = await fetchListedContext(baseUrl, apiKey, model, fetchImpl);
     }
+    const contextWindow = listed && listed > 0 ? Math.round(listed) : undefined;
     return {
       ok: true,
-      message: listed ? `Reached ${model}. Context ${listed.toLocaleString()} tokens.` : `Reached ${model}.`,
-      contextWindow: listed && listed > 0 ? Math.round(listed) : 128_000,
+      message: contextWindow ? `Reached ${model}. Context ${contextWindow.toLocaleString()} tokens.` : `Reached ${model}.`,
+      ...(contextWindow ? { contextWindow } : {}),
       model,
       api,
     };

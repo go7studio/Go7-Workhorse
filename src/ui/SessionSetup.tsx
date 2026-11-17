@@ -10,7 +10,7 @@ import { hasAttachedLlm, vendorEnabled, vendorLabel, vendorTint } from "../lib/s
 import { BLENDER_PRESET, presetOn } from "../lib/environment-presets";
 import { sessionEnvironmentKind } from "../lib/session-environment";
 import { useActiveSession, useStore } from "../lib/store";
-import { vendorTidePercent } from "../lib/usage";
+import { leftoverForCard, setupPaintsTide, vendorTidePercent } from "../lib/usage";
 import type { EffortLevel, PermissionMode, ProviderId, SandboxProfile } from "../lib/types";
 import { ComputerSeatCard } from "./ComputerSeatCard";
 
@@ -136,13 +136,18 @@ export function SessionSetup({ onClose }: { onClose: () => void }) {
       : session.provider === "gemini"
         ? agyWatchKey(session.model)
         : session.provider;
-  const used = vendorTidePercent(
-    { focus, provider: session.provider, key: bot?.id ?? focus },
-    { grok: grokPlan, codex: codexPlan, claude: claudePlan, cursor: cursorPlan, gemini: geminiPlan, custom: customPlans },
-    usage ?? [],
-    settings.usageBudgets[session.provider],
-    bot,
-  );
+  const tidePlans = { grok: grokPlan, codex: codexPlan, claude: claudePlan, cursor: cursorPlan, gemini: geminiPlan, custom: customPlans };
+  const tideRow = { focus, provider: session.provider, key: bot?.id ?? focus };
+  const showTide = setupPaintsTide(session.provider, leftoverForCard(tideRow, tidePlans));
+  const used = showTide
+    ? vendorTidePercent(
+        tideRow,
+        tidePlans,
+        usage ?? [],
+        settings.usageBudgets[session.provider],
+        bot,
+      )
+    : undefined;
   const stockTint =
     session.provider !== "custom" ? vendorTint(session.provider, settings.llms[session.provider]) : undefined;
   const vendorColor =
@@ -172,12 +177,12 @@ export function SessionSetup({ onClose }: { onClose: () => void }) {
 
   return (
     <div
-      className={`session-setup vendor-${session.provider}`}
+      className={`session-setup vendor-${session.provider}${showTide ? "" : " tide-unknown"}`}
       ref={root}
       data-session-setup
       style={{
         ["--setup-vendor" as string]: vendorColor,
-        ["--setup-used" as string]: `${Math.round(used)}%`,
+        ...(typeof used === "number" ? { ["--setup-used" as string]: `${Math.round(used)}%` } : {}),
       }}
     >
       <div className="setup-tide" aria-hidden="true">

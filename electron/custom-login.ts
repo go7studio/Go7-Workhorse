@@ -33,6 +33,11 @@ function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" ? (value as Record<string, unknown>) : {};
 }
 
+function minimaxSeedWindow(id: string): number | undefined {
+  const key = id.trim().toLowerCase();
+  return MINIMAX_DEFAULTS.find((item) => item.id.toLowerCase() === key)?.contextWindow;
+}
+
 function providerHasMiniMaxM3(value: unknown): boolean {
   const provider = asRecord(value);
   if (!Array.isArray(provider.models)) return false;
@@ -62,13 +67,24 @@ export function parseOpenClawMinimax(raw: unknown): { config: CustomLlm; models:
       const id = typeof row.id === "string" ? row.id.trim() : "";
       if (!id) continue;
       const name = typeof row.name === "string" && row.name.trim() ? row.name.trim() : id;
-      const contextWindow =
-        typeof row.contextWindow === "number" && row.contextWindow > 0 ? Math.round(row.contextWindow) : 204_800;
-      listed.push({ id, name, effort: row.reasoning !== false, contextWindow });
+      const published =
+        typeof row.contextWindow === "number" && Number.isFinite(row.contextWindow) && row.contextWindow > 0
+          ? Math.round(row.contextWindow)
+          : undefined;
+      const contextWindow = published ?? minimaxSeedWindow(id);
+      const entry: ModelInfo = {
+        id,
+        name,
+        effort: row.reasoning !== false,
+        contextWindow: contextWindow ?? 0,
+      };
+      if (contextWindow === undefined) delete (entry as { contextWindow?: number }).contextWindow;
+      listed.push(entry);
     }
   }
   const models = listed.length > 0 ? listed : MINIMAX_DEFAULTS;
   const preferred = models.find((model) => /m3/i.test(model.id)) ?? models[0];
+  const preferredWindow = preferred.contextWindow;
   return {
     models,
     config: {
@@ -78,11 +94,11 @@ export function parseOpenClawMinimax(raw: unknown): { config: CustomLlm; models:
       baseUrl,
       model: preferred.id,
       apiKey,
-      contextWindow: preferred.contextWindow,
+      ...(typeof preferredWindow === "number" && preferredWindow > 0 ? { contextWindow: preferredWindow } : {}),
       api: inferCustomApi(baseUrl),
       source: "openclaw",
       tested: false,
-    },
+    } as CustomLlm,
   };
 }
 

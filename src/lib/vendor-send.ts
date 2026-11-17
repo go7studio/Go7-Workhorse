@@ -1,4 +1,6 @@
 import { invokeSkillPrompt } from "./commands";
+import { withLoadedSkills } from "./desk-assignment";
+import { requiredSkillNotInstalled, skillBodyFromMarkdown } from "./skills-catalog";
 import {
   applyGoalCommand,
   applyGrokGoalMirror,
@@ -17,7 +19,38 @@ export type VendorSendPrep = {
   haltVendor: boolean;
   applyDeskGoal: boolean;
   skipVendor: boolean;
+  /** Set when the slash names a skill that is not installed. The send stops. */
+  error?: string;
 };
+
+const ACP_SKILL_PROVIDERS = new Set(["grok", "codex", "claude", "cursor"]);
+
+function acpSkillSend(input: {
+  provider?: string | null;
+  text: string;
+  match?: Command | null;
+}): VendorSendPrep | undefined {
+  if (input.match?.run !== "skill") return undefined;
+  if (!input.provider || !ACP_SKILL_PROVIDERS.has(input.provider)) return undefined;
+  const name = input.match.name.replace(/^\//, "").trim() || input.match.name;
+  const raw = input.match.skillBody ?? "";
+  if (!skillBodyFromMarkdown(raw).trim()) {
+    return {
+      vendorText: input.text,
+      haltVendor: false,
+      applyDeskGoal: false,
+      skipVendor: true,
+      error: requiredSkillNotInstalled([name]),
+    };
+  }
+  const label = input.match.skillOrigin ? `${input.match.skillOrigin}:${name}` : name;
+  return {
+    vendorText: withLoadedSkills(input.text, [{ name: label, body: raw }]),
+    haltVendor: false,
+    applyDeskGoal: false,
+    skipVendor: false,
+  };
+}
 
 export function prepareVendorSend(input: {
   provider?: string | null;
@@ -26,6 +59,8 @@ export function prepareVendorSend(input: {
   match?: Command | null;
 }): VendorSendPrep {
   const text = input.text.trim();
+  const skillSend = acpSkillSend({ provider: input.provider, text, match: input.match });
+  if (skillSend) return skillSend;
   const workhorseGoal = isWorkhorseGoalIntent(text) || isWorkhorseGoalControl(text, input.goal);
   if (input.provider === "grok" && !workhorseGoal) {
     const grokGoal = parseGrokGoalLine(text);

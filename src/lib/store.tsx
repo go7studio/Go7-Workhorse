@@ -37,7 +37,7 @@ import {
 } from "./environment-presets";
 import { isWorkhorseGoalControl, isWorkhorseGoalIntent, parseGoalInput, parseGrokGoalLine } from "./goal";
 import { nextGoalForSend, planHaltForward, prepareVendorSend, shouldIgnoreRedirectedCancel, vendorTerminalAction } from "./vendor-send";
-import { customChatHistory } from "./custom-history";
+import { customReplaySlice } from "./custom-history";
 import { uid } from "./id";
 import {
   archiveChat,
@@ -163,7 +163,7 @@ import {
 } from "./project";
 import { isParentTakeoverTool, isWriteToolTitle, projectEdits, workerChangedFiles, writePathFromToolEvent } from "./project-edits";
 import { GEMINI_LOGIN_REMOVED, isProviderId, providerById } from "./providers";
-import { sameDeskSkills, skillBodyFromMarkdown, skillsForAutoLoad } from "./skills-catalog";
+import { requiredSkillNotInstalled, sameDeskSkills, settleSpawnSkillReads, skillsForAutoLoad } from "./skills-catalog";
 import { withSkillDiscoveryHint } from "./skill-suggestions";
 import { mcpServersForSession, restrictMcpServersToTools } from "./mcp-servers";
 import {
@@ -2914,6 +2914,23 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       goal: liveSession?.goal,
       match,
     });
+    if (prep.error && prep.skipVendor) {
+      const sessionId = liveSession?.id;
+      if (!sessionId) return;
+      const note = prep.error;
+      setState((current) => ({
+        ...current,
+        sessions: current.sessions.map((item) =>
+          item.id === sessionId
+            ? {
+                ...item,
+                messages: [...item.messages, { id: uid("msg"), role: "system" as const, text: note, createdAt: Date.now() }],
+              }
+            : item,
+        ),
+      }));
+      return;
+    }
     const goalInput = liveSession && (
       liveSession.provider !== "grok" ||
       isWorkhorseGoalIntent(originalText) ||
@@ -4873,7 +4890,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               // has to travel with every request. This used to be [] — which
               // is why Kimi and MiniMax answered each message as if it were
               // the first. Text only; see custom-history for why.
-              history: customChatHistory(session.messages),
+              history: customReplaySlice(
+                session.messages,
+                contextWindowFor(
+                  "custom",
+                  session.model || custom.model,
+                  custom.contextWindow,
+                  session.customBotId ?? ("id" in custom ? custom.id : undefined),
+                  session.contextWindow,
+                ),
+              ),
               mcpServers: runtimeMcpServers,
               securityPolicy: session.securityPolicy,
               permissionGrants: session.permissionGrants,
@@ -7469,17 +7495,30 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                   debug: parent.crewModes?.includes("debug") === true,
                 });
                 const loaded: Array<{ name: string; body: string }> = [];
-                if (assignedSkills.length > 0 && window.workhorse?.readDeskSkill) {
-                  const folders = projectFolderPaths(project, folderExists);
-                  for (const name of assignedSkills) {
-                    const read = await window.workhorse.readDeskSkill(name, folders).catch(() => null);
-                    if (read?.ok && read.skill?.text) {
-                      loaded.push({
-                        name: `${read.skill.origin}:${read.skill.name}`,
-                        body: skillBodyFromMarkdown(read.skill.text),
+                if (assignedSkills.length > 0) {
+                  const reads: { name: string; text?: string; origin?: string; skillName?: string }[] = [];
+                  if (!window.workhorse?.readDeskSkill) {
+                    for (const name of assignedSkills) reads.push({ name });
+                  } else {
+                    const folders = projectFolderPaths(project, folderExists);
+                    for (const name of assignedSkills) {
+                      const read = await window.workhorse.readDeskSkill(name, folders).catch(() => null);
+                      reads.push({
+                        name,
+                        text: read?.ok ? read.skill?.text : "",
+                        origin: read?.ok ? read.skill?.origin : undefined,
+                        skillName: read?.ok ? read.skill?.name : undefined,
                       });
                     }
                   }
+                  const settled = settleSpawnSkillReads(reads);
+                  if (settled.missing.length > 0) {
+                    const message = requiredSkillNotInstalled(settled.missing);
+                    notStarted = message;
+                    markChildFailure(new Error(message));
+                    return "";
+                  }
+                  loaded.push(...settled.loaded);
                 }
                 reply = await promptVendor(
                   child,

@@ -3,12 +3,14 @@ import test from "node:test";
 import { buildGrokLaunchSpec } from "../electron/grok-launch";
 import type { McpServerConfig } from "../src/lib/types";
 import { applyCursorMcpHandoff, loadCursorMcpHandoff } from "../electron/mcp-foreign-load";
+import { customTurnMcpServers } from "../electron/custom-host";
 import {
   expandMcpText,
   grokMcpServerNames,
   materializeCursorMcpDocument,
   mergeDeskAndForeignMcp,
 } from "../src/lib/mcp-foreign";
+import { restrictMcpServersToTools } from "../src/lib/mcp-servers";
 
 const ENV = {
   USERPROFILE: "C:\\Users\\sgovo",
@@ -190,6 +192,33 @@ test("Claude and project mcp.json expand, and a remote row does not drop Cursor 
   const claude = applyCursorMcpHandoff("claude", { cwd, mcpServers: [] as McpServerConfig[] }, [], io);
   assert.deepEqual(claude.mcpServers?.map((server) => server.name), ["shared"]);
   assert.equal(claude.suppressCursorMcpImport, false);
+});
+
+test("a custom turn restricts foreign MCP servers again, and an ACP list does not", () => {
+  const desk = [
+    { name: "lovart", command: "py", args: [], includeTools: ["lovart_query_mode", "lovart_generate"] },
+    { name: "memory", command: "mem", args: [] },
+  ] satisfies McpServerConfig[];
+  const foreign = [{ name: "github", command: "gh", args: [] }] satisfies McpServerConfig[];
+  const namedTool = restrictMcpServersToTools(desk, ["lovart_query_mode"], "custom");
+  const mergedTool = mergeDeskAndForeignMcp(namedTool, foreign);
+  assert.deepEqual(mergedTool.map((server) => server.name), ["lovart", "github"]);
+  const customTool = customTurnMcpServers(mergedTool);
+  assert.deepEqual(customTool.map((server) => server.name), ["lovart"]);
+  assert.deepEqual(customTool[0]?.includeTools, ["lovart_query_mode"]);
+  assert.equal(customTool[0]?.sliceTools, undefined);
+
+  // The slice named a server that arrives only with the foreign merge. The
+  // first filter matches nothing and keeps the desk list. The second keeps
+  // the named foreign server, not every schema.
+  const namedForeign = restrictMcpServersToTools(desk, ["github"], "custom");
+  assert.equal(namedForeign.length, desk.length);
+  const customForeign = customTurnMcpServers(mergeDeskAndForeignMcp(namedForeign, foreign));
+  assert.deepEqual(customForeign.map((server) => server.name), ["github"]);
+
+  const acp = restrictMcpServersToTools(mergeDeskAndForeignMcp(desk, foreign), ["lovart_query_mode"], "grok");
+  assert.deepEqual(acp.map((server) => server.name), ["lovart", "memory", "github"]);
+  assert.equal(acp.some((server) => server.sliceTools), false);
 });
 
 test("home and Windows percent placeholders expand", () => {

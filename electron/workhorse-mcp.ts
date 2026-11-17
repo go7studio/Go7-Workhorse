@@ -130,6 +130,7 @@ import { linkCallFromObservation, safeCallerName } from "../src/lib/link-history
 import { watchWorkerCompletions } from "./link-watch";
 import type { WorkerRunRow } from "../src/lib/worker-settled";
 import { createFramedSender } from "../src/lib/link-notify";
+import { sessionRulesFor } from "../src/lib/workhorse-rules";
 
 type JsonRpc = {
   jsonrpc?: string;
@@ -140,6 +141,17 @@ type JsonRpc = {
 
 export const WORKHORSE_MCP_INSTRUCTIONS =
   "Workhorse is an execution desk. When the user asks to work with Workhorse or says set a goal, first use workhorse_list_chats to choose an explicit parent, then use workhorse_delegate before doing the task directly. fromSessionId is that parent id, never a worker. Give the desk the objective, constraints, exclusions, and working folder. Leave initialBrain unset for full Auto; set it only when the user or harness chooses the first coordinating brain. That choice does not pin descendants, which still route independently unless a slice is explicitly assigned. Workhorse auto-routes from task fit and current capacity and returns its decision. Grok 4.7 is ACP Grok or Cursor Grok, never Grok Bot. Naming grok-4.7 or grok-4.6 with no vendor lets leftover pick the pool. Auto does not allocate grok-bot as an orchestration or builder worker. Set initialBrain to grok-bot only when the user chose Grok Bot as the calling, analyzing, or dispatch brain. Ordinary delegation is one wave. Enable loop only when the user asks for adaptive sequential work; then call workhorse_continue_mission with the returned worker ids when work remains. A continuation keeps that pass's coordinating vendor, model, and effort by default; set initialBrain to change it or route to opt back into automatic routing. Delegation returns a worker id promptly. Stop this turn. The desk journals the terminal report and joins it into the parent chat. Do not sit in a poll loop. Do not pass wait=true. Later, workhorse_agent_status on that worker id or asked-chat childSessionId is how you follow through: next is wait, done, or failed. When done, the report is in that payload. Named worker or live chat: workhorse_ask_chat with that row's id, then workhorse_agent_status on the returned id. If several rows share a worker name, pass id. Do not spawn a second worker for the same slice. If delegation fails, report the exact Workhorse error before any direct fallback.";
+
+/** Parent and Link keep the delegate instructions. A worker seat gets its short rules. */
+export function mcpInitializeInstructions(role: ReturnType<typeof deskRoleOf> | undefined): string {
+  if (role === "worker" || role === "auditor" || role === "helper") return sessionRulesFor(role);
+  return WORKHORSE_MCP_INSTRUCTIONS;
+}
+
+function spawnSeatRole(value: unknown): "auditor" | "helper" | undefined {
+  const role = typeof value === "string" ? value.trim() : "";
+  return role === "auditor" || role === "helper" ? role : undefined;
+}
 
 export type McpFraming = "content-length" | "ndjson";
 
@@ -622,6 +634,7 @@ const TOOLS = [
         permission: { type: "string", description: "Ignored. This chat's Permission is the person's setting; the worker copies it. Do not pass permission." },
         sandbox: { type: "string", description: "Ignored. This chat's Sandbox is the person's setting; the worker copies it. Do not pass sandbox." },
         route: { type: "string", description: "auto, quick, balanced, or deep" },
+        role: { type: "string", description: "auditor when this slice checks another worker's output, so it routes deep instead of being sized from the prompt. It does not restrict the worker or pick a different vendor from the builder — name the builder in exclude for that." },
         domain: {
           type: "string",
           description: "Optional: coding, image-generation, writing, visual, data, or general. The kind of work this slice is; omit to read it from the prompt",
@@ -2482,7 +2495,7 @@ async function spawnAgent(
     route?: "auto" | "quick" | "balanced" | "deep";
     /** The kind of work this slice is. Omit to read it from the prompt. */
     domain?: string;
-    role?: "auditor";
+    role?: "auditor" | "helper";
     planStepId?: string;
     rationale?: string;
     skills?: string[];
@@ -3272,6 +3285,7 @@ async function callMutatingTool(name: string, args: Record<string, unknown>, fro
         planStepId: typeof args.planStepId === "string" ? args.planStepId : undefined,
         folder: typeof args.folder === "string" ? args.folder : undefined,
         wait: linkWait(args.wait),
+        role: spawnSeatRole(args.role),
         mission: true,
         missionIteration,
         traceId: effectiveTraceId,
@@ -3716,6 +3730,7 @@ async function callDeskTool(name: string, args: Record<string, unknown>, from?: 
             ? args.route
             : undefined,
         domain: typeof args.domain === "string" ? args.domain : undefined,
+        role: spawnSeatRole(args.role),
         planStepId: typeof args.planStepId === "string" ? args.planStepId : undefined,
         rationale: typeof args.rationale === "string" ? args.rationale : undefined,
         skills: Array.isArray(args.skills) ? args.skills.filter((item): item is string => typeof item === "string") : undefined,
@@ -4229,7 +4244,7 @@ export async function handleWorkhorseRpc(
         protocolVersion: "2024-11-05",
         capabilities: { tools: {} },
         serverInfo: { name: "go7-workhorse", version: APP_VERSION },
-        instructions: WORKHORSE_MCP_INSTRUCTIONS,
+        instructions: mcpInitializeInstructions(deskRoleOf(callerSession())),
       },
     };
   }

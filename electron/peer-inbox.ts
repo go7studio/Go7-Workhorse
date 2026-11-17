@@ -73,12 +73,11 @@ export type PeerAsk = {
   /** Name of the worker to hand this slice back to — Wren, Dexter, Marlow. */
   worker?: string;
   /**
-   * Sibling that admits a plan step, matching AgentRun.role. store.tsx reads
-   * this to pick the spawn role; nothing on the desk sends it yet, so the
-   * auditor branch there is still inert. Declared because the read is real:
-   * without it `npm run build` fails and no release can be cut.
+   * Matching AgentRun.role. Delegate and spawn send auditor when the caller
+   * said so. A nested child sends helper. The store stores auditor from this
+   * field and computes helper for a nested spawn.
    */
-  role?: "auditor";
+  role?: "auditor" | "helper";
   /**
    * The seat this delegation asks its child to run under. Both are capped at
    * the desk default, never at the caller's own seat, so a call may raise a

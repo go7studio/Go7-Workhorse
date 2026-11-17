@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync, readFileSync, existsSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import test from "node:test";
 import { buildAnthropicBody, buildOpenAiBody } from "../electron/custom-http";
 import { CustomSessionHost, MCP_ARGUMENTS_PREVIEW_CHARS, mcpArgumentsPreview } from "../electron/custom-host";
@@ -341,5 +344,93 @@ test("an exposed MCP tool name fits 64 characters and is the same on every reque
     for (const name of names) assert.match(name, valid);
   } finally {
     bridge.dispose();
+  }
+});
+
+test("MCP servers for one turn start together, and one failure does not drop the rest", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "wh-mcp-parallel-"));
+  const log = path.join(dir, "starts.txt");
+  const slow = String.raw`
+const fs = require("node:fs");
+const readline = require("node:readline");
+fs.appendFileSync(${JSON.stringify(log)}, Date.now() + "\n");
+const lines = readline.createInterface({ input: process.stdin });
+lines.on("line", (line) => {
+  const message = JSON.parse(line);
+  if (message.id === undefined) return;
+  setTimeout(() => {
+    if (message.method === "initialize") {
+      process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: message.id, result: { protocolVersion: "2025-03-26", capabilities: {}, serverInfo: { name: "slow", version: "1" } } }) + "\n");
+      return;
+    }
+    if (message.method === "tools/list") {
+      process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: message.id, result: { tools: [{ name: "ping", inputSchema: { type: "object", properties: {} } }] } }) + "\n");
+      return;
+    }
+    process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: message.id, result: { content: [{ type: "text", text: "ok" }] } }) + "\n");
+  }, 400);
+});
+`;
+  const bridge = new McpToolBridge([
+    { name: "one", command: process.execPath, args: ["-e", slow] },
+    { name: "missing", command: "no-such-mcp-binary-repair", args: [] },
+    { name: "two", command: process.execPath, args: ["-e", slow] },
+  ]);
+  try {
+    const tools = await bridge.tools();
+    assert.deepEqual(tools.map((tool) => tool.name).sort(), ["mcp__one__ping", "mcp__two__ping"]);
+    const starts = readFileSync(log, "utf8").trim().split("\n").map((line) => Number(line));
+    assert.equal(starts.length, 2);
+    const gap = Math.abs(starts[0]! - starts[1]!);
+    assert.ok(gap < 500, `servers started ${gap}ms apart`);
+  } finally {
+    bridge.dispose();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("an empty MCP allow-list is not started", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "wh-mcp-empty-"));
+  const marker = path.join(dir, "started");
+  const bridge = new McpToolBridge([{
+    name: "none",
+    command: process.execPath,
+    args: ["-e", `require("node:fs").writeFileSync(${JSON.stringify(marker)}, "started")`],
+    includeTools: [],
+  }]);
+  try {
+    assert.deepEqual(await bridge.tools(), []);
+    assert.equal(existsSync(marker), false);
+  } finally {
+    bridge.dispose();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("an auditor or helper custom turn does not start MCP servers", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "wh-mcp-seat-skip-"));
+  const marker = path.join(dir, "started");
+  const script = `require("node:fs").writeFileSync(${JSON.stringify(marker)}, "started");\n${FAKE_MCP}`;
+  try {
+    for (const role of ["auditor", "helper"] as const) {
+      const host = new CustomSessionHost(async () => ({ text: "done", stopReason: "end_turn" }));
+      await host.prompt({
+        sessionId: `mcp-skip-${role}`,
+        parentId: "orch",
+        hidden: true,
+        role,
+        text: "Look.",
+        model: "local-qwen",
+        effort: "high",
+        cwd: process.cwd(),
+        mode: "always-approve",
+        sandbox: "off",
+        mcpServers: [{ name: "memory", command: process.execPath, args: ["-e", script] }],
+        config: { baseUrl: "http://127.0.0.1:1/v1", apiKey: "unused", model: "local-qwen", api: "openai-completions" },
+      }, () => undefined);
+      assert.equal(existsSync(marker), false, role);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 });

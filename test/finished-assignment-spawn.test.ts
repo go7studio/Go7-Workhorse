@@ -144,7 +144,7 @@ test("a cancelled running step is ready for the next assign", () => {
     events: [],
     createdAt: 1,
     updatedAt: 1,
-  } as PlanRun;
+  } as unknown as PlanRun;
   const next = readyAfterCancel(plan, "s1", 50);
   assert.ok(next);
   assert.equal(next?.steps[0]?.status, "ready");

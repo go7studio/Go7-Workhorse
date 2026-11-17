@@ -730,7 +730,7 @@ test("Chrome does not fill a real profile from home, and an early exit does not 
     spawnImpl: (() => {
       queueMicrotask(() => child.emit("exit", 1, null));
       return child;
-    }) as typeof import("node:child_process").spawn,
+    }) as unknown as typeof import("node:child_process").spawn,
     executable: "/opt/chrome-test",
     connect: async () => {
       throw new Error("connect must not run");

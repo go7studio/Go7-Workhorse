@@ -52,7 +52,9 @@ test("a turn that truly did nothing still says so", () => {
     turnEndedWithoutProse({ provider: "custom", stopReason: "end_turn", worked: false }),
     vendorEmptyReply("custom"),
   );
-  assert.match(vendorEmptyReply("custom"), /finished without a visible reply/);
+  assert.equal(vendorEmptyReply("grok"), "Grok sent no reply.");
+  assert.equal(vendorEmptyReply("custom"), "Custom sent no reply.");
+  assert.equal(isVendorEmptyReply("Grok finished without a visible reply."), true);
 });
 
 test("markdown image embeds count as a visible reply", () => {

@@ -248,6 +248,8 @@ test("parent takeover is a recorded fact the UI and join can show", () => {
   assert.equal(next[1]?.agentRun?.takeoverReason, "Parent applied patch after handing the work to Workhorse.");
   assert.equal(next[1]?.agentRun?.events?.[0]?.type, "takeover");
   assert.match(next[0]?.messages.at(-1)?.text ?? "", /Parent took over/);
+  const plain = recordParentTakeover([{ ...parent, messages: [] }, child], "boss", "", 11);
+  assert.equal(plain[0]?.messages.at(-1)?.text, "This chat took the work back.");
   assert.equal(crewHasParentTakeover(next, "boss"), true);
   const persisted = normalizeAgentRun(next[1]?.agentRun);
   assert.equal(persisted?.executionOwner, "parent");

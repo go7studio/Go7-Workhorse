@@ -173,7 +173,7 @@ function cancelWorker(sessions: Session[], workerId: string, now: number): Sessi
         ...baseRun,
         status: "cancelled",
         finishedAt: now,
-        error: baseRun.error?.trim() ? baseRun.error : "Cancelled by the orchestrator before the worker finished.",
+        error: baseRun.error?.trim() ? baseRun.error : "This chat cancelled the worker before it finished.",
       },
     };
   });

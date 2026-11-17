@@ -62,12 +62,12 @@ export function isVendorFailureReply(text: string | undefined | null): boolean {
 }
 
 export function vendorEmptyReply(provider: ProviderId): string {
-  return `${vendorAgentLabel(provider)} finished without a visible reply.`;
+  return `${vendorAgentLabel(provider)} sent no reply.`;
 }
 
 /** Placeholder the desk wrote because the vendor returned no prose. Not a reply. */
 export function isVendorEmptyReply(text: string | undefined | null): boolean {
-  return /^(?:Grok|Codex|Claude|Cursor|Gemini|Custom) finished without a visible reply\.$/.test((text ?? "").trim());
+  return /^(?:Grok|Codex|Claude|Cursor|Gemini|Custom) (?:sent no reply|finished without a visible reply)\.$/.test((text ?? "").trim());
 }
 
 /** Desk notice for a real user stop. Not model prose — stream must replace it. */

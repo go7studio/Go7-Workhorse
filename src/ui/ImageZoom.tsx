@@ -14,12 +14,14 @@ export function ImageZoom({
   className,
   decoding = "async",
   loading = "lazy",
+  onError,
 }: {
   src: string;
   alt: string;
   className?: string;
   decoding?: "async" | "auto" | "sync";
   loading?: "eager" | "lazy";
+  onError?: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const [scale, setScale] = useState(1);
@@ -72,7 +74,7 @@ export function ImageZoom({
   return (
     <>
       <button className="image-zoom-open" type="button" aria-label={alt ? `Open ${alt}` : "Open image"}>
-        <img className={className} src={src} alt={alt} decoding={decoding} loading={loading} onClick={openAt} />
+        <img className={className} src={src} alt={alt} decoding={decoding} loading={loading} onClick={openAt} onError={onError} />
       </button>
       {open ? (
         <div className="image-zoom" role="dialog" aria-modal="true" aria-label={alt || "Image"} onClick={close}>

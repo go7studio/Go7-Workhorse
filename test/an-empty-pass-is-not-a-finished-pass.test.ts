@@ -60,7 +60,7 @@ test("a pass that produced nothing is failed, with the vendor's own words", () =
   const silent = applyChildIdleSync([missionWorker({ reply: "" })], "sess_worker", "completed");
   const run = silent[0]?.agentRun;
   assert.equal(run?.status, "failed", "fifty seconds and an empty message is not a finished pass");
-  assert.equal(run?.error, "Codex finished without a visible reply.");
+  assert.equal(run?.error, "Codex sent no reply.");
   assert.equal(run?.findings, undefined, "and the previous pass's findings are not handed back as this pass's");
 
   const spoke = applyChildIdleSync([missionWorker({ reply: "Gated all three." })], "sess_worker", "completed");
@@ -77,7 +77,7 @@ test("a turn that worked and wrote no prose is still a finished turn", () => {
 
   // The desk's own placeholder for a silent vendor is not prose either.
   const placeholder = applyChildIdleSync(
-    [missionWorker({ reply: "Codex finished without a visible reply." })],
+    [missionWorker({ reply: "Codex sent no reply." })],
     "sess_worker",
     "completed",
   );

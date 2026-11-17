@@ -1030,10 +1030,10 @@ test("an interrupted worker's chat says what happened to its processes", () => {
   const reaped = interruptedWorkerError({ kind: "worktree", path: "/tmp/wt", gitRoot: "/nowhere/repo" });
   assert.match(reaped, /\/tmp\/wt/);
   assert.ok(reaped.endsWith(WORKER_PROCESSES_REAPED), "the interrupt message must end with the processes sentence");
-  assert.match(reaped, /processes were stopped/);
+  assert.match(reaped, /Workhorse stopped its processes on the next launch/);
   const stranded = interruptedWorkerError({ kind: "local" }, false);
   assert.ok(stranded.endsWith(WORKER_PROCESSES_NOT_REAPED));
-  assert.match(stranded, /could not be stopped/);
+  assert.match(stranded, /Workhorse could not stop its processes/);
   assert.match(interruptedWorkerError({ kind: "cloud", environmentId: "env_1" }), /cloud environment/);
 });
 

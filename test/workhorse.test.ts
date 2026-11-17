@@ -1232,7 +1232,7 @@ test("in-chat subagents resolve vendors and keep a nested transcript", () => {
   // It used to land on "failed", which read as the worker breaking and left no
   // way back. The desk stopped it; the brief and the transcript are still here.
   assert.equal(interrupted?.status, "interrupted");
-  assert.match(interrupted?.error ?? "", /resume it from the chat/);
+  assert.match(interrupted?.error ?? "", /Resume from this chat/);
   assert.deepEqual(overlappingAgentFiles([
     { id: "parent" },
     { id: "a", parentId: "parent", agentRun: { status: "completed", startedAt: 1, isolation: "shared", changedFiles: ["C:\\repo\\a.ts"] } },

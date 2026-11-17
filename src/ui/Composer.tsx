@@ -1346,9 +1346,9 @@ export const Composer = memo(function Composer({
         <button
           className={`composer-mic${recording ? " recording" : ""}`}
           type="button"
-          aria-label={recording ? "Stop recording" : "Record voice"}
+          aria-label={recording ? "Stop listening" : "Listen"}
           aria-pressed={recording}
-          title={recording ? "Stop recording" : "Record voice"}
+          title={recording ? "Stop listening" : "Listen"}
           onClick={() => {
             if (recordingRef.current) void stopMic();
             else void startMic();

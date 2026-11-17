@@ -1,4 +1,5 @@
 import assert from "node:assert";
+import path from "node:path";
 import { test, describe } from "node:test";
 import {
   watchViewerFolder,
@@ -87,6 +88,38 @@ describe("watchViewerFolder", () => {
 
     assert.ok(!txtEvent, "should ignore non-viewer files");
 
+    handle.stop();
+  });
+
+  test("the first scan reports the newest drawn file first", async () => {
+    const events: ViewerFileEvent[] = [];
+    const files = ["old.glb", "mid.png", "scene.gltf", "new.jpg", "scene.svg", "model.fbx", "mesh.obj", "note.txt"];
+    const file = (name: string) => path.join("/draw", name);
+    const mtimes = new Map<string, number>([
+      [file("old.glb"), 10],
+      [file("mid.png"), 20],
+      [file("scene.gltf"), 25],
+      [file("new.jpg"), 30],
+    ]);
+
+    const handle = watchViewerFolder({
+      folder: "/draw",
+      onFile: (event) => events.push(event),
+      existsSync: () => true,
+      readdirSync: () => files,
+      statSync: (item) => ({ mtimeMs: mtimes.get(item) ?? 0 }),
+      readFileSync: () => Buffer.from("x"),
+      watch: mockWatch,
+    });
+
+    await handle.idle();
+
+    assert.deepStrictEqual(
+      events.map((event) => path.basename(event.path)),
+      ["new.jpg", "scene.gltf", "mid.png", "old.glb"],
+    );
+    assert.ok(events.every((event) => event.initial === true));
+    assert.deepStrictEqual(events.map((event) => event.format), ["jpg", "gltf", "png", "glb"]);
     handle.stop();
   });
 

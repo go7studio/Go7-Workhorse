@@ -38,7 +38,7 @@ const worker = (id: string, title: string): Session =>
 test("a run still marked running when the desk exited is interrupted, not failed", () => {
   const run = normalizeAgentRun({ status: "running", startedAt: 1, isolation: "shared" })!;
   assert.equal(run.status, "interrupted");
-  assert.match(run.error ?? "", /resume it from the chat/);
+  assert.match(run.error ?? "", /Resume from this chat/);
   assert.equal(typeof run.finishedAt, "number");
 
   // A worker that genuinely failed still says so — the two are not merged.
@@ -272,11 +272,11 @@ test("an interrupted worker's message names the folder its work is sitting in", 
   // Lane 3 added the second half: whether the worker's processes were reaped.
   assert.equal(
     interruptedWorkerError({ kind: "worktree", path: wt, gitRoot: "/nowhere/repo" }),
-    `Workhorse exited while this worker was running. Its brief and its work are kept in ${wt} — resume it from the chat. Its processes were stopped at the next launch.`,
+    `Workhorse quit while this worker was running. The brief and the work are in ${wt}. Resume from this chat. Workhorse stopped its processes on the next launch.`,
   );
-  assert.match(interruptedWorkerError({ kind: "local" }), /kept in the chat's own folder/);
+  assert.match(interruptedWorkerError({ kind: "local" }), /in the chat's own folder/);
   assert.match(interruptedWorkerError({ kind: "cloud", environmentId: "env_1" }), /cloud environment/);
-  assert.match(interruptedWorkerError(), /kept in the chat's own folder/);
+  assert.match(interruptedWorkerError(), /in the chat's own folder/);
 
   // And it arrives through the run, not just the helper.
   const run = normalizeAgentRun({ status: "running", startedAt: 1, isolation: "worktree" }, {

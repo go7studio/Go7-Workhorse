@@ -2626,19 +2626,24 @@ export function recordParentTakeover(
   const crew = sessions.filter((session) => session.parentId === parentId && session.agentRun);
   if (crew.length === 0 && !parent.lineup?.rows.length) return sessions;
   const detail = reason.trim() || "Parent applied shell or patch changes after handing the work to Workhorse.";
+  const text =
+    detail === "Parent applied shell or patch changes after handing the work to Workhorse."
+      ? "This chat took the work back."
+      : `Parent took over: ${detail}`;
   const notice = (): ChatMessage => ({
     id: uid("msg"),
     role: "system",
-    text: `Parent took over: ${detail}`,
+    text,
     createdAt: at,
   });
+  const takeoverNotice = (message: ChatMessage) =>
+    message.role === "system" &&
+    (message.text.startsWith("Parent took over:") || message.text === "This chat took the work back.");
   let changed = false;
   const next = sessions.map((session) => {
     if (session.id === parentId) {
       const run = session.agentRun ? markExecutionTakeover(session.agentRun, detail, at) : session.agentRun;
-      const already = session.messages.some(
-        (message) => message.role === "system" && message.text.startsWith("Parent took over:"),
-      );
+      const already = session.messages.some(takeoverNotice);
       changed = true;
       return {
         ...session,
@@ -2648,9 +2653,7 @@ export function recordParentTakeover(
     }
     if (session.parentId === parentId && session.agentRun && session.agentRun.executionOwner !== "parent") {
       changed = true;
-      const already = session.messages.some(
-        (message) => message.role === "system" && message.text.startsWith("Parent took over:"),
-      );
+      const already = session.messages.some(takeoverNotice);
       return {
         ...session,
         agentRun: markExecutionTakeover(session.agentRun, detail, at),
@@ -3205,7 +3208,7 @@ export function applyCancelWorker(sessions: Session[], workerId: string, now = D
         ...baseRun,
         status: "cancelled" as const,
         finishedAt: now,
-        error: baseRun.error?.trim() ? baseRun.error : "Cancelled by the orchestrator before the worker finished.",
+        error: baseRun.error?.trim() ? baseRun.error : "This chat cancelled the worker before it finished.",
       },
     };
   });
@@ -3226,9 +3229,9 @@ export function applyCancelWorker(sessions: Session[], workerId: string, now = D
  * so here, or says it could not, rather than leaving the person to guess from
  * a load average.
  */
-export const WORKER_PROCESSES_REAPED = "Its processes were stopped at the next launch.";
+export const WORKER_PROCESSES_REAPED = "Workhorse stopped its processes on the next launch.";
 export const WORKER_PROCESSES_NOT_REAPED =
-  "Its processes could not be stopped — check for work it left running on this machine.";
+  "Workhorse could not stop its processes. Check this machine for work it left running.";
 
 /**
  * What an interrupted worker's chat says, and where its work is.
@@ -3239,15 +3242,15 @@ export const WORKER_PROCESSES_NOT_REAPED =
  * the session carries one; say the shape of the answer when it does not.
  */
 export function interruptedWorkerError(environment?: SessionEnvironment, processesReaped = true): string {
-  const opening = "Workhorse exited while this worker was running.";
+  const opening = "Workhorse quit while this worker was running.";
   const processes = processesReaped ? WORKER_PROCESSES_REAPED : WORKER_PROCESSES_NOT_REAPED;
-  if (environment?.kind === "worktree" && environment.path) {
-    return `${opening} Its brief and its work are kept in ${environment.path} — resume it from the chat. ${processes}`;
-  }
-  if (environment?.kind === "cloud") {
-    return `${opening} Its brief and its work are kept in its cloud environment — resume it from the chat. ${processes}`;
-  }
-  return `${opening} Its brief and its work are kept in the chat's own folder — resume it from the chat. ${processes}`;
+  const where =
+    environment?.kind === "worktree" && environment.path
+      ? environment.path
+      : environment?.kind === "cloud"
+        ? "its cloud environment"
+        : "the chat's own folder";
+  return `${opening} The brief and the work are in ${where}. Resume from this chat. ${processes}`;
 }
 
 export function normalizeAgentRun(

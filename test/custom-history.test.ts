@@ -74,10 +74,12 @@ test("desk notices are not put in the model's mouth", () => {
     msg("user", "Do it again"),
     msg("assistant", "Custom finished without a visible reply."),
     msg("user", "Once more"),
+    msg("assistant", "Custom sent no reply."),
+    msg("user", "And the last time"),
     msg("assistant", "Done."),
   ]);
   assert.deepEqual(history.filter((item) => item.role === "assistant"), [{ role: "assistant", text: "Done." }]);
-  assert.equal(history.some((item) => /Stopped\.|visible reply/.test(item.text)), false);
+  assert.equal(history.some((item) => /Stopped\.|visible reply|sent no reply/.test(item.text)), false);
 });
 
 test("a trim keeps the newest and still starts on a user message", () => {

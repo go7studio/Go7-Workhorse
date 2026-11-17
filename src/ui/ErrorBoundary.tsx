@@ -7,7 +7,7 @@ export class ErrorBoundary extends Component<Props, State> {
   state: State = { error: null, gen: 0 };
 
   static getDerivedStateFromError(error: Error): Partial<State> {
-    return { error: error.message || "Something went wrong" };
+    return { error: error.message || "The window failed to draw." };
   }
 
   componentDidCatch(error: Error, info: ErrorInfo) {
@@ -24,7 +24,7 @@ export class ErrorBoundary extends Component<Props, State> {
     if (this.state.error) {
       return (
         <div className="crash">
-          <h1>Workhorse hit a snag</h1>
+          <h1>This window stopped drawing.</h1>
           <p>{this.state.error}</p>
           <button type="button" onClick={() => this.setState((current) => ({ error: null, gen: current.gen + 1 }))}>
             Try again

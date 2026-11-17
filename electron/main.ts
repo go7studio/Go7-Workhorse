@@ -1,9 +1,9 @@
-import { app, BrowserWindow, crashReporter, dialog, ipcMain, nativeImage, nativeTheme, net, protocol, safeStorage, session, shell, systemPreferences } from "electron";
+import { app, BrowserWindow, crashReporter, dialog, ipcMain, nativeImage, nativeTheme, protocol, safeStorage, session, shell, systemPreferences } from "electron";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { Readable } from "node:stream";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 import { GrokSessionHost, resolveOrBaseSessionCwd, resolveSessionCwd, type GrokCompactInput, type GrokPromptInput } from "./grok-host";
 import { CodexSessionHost, type CodexPromptInput } from "./codex-host";
 import { ClaudeSessionHost, type ClaudePromptInput } from "./claude-host";
@@ -670,16 +670,20 @@ function readMediaSrc(href: string, cwd?: string, vendorSessionId?: string): str
 function handleMediaProtocol(request: Request): Promise<Response> | Response {
   const file = resolveMediaProtocolFile(request.url);
   if (!file) return new Response(null, { status: 404 });
+  let size = 0;
+  try {
+    const stat = fs.statSync(file);
+    if (!stat.isFile()) return new Response(null, { status: 404 });
+    size = stat.size;
+  } catch {
+    return new Response(null, { status: 404 });
+  }
+  const headers = {
+    "Accept-Ranges": "bytes",
+    "Content-Type": mediaContentType(file),
+  };
   const range = request.headers.get("range");
   if (range) {
-    let size = 0;
-    try {
-      const stat = fs.statSync(file);
-      if (!stat.isFile()) return new Response(null, { status: 404 });
-      size = stat.size;
-    } catch {
-      return new Response(null, { status: 404 });
-    }
     const parsed = mediaByteRange(range, size);
     if (parsed === "bad") {
       return new Response(null, { status: 416, headers: { "Content-Range": `bytes */${size}` } });
@@ -689,8 +693,7 @@ function handleMediaProtocol(request: Request): Promise<Response> | Response {
       return new Response(Readable.toWeb(stream) as ReadableStream, {
         status: 206,
         headers: {
-          "Accept-Ranges": "bytes",
-          "Content-Type": mediaContentType(file),
+          ...headers,
           "Content-Length": String(parsed.end - parsed.start + 1),
           "Content-Range": `bytes ${parsed.start}-${parsed.end}/${size}`,
         },
@@ -698,7 +701,14 @@ function handleMediaProtocol(request: Request): Promise<Response> | Response {
     }
   }
   try {
-    return net.fetch(pathToFileURL(file).href);
+    const stream = fs.createReadStream(file);
+    return new Response(Readable.toWeb(stream) as ReadableStream, {
+      status: 200,
+      headers: {
+        ...headers,
+        "Content-Length": String(size),
+      },
+    });
   } catch {
     return new Response(null, { status: 404 });
   }

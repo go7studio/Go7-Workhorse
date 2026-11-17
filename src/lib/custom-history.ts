@@ -53,7 +53,7 @@ function isDeskNotice(text: string): boolean {
   const line = text.trim();
   return (
     line === "Stopped." ||
-    /finished without a visible reply\.$/.test(line) ||
+    /(?:finished without a visible reply|sent no reply)\.$/.test(line) ||
     /^Preview only\./.test(line) ||
     /^(Grok|Claude|Codex|Cursor|Custom) agent failed:/.test(line)
   );

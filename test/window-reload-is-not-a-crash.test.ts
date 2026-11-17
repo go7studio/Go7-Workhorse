@@ -29,7 +29,7 @@ test("a run this process is still driving stays running", () => {
 test("a run nobody is driving is still interrupted, as after a real exit", () => {
   const dead = normalizeAgentRun(RUN, undefined, false);
   assert.equal(dead?.status, "interrupted");
-  assert.match(dead?.error ?? "", /Workhorse exited while this worker was running/);
+  assert.match(dead?.error ?? "", /Workhorse quit while this worker was running/);
   assert.equal(normalizeAgentRun(RUN)?.status, "interrupted", "the default stays the old, safe answer");
 });
 
@@ -43,7 +43,7 @@ test("the live set decides per session, not per load", () => {
 test("a legacy failed row still recovers to interrupted whatever is live", () => {
   const legacy = { status: "failed" as const, startedAt: 1, error: LEGACY_INTERRUPTED_ERROR };
   assert.equal(normalizeAgentRun(legacy, undefined, true)?.status, "interrupted");
-  assert.equal(interruptedWorkerError(undefined).startsWith("Workhorse exited"), true);
+  assert.equal(interruptedWorkerError(undefined).startsWith("Workhorse quit"), true);
 });
 
 test("every ACP host can name the runs it is still carrying", () => {

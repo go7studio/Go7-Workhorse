@@ -6,7 +6,7 @@ import { useStoreSelector } from "../lib/store";
 import type { ChatImage, ChatMessage } from "../lib/types";
 import { ImageZoom } from "./ImageZoom";
 import { useMediaPaintReady } from "./MediaPaint";
-import { MessageBody } from "./MessageBody";
+import { MdPlayable, MessageBody } from "./MessageBody";
 import { copyText } from "../lib/copy-text";
 import { TimeStamp } from "./TimeStamp";
 import { TurnActions } from "./TurnActions";
@@ -15,6 +15,36 @@ function DeferredChatImage({ image }: { image: ChatImage }) {
   const ready = useMediaPaintReady();
   if (!ready) return <span className="say-image-pending" aria-hidden="true" />;
   return <ImageZoom className="say-image" src={imageSrc(image)} alt={image.name} />;
+}
+
+function DiskMedia({
+  file,
+  cwd,
+  vendorSessionId,
+}: {
+  file: ChatImage;
+  cwd?: string;
+  vendorSessionId?: string;
+}) {
+  const source = file.sourcePath?.trim() ?? "";
+  if ((file.kind === "audio" || file.kind === "video") && source) {
+    return (
+      <MdPlayable
+        href={source}
+        alt={file.name}
+        kind={file.kind}
+        cwd={cwd}
+        vendorSessionId={vendorSessionId}
+        caption={false}
+      />
+    );
+  }
+  return (
+    <span className="say-file" title={file.name}>
+      {file.name}
+      <em>{attachmentLabel(file)}</em>
+    </span>
+  );
 }
 
 type UserTurnStore = {
@@ -32,7 +62,17 @@ const sameUserTurnStore = (left: UserTurnStore, right: UserTurnStore) =>
   left.resendFrom === right.resendFrom &&
   left.forkFrom === right.forkFrom;
 
-export const UserTurn = memo(function UserTurn({ message, readOnly = false }: { message: ChatMessage; readOnly?: boolean }) {
+export const UserTurn = memo(function UserTurn({
+  message,
+  readOnly = false,
+  cwd,
+  vendorSessionId,
+}: {
+  message: ChatMessage;
+  readOnly?: boolean;
+  cwd?: string;
+  vendorSessionId?: string;
+}) {
   const store = useStoreSelector((desk) => ({
     editing: desk.editMessageId === message.id,
     requestEditMessage: desk.requestEditMessage,
@@ -138,10 +178,7 @@ export const UserTurn = memo(function UserTurn({ message, readOnly = false }: { 
                 ) : isPicture(group.file) ? (
                   <DeferredChatImage key={group.file.id} image={group.file} />
                 ) : (
-                  <span key={group.file.id} className="say-file" title={group.file.name}>
-                    {group.file.name}
-                    <em>{attachmentLabel(group.file)}</em>
-                  </span>
+                  <DiskMedia key={group.file.id} file={group.file} cwd={cwd} vendorSessionId={vendorSessionId} />
                 ),
               )}
             </div>
@@ -152,7 +189,7 @@ export const UserTurn = memo(function UserTurn({ message, readOnly = false }: { 
               {goal.rest}
             </p>
           ) : visible.trim() ? (
-            <MessageBody text={visible} />
+            <MessageBody text={visible} cwd={cwd} vendorSessionId={vendorSessionId} />
           ) : null}
         </div>
       </div>

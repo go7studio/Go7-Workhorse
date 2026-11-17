@@ -88,6 +88,8 @@ export function watchViewerFolder(input: ViewerWatchInput): ViewerWatchHandle {
     }
 
     const current = new Set<string>();
+    // The chat opens the first file of a scan. Newest first, so an older file does not win.
+    const opened: ViewerFileEvent[] = [];
     for (const name of entries) {
       const filePath = path.join(folder, name);
       current.add(filePath);
@@ -106,7 +108,16 @@ export function watchViewerFolder(input: ViewerWatchInput): ViewerWatchHandle {
       if (!prev) {
         const hash = hashFile(filePath, readFileSync);
         known.set(filePath, { hash, mtime });
-        input.onFile({ type: "added", path: filePath, format, hash, mtime, ...(initial ? { initial: true } : {}) });
+        const event: ViewerFileEvent = {
+          type: "added",
+          path: filePath,
+          format,
+          hash,
+          mtime,
+          ...(initial ? { initial: true } : {}),
+        };
+        if (initial) opened.push(event);
+        else input.onFile(event);
       } else if (prev.mtime !== mtime) {
         const hash = hashFile(filePath, readFileSync);
         if (hash !== prev.hash) {
@@ -116,6 +127,11 @@ export function watchViewerFolder(input: ViewerWatchInput): ViewerWatchHandle {
           known.set(filePath, { ...prev, mtime });
         }
       }
+    }
+
+    if (initial) {
+      opened.sort((left, right) => (right.mtime ?? 0) - (left.mtime ?? 0));
+      for (const event of opened) input.onFile(event);
     }
 
     for (const [filePath] of known) {

@@ -69,6 +69,11 @@ import type { AppState, ChatMessage, ProviderId } from "../lib/types";
 
 const SCROLL_SLACK = 96;
 
+function samePreviewPath(left?: string, right?: string): boolean {
+  if (!left || !right) return false;
+  return left.replace(/\\/g, "/") === right.replace(/\\/g, "/");
+}
+
 function followLatestClass(el: HTMLElement, following: boolean) {
   el.classList.toggle("follow-latest", following);
 }
@@ -89,9 +94,13 @@ export function crewDoneKind(text: string): "ok" | "bad" | null {
 const SystemTurn = memo(function SystemTurn({
   block,
   crewNames,
+  cwd,
+  vendorSessionId,
 }: {
   block: Extract<TranscriptBlock, { type: "system" }>;
   crewNames?: string;
+  cwd?: string;
+  vendorSessionId?: string;
 }) {
   if (isDeskNotice(block.message)) return null;
   const crew = crewDoneKind(block.message.text);
@@ -111,7 +120,7 @@ const SystemTurn = memo(function SystemTurn({
   }
   return (
     <article className="turn system chat" data-turn-id={block.message.id}>
-      <div className="say"><MessageBody text={block.message.text} /></div>
+      <div className="say"><MessageBody text={block.message.text} cwd={cwd} vendorSessionId={vendorSessionId} /></div>
     </article>
   );
 });
@@ -275,6 +284,11 @@ export function SessionPane() {
   const sessionId = session?.id ?? "";
   const viewer = useSessionViewer(sessionId, cwd, session?.previewUsed);
   const { open: viewerOpen, refreshViewer } = viewer;
+  const previewPath = useRef<string | undefined>(undefined);
+  const previewLoadedAt = useRef(0);
+  previewPath.current = viewer.asset?.path;
+  previewLoadedAt.current = viewer.asset?.loadedAt ?? 0;
+  const [hiddenPreview, setHiddenPreview] = useState<{ path: string; loadedAt: number } | null>(null);
   useLayoutEffect(() => { setChatStage(null); }, [sessionId]);
   const blenderOn = presetOn(session?.presets, "blender");
   const previewWatch = (viewerOpen || blenderOn) && viewer.ready;
@@ -289,10 +303,21 @@ export function SessionPane() {
   }, [sessionId, previewWatch, cwd]);
 
   useEffect(() => {
+    setHiddenPreview(null);
+  }, [sessionId]);
+
+  useEffect(() => {
     const off = window.workhorse?.onViewerFileChanged?.((event) => {
       if (event.sessionId !== sessionId) return;
       const fmt = event.format as ViewerAsset["format"];
       if (!["glb", "gltf", "png", "jpg"].includes(fmt)) return;
+      // A delete must not open the path. If it was the open file, clear the preview.
+      if (event.type === "removed") {
+        if (samePreviewPath(previewPath.current, event.path)) {
+          setHiddenPreview({ path: event.path, loadedAt: previewLoadedAt.current });
+        }
+        return;
+      }
       refreshViewer({ ...previewAsset(event.path, fmt), loadedAt: Date.now(), scopeRoot: event.scopeRoot }, event.initial);
     });
     return () => off?.();
@@ -702,9 +727,26 @@ export function SessionPane() {
         {shownBlocks.map((block, offset) => {
           const index = paintFrom + offset;
           if (block.type === "user") {
-            return <UserTurn key={block.message.id} message={block.message} />;
+            return (
+              <UserTurn
+                key={block.message.id}
+                message={block.message}
+                cwd={cwd}
+                vendorSessionId={session.vendorSessionId}
+              />
+            );
           }
-          if (block.type === "system") return <SystemTurn key={block.message.id} block={block} crewNames={crewNames} />;
+          if (block.type === "system") {
+            return (
+              <SystemTurn
+                key={block.message.id}
+                block={block}
+                crewNames={crewNames}
+                cwd={cwd}
+                vendorSessionId={session.vendorSessionId}
+              />
+            );
+          }
           const live = working && index === liveIndex;
           return (
             <AssistantTurn
@@ -832,7 +874,14 @@ export function SessionPane() {
         <aside className="session-viewer" aria-label="3D preview">
           <ViewerPanel
             sessionId={session.id}
-            asset={viewer.asset}
+            asset={
+              viewer.asset &&
+              hiddenPreview &&
+              samePreviewPath(hiddenPreview.path, viewer.asset.path) &&
+              viewer.asset.loadedAt === hiddenPreview.loadedAt
+                ? null
+                : viewer.asset
+            }
             annotations={viewer.annotations}
             onAnnotation={viewer.addAnnotation}
             onSendMarks={sendMarksToChat}

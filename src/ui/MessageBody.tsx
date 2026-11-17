@@ -1,4 +1,4 @@
-import { memo, useEffect, useState, type MouseEvent } from "react";
+import { memo, useEffect, useRef, useState, type MouseEvent } from "react";
 import { isLocalHtmlHref, parseChatMarkdown, parseInline, type Inline } from "../lib/markdown";
 import { isPassThroughImageHref, mdImageInitialSrc } from "../lib/media-display";
 import { safeExternalUrl } from "../lib/open-external";
@@ -15,6 +15,56 @@ function openWebUrl(url: string) {
   window.open(url, "_blank", "noopener,noreferrer");
 }
 
+/** The main process remembers a miss for 10 seconds. One retry after that, then stop. */
+export const MEDIA_LOAD_RETRY_MS = 10_000;
+
+export function mediaRetrySrc(src: string): string {
+  if (!src) return src;
+  const join = src.includes("?") ? "&" : "?";
+  return `${src}${join}retry=1`;
+}
+
+function MediaFallback({ label, path }: { label: string; path: string }) {
+  const name = label.trim();
+  const file = path.trim();
+  const text = name && file && name !== file ? `${name} ${file}` : file || name;
+  if (!text) return null;
+  return <p className="md-image-fallback">{text}</p>;
+}
+
+function useMediaLoad(src: string) {
+  const [retrySrc, setRetrySrc] = useState<string | null>(null);
+  const [waiting, setWaiting] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const tries = useRef(0);
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  useEffect(() => {
+    tries.current = 0;
+    setRetrySrc(null);
+    setWaiting(false);
+    setFailed(false);
+    return () => clearTimeout(timer.current);
+  }, [src]);
+
+  const onError = () => {
+    if (tries.current >= 1) {
+      setFailed(true);
+      setWaiting(false);
+      return;
+    }
+    tries.current = 1;
+    setWaiting(true);
+    clearTimeout(timer.current);
+    timer.current = setTimeout(() => {
+      setRetrySrc(mediaRetrySrc(src));
+      setWaiting(false);
+    }, MEDIA_LOAD_RETRY_MS);
+  };
+
+  return { src: retrySrc ?? src, waiting, failed, onError };
+}
+
 function MdImage({
   href,
   alt,
@@ -27,6 +77,7 @@ function MdImage({
   vendorSessionId?: string;
 }) {
   const [src, setSrc] = useState(() => mdImageInitialSrc(href, { cwd, vendorSessionId }));
+  const load = useMediaLoad(src);
   useEffect(() => {
     const next = mdImageInitialSrc(href, { cwd, vendorSessionId });
     setSrc(next);
@@ -39,18 +90,19 @@ function MdImage({
       gone = true;
     };
   }, [href, cwd, vendorSessionId]);
-  if (!src) {
+  if (!src || load.waiting) {
     return <span className="md-image-pending" aria-hidden="true" />;
   }
+  if (load.failed) return <MediaFallback label={alt} path={href} />;
   return (
     <figure className="md-figure">
-      <ImageZoom className="md-image" src={src} alt={alt} decoding="async" loading="lazy" />
+      <ImageZoom className="md-image" src={load.src} alt={alt} decoding="async" loading="lazy" onError={load.onError} />
       {alt ? <figcaption>{alt}</figcaption> : null}
     </figure>
   );
 }
 
-function MdPlayable({
+export function MdPlayable({
   href,
   alt,
   kind,
@@ -66,12 +118,14 @@ function MdPlayable({
   caption: boolean;
 }) {
   const src = mdImageInitialSrc(href, { cwd, vendorSessionId });
-  if (!src) return <span className="md-image-pending" aria-hidden="true" />;
+  const load = useMediaLoad(src);
+  if (!src || load.waiting) return <span className="md-image-pending" aria-hidden="true" />;
+  if (load.failed) return <MediaFallback label={alt} path={href} />;
   const media =
     kind === "audio" ? (
-      <audio className="md-audio" src={src} controls preload="metadata" aria-label={alt || undefined} />
+      <audio className="md-audio" src={load.src} controls preload="metadata" aria-label={alt || undefined} onError={load.onError} />
     ) : (
-      <video className="md-video" src={src} controls preload="metadata" playsInline aria-label={alt || undefined} />
+      <video className="md-video" src={load.src} controls preload="metadata" playsInline aria-label={alt || undefined} onError={load.onError} />
     );
   if (!caption) return media;
   return (

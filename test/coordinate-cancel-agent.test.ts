@@ -92,6 +92,7 @@ test("cancel-agent dispatcher marks the worker terminal and preserves partial wo
   assert.equal(out.alreadyTerminal, false);
   const run = out.worker?.agentRun;
   assert.equal(run?.status, "cancelled", "the worker agentRun must end in the terminal `cancelled` status");
+  assert.equal(run?.error, "This chat cancelled the worker before it finished.");
   assert.equal(run?.finishedAt, 4_242, "the worker agentRun must carry a finishedAt timestamp");
   assert.equal(
     out.worker?.messages.length,

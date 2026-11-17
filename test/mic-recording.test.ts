@@ -768,7 +768,7 @@ test("main, preload, and composer wire the mic control after the tools spacer", 
   assert.match(preload, /micGetStatus/);
   assert.match(preload, /micTranscribeLocal/);
   assert.match(composer, /composer-tools-spacer[\s\S]*composer-mic[\s\S]*Steer/);
-  assert.match(composer, /aria-label=\{recording \? "Stop recording" : "Record voice"\}/);
+  assert.match(composer, /aria-label=\{recording \? "Stop listening" : "Listen"\}/);
   assert.match(composer, /composerFieldPlaceholder/);
   assert.match(composer, /micDictateStart/);
   assert.match(read("electron/preload.ts"), /micDictateStart/);

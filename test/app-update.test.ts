@@ -15,11 +15,22 @@ import {
   npmInstallCommand,
   windowsGrokBotShimPids,
   offerFromRelease,
+  parseRegInstallLocation,
+  winElevationWasRefused,
   winInstallerArgs,
   winInstallerCommandLine,
+  winNsisGuid,
+  winRegQueryInstallLocation,
+  winRunAsInstaller,
   winSchtasksCreate,
   winSchtasksDelete,
   winSchtasksRun,
+  WIN_NSIS_APP_ID,
+  WIN_RUNAS_TIMEOUT_MS,
+  WIN_UPDATE_REFUSED_MESSAGE,
+  WIN_UPDATE_UNANSWERED_MESSAGE,
+  winUpdateLaunchError,
+  winUpdateLaunchKind,
   winUpdateTaskXml,
   winUpdateTaskXmlBytes,
   winWmiCreate,
@@ -257,6 +268,43 @@ test("a packaged Windows desk service-spawns silent Setup and NSIS relaunches on
   assert.equal(xmlFile[1], 0xfe);
 });
 
+test("a per-machine Windows install asks from the open desk, not the hidden task", () => {
+  const pkg = JSON.parse(readFileSync(path.join(ROOT, "package.json"), "utf8")) as { build?: { appId?: string } };
+  assert.equal(pkg.build?.appId, WIN_NSIS_APP_ID);
+  assert.equal(winNsisGuid(WIN_NSIS_APP_ID), "a3f662b3-1465-56f7-a94a-8e3a62128a79");
+
+  const query = winRegQueryInstallLocation();
+  assert.equal(query.command, "reg.exe");
+  assert.deepEqual(query.args, ["query", "HKLM\\SOFTWARE\\a3f662b3-1465-56f7-a94a-8e3a62128a79", "/v", "InstallLocation"]);
+  assert.equal(
+    parseRegInstallLocation(
+      "HKEY_LOCAL_MACHINE\\SOFTWARE\\a3f662b3-1465-56f7-a94a-8e3a62128a79\r\n    InstallLocation    REG_SZ    D:\\Program Files\\Go7 Workhorse\r\n",
+    ),
+    "D:\\Program Files\\Go7 Workhorse",
+  );
+  assert.equal(parseRegInstallLocation("    InstallLocation    REG_SZ    \r\n"), null);
+  assert.equal(winUpdateLaunchKind(null), "scheduled-task");
+  assert.equal(winUpdateLaunchKind(""), "scheduled-task");
+  assert.equal(winUpdateLaunchKind("D:\\Program Files\\Go7 Workhorse"), "runas");
+
+  const setup = "C:\\Users\\me\\AppData\\Local\\Temp\\workhorse-update-1\\workhorse-setup.exe";
+  const launch = winRunAsInstaller(setup);
+  assert.equal(launch.command, "powershell.exe");
+  const command = launch.args.join(" ");
+  assert.match(command, /-WindowStyle Hidden/);
+  assert.doesNotMatch(command, /-NonInteractive/);
+  assert.match(command, /Verb RunAs/);
+  assert.match(command, /\/S','--force-run/);
+  assert.match(command, /workhorse-setup\.exe/);
+  assert.doesNotMatch(command, /schtasks|Start-Sleep|Wait-Process/);
+  assert.equal(WIN_RUNAS_TIMEOUT_MS, 10 * 60_000);
+
+  assert.equal(winElevationWasRefused("The operation was canceled by the user."), true);
+  assert.equal(winUpdateLaunchError("The operation was canceled by the user.", false), WIN_UPDATE_REFUSED_MESSAGE);
+  assert.equal(winUpdateLaunchError("timed out", true), WIN_UPDATE_UNANSWERED_MESSAGE);
+  assert.equal(winUpdateLaunchError("Download failed (500).", false), "Download failed (500).");
+});
+
 test("update check is wired through main, preload, and the sidebar action", () => {
   const main = readFileSync(path.join(ROOT, "electron", "main.ts"), "utf8");
   const preload = readFileSync(path.join(ROOT, "electron", "preload.ts"), "utf8");
@@ -305,6 +353,8 @@ test("update check is wired through main, preload, and the sidebar action", () =
   assert.match(updater, /winSchtasksCreate/);
   assert.match(updater, /winSchtasksRun/);
   assert.match(updater, /winWmiCreate/);
+  assert.match(updater, /winRunAsInstaller/);
+  assert.match(updater, /winUpdateLaunchKind/);
   assert.doesNotMatch(updater, /winReplaceScript/);
   assert.doesNotMatch(updater, /winInstallerLaunch/);
   assert.doesNotMatch(updater, /replace\.vbs/);
@@ -316,6 +366,12 @@ test("update check is wired through main, preload, and the sidebar action", () =
   assert.match(winApply, /winSchtasksCreate/);
   assert.match(winApply, /winSchtasksRun/);
   assert.match(winApply, /winWmiCreate/);
+  assert.match(winApply, /readPerMachineInstallLocation/);
+  assert.match(winApply, /winRunAsInstaller/);
+  assert.match(winApply, /WIN_RUNAS_TIMEOUT_MS/);
+  const runasAt = winApply.indexOf("winRunAsInstaller");
+  const quitAt = winApply.lastIndexOf("app.quit");
+  assert.ok(runasAt > 0 && quitAt > runasAt, "the desk quits only after Windows has accepted the elevated installer");
   assert.doesNotMatch(winApply, /cleanupDir/);
   assert.match(winApply, /app\.quit/);
   assert.doesNotMatch(winApply, /spawn\(/);

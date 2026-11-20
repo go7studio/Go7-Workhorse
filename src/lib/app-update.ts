@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 export const UPDATE_REPO = {
   owner: "go7studio",
   repo: "Go7-Workhorse",
@@ -218,10 +220,14 @@ function xmlEscape(value: string): string {
 }
 
 /**
- * One-shot Task Scheduler XML: silent Setup only.
+ * One-shot Task Scheduler XML for a per-user install: silent Setup only.
  * Do not Exec cmd.exe or schtasks.exe here — those are console apps and would
  * flash a prompt in the user session. Setup /S has no wizard; --force-run
  * opens Workhorse when the copy is done.
+ *
+ * A per-machine install must not use this task. The task is hidden and
+ * LeastPrivilege, and silent NSIS then asks to elevate from that task.
+ * Windows starts consent.exe with no window, so the prompt never appears.
  */
 export function winUpdateTaskXml(input: { command: string; args?: string }): string {
   const command = xmlEscape(input.command);
@@ -313,6 +319,85 @@ export function winWmiCreateCommand(commandLine: string): { command: string; arg
 
 export function winWmiCreate(setup: string): { command: string; args: string[] } {
   return winWmiCreateCommand(winInstallerCommandLine(setup));
+}
+
+/** electron-builder's UUID namespace. NSIS records the install at HKLM\SOFTWARE\<guid>. */
+export const ELECTRON_BUILDER_NS_UUID = "50e065bc-3134-11e6-9bab-38c9862bdaf3";
+
+/** package.json build.appId. The Windows install guid is UUID v5 of this. */
+export const WIN_NSIS_APP_ID = "com.go7studio.workhorse";
+
+export const WIN_UPDATE_REFUSED_MESSAGE = "Windows did not approve the update. Workhorse was not changed.";
+
+export const WIN_UPDATE_UNANSWERED_MESSAGE = "Windows did not answer the update prompt. Workhorse was not changed.";
+
+/** How long the desk waits at the Windows approval prompt. */
+export const WIN_RUNAS_TIMEOUT_MS = 10 * 60_000;
+
+export function winNsisGuid(appId: string): string {
+  const namespace = Buffer.from(ELECTRON_BUILDER_NS_UUID.replace(/-/g, ""), "hex");
+  const hash = createHash("sha1").update(namespace).update(appId, "utf8").digest();
+  hash[6] = (hash[6] & 0x0f) | 0x50;
+  hash[8] = (hash[8] & 0x3f) | 0x80;
+  const hex = hash.subarray(0, 16).toString("hex");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+export function winRegQueryInstallLocation(appId = WIN_NSIS_APP_ID): { command: string; args: string[] } {
+  return {
+    command: "reg.exe",
+    args: ["query", `HKLM\\SOFTWARE\\${winNsisGuid(appId)}`, "/v", "InstallLocation"],
+  };
+}
+
+export function parseRegInstallLocation(stdout: string): string | null {
+  for (const line of stdout.split(/\r?\n/)) {
+    const match = line.match(/^\s*InstallLocation\s+REG_\w+\s*(.*)$/);
+    if (!match) continue;
+    const value = match[1]?.trim() ?? "";
+    return value || null;
+  }
+  return null;
+}
+
+/**
+ * Per-machine (HKLM InstallLocation set) has to elevate. Ask with ShellExecute
+ * runas from the open desk, which is an interactive window, so Windows draws
+ * the approval prompt. The scheduled task never does.
+ */
+export function winUpdateLaunchKind(perMachineInstallLocation: string | null | undefined): "runas" | "scheduled-task" {
+  return perMachineInstallLocation?.trim() ? "runas" : "scheduled-task";
+}
+
+export function winElevationWasRefused(message: string): boolean {
+  return /canceled by the user|cancelled by the user|operation was canceled|0x800710e0|error:\s*1223/i.test(message);
+}
+
+export function winUpdateLaunchError(message: string, timedOut: boolean): string {
+  if (timedOut) return WIN_UPDATE_UNANSWERED_MESSAGE;
+  if (winElevationWasRefused(message)) return WIN_UPDATE_REFUSED_MESSAGE;
+  return message.slice(0, 280);
+}
+
+/**
+ * Start silent Setup elevated from the interactive desk.
+ * -Verb RunAs shows the Windows prompt before the process exists, and the
+ * elevated Setup is not a child of Electron, so it survives the desk quitting.
+ * Do not pass -NonInteractive: that can refuse the prompt. Do not -Wait: the
+ * installer stops this desk, then --force-run opens the new one.
+ */
+export function winRunAsInstaller(setup: string): { command: string; args: string[] } {
+  const file = setup.replace(/'/g, "''");
+  const script = [
+    "$ErrorActionPreference = 'Stop'",
+    `$p = Start-Process -FilePath '${file}' -ArgumentList '/S','--force-run' -Verb RunAs -PassThru -WindowStyle Hidden`,
+    "if (-not $p) { exit 1 }",
+    "exit 0",
+  ].join("; ");
+  return {
+    command: "powershell.exe",
+    args: ["-NoProfile", "-WindowStyle", "Hidden", "-Command", script],
+  };
 }
 
 /** Re-register the live bundle and drop a stale Dock bookmark after an in-place replace. */

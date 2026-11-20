@@ -19,13 +19,21 @@ import {
   parseVersion,
   pickLatestTagOffer,
   pickMacDmgAsset,
+  parseRegInstallLocation,
   pickWinSetupAsset,
   releaseTag,
   UPDATE_REPO,
   updateInstallKind,
   versionFromRef,
+  WIN_NSIS_APP_ID,
+  WIN_RUNAS_TIMEOUT_MS,
+  winRegQueryInstallLocation,
+  winRunAsInstaller,
   winSchtasksCreate,
+  winSchtasksDelete,
   winSchtasksRun,
+  winUpdateLaunchError,
+  winUpdateLaunchKind,
   winUpdateTaskXml,
   winUpdateTaskXmlBytes,
   winWmiCreate,
@@ -241,6 +249,19 @@ async function stopWindowsGrokBotShim(): Promise<void> {
   }
 }
 
+async function readPerMachineInstallLocation(): Promise<string | null> {
+  if (process.platform !== "win32") return null;
+  const query = winRegQueryInstallLocation(WIN_NSIS_APP_ID);
+  let output = "";
+  try {
+    output = await run(query.command, query.args, os.tmpdir(), 15_000);
+  } catch {
+    // No HKLM install key means this desk is per-user. A missing key exits 1.
+    output = "";
+  }
+  return parseRegInstallLocation(output);
+}
+
 async function installWinNsis(version: string): Promise<AppUpdateApplyResult> {
   let release: unknown;
   try {
@@ -254,6 +275,7 @@ async function installWinNsis(version: string): Promise<AppUpdateApplyResult> {
 
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "workhorse-update-"));
   const setup = path.join(tmp, "workhorse-setup.exe");
+  let launchKind: "runas" | "scheduled-task" = "scheduled-task";
   try {
     const response = await fetch(asset.url, {
       headers: { "User-Agent": "Go7-Workhorse", Accept: "application/octet-stream" },
@@ -263,16 +285,28 @@ async function installWinNsis(version: string): Promise<AppUpdateApplyResult> {
     fs.writeFileSync(setup, Buffer.from(await response.arrayBuffer()));
     await stopWindowsGrokBotShim();
 
-    const xmlPath = path.join(tmp, "update-task.xml");
-    fs.writeFileSync(xmlPath, winUpdateTaskXmlBytes(winUpdateTaskXml({ command: setup })));
-    const create = winSchtasksCreate({ xmlPath });
-    const runTask = winSchtasksRun();
-    try {
-      await run(create.command, create.args, tmp, 30_000);
-      await run(runTask.command, runTask.args, tmp, 30_000);
-    } catch {
-      const wmi = winWmiCreate(setup);
-      await run(wmi.command, wmi.args, tmp, 30_000);
+    launchKind = winUpdateLaunchKind(await readPerMachineInstallLocation());
+    if (launchKind === "runas") {
+      const remove = winSchtasksDelete();
+      try {
+        await run(remove.command, remove.args, tmp, 15_000);
+      } catch {
+        /* no leftover hidden task */
+      }
+      const launch = winRunAsInstaller(setup);
+      await run(launch.command, launch.args, tmp, WIN_RUNAS_TIMEOUT_MS);
+    } else {
+      const xmlPath = path.join(tmp, "update-task.xml");
+      fs.writeFileSync(xmlPath, winUpdateTaskXmlBytes(winUpdateTaskXml({ command: setup })));
+      const create = winSchtasksCreate({ xmlPath });
+      const runTask = winSchtasksRun();
+      try {
+        await run(create.command, create.args, tmp, 30_000);
+        await run(runTask.command, runTask.args, tmp, 30_000);
+      } catch {
+        const wmi = winWmiCreate(setup);
+        await run(wmi.command, wmi.args, tmp, 30_000);
+      }
     }
   } catch (error) {
     try {
@@ -281,6 +315,8 @@ async function installWinNsis(version: string): Promise<AppUpdateApplyResult> {
       /* helper may already be running */
     }
     const message = error instanceof Error ? error.message : "Install failed.";
+    const timedOut = error instanceof Error && "killed" in error && Boolean((error as { killed?: boolean }).killed);
+    if (launchKind === "runas") return { ok: false, message: winUpdateLaunchError(message, timedOut) };
     return { ok: false, message: message.slice(0, 280) };
   }
   setImmediate(() => app.quit());

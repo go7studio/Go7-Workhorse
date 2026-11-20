@@ -1343,6 +1343,34 @@ function DeskAccessBlock() {
       </div>
       <div className="settings-row">
         <div className="settings-row-copy">
+          <strong>Computer</strong>
+          <span>New chats start here. Always on a chat keeps that model on across chats.</span>
+        </div>
+        <div className="settings-control">
+          <div className="actions" role="radiogroup" aria-label="Computer default">
+            <button
+              className={store.settings.computerDefault === "on" ? "tiny" : "tiny active-kind"}
+              type="button"
+              role="radio"
+              aria-checked={store.settings.computerDefault !== "on"}
+              onClick={() => store.setComputerDefault("off")}
+            >
+              Off
+            </button>
+            <button
+              className={store.settings.computerDefault === "on" ? "tiny active-kind" : "tiny"}
+              type="button"
+              role="radio"
+              aria-checked={store.settings.computerDefault === "on"}
+              onClick={() => store.setComputerDefault("on")}
+            >
+              On
+            </button>
+          </div>
+        </div>
+      </div>
+      <div className="settings-row">
+        <div className="settings-row-copy">
           <strong>Chrome</strong>
           <span>
             Ask each chat shows the card on a chat that has not answered.

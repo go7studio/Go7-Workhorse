@@ -1,43 +1,49 @@
-import type { ComputerSeat } from "../lib/computer-seat";
+import type { ComputerChoice } from "../lib/computer-seat";
+
+const CHOICES: { id: ComputerChoice; label: string }[] = [
+  { id: "off", label: "Off" },
+  { id: "on", label: "On" },
+  { id: "always", label: "Always" },
+];
 
 /**
- * The per-chat Computer switch. It sits on the existing access card, beside
- * Permission and Sandbox.
+ * The Computer control beside Permission and Sandbox.
+ * Off and On are this chat. Always keeps this model on across chats.
  */
 export function ComputerSeatCard({
-  computer,
+  choice,
   worker = false,
   onChange,
 }: {
-  computer: ComputerSeat;
+  choice: ComputerChoice;
   worker?: boolean;
-  onChange: (computer: ComputerSeat) => void;
+  onChange: (choice: ComputerChoice) => void;
 }) {
   return (
     <div className="setup-block">
       <div className="setup-choice-title">
         <strong>Computer</strong>
       </div>
-      <div className="setup-grid" role="radiogroup" aria-label="Computer">
-        {(["off", "on"] as const).map((value) => (
+      <div className="setup-effort setup-segment" role="radiogroup" aria-label="Computer">
+        {CHOICES.map((item) => (
           <button
-            key={value}
-            className={computer === value ? "on" : undefined}
+            key={item.id}
+            className={choice === item.id ? "on" : undefined}
             type="button"
             role="radio"
-            aria-checked={computer === value}
-            onClick={() => onChange(value)}
+            aria-checked={choice === item.id}
+            onClick={() => onChange(item.id)}
           >
             <span className="setup-choice-copy">
-              <strong>{value === "on" ? "On" : "Off"}</strong>
+              <strong>{item.label}</strong>
             </span>
           </button>
         ))}
       </div>
       <p className="setup-lede">
         {worker
-          ? "Spawn leaves Computer off. This worker does not get the computer tool."
-          : "Drive Finder, Explorer, and System Settings from this chat. Workers do not inherit it."}
+          ? "This worker inherited the parent chat. Always keeps this model on. The parent can pass computer false to withhold it."
+          : "On drives Finder, Explorer, and System Settings from this chat. Always keeps this model on across chats. A spawn hands this seat down unless that call passes computer false."}
       </p>
     </div>
   );

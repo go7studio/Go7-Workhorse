@@ -9,7 +9,8 @@ export type { CrewMode };
  * used to seat Wren at Ask under an Always parent.
  */
 const SPAWN_ACCESS_LAW =
-  "Do not pass permission or sandbox on a spawn. This chat's Permission and Sandbox are the person's setting; every worker you hire copies that seat. You cannot raise, lower, or retune a worker's access from the call. ";
+  "Do not pass permission or sandbox on a spawn. This chat's Permission and Sandbox are the person's setting; every worker you hire copies that seat. You cannot raise, lower, or retune a worker's access from the call. " +
+  "Computer hands down from this chat. Omit computer to copy it. Pass computer false to leave that worker off. You cannot turn Computer on for a worker when this chat has it off. ";
 
 /**
  * The same fact for a worker, which may make one bounded helper and nothing

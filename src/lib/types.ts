@@ -636,10 +636,15 @@ export type Session = {
   mode: PermissionMode;
   sandbox: SandboxProfile;
   /**
-   * Desktop control for this chat. Missing means off. Spawn does not copy it
-   * onto a worker.
+   * Desktop control for this chat. Missing means off. A spawn hands the parent
+   * seat down unless that call passes computer false.
    */
   computer?: "off" | "on";
+  /**
+   * A parent spawn passed computer false. Model Always does not turn this chat
+   * back on. Cleared when the person sets Computer on this chat.
+   */
+  computerHold?: true;
   /** Controls that are independent from the filesystem sandbox. */
   securityPolicy?: SessionSecurityPolicy;
   /** Where this chat executes. Missing on older saves means the project's local folder. */
@@ -1114,6 +1119,16 @@ export type Settings = {
    * Off leaves the choice on each chat.
    */
   chromeAlways: boolean;
+  /**
+   * Computer for a new chat that has no model Always. Off unless the person
+   * sets it. Existing chats keep the seat they were saved with.
+   */
+  computerDefault: "off" | "on";
+  /**
+   * Models that stay on across chats and restarts. Each key is
+   * `provider:model`, or `provider:bot:model` for a custom slot.
+   */
+  computerAlways: string[];
   /** Crew (team sharing) settings. Off by default, staff-gated until dogfood. */
   crew?: CrewSettings;
 };

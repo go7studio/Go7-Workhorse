@@ -226,6 +226,11 @@ const DESK_TOOLS: { name: string; description: string; input_schema: Record<stri
         model: { type: "string", description: "Model id. Only for a user's assignment or a workhorse_find_bots pick" },
         permission: { type: "string", description: "Ignored. This chat's Permission is the person's setting; the worker copies it. Do not pass permission." },
         sandbox: { type: "string", description: "Ignored. This chat's Sandbox is the person's setting; the worker copies it. Do not pass sandbox." },
+        computer: {
+          type: "boolean",
+          description:
+            "Omit to hand this chat's Computer down to the worker. Pass false to leave Computer off on that worker. Passing true cannot turn Computer on when this chat has it off.",
+        },
         route: { type: "string", description: "auto, quick, balanced, or deep" },
         domain: {
           type: "string",

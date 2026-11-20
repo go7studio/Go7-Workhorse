@@ -5,13 +5,14 @@ import { makerLabel, modelChipLabel, parseModelId } from "../lib/model-groups";
 import { cursorFamilyId } from "../lib/cursor-catalog";
 import { agyWatchKey, type AgyWatchKey } from "../lib/agy-usage";
 import { cursorWatchLane, type CursorWatchKey } from "../lib/cursor-lane";
-import { contextWindowFor, contextWindowsFor, defaultModel, effortLabel, effortStopAt, effortStopPos, effortsFor, formatWindow, modelName, modelsForPicker, supportsFastMode, withEffort } from "../lib/models";
+import { contextWindowFor, contextWindowsFor, defaultModel, effortsFor, formatWindow, modelName, modelsForPicker, supportsFastMode, withEffort } from "../lib/models";
 import { hasAttachedLlm, vendorEnabled, vendorLabel, vendorTint } from "../lib/settings";
 import { BLENDER_PRESET, presetOn } from "../lib/environment-presets";
 import { sessionEnvironmentKind } from "../lib/session-environment";
 import { useActiveSession, useStore } from "../lib/store";
 import { leftoverForCard, setupPaintsTide, vendorTidePercent } from "../lib/usage";
 import type { EffortLevel, PermissionMode, ProviderId, SandboxProfile } from "../lib/types";
+import { computerChoiceForChat, computerModelIsAlways } from "../lib/computer-seat";
 import { ComputerSeatCard } from "./ComputerSeatCard";
 
 const PERMISSIONS: { id: PermissionMode; label: string }[] = [
@@ -27,20 +28,6 @@ const SANDBOXES: { id: SandboxProfile; label: string }[] = [
   { id: "read-only", label: "Read-only" },
   { id: "strict", label: "Strict" },
 ];
-
-const PERMISSION_ICONS: Record<PermissionMode, string> = {
-  ask: "?",
-  "accept-edits": "✓",
-  "always-approve": "∞",
-  plan: "◇",
-};
-
-const SANDBOX_ICONS: Record<SandboxProfile, string> = {
-  off: "◎",
-  workspace: "▣",
-  "read-only": "◉",
-  strict: "◆",
-};
 
 const SETUP_VENDORS: Exclude<ProviderId, "custom">[] = ["grok", "codex", "claude", "cursor"];
 
@@ -76,7 +63,6 @@ export function SessionSetup({ onClose }: { onClose: () => void }) {
     setChatPreset,
   } = useStore();
   const root = useRef<HTMLDivElement>(null);
-  const [slide, setSlide] = useState<number | null>(null);
   const [environmentBusy, setEnvironmentBusy] = useState<"local" | "worktree" | null>(null);
   const [environmentNote, setEnvironmentNote] = useState("");
 
@@ -153,14 +139,10 @@ export function SessionSetup({ onClose }: { onClose: () => void }) {
   const vendorColor =
     bot?.color ?? stockTint ?? `var(--${session.provider === "custom" ? "custom" : session.provider})`;
   const thinking = effortsFor(session.provider, session.model);
-  // Sheet can show a default level; persist only when the user picks or slides.
+  // Sheet can show a default level; persist only when the user picks one.
   const shownEffort = thinking.some((item) => item.id === session.effort)
     ? session.effort
     : withEffort(session.provider, session.model, session.effort ?? null);
-  const thinkIndex = Math.max(0, thinking.findIndex((item) => item.id === shownEffort));
-  const hoverIndex =
-    slide == null || thinking.length === 0 ? thinkIndex : effortStopAt(slide, thinking.length);
-  const thinkNow = thinking[hoverIndex] ?? thinking[thinkIndex];
   const selectedPermission = PERMISSIONS.find((item) => item.id === session.mode) ?? PERMISSIONS[0];
   const selectedSandbox = SANDBOXES.find((item) => item.id === session.sandbox) ?? SANDBOXES[0];
   const routeLabel = session.routingMode === "auto"
@@ -563,7 +545,11 @@ export function SessionSetup({ onClose }: { onClose: () => void }) {
           </div>
         </div>
         <ComputerSeatCard
-          computer={session.computer === "on" ? "on" : "off"}
+          choice={computerChoiceForChat({
+            computer: session.computer,
+            held: session.computerHold === true,
+            modelAlways: computerModelIsAlways(settings.computerAlways, session.provider, session.model, session.customBotId),
+          })}
           worker={session.hidden === true}
           onChange={setComputer}
         />

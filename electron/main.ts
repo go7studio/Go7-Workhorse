@@ -349,6 +349,13 @@ mainLog.record("startup", isMcpHelper ? `version=${APP_VERSION} pid=${process.pi
 
 try {
   app.commandLine.appendSwitch("disk-cache-size", String(64 * 1024 * 1024));
+  // Unpackaged only. A dev run sets WORKHORSE_DEBUG_PORT to drive this desk
+  // over CDP. A packaged build and the MCP helper never open the port.
+  const debugPort = !isMcpHelper && !app.isPackaged ? process.env.WORKHORSE_DEBUG_PORT?.trim() ?? "" : "";
+  if (/^\d{2,5}$/.test(debugPort)) {
+    app.commandLine.appendSwitch("remote-debugging-port", debugPort);
+    app.commandLine.appendSwitch("remote-allow-origins", "*");
+  }
 } catch {
   /* Chromium may already have taken its switches */
 }

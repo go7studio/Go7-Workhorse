@@ -108,8 +108,15 @@ import {
   workerAccess,
   workerGrant,
 } from "./permissions";
-import { computerForSpawnedWorker } from "./computer-seat";
-import type { ComputerSeat } from "./computer-seat";
+import {
+  computerForNewChat,
+  computerForSpawnedWorker,
+  computerHandDown,
+  computerModelIsAlways,
+  computerModelKey,
+  withModelComputerAlways,
+} from "./computer-seat";
+import type { ComputerChoice, ComputerSeat } from "./computer-seat";
 import {
   applyDeleteCustomBot,
   applyInstallCustomBot,
@@ -635,7 +642,8 @@ export type Store = AppState & {
   setMode: (mode: PermissionMode) => void;
   setDeskAccess: (patch: Partial<DeskAccess>) => void;
   setSandbox: (sandbox: SandboxProfile) => void;
-  setComputer: (computer: ComputerSeat) => void;
+  setComputer: (choice: ComputerChoice) => void;
+  setComputerDefault: (computer: ComputerSeat) => void;
   setChatPreset: (id: "blender", on: boolean) => void;
   setSecurityPolicy: (patch: Partial<SessionSecurityPolicy>) => void;
   setMcpServers: (servers: McpServerConfig[]) => Promise<void>;
@@ -1065,7 +1073,8 @@ function hydrate(value: unknown, liveRunIds?: ReadonlySet<string>): AppState {
       const suggested = suggestedTitleForSession(session);
       const titled = suggested ? { ...session, title: suggested } : session;
       const lineup = reconcileLineupOnRestart(titled.lineup);
-      return lineup ? { ...titled, lineup } : titled;
+      const lined = lineup ? { ...titled, lineup } : titled;
+      return withModelComputerAlways(lined, settings.computerAlways);
     }),
   ));
   const activeSessionId =
@@ -2071,6 +2080,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         // A new chat keeps the model the person picked. Auto is a pick they
         // make on the chat afterwards; no setting puts a chat on Auto for them.
         routingMode: "manual",
+        ...(computerForNewChat({
+          appDefault: current.settings.computerDefault,
+          modelAlways: computerModelIsAlways(current.settings.computerAlways, choice.provider, choice.model, customBotId),
+        }) === "on"
+          ? { computer: "on" as const }
+          : {}),
       });
       return {
         ...current,
@@ -2116,11 +2131,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if (!live) return latest;
       const nextEffort = withEffort(provider, model, live.effort);
       const next = applySessionModelChange(live, { provider, model, effort: nextEffort, customBotId: botId });
+      const modelAlways = computerModelIsAlways(latest.settings.computerAlways, provider, model, botId);
+      const seated = modelAlways ? { ...next, computer: "on" as const, computerHold: undefined } : next;
       const nextState = {
         ...latest,
-        lastModel: rememberLastModel(latest.lastModel, next),
+        lastModel: rememberLastModel(latest.lastModel, seated),
         sessions: latest.sessions.map((item) =>
-          item.id === live.id ? { ...next, routingMode: "manual" as const, routingDecision: undefined } : item,
+          item.id === live.id ? { ...seated, routingMode: "manual" as const, routingDecision: undefined } : item,
         ),
       };
       stateRef.current = nextState;
@@ -2429,19 +2446,49 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }));
   }, []);
 
-  const setComputer = useCallback((computer: ComputerSeat) => {
-    const next = computer === "on" ? "on" : "off";
+  const setComputer = useCallback((choice: ComputerChoice) => {
     setState((current) => {
       const live = current.sessions.find((item) => item.id === current.activeSessionId);
       if (!live) return current;
-      if ((live.computer === "on" ? "on" : "off") === next) return current;
+      const key = computerModelKey(live.provider, live.model, live.customBotId);
+      const always = new Set(current.settings.computerAlways);
+      if (choice === "always") {
+        if (key) always.add(key);
+        return {
+          ...current,
+          settings: { ...current.settings, computerAlways: [...always] },
+          sessions: current.sessions.map((item) => {
+            if (computerModelKey(item.provider, item.model, item.customBotId) !== key) return item;
+            if (item.id === live.id) return { ...item, computer: "on" as const, computerHold: undefined };
+            if (item.computerHold) return item;
+            return item.computer === "on" ? item : { ...item, computer: "on" as const };
+          }),
+        };
+      }
+      if (key) always.delete(key);
+      const computer = choice === "on" ? ("on" as const) : undefined;
+      const unchanged =
+        (live.computer === "on" ? "on" : "off") === (computer ?? "off") &&
+        !live.computerHold &&
+        current.settings.computerAlways.length === always.size;
+      if (unchanged) return current;
       return {
         ...current,
+        settings: { ...current.settings, computerAlways: [...always] },
         sessions: current.sessions.map((item) =>
-          item.id === live.id ? { ...item, computer: next === "on" ? "on" : undefined } : item,
+          item.id === live.id ? { ...item, computer, computerHold: undefined } : item,
         ),
       };
     });
+  }, []);
+
+  const setComputerDefault = useCallback((computer: ComputerSeat) => {
+    const next = computer === "on" ? "on" : "off";
+    setState((current) =>
+      current.settings.computerDefault === next
+        ? current
+        : { ...current, settings: { ...current.settings, computerDefault: next } },
+    );
   }, []);
 
   const setSandbox = useCallback((sandbox: SandboxProfile) => {
@@ -7239,6 +7286,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               typeof (payload as { fast?: unknown }).fast === "boolean"
                 ? (payload as { fast: boolean }).fast === true
                 : priorWorker?.fastMode === true;
+            const childComputer = computerForSpawnedWorker({
+              parent: parent.computer,
+              handDown: payload.computer,
+              modelAlways: computerModelIsAlways(latest.settings.computerAlways, spec.provider, spec.model, spec.customBotId),
+            });
             const nextBrain = {
               provider: spec.provider,
               model: spec.model,
@@ -7288,7 +7340,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 owned: assignedPaths.length > 0,
                 prior: priorWorker,
               }),
-              computer: computerForSpawnedWorker(priorWorker?.computer),
+              ...(childComputer === "on" ? { computer: "on" as const } : { computer: undefined }),
+              computerHold: computerHandDown(payload.computer) ? undefined : (true as const),
               securityPolicy: parent.securityPolicy,
               environment,
               ...(childBound ? { boundFolder: childBound } : {}),
@@ -10594,6 +10647,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       setDeskAccess,
       setSandbox,
       setComputer,
+      setComputerDefault,
       setChatPreset,
       setSecurityPolicy,
       setMcpServers,
@@ -10758,6 +10812,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       setDeskAccess,
       setSandbox,
       setComputer,
+      setComputerDefault,
       setChatPreset,
       setSecurityPolicy,
       setMcpServers,

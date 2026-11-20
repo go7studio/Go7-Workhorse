@@ -498,6 +498,11 @@ const TOOLS = [
         },
         permission: { type: "string", description: "Ignored. This chat's Permission is the person's setting; the worker copies it. Do not pass permission." },
         sandbox: { type: "string", description: "Ignored. This chat's Sandbox is the person's setting; the worker copies it. Do not pass sandbox." },
+        computer: {
+          type: "boolean",
+          description:
+            "Omit to hand this chat's Computer down to the worker. Pass false to leave Computer off on that worker. Passing true cannot turn Computer on when this chat has it off.",
+        },
         route: { type: "string", description: "auto (default), quick, balanced, or deep" },
         role: { type: "string", description: "auditor when this slice checks another worker's output, so it routes deep instead of being sized from the prompt. It does not restrict the worker or pick a different vendor from the builder — name the builder in exclude for that." },
         exclude: { type: "array", items: { type: "string" }, description: "Provider, model, or bot terms this worker and its descendants must avoid" },
@@ -552,6 +557,11 @@ const TOOLS = [
         },
         permission: { type: "string", description: "Ignored. This chat's Permission is the person's setting; the worker copies it. Do not pass permission." },
         sandbox: { type: "string", description: "Ignored. This chat's Sandbox is the person's setting; the worker copies it. Do not pass sandbox." },
+        computer: {
+          type: "boolean",
+          description:
+            "Omit to hand this chat's Computer down to the worker. Pass false to leave Computer off on that worker. Passing true cannot turn Computer on when this chat has it off.",
+        },
         route: { type: "string", description: "Omit to keep the prior brain; auto, quick, balanced, or deep opts into routing" },
         timeoutSeconds: { type: "number", description: "Ignored. The desk does not stop a worker on a runtime limit. The worker runs until it finishes or is cancelled." },
         tokenBudget: { type: "number", description: "Ignored. The desk does not stop a worker on a token ceiling. This chat's billed spend is on the meter." },
@@ -633,6 +643,11 @@ const TOOLS = [
         },
         permission: { type: "string", description: "Ignored. This chat's Permission is the person's setting; the worker copies it. Do not pass permission." },
         sandbox: { type: "string", description: "Ignored. This chat's Sandbox is the person's setting; the worker copies it. Do not pass sandbox." },
+        computer: {
+          type: "boolean",
+          description:
+            "Omit to hand this chat's Computer down to the worker. Pass false to leave Computer off on that worker. Passing true cannot turn Computer on when this chat has it off.",
+        },
         route: { type: "string", description: "auto, quick, balanced, or deep" },
         role: { type: "string", description: "auditor when this slice checks another worker's output, so it routes deep instead of being sized from the prompt. It does not restrict the worker or pick a different vendor from the builder — name the builder in exclude for that." },
         domain: {
@@ -2479,6 +2494,8 @@ async function spawnAgent(
     /** The seat this call asks for the child; the desk caps both at its default. */
     permission?: string;
     sandbox?: string;
+    /** Omit or true hands Computer down. False leaves the worker off. */
+    computer?: boolean;
     /** A continuation hands its wave's seat forward, so later passes keep it. */
     continuedAccess?: { mode?: string; sandbox?: string; pass?: number };
     timeoutSeconds?: number;
@@ -2654,6 +2671,7 @@ async function spawnAgent(
     ...(typeof spawnInput.fast === "boolean" ? { fast: spawnInput.fast } : {}),
     permission: spawnInput.permission,
     sandbox: spawnInput.sandbox,
+    ...(typeof spawnInput.computer === "boolean" ? { computer: spawnInput.computer } : {}),
     continuedAccess: spawnInput.continuedAccess,
     timeoutSeconds: spawnInput.timeoutSeconds,
     tokenBudget: spawnInput.tokenBudget,
@@ -2702,6 +2720,7 @@ async function spawnAgent(
       ...(typeof spawnInput.fast === "boolean" ? { fast: spawnInput.fast } : {}),
       permission: spawnInput.permission,
       sandbox: spawnInput.sandbox,
+      ...(typeof spawnInput.computer === "boolean" ? { computer: spawnInput.computer } : {}),
       continuedAccess: spawnInput.continuedAccess,
       timeoutSeconds: spawnInput.timeoutSeconds,
       tokenBudget: spawnInput.tokenBudget,
@@ -3050,6 +3069,7 @@ async function continueMission(args: Record<string, unknown>, from?: string): Pr
       }),
       permission: typeof args.permission === "string" ? args.permission : undefined,
       sandbox: typeof args.sandbox === "string" ? args.sandbox : undefined,
+      computer: args.computer === true || args.computer === false ? args.computer : undefined,
       ...(passSeat ? { continuedAccess: { ...passSeat, pass: previousPass } } : {}),
       // A continuation is the SAME mission, so it keeps the mission's name.
       // Defaulting to "Mission pass 2" retitled the parent chat on every pass
@@ -3272,6 +3292,7 @@ async function callMutatingTool(name: string, args: Record<string, unknown>, fro
         effort: initialBrain.effort,
         permission: typeof args.permission === "string" ? args.permission : undefined,
         sandbox: typeof args.sandbox === "string" ? args.sandbox : undefined,
+        computer: args.computer === true || args.computer === false ? args.computer : undefined,
         route,
         exclude: mergedDelegateExclusions(task, args.exclude),
         constraints: Array.isArray(args.constraints) ? args.constraints.filter((item): item is string => typeof item === "string") : undefined,
@@ -3715,6 +3736,7 @@ async function callDeskTool(name: string, args: Record<string, unknown>, from?: 
         fast: typeof args.fast === "boolean" ? args.fast : undefined,
         permission: typeof args.permission === "string" ? args.permission : undefined,
         sandbox: typeof args.sandbox === "string" ? args.sandbox : undefined,
+        computer: args.computer === true || args.computer === false ? args.computer : undefined,
         timeoutSeconds: typeof args.timeoutSeconds === "number" ? args.timeoutSeconds : undefined,
         tokenBudget: typeof args.tokenBudget === "number" ? args.tokenBudget : undefined,
         isolation: args.isolation === "shared" ? "shared" : args.isolation === "worktree" ? "worktree" : undefined,

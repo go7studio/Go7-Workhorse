@@ -87,6 +87,11 @@ export type PeerAsk = {
   permission?: string;
   sandbox?: string;
   /**
+   * Omit or true to hand this chat's Computer down. False leaves the worker
+   * off. True cannot turn Computer on when this chat is off.
+   */
+  computer?: boolean;
+  /**
    * The seat the wave being continued ran under, handed forward so a mission's
    * later passes are seated by the mission and not by the chat it was called
    * from. Only a continuation sends it, and an explicit permission/sandbox on

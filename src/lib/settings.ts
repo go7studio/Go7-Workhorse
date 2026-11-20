@@ -4,6 +4,7 @@ import { DEFAULT_LEARNING, normalizeLearning } from "./learning-policy";
 import { DEFAULT_LOCAL_COMPUTE_SETTINGS, normalizeLocalComputeSettings } from "./local-compute";
 import { DEFAULT_WORKSHOP_SETTINGS, normalizeWorkshopSettings } from "./workshop-pack";
 import { defaultModel, withEffort, type ModelChoice } from "./models";
+import { normalizeComputerAlways, normalizeComputerDefault } from "./computer-seat";
 import { inboundAccess } from "./permissions";
 import { GEMINI_LOGIN_REMOVED, isProviderId, providerById } from "./providers";
 import type { AgentSystemsSettings, BotAccessDefaults, CrewSettings, CustomBot, CustomLlm, DeskAccess, LlmLink, ProviderId, McpServerConfig, Profile, RoutingSettings, Session, Settings, SettingsSection, SkillDiscoverySettings } from "./types";
@@ -66,6 +67,9 @@ export const DEFAULT_SETTINGS: Settings = {
   retentionDays: RETENTION_DAYS_DEFAULT,
   /** All chats may use installed Chrome. Off asks each chat that has not answered. */
   chromeAlways: false,
+  /** New chats start with Computer off until the person sets a default or Always. */
+  computerDefault: "off",
+  computerAlways: [],
 };
 
 /** Crew is off by default, staff-gated until dogfood passes. */
@@ -487,6 +491,8 @@ export function normalizeSettings(raw: unknown): Settings {
     workshop: normalizeWorkshopSettings((record as { workshop?: unknown }).workshop),
     retentionDays: normalizeRetentionDays((record as { retentionDays?: unknown }).retentionDays),
     chromeAlways: (record as { chromeAlways?: unknown }).chromeAlways === true,
+    computerDefault: normalizeComputerDefault((record as { computerDefault?: unknown }).computerDefault),
+    computerAlways: normalizeComputerAlways((record as { computerAlways?: unknown }).computerAlways),
     ...((): { crew?: CrewSettings } => {
       const crew = normalizeCrew((record as { crew?: unknown }).crew);
       return crew ? { crew } : {};

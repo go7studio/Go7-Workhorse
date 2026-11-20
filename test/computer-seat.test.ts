@@ -1,13 +1,23 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
+import { normalizeSession } from "../src/lib/session";
+import { normalizeSettings } from "../src/lib/settings";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   actionOnApp,
   appClass,
   computerAppIdentity,
+  computerChoiceForChat,
+  computerForNewChat,
   computerForSpawnedWorker,
+  computerHandDown,
+  computerModelIsAlways,
+  computerModelKey,
+  normalizeComputerAlways,
+  normalizeComputerDefault,
+  withModelComputerAlways,
   computerGrantCovers,
   computerGrantKey,
   acceptDeskScreenshot,
@@ -73,15 +83,69 @@ test("Computer stays off unless this chat turns it on, and Plan, Read-only, Stri
   assert.match(computerSeatAllows({ computer: "on", mode: "ask", sandbox: "workspace" }).ok ? "" : "Workspace", /Workspace/);
   assert.match(computerLine("on"), /Sandbox is Off/);
   assert.match(computerLine("on"), /Workspace/);
+  assert.match(computerLine("on"), /computer false/);
   assert.match(computerLine("off"), /does not drive desktop apps/);
+  assert.match(computerLine("off"), /does not turn it on/);
   assert.doesNotMatch(computerLine("off"), /stay closed/);
 });
 
-test("spawn cannot turn Computer on, and a worker the person already enabled keeps it", () => {
-  assert.equal(computerForSpawnedWorker(undefined, "on"), "off");
-  assert.equal(computerForSpawnedWorker("off", "on"), "off");
-  assert.equal(computerForSpawnedWorker("on", "off"), "on");
-  assert.equal(computerForSpawnedWorker({ computer: "on" }, "on"), "off");
+test("Computer hands down from the parent unless the parent passes computer false", () => {
+  assert.equal(computerHandDown(undefined), true);
+  assert.equal(computerHandDown(true), true);
+  assert.equal(computerHandDown("on"), true);
+  assert.equal(computerHandDown(false), false);
+  assert.equal(computerHandDown("false"), false);
+  assert.equal(computerHandDown("off"), false);
+
+  assert.equal(computerForSpawnedWorker({ parent: "on" }), "on");
+  assert.equal(computerForSpawnedWorker({ parent: "on", handDown: true }), "on");
+  assert.equal(computerForSpawnedWorker({ parent: "on", handDown: false }), "off");
+  assert.equal(computerForSpawnedWorker({ parent: "off" }), "off");
+  assert.equal(computerForSpawnedWorker({ parent: undefined, handDown: true }), "off");
+  assert.equal(computerForSpawnedWorker({ parent: "off", handDown: false, modelAlways: true }), "off");
+  assert.equal(computerForSpawnedWorker({ parent: "off", modelAlways: true }), "on");
+  assert.equal(computerForSpawnedWorker({ parent: "on", modelAlways: true, handDown: false }), "off");
+});
+
+test("an app default and Always for a model decide a new chat, and a withhold stays off", () => {
+  assert.equal(normalizeComputerDefault(undefined), "off");
+  assert.equal(normalizeComputerDefault("on"), "on");
+  assert.equal(normalizeComputerDefault("always"), "off");
+  assert.deepEqual(normalizeComputerAlways(["grok:grok-4.7", "grok:grok-4.7", "nope", 1]), ["grok:grok-4.7"]);
+  assert.equal(computerModelKey("grok", "grok-4.7"), "grok:grok-4.7");
+  assert.equal(computerModelKey("custom", "qwen", "spark"), "custom:spark:qwen");
+  assert.equal(computerModelIsAlways(["grok:grok-4.7"], "grok", "grok-4.7"), true);
+  assert.equal(computerModelIsAlways(["grok:grok-4.7"], "cursor", "grok-4.7"), false);
+
+  assert.equal(computerForNewChat({ appDefault: "off" }), "off");
+  assert.equal(computerForNewChat({ appDefault: "on" }), "on");
+  assert.equal(computerForNewChat({ appDefault: "off", modelAlways: true }), "on");
+
+  assert.equal(computerChoiceForChat({ computer: "on" }), "on");
+  assert.equal(computerChoiceForChat({ computer: "off", modelAlways: true }), "always");
+  assert.equal(computerChoiceForChat({ computer: "on", modelAlways: true, held: true }), "off");
+
+  const held = withModelComputerAlways(
+    { provider: "grok", model: "grok-4.7", computerHold: true as const },
+    ["grok:grok-4.7"],
+  );
+  assert.equal(held.computer, undefined);
+  const opened = withModelComputerAlways(
+    { provider: "grok", model: "grok-4.7" },
+    ["grok:grok-4.7"],
+  );
+  assert.equal(opened.computer, "on");
+
+  const heldSession = normalizeSession({ id: "w", provider: "grok", model: "grok-4.7", computerHold: true });
+  assert.equal(heldSession?.computerHold, true);
+  assert.equal(heldSession?.computer, undefined);
+  const onSession = normalizeSession({ id: "c", provider: "grok", model: "grok-4.7", computer: "on" });
+  assert.equal(onSession?.computer, "on");
+  assert.equal(onSession?.computerHold, undefined);
+  assert.equal(normalizeSettings({}).computerDefault, "off");
+  assert.deepEqual(normalizeSettings({}).computerAlways, []);
+  assert.equal(normalizeSettings({ computerDefault: "on", computerAlways: ["grok:grok-4.7", "bad"] }).computerDefault, "on");
+  assert.deepEqual(normalizeSettings({ computerDefault: "yes", computerAlways: ["grok:grok-4.7"] }).computerAlways, ["grok:grok-4.7"]);
 });
 
 test("Workhorse, browsers, terminals, and IDEs stay out of the grant", () => {
@@ -424,9 +488,21 @@ test("main checks GUI launches before a shell runs, and the seat card is not a n
   const mcp = readFileSync(path.join(ROOT, "electron", "workhorse-mcp.ts"), "utf8");
   assert.match(mcp, /computerUse: false/);
   assert.doesNotMatch(mcp, /computer\|desktop\|screen/);
-  assert.match(card, /Spawn leaves Computer off/);
-  assert.match(card, /does not get the computer tool/);
+  assert.match(card, /Always/);
+  assert.match(card, /computer false/);
+  assert.doesNotMatch(card, /Spawn leaves Computer off/);
+  assert.doesNotMatch(card, /does not get the computer tool/);
+  assert.doesNotMatch(card, /Workers do not inherit/);
   assert.doesNotMatch(card, /Turn it on here/);
+  const store = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
+  assert.match(store, /computerForSpawnedWorker\(\{/);
+  assert.match(store, /parent: parent\.computer/);
+  assert.match(store, /handDown: payload\.computer/);
+  assert.match(mcp, /Pass false to leave Computer off/);
+  assert.equal((mcp.match(/typeof spawnInput\.computer === "boolean"/g) ?? []).length, 2);
+  const settings = readFileSync(path.join(ROOT, "src", "lib", "settings.ts"), "utf8");
+  assert.match(settings, /computerDefault: normalizeComputerDefault/);
+  assert.match(settings, /computerAlways: normalizeComputerAlways/);
 });
 
 test("a desk Computer ask uses the live seat and waits for the permission card", async () => {

@@ -524,6 +524,11 @@ export function openDraft(sessions: Session[], draft: Session): { sessions: Sess
     sandbox: draft.sandbox,
     mode: draft.mode,
     customBotId: draft.customBotId,
+    // New chat reseats the unused draft the same way it reseats Permission.
+    // Computer was left behind, so a later app default or Always never landed
+    // on the empty chat the button kept reusing.
+    ...(draft.computer === "on" ? { computer: "on" as const } : { computer: undefined }),
+    computerHold: undefined,
   };
   return {
     sessions: dropDrafts(sessions, existing.id).map((item) => (item.id === existing.id ? session : item)),

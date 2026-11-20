@@ -322,6 +322,7 @@ export function normalizeSession(raw: unknown, liveRunIds?: ReadonlySet<string>)
     mode,
     sandbox: normalizeSandbox(record.sandbox),
     ...(record.computer === "on" ? { computer: "on" as const } : {}),
+    ...(record.computerHold === true ? { computerHold: true as const } : {}),
     securityPolicy: normalizeSessionSecurityPolicy(record.securityPolicy),
     environment: normalizeSessionEnvironment(record.environment),
     ...(typeof record.boundFolder === "string" && record.boundFolder.trim()

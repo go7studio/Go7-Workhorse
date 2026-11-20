@@ -3,6 +3,12 @@ import type { PermissionMode, SandboxProfile } from "./types";
 /** Per-chat desktop control. Missing on a saved chat means off. */
 export type ComputerSeat = "off" | "on";
 
+/**
+ * What the Computer control is set to.
+ * Off and On are this chat. Always keeps this model on across chats and restarts.
+ */
+export type ComputerChoice = "off" | "on" | "always";
+
 export type ComputerAction = "frontmost" | "screenshot" | "click" | "type" | "key" | "scroll";
 
 export type ComputerAppClass = "workhorse" | "browser" | "terminal" | "ide" | "app";
@@ -62,13 +68,97 @@ const IDES = [
 
 const WORKHORSE = ["go7 workhorse dev", "go7 workhorse", "workhorse"];
 
+/** `${provider}:${model}`, or `${provider}:${bot}:${model}` for a custom slot. */
+export function computerModelKey(provider: string, model: string, customBotId?: string): string {
+  const vendor = provider.trim();
+  const id = model.trim();
+  if (!vendor || !id) return "";
+  const bot = customBotId?.trim();
+  return bot ? `${vendor}:${bot}:${id}` : `${vendor}:${id}`;
+}
+
+export function normalizeComputerDefault(value: unknown): ComputerSeat {
+  return value === "on" ? "on" : "off";
+}
+
+export function normalizeComputerAlways(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const keys = new Set<string>();
+  for (const item of value) {
+    if (typeof item !== "string") continue;
+    const key = item.trim();
+    if (!key.includes(":")) continue;
+    keys.add(key);
+  }
+  return [...keys];
+}
+
+export function computerModelIsAlways(
+  always: readonly string[] | undefined,
+  provider: string,
+  model: string,
+  customBotId?: string,
+): boolean {
+  const key = computerModelKey(provider, model, customBotId);
+  return Boolean(key) && (always ?? []).includes(key);
+}
+
+/** A new chat. Model Always wins over the app default. Missing stays off. */
+export function computerForNewChat(input: {
+  appDefault?: ComputerSeat | null;
+  modelAlways?: boolean;
+}): ComputerSeat {
+  if (input.modelAlways || input.appDefault === "on") return "on";
+  return "off";
+}
+
 /**
- * A spawn may not turn Computer on. A worker the person already switched on
- * keeps that choice. Anything the call asked for is ignored.
+ * Only an explicit false withholds Computer. Omit, true, and "on" hand the
+ * parent seat down. A parent cannot raise Computer by passing true.
  */
-export function computerForSpawnedWorker(prior: unknown, requested?: unknown): ComputerSeat {
-  void requested;
-  return prior === "on" ? "on" : "off";
+export function computerHandDown(value: unknown): boolean {
+  if (value === false || value === "false" || value === "off") return false;
+  return true;
+}
+
+/**
+ * The parent seat hands down. Pass handDown false to leave the worker off,
+ * even when that model is Always. Model Always turns the worker on when the
+ * parent is off and did not withhold.
+ */
+export function computerForSpawnedWorker(input: {
+  parent?: unknown;
+  handDown?: unknown;
+  modelAlways?: boolean;
+}): ComputerSeat {
+  if (!computerHandDown(input.handDown)) return "off";
+  if (input.parent === "on" || input.modelAlways) return "on";
+  return "off";
+}
+
+/** The card's selected radio. A parent withhold shows Off even when the model is Always. */
+export function computerChoiceForChat(input: {
+  computer?: ComputerSeat | null;
+  held?: boolean;
+  modelAlways?: boolean;
+}): ComputerChoice {
+  if (input.held) return "off";
+  if (input.modelAlways) return "always";
+  return input.computer === "on" ? "on" : "off";
+}
+
+/** Model Always turns a saved chat on. A parent withhold (computerHold) stays off. */
+export function withModelComputerAlways<T extends {
+  provider: string;
+  model: string;
+  customBotId?: string;
+  computer?: ComputerSeat;
+  computerHold?: true;
+}>(session: T, always: readonly string[] | undefined): T & { computer?: ComputerSeat } {
+  if (session.computerHold) return session;
+  if (!computerModelIsAlways(always, session.provider, session.model, session.customBotId)) return session;
+  if (session.computer === "on") return session;
+  return { ...session, computer: "on" };
 }
 
 export function computerSeatAllows(input: {
@@ -242,8 +332,8 @@ export function launchedComputer(value: unknown): ComputerSeat {
 
 export function computerLine(computer?: ComputerSeat | null): string {
   return computer === "on"
-    ? "On — this chat may drive desktop apps when Sandbox is Off. Plan, Read-only, Strict, and Workspace still refuse."
-    : "Off — this chat does not drive desktop apps.";
+    ? "On — this chat may drive desktop apps when Sandbox is Off. Plan, Read-only, Strict, and Workspace still refuse. A spawn hands Computer down. Pass computer false on that call to leave the worker off. Passing computer true cannot turn it on when this chat is off."
+    : "Off — this chat does not drive desktop apps. A spawn hands Computer off. Passing computer true on that call does not turn it on.";
 }
 
 export type ComputerWindowHit = { name: string; pid: number };

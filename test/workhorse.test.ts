@@ -5198,6 +5198,15 @@ test("empty chats stay drafts until the first send names them", () => {
   assert.equal(reused.session.model, "grok-4.5");
   assert.equal(reused.session.mode, "plan");
   assert.equal(reused.session.sandbox, "strict");
+  const reseatedOff = openDraft(
+    [{ ...draft, computer: "on" }, named],
+    { ...draft, id: "draft_2" },
+  );
+  assert.equal(reseatedOff.session.id, "draft_1");
+  assert.equal(reseatedOff.session.computer, undefined);
+  const reseatedOn = openDraft([draft, named], { ...draft, id: "draft_2", computer: "on" });
+  assert.equal(reseatedOn.session.computer, "on");
+  assert.equal(reseatedOn.session.computerHold, undefined);
   const queued = enqueuePrompt([named], "live_1", { text: "then add the bot" });
   assert.equal(queued?.[0].queue?.length, 1);
   assert.equal(queued?.[0].queue?.[0]?.text, "then add the bot");

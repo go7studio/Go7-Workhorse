@@ -29,6 +29,20 @@ const SANDBOXES: { id: SandboxProfile; label: string }[] = [
   { id: "strict", label: "Strict" },
 ];
 
+const PERMISSION_ICONS: Record<PermissionMode, string> = {
+  ask: "?",
+  "accept-edits": "✓",
+  "always-approve": "∞",
+  plan: "◇",
+};
+
+const SANDBOX_ICONS: Record<SandboxProfile, string> = {
+  off: "◎",
+  workspace: "▣",
+  "read-only": "◉",
+  strict: "◆",
+};
+
 const SETUP_VENDORS: Exclude<ProviderId, "custom">[] = ["grok", "codex", "claude", "cursor"];
 
 export function SessionSetup({ onClose }: { onClose: () => void }) {
@@ -63,6 +77,7 @@ export function SessionSetup({ onClose }: { onClose: () => void }) {
     setChatPreset,
   } = useStore();
   const root = useRef<HTMLDivElement>(null);
+  const [slide, setSlide] = useState<number | null>(null);
   const [environmentBusy, setEnvironmentBusy] = useState<"local" | "worktree" | null>(null);
   const [environmentNote, setEnvironmentNote] = useState("");
 
@@ -139,10 +154,14 @@ export function SessionSetup({ onClose }: { onClose: () => void }) {
   const vendorColor =
     bot?.color ?? stockTint ?? `var(--${session.provider === "custom" ? "custom" : session.provider})`;
   const thinking = effortsFor(session.provider, session.model);
-  // Sheet can show a default level; persist only when the user picks one.
+  // Sheet can show a default level; persist only when the user picks or slides.
   const shownEffort = thinking.some((item) => item.id === session.effort)
     ? session.effort
     : withEffort(session.provider, session.model, session.effort ?? null);
+  const thinkIndex = Math.max(0, thinking.findIndex((item) => item.id === shownEffort));
+  const hoverIndex =
+    slide == null || thinking.length === 0 ? thinkIndex : effortStopAt(slide, thinking.length);
+  const thinkNow = thinking[hoverIndex] ?? thinking[thinkIndex];
   const selectedPermission = PERMISSIONS.find((item) => item.id === session.mode) ?? PERMISSIONS[0];
   const selectedSandbox = SANDBOXES.find((item) => item.id === session.sandbox) ?? SANDBOXES[0];
   const routeLabel = session.routingMode === "auto"

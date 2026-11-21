@@ -8,6 +8,22 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.7.17](https://github.com/go7studio/Go7-Workhorse/compare/v0.7.16...v0.7.17) (2026-11-21)
+
+
+### Features
+
+* keep Computer on across chats, spawns, and restarts ([96b1c5e](https://github.com/go7studio/Go7-Workhorse/commit/96b1c5eb3faf3dd2d6f858df5268bd7af0640564))
+
+
+### Bug Fixes
+
+* keep the segmented session sheet ([8839896](https://github.com/go7studio/Go7-Workhorse/commit/88398964d2d5819b5fa1829343eac3de4738938e))
+* keep the segmented sheet on the desk's style scale ([f299925](https://github.com/go7studio/Go7-Workhorse/commit/f299925febee3b3fd62d6b5af79cce772e1a9214))
+* quiet chat settings into segmented controls ([880dae4](https://github.com/go7studio/Go7-Workhorse/commit/880dae43ba75406ef1677b1a6692671d110d3851))
+* restore the effort helpers the session sheet still calls ([8d346ea](https://github.com/go7studio/Go7-Workhorse/commit/8d346eaf1b047b266769f6cc576478057660f566))
+* restore the session sheet the Computer commit broke ([312636d](https://github.com/go7studio/Go7-Workhorse/commit/312636d325dd156e217852d6a72a17230e781de8))
+
 ## [0.7.16](https://github.com/go7studio/Go7-Workhorse/compare/v0.7.15...v0.7.16) (2026-11-20)
 
 

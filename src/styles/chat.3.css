@@ -728,7 +728,7 @@
   min-height: 28px;
   padding: 5px 8px;
   border: none;
-  border-radius: 8px;
+  border-radius: var(--radius-6);
   background: transparent;
   box-shadow: none;
   font-size: var(--text-12);
@@ -749,7 +749,7 @@
   min-height: 28px;
   padding: 4px 8px;
   border: none;
-  border-radius: 8px;
+  border-radius: var(--radius-6);
   background: transparent;
   box-shadow: none;
 }
@@ -811,7 +811,7 @@
   width: 36px;
   height: 22px;
   flex: 0 0 36px;
-  border-radius: 11px;
+  border-radius: var(--radius-pill);
   background: color-mix(in srgb, var(--setup-ink) 16%, var(--bg-hover));
 }
 

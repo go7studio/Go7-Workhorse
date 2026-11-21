@@ -49,7 +49,7 @@ test("opening chat settings does not persist a default effort", () => {
     assert.doesNotMatch(effect[1], /setSessionEffort/);
   }
   assert.match(setup, /withEffort\(session\.provider, session\.model, session\.effort/);
-  assert.match(setup, /setSessionEffort\(next\.id/);
+  assert.match(setup, /setSessionEffort\(item\.id/);
 });
 
 test("/providers names the vendor and model sheet", () => {

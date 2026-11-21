@@ -229,11 +229,10 @@ test("Auto is a pick a person makes on the chat, not in Settings", () => {
   const setup = read("src/ui/SessionSetup.tsx");
   assert.match(setup, /onClick=\{\(\) => setSessionRoutingMode\("auto"\)\}/);
   assert.doesNotMatch(setup, /settings\.routing\.enabled \? setSessionRoutingMode/, "Auto no longer bounces to Settings");
-  // In Auto the effort is picked per message, so the reasoning slider in the
-  // setup panel steps aside and says so.
-  assert.match(setup, /session\.routingMode === "auto" && \(\s*<section className="setup-card setup-reasoning-card">/);
-  assert.match(setup, /Picked with the model for each message/);
-  assert.match(setup, /session\.routingMode !== "auto" && thinking\.length > 0 && \(/);
+  // In Auto the effort is picked per message, so the reasoning control
+  // steps aside and says so.
+  assert.match(setup, /session\.routingMode === "auto" \? \(\s*<p className="row-meta">Picked with the model for each message/);
+  assert.match(setup, /: thinking\.length > 0 \? \(/);
 });
 
 test("Settings → Routing is the desk's own routing for spawned work: on by default, off is a choice", () => {

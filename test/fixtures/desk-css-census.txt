@@ -1290,18 +1290,6 @@ ab30de1979b2  .setup-effort button.claude
 b046fb4790e5  .setup-effort button.gemini
 9b15fcce0873  .setup-effort button.custom
 7b752212d3ee  .setup-effort button.on
-01c48e72a9af  .setup-slider
-37190da9c019  .setup-slider-line
-d2275fc38877  .setup-slider-line::before
-23b3d6fc9c93  .setup-slider-fill
-9bd0bb84a5eb  .setup-slider-thumb
-426c09a8d022  .setup-slider.dragging .setup-slider-fill, .setup-slider.dragging .setup-slider-thumb
-5b79a8dd00ec  .setup-slider input[type="range"]
-8fdf9c7d0f82  .setup-slider-marks
-56a4572b2424  .setup-slider-marks button
-59f2866594f2  .setup-slider-marks button:first-child
-0d09709e6591  .setup-slider-marks button:last-child
-5b7d3496d118  .setup-slider-marks button.on
 09dc124a910d  .setup-split
 abc76c3a394f  .setup-split:has(.setup-block:only-child)
 a44e027fcc91  .setup-grid
@@ -1320,15 +1308,15 @@ c308c0890ebb  .session-setup .setup-tide-water
 dd5cac286925  .setup-close
 36f733f0b739  .setup-close:hover
 e1b52dd02f10  .setup-card
-4a1e40a91fd3  .setup-top-grid
+71ca57506cb9  .setup-top-grid
 b9270eba65cc  .setup-model-card
 f3354deca940  .setup-model-card .setup-subgroup:last-child
 02419cffd4a2  .setup-top-grid .setup-card
 b6197dfbae4b  .setup-compact-stack
 092aafe123d1  .setup-top-grid .setup-effort button
 e9f2bacf99e8  .setup-top-grid .setup-vendors
-67b48fd5f0fd  .setup-access-card
-147ef4dafc32  .setup-top-grid .setup-models
+02419cffd4a2  .setup-access-card
+89a911999e56  .setup-top-grid .setup-models
 abc76c3a394f  .setup-top-grid .setup-environments
 907a2f0ebe3c  .setup-top-grid .setup-environments button
 fe92127798bb  .setup-top-grid .setup-environment-icon
@@ -1346,7 +1334,7 @@ f1bc0c968db0  .setup-heading > div > strong, .setup-choice-title > strong
 9bb664fec1fd  .setup-vendors button
 fcb3e1902965  .setup-provider-dot
 1bbf33ae8307  .session-setup .setup-effort button.on
-147ef4dafc32  .session-setup .setup-models
+d79e58314f14  .session-setup .setup-models
 f13de893c64b  .setup-models button
 51cd18e85a20  .setup-models button strong
 a2296702220e  .setup-models button > span
@@ -1358,12 +1346,6 @@ d529e1f5d1cf  .setup-environments button > span:last-child
 aa75644121bb  .setup-environments strong, .setup-environments em
 5f866127ca30  .setup-environments strong
 589181d34810  .setup-environments em
-3bf7fa82d7e2  .setup-reasoning-card .setup-slider
-0e8d6167b275  .setup-reasoning-card .setup-slider-line
-010ea7d31751  .setup-reasoning-card .setup-slider-line::before, .setup-reasoning-card .setup-slider-fill
-077508afbf7a  .setup-reasoning-card .setup-slider-thumb
-e7a29b03311f  .setup-reasoning-card .setup-slider-marks
-6e3a4714ba19  .setup-reasoning-card .setup-slider-marks button
 147ef4dafc32  .session-setup .setup-context
 7013fa78bab8  .setup-context-card .row-meta
 58cf3fe563b8  .session-setup .setup-split
@@ -1381,7 +1363,7 @@ dd599080d1d3  .setup-choice-copy em
 aa30f90f37d0  .setup-access-note p
 dc43553488c7  .setup-access-note strong
 d5000b5b82ff  @container session (max-width: 720px) { .session-setup
-147ef4dafc32  @container session (max-width: 720px) { .session-setup .setup-models
+b9270eba65cc  @container session (max-width: 720px) { .session-setup .setup-models
 abc76c3a394f  @container session (max-width: 720px) { .session-setup .setup-split
 abc76c3a394f  @container session (max-width: 720px) { .setup-top-grid
 29007a68285a  @container session (max-width: 720px) { .setup-top-grid .setup-environments

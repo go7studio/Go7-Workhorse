@@ -3531,9 +3531,10 @@ test("session setup is a compact right-side model and access inspector", () => {
   assert.match(setup, /File access/);
   assert.match(setup, /label: "Plan mode"/);
   assert.match(setup, /label: "Full access"/);
-  assert.match(setup, /type="range"/);
-  assert.match(setup, /setup-slider-line/);
-  assert.doesNotMatch(setup, /setup-slider-head/);
+  assert.match(setup, /aria-label="Thinking"/);
+  assert.match(setup, /setup-segment/);
+  assert.doesNotMatch(setup, /type="range"/);
+  assert.doesNotMatch(setup, /setup-slider/);
   assert.match(setup, /effortsFor\(session\.provider/);
   const storeSrc = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
   assert.match(storeSrc, /mode: choice\.mode/);
@@ -3545,7 +3546,8 @@ test("session setup is a compact right-side model and access inspector", () => {
   );
   assert.match(setup, /Accept edits/);
   assert.doesNotMatch(setup, /Choose the brain|Approval behavior and file containment|When should Workhorse pause/);
-  assert.match(deskCss(), /setup-slider-thumb/);
+  assert.match(deskCss(), /setup-segment/);
+  assert.doesNotMatch(deskCss(), /setup-slider-thumb/);
   const setupCss = deskCss();
   assert.match(setupCss, /container-name:\s*session/);
   assert.match(setupCss, /width:\s*min\(720px/);
@@ -3557,7 +3559,6 @@ test("session setup is a compact right-side model and access inspector", () => {
   assert.equal(effortStopPos(4, 5), 1);
   assert.equal(effortStopPos(0, 5), 0);
   assert.equal(effortStopAt(1, 5), 4);
-  assert.match(setup, /effortStopPos/);
   assert.match(composer, /setup-trigger/);
   assert.match(composer, /deskInk/);
   assert.match(composer, /formatChatSidebar/);

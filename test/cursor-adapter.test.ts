@@ -1018,9 +1018,10 @@ test("Available models chips do not ellipsis-clip Cursor Grok names", () => {
   assert.match(block, /white-space:\s*normal/);
   assert.doesNotMatch(block, /text-overflow:\s*ellipsis/);
   assert.doesNotMatch(block, /overflow:\s*hidden/);
-  const modelsGrid = css.slice(css.indexOf(".session-setup .setup-models"), css.indexOf(".session-setup .setup-models") + 160);
-  assert.match(modelsGrid, /repeat\(2,/);
+  const modelsGrid = css.slice(css.indexOf(".session-setup .setup-models"), css.indexOf(".session-setup .setup-models") + 180);
+  assert.match(modelsGrid, /flex-direction:\s*column/);
   assert.doesNotMatch(modelsGrid.split("}")[0] ?? "", /repeat\(3,/);
+  assert.doesNotMatch(modelsGrid.split("}")[0] ?? "", /repeat\(2,/);
 });
 
 /*

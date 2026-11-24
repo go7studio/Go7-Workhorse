@@ -19,6 +19,8 @@ export const WINDOWS_SPEECH_SETTINGS_URL = "ms-settings:speech";
 /** Online speech recognition. The desktop recognizer stays silent until this is on. */
 export const WINDOWS_SPEECH_PRIVACY_URL = "ms-settings:privacy-speech";
 export const LISTENING_PLACEHOLDER = "Listening…";
+/** The endpoint opened and then the helper died or finished with no words. Not a privacy failure. */
+export const DICTATION_OPENED_WITHOUT_SPEECH = "The microphone opened, but no speech was heard.";
 
 /** Placeholder while the microphone is open. Names the endpoint so a virtual mix is obvious. */
 export function listeningDeviceLabel(name?: string | null): string {
@@ -28,6 +30,22 @@ export function listeningDeviceLabel(name?: string | null): string {
 }
 
 /** Stdin line for the Windows helper. An empty id lets the helper pick a real microphone. */
+/** A helper that exits after ready without words must surface an error. A clean exit before ready stays quiet. */
+export function dictationHelperExit(input: {
+  stopped: boolean;
+  reported: boolean;
+  code: number | null;
+  signal: NodeJS.Signals | null;
+  sawReady: boolean;
+  sawTranscript: boolean;
+}): { type: "error"; message: string } | null {
+  if (input.stopped || input.reported || input.sawTranscript) return null;
+  if (input.code === null && !input.signal) return null;
+  if (input.sawReady) return { type: "error", message: DICTATION_OPENED_WITHOUT_SPEECH };
+  if (input.code === 0) return null;
+  return { type: "error", message: "Speech recognition stopped before it heard anything." };
+}
+
 export function dictationStartLine(deviceId?: string | null): string {
   const id = deviceId?.trim() ?? "";
   if (!id || id.length > 512 || /[\u0000-\u001f]/.test(id)) return "start\n";

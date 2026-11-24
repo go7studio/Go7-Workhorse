@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { readFileSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { Writable } from "node:stream";
 import { fileURLToPath } from "node:url";
@@ -16,6 +17,8 @@ import {
   getMicrophoneAccessStatus,
   installDeskMediaPermissions,
   beginVoiceDraft,
+  DICTATION_OPENED_WITHOUT_SPEECH,
+  dictationHelperExit,
   dictationStartLine,
   joinVoiceDraft,
   LISTENING_PLACEHOLDER,
@@ -954,4 +957,136 @@ test("a helper aborted by the system tells the composer instead of leaving it li
   child.emit("close", null, "SIGABRT");
   assert.deepEqual(lines, [{ type: "error", message: "Speech recognition stopped before it heard anything." }]);
   stopMacDictation();
+});
+
+test("a ready helper that exits with no words surfaces an error and clears listening", () => {
+  assert.equal(
+    dictationHelperExit({
+      stopped: false,
+      reported: false,
+      code: 0,
+      signal: null,
+      sawReady: false,
+      sawTranscript: false,
+    }),
+    null,
+  );
+  assert.equal(
+    dictationHelperExit({
+      stopped: false,
+      reported: false,
+      code: 0,
+      signal: null,
+      sawReady: true,
+      sawTranscript: true,
+    }),
+    null,
+  );
+  assert.deepEqual(
+    dictationHelperExit({
+      stopped: false,
+      reported: false,
+      code: 0,
+      signal: null,
+      sawReady: true,
+      sawTranscript: false,
+    }),
+    { type: "error", message: DICTATION_OPENED_WITHOUT_SPEECH },
+  );
+  assert.equal(DICTATION_OPENED_WITHOUT_SPEECH.includes("privacy"), false);
+  stopMacDictation();
+  const lines: Array<{ type: string; message?: string; openSettings?: boolean; device?: string }> = [];
+  const child = new EventEmitter() as EventEmitter & {
+    stdin: Writable;
+    stdout: EventEmitter;
+    stderr: EventEmitter;
+    exitCode: number | null;
+    killed: boolean;
+  };
+  child.stdout = new EventEmitter();
+  child.stderr = new EventEmitter();
+  child.exitCode = null;
+  child.killed = false;
+  child.stdin = new Writable({
+    write(_chunk, _encoding, done) {
+      done();
+    },
+  });
+  const spawnImpl = (() => child) as unknown as NonNullable<Parameters<typeof startMacDictation>[0]["spawnImpl"]>;
+  const started = startMacDictation({
+    platform: "win32",
+    resourcesPath: path.join(ROOT, "resources"),
+    appPath: ROOT,
+    existsSync: (file) => file.endsWith(`${path.sep}windows-dictation.exe`),
+    spawnImpl,
+    onLine: (line) => lines.push(line),
+  });
+  assert.equal(started.ok, true);
+  child.stdout.emit(
+    "data",
+    '{"type":"ready","device":"Microphone (Razer Kraken Ultimate)","deviceId":"{0.0.1.00000000}.{90a9e327-e6a9-4f41-92d4-8e0162e9633d}"}\n',
+  );
+  child.emit("close", 0, null);
+  assert.equal(lines[0]?.type, "ready");
+  assert.deepEqual(lines[1], { type: "error", message: DICTATION_OPENED_WITHOUT_SPEECH });
+  assert.equal(lines[1]?.openSettings, undefined);
+  const composer = read("src/ui/Composer.tsx");
+  assert.match(composer, /event\.type === "error"[\s\S]{0,400}setRecording\(false\)/);
+  assert.match(composer, /dictationRef\.current = false/);
+  assert.doesNotMatch(composer, /readOnly/);
+  stopMacDictation();
+});
+
+function runDictationHelper(args: string[], timeoutMs: number): Promise<{ code: number | null; stdout: string }> {
+  const exe = path.join(ROOT, "build", "windows-dictation.exe");
+  return new Promise((resolve, reject) => {
+    const child = spawn(exe, args, { stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
+    let stdout = "";
+    let settled = false;
+    const finish = (code: number | null) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve({ code, stdout });
+    };
+    const timer = setTimeout(() => {
+      child.kill();
+    }, timeoutMs);
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", (chunk: string) => {
+      stdout += chunk;
+    });
+    child.on("error", (error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      reject(error);
+    });
+    child.on("close", (code) => finish(code));
+  });
+}
+
+test("the pipe stays fed while a reader is blocked and direct capture uses the real block align", async () => {
+  const windowsSource = read("electron/windows-dictation.cs");
+  assert.match(windowsSource, /PumpPipeRead/);
+  assert.match(windowsSource, /PullCaptureOffSta/);
+  assert.match(windowsSource, /while \(filled < count\)/);
+  assert.match(windowsSource, /position \+= filled/);
+  assert.match(windowsSource, /EmitCaptureLevel/);
+  assert.doesNotMatch(windowsSource, /A short read is the end/);
+  assert.match(windowsSource, /\(int\)read \* blockAlign/);
+  assert.doesNotMatch(windowsSource, /\(int\)read \* 2/);
+  assert.match(windowsSource, /lock \(Gate\) committed = "";/);
+  assert.match(windowsSource, /The microphone opened, but no speech was heard\./);
+  assert.match(windowsSource, /finalResult && result\.Confidence < 0\.1f/);
+  assert.doesNotMatch(windowsSource, /if \(!Heard\(e\.Result\)\) return;/);
+  if (process.platform !== "win32") return;
+  const exe = path.join(ROOT, "build", "windows-dictation.exe");
+  assert.equal(existsSync(exe), true, "rebuild build/windows-dictation.exe before this test");
+  const pipe = await runDictationHelper(["--self-test-pipe"], 8000);
+  assert.match(pipe.stdout, /hello pipe/);
+  assert.equal(pipe.code, 0);
+  const stream = await runDictationHelper(["--self-test-stream"], 20000);
+  assert.match(stream.stdout, /hello/i);
+  assert.equal(stream.code, 0);
 });

@@ -62,9 +62,13 @@ internal static class WindowsDictation
     [DllImport("kernel32.dll")]
     private static extern uint GetCurrentThreadId();
 
+    private const string OpenedWithoutSpeech = "The microphone opened, but no speech was heard.";
+
     private static readonly object Gate = new object();
     private static readonly ConcurrentQueue<string> Commands = new ConcurrentQueue<string>();
     private static string committed = "";
+    private static string capturedSpeech = "";
+    private static string rejectedSpeech = "";
     private static bool listening;
     private static SpeechRecognitionEngine engine;
     private static WasapiCapture capture;
@@ -72,14 +76,34 @@ internal static class WindowsDictation
     private static string openDeviceName = "";
     private static Windows.Media.SpeechRecognition.SpeechRecognizer winrt;
     private static bool winrtActive;
+    private static bool engineReported;
     private static int startDepth;
     private static DateTime lastLevel = DateTime.MinValue;
     private static uint staThreadId;
+    private static int pipeReadDepth;
+    private static int pipeReadRequests;
+    private static int pipeReadReturns;
+    private static int pipeBytesOut;
+    private static int lastReadRequest;
+    private static int captureLevelEvents;
+    private static volatile bool disposeEngineAfterRead;
+    private static volatile bool pipeClose;
+    private static bool captureFormatEmitted;
+    private static PcmPipe streamPipe;
+    private static byte[] streamPcm;
+    private static int streamAt;
+    private static int streamSilence;
+    private static bool streamEnded;
+    internal static DateTime PipeReadDeadline = DateTime.MaxValue;
 
     [STAThread]
     private static int Main(string[] args)
     {
         if (args.Length == 1 && args[0] == "--self-test") return SelfTest();
+        if (args.Length == 1 && args[0] == "--self-test-stream") return StreamSelfTest();
+        if (args.Length == 1 && args[0] == "--self-test-pipe") return PipeSelfTest();
+        if (args.Length == 1 && args[0] == "--probe-mic") return ProbeMic();
+        if (args.Length == 1 && args[0] == "--listen-check") return ListenCheck();
         if (args.Length == 1 && args[0] == "--list-devices")
         {
             EmitDevices();
@@ -106,14 +130,8 @@ internal static class WindowsDictation
         MSG msg;
         while (GetMessage(out msg, IntPtr.Zero, 0, 0) > 0)
         {
-            if (msg.message == WM_APP)
-            {
-                DrainCommands();
-                continue;
-            }
-            if (msg.message == WM_TIMER && capture != null) capture.Pull();
-            TranslateMessage(ref msg);
-            DispatchMessage(ref msg);
+            DrainDeferredEngineDispose();
+            DispatchSta(ref msg);
         }
 
         try
@@ -154,6 +172,147 @@ internal static class WindowsDictation
         }
     }
 
+    /// <summary>
+    /// Self-tests return before Main builds the queue. Timers and pipe reads
+    /// need that queue on the thread that opened the microphone.
+    /// </summary>
+    private static void EnsureSta()
+    {
+        if (staThreadId != 0) return;
+        staThreadId = GetCurrentThreadId();
+        MSG warmup;
+        PeekMessage(out warmup, IntPtr.Zero, 0, 0, PM_NOREMOVE);
+    }
+
+    private static void DispatchSta(ref MSG msg)
+    {
+        if (msg.message == WM_QUIT)
+        {
+            pipeClose = true;
+            PostThreadMessage(staThreadId, WM_QUIT, IntPtr.Zero, IntPtr.Zero);
+            return;
+        }
+        if (msg.message == WM_APP)
+        {
+            DrainCommands();
+            DrainDeferredEngineDispose();
+            return;
+        }
+        if (msg.message == WM_TIMER)
+        {
+            if (capture != null) capture.Pull();
+            FeedStreamTick();
+            EmitCaptureLevel();
+        }
+        TranslateMessage(ref msg);
+        DispatchMessage(ref msg);
+    }
+
+    /// <summary>
+    /// SpeechRecognitionEngine reads the pipe on the STA that must also pull
+    /// WASAPI. Waiting here without pumping leaves that read blocked and the
+    /// timer never runs again. Returns true when this thread is that STA.
+    /// </summary>
+    internal static bool PumpPipeRead()
+    {
+        if (staThreadId == 0 || GetCurrentThreadId() != staThreadId) return false;
+        if (pipeClose || DateTime.UtcNow >= PipeReadDeadline) return true;
+        // This read is already inside a recognizer message. WM_TIMER is not
+        // delivered while those messages sit in the queue, so pull the capture
+        // here instead of dispatching. Dispatching the recognizer re-enters Read
+        // and never returns the buffer it asked for.
+        if (capture != null) capture.Pull();
+        FeedStreamTick();
+        EmitCaptureLevel();
+        MSG msg;
+        if (!pipeClose && PeekMessage(out msg, IntPtr.Zero, WM_APP, WM_APP, PM_REMOVE))
+            DispatchSta(ref msg);
+        else if (!pipeClose && PeekMessage(out msg, IntPtr.Zero, WM_QUIT, WM_QUIT, PM_REMOVE))
+            DispatchSta(ref msg);
+        else
+            Thread.Sleep(15);
+        DrainDeferredEngineDispose();
+        return true;
+    }
+
+    /// <summary>
+    /// The recognizer reads on a worker while the STA is still inside the call
+    /// that started that read, so the capture timer cannot run. Take the next
+    /// packet on this worker. A second overlapping read leaves the pull to the first.
+    /// </summary>
+    internal static void PullCaptureOffSta()
+    {
+        if (staThreadId != 0 && GetCurrentThreadId() == staThreadId) return;
+        if (!Monitor.TryEnter(PullGate, 0)) return;
+        try
+        {
+            if (capture != null) capture.Pull();
+            FeedStreamTick();
+        }
+        finally
+        {
+            Monitor.Exit(PullGate);
+        }
+    }
+
+    private static readonly object PullGate = new object();
+
+    internal static void NotePipeRead(int count)
+    {
+        Interlocked.Increment(ref pipeReadRequests);
+        lastReadRequest = count;
+    }
+
+    internal static void NotePipeBytes(int count)
+    {
+        if (count <= 0) return;
+        Interlocked.Increment(ref pipeReadReturns);
+        Interlocked.Add(ref pipeBytesOut, count);
+    }
+
+    internal static void EnterPipeRead()
+    {
+        Interlocked.Increment(ref pipeReadDepth);
+    }
+
+    internal static void LeavePipeRead()
+    {
+        if (Interlocked.Decrement(ref pipeReadDepth) == 0 && disposeEngineAfterRead) Wake(WM_APP);
+    }
+
+    internal static bool PipeClosed()
+    {
+        return pipeClose;
+    }
+
+    internal static bool PipeReadExpired()
+    {
+        return DateTime.UtcNow >= PipeReadDeadline;
+    }
+
+    private static void DrainDeferredEngineDispose()
+    {
+        if (!disposeEngineAfterRead) return;
+        if (Thread.VolatileRead(ref pipeReadDepth) > 0) return;
+        DisposeEngine();
+    }
+
+    private static void DisposeEngine()
+    {
+        disposeEngineAfterRead = false;
+        var current = engine;
+        engine = null;
+        try
+        {
+            if (current != null) current.RecognizeAsyncCancel();
+        }
+        catch (Exception)
+        {
+            /* not listening */
+        }
+        try { if (current != null) current.Dispose(); } catch (Exception) { }
+    }
+
     private static void DrainCommands()
     {
         string command;
@@ -171,6 +330,7 @@ internal static class WindowsDictation
         var infos = SpeechRecognitionEngine.InstalledRecognizers();
         if (infos == null || infos.Count == 0)
         {
+            engineReported = true;
             Emit("{\"type\":\"error\",\"message\":\"Speech recognition is off. Turn it on in Windows Speech settings, then try the mic again.\",\"openSettings\":true,\"settingsUrl\":\"ms-settings:speech\"}");
             return null;
         }
@@ -221,10 +381,12 @@ internal static class WindowsDictation
             return;
         }
         if (listening) Stop();
+        else lock (Gate) committed = "";
         if (startDepth > 0) return;
         startDepth++;
         try
         {
+            engineReported = false;
             // This PC already has a local recognizer. Do not fall through to
             // online voice typing.
             CloseCapture();
@@ -246,28 +408,38 @@ internal static class WindowsDictation
             }
             openDeviceId = capture.DeviceId;
             openDeviceName = capture.DeviceName;
+            // Arm before the recognizer reads. A read on this thread has to pump
+            // the timer, and the timer is what pulls the next buffer.
+            ArmMicTimer();
+            // A short cushion so the recognizer's first read has real frames.
+            // The rest arrives from the timer, including while that read waits.
+            var cushionUntil = DateTime.UtcNow.AddMilliseconds(160);
+            while (capture != null && DateTime.UtcNow < cushionUntil && capture.Bytes < 3200)
+            {
+                capture.Pull();
+                if (capture.Bytes >= 3200) break;
+                Thread.Sleep(10);
+            }
             if (EnsureEngine(capture.Pipe))
             {
                 listening = true;
                 try
                 {
-                    ArmMicTimer();
                     engine.RecognizeAsync(RecognizeMode.Multiple);
                     if (capture != null) capture.Pull();
+                    EmitCaptureFormat();
                     EmitReady();
                     return;
                 }
                 catch (Exception ex)
                 {
                     Note(ex);
-                    listening = false;
-                    DisarmMicTimer();
-                    try { if (engine != null) engine.Dispose(); } catch (Exception) { }
-                    engine = null;
+                    FailListening(OpenedWithoutSpeech);
+                    return;
                 }
             }
             CloseCapture();
-            FailMic(null);
+            if (!engineReported) FailListening(OpenedWithoutSpeech);
         }
         finally
         {
@@ -298,6 +470,8 @@ internal static class WindowsDictation
         var wasListening = listening;
         listening = false;
         DisarmMicTimer();
+        // The next tap must not prepend words from the session that just ended.
+        lock (Gate) committed = "";
         if (!wasListening && engine == null && capture == null && !winrtActive) return;
         if (winrtActive)
         {
@@ -305,18 +479,12 @@ internal static class WindowsDictation
             try { winrt.ContinuousRecognitionSession.StopAsync(); } catch (Exception) { }
         }
         // End the capture first. Cancel waits on a blocked stream read, and ending
-        // the pipe is what lets that read return.
+        // the pipe is what lets that read return. When that read is this thread,
+        // disposing now would wait for itself, so the message loop finishes it.
+        disposeEngineAfterRead = engine != null;
         CloseCapture();
-        try
-        {
-            if (engine != null) engine.RecognizeAsyncCancel();
-        }
-        catch (Exception)
-        {
-            /* not listening */
-        }
-        try { if (engine != null) engine.Dispose(); } catch (Exception) { }
-        engine = null;
+        if (Thread.VolatileRead(ref pipeReadDepth) > 0) return;
+        DisposeEngine();
     }
 
     private static IntPtr micTimer;
@@ -338,6 +506,7 @@ internal static class WindowsDictation
     {
         var current = capture;
         capture = null;
+        captureFormatEmitted = false;
         if (current != null) current.Close();
     }
 
@@ -462,19 +631,8 @@ internal static class WindowsDictation
                 Thread.Sleep(10);
                 continue;
             }
-            if (msg.message == WM_QUIT)
-            {
-                PostThreadMessage(staThreadId, WM_QUIT, IntPtr.Zero, IntPtr.Zero);
-                return;
-            }
-            if (msg.message == WM_APP)
-            {
-                DrainCommands();
-                continue;
-            }
-            if (msg.message == WM_TIMER && capture != null) capture.Pull();
-            TranslateMessage(ref msg);
-            DispatchMessage(ref msg);
+            DispatchSta(ref msg);
+            if (pipeClose) return;
         }
     }
 
@@ -503,9 +661,10 @@ internal static class WindowsDictation
     {
         try
         {
-            if (!Heard(e.Result)) return;
+            if (!Heard(e.Result, false)) return;
             var text = Join(e.Result.Text);
             if (text.Length == 0) return;
+            capturedSpeech = text;
             Emit("{\"type\":\"partial\",\"text\":" + Json(text) + "}");
         }
         catch (Exception ex)
@@ -518,9 +677,10 @@ internal static class WindowsDictation
     {
         try
         {
-            if (!Heard(e.Result)) return;
+            if (!Heard(e.Result, true)) return;
             var text = Join(e.Result.Text);
             if (text.Length == 0) return;
+            capturedSpeech = text;
             lock (Gate) committed = text;
             Emit("{\"type\":\"final\",\"text\":" + Json(text) + "}");
         }
@@ -535,8 +695,9 @@ internal static class WindowsDictation
         if (!listening || e.Cancelled) return;
         if (e.Error != null)
         {
-            listening = false;
-            FailMic(null);
+            // The endpoint already opened. Privacy settings will not put words in the draft.
+            if (!string.IsNullOrEmpty(openDeviceName)) FailListening(OpenedWithoutSpeech);
+            else FailMic(null);
             return;
         }
         try
@@ -547,6 +708,27 @@ internal static class WindowsDictation
         {
             /* this phrase ended while the session is still listening */
         }
+    }
+
+    /// <summary>
+    /// SAPI's level event stays quiet on a custom stream until a buffer returns.
+    /// The composer meter follows the samples that actually arrived.
+    /// </summary>
+    private static void EmitCaptureLevel()
+    {
+        if (!listening || capture == null) return;
+        var now = DateTime.UtcNow;
+        lock (Gate)
+        {
+            if ((now - lastLevel).TotalMilliseconds < 100) return;
+            lastLevel = now;
+        }
+        captureLevelEvents++;
+        var peak = capture.TakeWindowPeak();
+        var scaled = peak / 32767.0;
+        var level = scaled <= 0.01 ? 0 : Math.Pow(Math.Min(1.0, scaled * 4.0), 0.5);
+        level = Math.Round(Math.Min(1.0, level), 3);
+        Emit("{\"type\":\"level\",\"value\":" + level.ToString(CultureInfo.InvariantCulture) + "}");
     }
 
     private static void OnLevel(object sender, AudioLevelUpdatedEventArgs e)
@@ -597,13 +779,29 @@ internal static class WindowsDictation
     }
 
     /// <summary>
-    /// Silence and room noise still produce a dictation guess. A very low score is that guess.
+    /// Dictation hypotheses often report confidence 0 even when the text is real.
+    /// A final still has to clear a floor, because silence turns into junk words there.
     /// </summary>
-    private static bool Heard(RecognitionResult result)
+    private static bool Heard(RecognitionResult result, bool finalResult)
     {
         if (result == null || result.Text == null) return false;
-        if (result.Confidence < 0.1f) return false;
-        return result.Text.Trim().Length > 0;
+        var text = result.Text.Trim();
+        if (text.Length == 0) return false;
+        if (finalResult && result.Confidence < 0.1f)
+        {
+            rejectedSpeech = text;
+            return false;
+        }
+        return true;
+    }
+
+    /// <summary>
+    /// The microphone is already open. Do not send the user to microphone privacy.
+    /// </summary>
+    private static void FailListening(string message)
+    {
+        Stop();
+        Emit("{\"type\":\"error\",\"message\":" + Json(message) + "}");
     }
 
     private static void FailMic(string reason)
@@ -642,6 +840,349 @@ internal static class WindowsDictation
         {
             try { if (File.Exists(wav)) File.Delete(wav); } catch (Exception) { }
         }
+    }
+
+    /// <summary>
+    /// Feeds a synthesized "hello desk" through the live pipe, recognizer, and
+    /// timer pull. A writer thread does not count: the read has to stay on the
+    /// STA, and the timer has to keep filling the pipe while that read waits.
+    /// </summary>
+    private static int StreamSelfTest()
+    {
+        var wav = Path.Combine(Path.GetTempPath(), "workhorse-dictation-stream.wav");
+        try
+        {
+            EnsureSta();
+            using (var synth = new SpeechSynthesizer())
+            {
+                synth.SetOutputToWaveFile(wav);
+                synth.Speak("hello desk");
+            }
+            var file = File.ReadAllBytes(wav);
+            int rate;
+            int channels;
+            int bits;
+            int dataAt;
+            int dataBytes;
+            if (!TryParseWav(file, out rate, out channels, out bits, out dataAt, out dataBytes))
+            {
+                Emit("{\"type\":\"error\",\"message\":\"The stream self-test wav could not be read.\"}");
+                return 6;
+            }
+            var raw = new byte[dataBytes];
+            Buffer.BlockCopy(file, dataAt, raw, 0, dataBytes);
+            var speech = ResampleToSpeechPcm(raw, rate, channels, bits);
+            if (speech == null || speech.Length == 0)
+            {
+                Emit("{\"type\":\"error\",\"message\":\"The stream self-test wav could not be converted.\"}");
+                return 6;
+            }
+            var pipe = new PcmPipe();
+            streamPipe = pipe;
+            streamPcm = speech;
+            streamAt = 0;
+            streamSilence = 0;
+            streamEnded = false;
+            capturedSpeech = "";
+            rejectedSpeech = "";
+            ArmMicTimer();
+            // One packet before the engine starts, matching the live cushion.
+            // The rest has to arrive from WM_TIMER while the recognizer reads.
+            FeedStreamTick();
+            if (!EnsureEngine(pipe)) return 5;
+            engine.RecognizeAsync(RecognizeMode.Multiple);
+            var until = DateTime.UtcNow.AddSeconds(12);
+            MSG msg;
+            while (DateTime.UtcNow < until && capturedSpeech.ToLowerInvariant().IndexOf("hello", StringComparison.Ordinal) < 0)
+            {
+                if (PeekMessage(out msg, IntPtr.Zero, 0, 0, PM_REMOVE)) DispatchSta(ref msg);
+                else Thread.Sleep(5);
+            }
+            DisarmMicTimer();
+            if (streamPipe != null) streamPipe.End();
+            DisposeEngine();
+            var text = capturedSpeech.Length > 0 ? capturedSpeech : rejectedSpeech;
+            Emit("{\"type\":\"final\",\"text\":" + Json(text) + "}");
+            return text.ToLowerInvariant().IndexOf("hello", StringComparison.Ordinal) >= 0 ? 0 : 4;
+        }
+        catch (Exception ex)
+        {
+            Emit("{\"type\":\"error\",\"message\":" + Json(ex.Message) + "}");
+            return 5;
+        }
+        finally
+        {
+            streamPipe = null;
+            streamPcm = null;
+            try { if (File.Exists(wav)) File.Delete(wav); } catch (Exception) { }
+        }
+    }
+
+    /// <summary>
+    /// A reader blocked on the pipe must still receive bytes written from the
+    /// timer. Monitor.Wait on the STA would miss that timer and return nothing.
+    /// </summary>
+    private static int PipeSelfTest()
+    {
+        try
+        {
+            EnsureSta();
+            var pipe = new PcmPipe();
+            var payload = Encoding.ASCII.GetBytes("HELLO-PIPE-BYTES");
+            streamPipe = pipe;
+            streamPcm = payload;
+            streamAt = 0;
+            streamSilence = int.MaxValue;
+            streamEnded = true;
+            PipeReadDeadline = DateTime.UtcNow.AddSeconds(3);
+            ArmMicTimer();
+            var buffer = new byte[payload.Length];
+            var read = 0;
+            while (read < payload.Length)
+            {
+                var n = pipe.Read(buffer, read, payload.Length - read);
+                if (n <= 0) break;
+                read += n;
+            }
+            DisarmMicTimer();
+            var got = Encoding.ASCII.GetString(buffer, 0, read);
+            var ok = got == "HELLO-PIPE-BYTES";
+            Emit("{\"type\":\"final\",\"text\":" + Json(ok ? "hello pipe" : "pipe empty") + "}");
+            return ok ? 0 : 4;
+        }
+        catch (Exception ex)
+        {
+            Emit("{\"type\":\"error\",\"message\":" + Json(ex.Message) + "}");
+            return 5;
+        }
+        finally
+        {
+            streamPipe = null;
+            streamPcm = null;
+            PipeReadDeadline = DateTime.MaxValue;
+        }
+    }
+
+    private static readonly object StreamGate = new object();
+
+    private static void FeedStreamTick()
+    {
+        lock (StreamGate)
+        {
+        var pipe = streamPipe;
+        var pcm = streamPcm;
+        if (pipe == null || pcm == null || (streamEnded && streamAt >= pcm.Length)) return;
+        if (streamAt < pcm.Length)
+        {
+            var n = Math.Min(640, pcm.Length - streamAt);
+            var chunk = new byte[n];
+            Buffer.BlockCopy(pcm, streamAt, chunk, 0, n);
+            streamAt += n;
+            pipe.WritePcm(chunk);
+            return;
+        }
+        if (streamSilence >= 16000)
+        {
+            if (!streamEnded)
+            {
+                streamEnded = true;
+                pipe.End();
+            }
+            return;
+        }
+        var silence = Math.Min(640, 16000 - streamSilence);
+        pipe.WritePcm(new byte[silence]);
+        streamSilence += silence;
+        }
+    }
+
+    private static byte[] ResampleToSpeechPcm(byte[] pcm, int rate, int channels, int bits)
+    {
+        if (pcm == null || rate < 1 || channels < 1 || bits != 16) return null;
+        var frameBytes = 2 * channels;
+        if (frameBytes < 2 || pcm.Length < frameBytes) return null;
+        var frames = pcm.Length / frameBytes;
+        var mono = new short[frames];
+        for (var i = 0; i < frames; i++)
+        {
+            var sum = 0;
+            for (var channel = 0; channel < channels; channel++)
+                sum += BitConverter.ToInt16(pcm, (i * channels + channel) * 2);
+            mono[i] = (short)(sum / channels);
+        }
+        if (rate == 16000)
+        {
+            var exact = new byte[frames * 2];
+            Buffer.BlockCopy(mono, 0, exact, 0, exact.Length);
+            return exact;
+        }
+        var outFrames = (int)((long)frames * 16000 / rate);
+        if (outFrames < 1) return null;
+        var output = new byte[outFrames * 2];
+        for (var i = 0; i < outFrames; i++)
+        {
+            var src = (double)i * rate / 16000.0;
+            var i0 = (int)src;
+            if (i0 >= frames) i0 = frames - 1;
+            var i1 = Math.Min(i0 + 1, frames - 1);
+            var frac = src - i0;
+            var sample = mono[i0] + (mono[i1] - mono[i0]) * frac;
+            var clamped = Math.Max(short.MinValue, Math.Min(short.MaxValue, (int)Math.Round(sample)));
+            output[i * 2] = (byte)(clamped & 0xff);
+            output[i * 2 + 1] = (byte)((clamped >> 8) & 0xff);
+        }
+        return output;
+    }
+
+    private static bool TryParseWav(byte[] file, out int rate, out int channels, out int bits, out int dataAt, out int dataBytes)
+    {
+        rate = 0;
+        channels = 0;
+        bits = 0;
+        dataAt = 0;
+        dataBytes = 0;
+        if (file == null || file.Length < 44) return false;
+        var offset = 12;
+        while (offset + 8 <= file.Length)
+        {
+            var id = Encoding.ASCII.GetString(file, offset, 4);
+            var size = BitConverter.ToInt32(file, offset + 4);
+            if (size < 0 || offset + 8 + size > file.Length) return false;
+            if (id == "fmt " && size >= 16)
+            {
+                channels = BitConverter.ToInt16(file, offset + 10);
+                rate = BitConverter.ToInt32(file, offset + 12);
+                bits = BitConverter.ToInt16(file, offset + 22);
+            }
+            else if (id == "data")
+            {
+                dataAt = offset + 8;
+                dataBytes = size;
+                return rate > 0 && channels > 0 && bits > 0 && dataBytes > 0;
+            }
+            offset += 8 + size + (size & 1);
+        }
+        return false;
+    }
+
+    /// <summary>Opens the chosen microphone and reports whether samples are arriving.</summary>
+    private static int ProbeMic()
+    {
+        var rows = WasapiMics.List();
+        var chosen = WasapiMics.Choose(rows, "");
+        if (chosen == null)
+        {
+            Emit("{\"type\":\"error\",\"message\":\"No microphone is connected.\"}");
+            return 2;
+        }
+        capture = new WasapiCapture();
+        if (!capture.Open(chosen))
+        {
+            Emit("{\"type\":\"error\",\"message\":" + Json(capture.Failure ?? "") + "}");
+            return 3;
+        }
+        ArmMicTimer();
+        var until = DateTime.UtcNow.AddSeconds(2);
+        MSG msg;
+        while (DateTime.UtcNow < until)
+        {
+            if (PeekMessage(out msg, IntPtr.Zero, 0, 0, PM_REMOVE))
+            {
+                if (msg.message == WM_TIMER && capture != null) capture.Pull();
+                TranslateMessage(ref msg);
+                DispatchMessage(ref msg);
+            }
+            else
+            {
+                Thread.Sleep(5);
+            }
+        }
+        DisarmMicTimer();
+        EmitCaptureFormat();
+        var peak = capture.Peak;
+        var bytes = capture.Bytes;
+        var name = capture.DeviceName ?? "";
+        var summary = "peak=" + peak.ToString(CultureInfo.InvariantCulture)
+            + " bytes=" + bytes.ToString(CultureInfo.InvariantCulture)
+            + " device=" + name
+            + " direct=" + (capture.Direct ? "true" : "false")
+            + " tag=" + capture.FormatTag.ToString(CultureInfo.InvariantCulture)
+            + " channels=" + capture.FormatChannels.ToString(CultureInfo.InvariantCulture)
+            + " rate=" + capture.FormatRate.ToString(CultureInfo.InvariantCulture)
+            + " bits=" + capture.FormatBits.ToString(CultureInfo.InvariantCulture)
+            + " floating=" + (capture.FormatFloating ? "true" : "false")
+            + " block=" + capture.FormatBlock.ToString(CultureInfo.InvariantCulture)
+            + " mixTag=" + capture.MixTag.ToString(CultureInfo.InvariantCulture)
+            + " mixChannels=" + capture.MixChannels.ToString(CultureInfo.InvariantCulture)
+            + " mixRate=" + capture.MixRate.ToString(CultureInfo.InvariantCulture)
+            + " mixBits=" + capture.MixBits.ToString(CultureInfo.InvariantCulture)
+            + " mixFloating=" + (capture.MixFloating ? "true" : "false")
+            + " mixBlock=" + capture.MixBlock.ToString(CultureInfo.InvariantCulture);
+        CloseCapture();
+        Emit("{\"type\":\"final\",\"text\":" + Json(summary) + "}");
+        return bytes > 0 ? 0 : 4;
+    }
+
+    /// <summary>
+    /// Starts the live path and reports whether the recognizer consumed samples.
+    /// A quiet room has no transcript. A stuck read has no consumed bytes.
+    /// </summary>
+    private static int ListenCheck()
+    {
+        try
+        {
+            EnsureSta();
+            StartDevice("");
+            var until = DateTime.UtcNow.AddSeconds(3);
+            MSG msg;
+            while (DateTime.UtcNow < until && !pipeClose)
+            {
+                if (PeekMessage(out msg, IntPtr.Zero, 0, 0, PM_REMOVE)) DispatchSta(ref msg);
+                else Thread.Sleep(5);
+            }
+            var bytes = capture == null ? 0 : capture.Bytes;
+            var peak = capture == null ? 0 : capture.Peak;
+            float volume;
+            bool muted;
+            WasapiMics.ReadVolume(openDeviceId, out volume, out muted);
+            var summary = "bytes=" + bytes.ToString(CultureInfo.InvariantCulture)
+                + " peak=" + peak.ToString(CultureInfo.InvariantCulture)
+                + " volume=" + volume.ToString(CultureInfo.InvariantCulture)
+                + " muted=" + (muted ? "true" : "false")
+                + " reads=" + pipeReadRequests.ToString(CultureInfo.InvariantCulture)
+                + " returned=" + pipeReadReturns.ToString(CultureInfo.InvariantCulture)
+                + " out=" + pipeBytesOut.ToString(CultureInfo.InvariantCulture)
+                + " last=" + lastReadRequest.ToString(CultureInfo.InvariantCulture)
+                + " levels=" + captureLevelEvents.ToString(CultureInfo.InvariantCulture)
+                + " speech=" + capturedSpeech;
+            Emit("{\"type\":\"final\",\"text\":" + Json(summary) + "}");
+            return pipeBytesOut > 0 && bytes > 0 ? 0 : 4;
+        }
+        catch (Exception ex)
+        {
+            Emit("{\"type\":\"error\",\"message\":" + Json(ex.Message) + "}");
+            return 5;
+        }
+    }
+
+    private static void EmitCaptureFormat()
+    {
+        if (captureFormatEmitted || capture == null) return;
+        captureFormatEmitted = true;
+        Emit("{\"type\":\"format\",\"direct\":" + (capture.Direct ? "true" : "false")
+            + ",\"tag\":" + capture.FormatTag.ToString(CultureInfo.InvariantCulture)
+            + ",\"channels\":" + capture.FormatChannels.ToString(CultureInfo.InvariantCulture)
+            + ",\"rate\":" + capture.FormatRate.ToString(CultureInfo.InvariantCulture)
+            + ",\"bits\":" + capture.FormatBits.ToString(CultureInfo.InvariantCulture)
+            + ",\"floating\":" + (capture.FormatFloating ? "true" : "false")
+            + ",\"block\":" + capture.FormatBlock.ToString(CultureInfo.InvariantCulture)
+            + ",\"mixTag\":" + capture.MixTag.ToString(CultureInfo.InvariantCulture)
+            + ",\"mixChannels\":" + capture.MixChannels.ToString(CultureInfo.InvariantCulture)
+            + ",\"mixRate\":" + capture.MixRate.ToString(CultureInfo.InvariantCulture)
+            + ",\"mixBits\":" + capture.MixBits.ToString(CultureInfo.InvariantCulture)
+            + ",\"mixFloating\":" + (capture.MixFloating ? "true" : "false")
+            + ",\"mixBlock\":" + capture.MixBlock.ToString(CultureInfo.InvariantCulture)
+            + "}");
     }
 
     private static string RecognizeWav(string wav)
@@ -688,8 +1229,7 @@ internal static class WindowsDictation
             if (PeekMessage(out msg, IntPtr.Zero, 0, 0, PM_REMOVE))
             {
                 if (msg.message == WM_QUIT) return;
-                TranslateMessage(ref msg);
-                DispatchMessage(ref msg);
+                DispatchSta(ref msg);
             }
             else
             {
@@ -745,6 +1285,23 @@ internal sealed class WasapiCapture
     public string DeviceId = "";
     public string DeviceName = "";
     public string Failure = "";
+    public int Peak;
+    public int Bytes;
+    public bool Direct;
+    public int FormatTag;
+    public int FormatChannels;
+    public int FormatRate;
+    public int FormatBits;
+    public int FormatBlock = 2;
+    public bool FormatFloating;
+    public int MixTag;
+    public int MixChannels;
+    public int MixRate;
+    public int MixBits;
+    public int MixBlock;
+    public bool MixFloating;
+    private int blockAlign = 2;
+    private readonly object pullGate = new object();
     private volatile bool run;
     private object client;
     private object captureClient;
@@ -774,12 +1331,37 @@ internal sealed class WasapiCapture
     /// Reads whatever the endpoint has queued. Called on the thread that opened
     /// the device, from the message timer, so the recognizer can read the pipe.
     /// </summary>
+    private void NotePeak(byte[] pcm)
+    {
+        Bytes += pcm.Length;
+        for (var i = 0; i + 1 < pcm.Length; i += 2)
+        {
+            var sample = (short)(pcm[i] | (pcm[i + 1] << 8));
+            var abs = sample == short.MinValue ? 32768 : Math.Abs(sample);
+            if (abs > Peak) Peak = abs;
+            if (abs > windowPeak) windowPeak = abs;
+        }
+    }
+
+    private int windowPeak;
+
+    public int TakeWindowPeak()
+    {
+        lock (pullGate)
+        {
+            var value = windowPeak;
+            windowPeak = 0;
+            return value;
+        }
+    }
+
     public void Pull()
     {
-        var source = packets;
-        if (source == null || !run) return;
+        if (!Monitor.TryEnter(pullGate, 0)) return;
         try
         {
+            var source = packets;
+            if (source == null || !run) return;
             uint frames;
             if (source.GetNextPacketSize(out frames) < 0) return;
             var pulls = 0;
@@ -795,17 +1377,24 @@ internal sealed class WasapiCapture
                 try
                 {
                     var silent = (flags & 2) != 0 || data == IntPtr.Zero;
+                    byte[] pcm;
                     if (converter == null)
                     {
-                        var count = (int)read * 2;
-                        var bytes = new byte[count];
-                        if (!silent && count > 0) Marshal.Copy(data, bytes, 0, count);
-                        if (count > 0) Pipe.WritePcm(bytes);
+                        // Copy the negotiated block, not a hardcoded 16-bit sample.
+                        // A float-stereo mix that ignored the 16 kHz init is block 8.
+                        if (blockAlign < 1) blockAlign = 2;
+                        var count = (int)read * blockAlign;
+                        pcm = new byte[count];
+                        if (!silent && count > 0) Marshal.Copy(data, pcm, 0, count);
                     }
                     else
                     {
-                        var pcm = converter.Convert(data, (int)read, silent);
-                        if (pcm.Length > 0) Pipe.WritePcm(pcm);
+                        pcm = converter.Convert(data, (int)read, silent);
+                    }
+                    if (pcm.Length > 0)
+                    {
+                        NotePeak(pcm);
+                        Pipe.WritePcm(pcm);
                     }
                 }
                 finally
@@ -818,6 +1407,10 @@ internal sealed class WasapiCapture
         catch (Exception ex)
         {
             WasapiMics.Note(ex);
+        }
+        finally
+        {
+            Monitor.Exit(pullGate);
         }
     }
 
@@ -847,7 +1440,19 @@ internal sealed class WasapiCapture
             client = activated;
             audioClient = (IAudioClient)activated;
             var audio = audioClient;
+            DescribeMix(audio);
             var direct = TryInitSpeechFormat(audio);
+            Direct = direct;
+            if (direct)
+            {
+                FormatTag = 1;
+                FormatChannels = 1;
+                FormatRate = 16000;
+                FormatBits = 16;
+                FormatFloating = false;
+                FormatBlock = 2;
+                blockAlign = 2;
+            }
             var convert = false;
             if (!direct)
             {
@@ -907,6 +1512,23 @@ internal sealed class WasapiCapture
                 return false;
             }
             converter = convert ? PcmConvert.FromMix(mixCopy) : null;
+            if (convert && mixCopy != IntPtr.Zero)
+            {
+                int tag;
+                int channels;
+                int rate;
+                int bits;
+                int block;
+                bool floating;
+                ReadFormat(mixCopy, out tag, out channels, out rate, out bits, out block, out floating);
+                FormatTag = tag;
+                FormatChannels = channels;
+                FormatRate = rate;
+                FormatBits = bits;
+                FormatFloating = floating;
+                FormatBlock = block;
+                blockAlign = block < 1 ? 2 : block;
+            }
             if (mixCopy != IntPtr.Zero) Marshal.FreeHGlobal(mixCopy);
             mixCopy = IntPtr.Zero;
             held = true;
@@ -936,6 +1558,40 @@ internal sealed class WasapiCapture
         client = null;
         audioClient = null;
         packets = null;
+    }
+
+    private void DescribeMix(IAudioClient audio)
+    {
+        IntPtr mix;
+        if (audio.GetMixFormat(out mix) < 0 || mix == IntPtr.Zero) return;
+        try
+        {
+            ReadFormat(mix, out MixTag, out MixChannels, out MixRate, out MixBits, out MixBlock, out MixFloating);
+        }
+        finally
+        {
+            Marshal.FreeCoTaskMem(mix);
+        }
+    }
+
+    private static void ReadFormat(IntPtr format, out int tag, out int channels, out int rate, out int bits, out int block, out bool floating)
+    {
+        tag = (ushort)Marshal.ReadInt16(format, 0);
+        channels = Marshal.ReadInt16(format, 2);
+        rate = Marshal.ReadInt32(format, 4);
+        block = (ushort)Marshal.ReadInt16(format, 12);
+        bits = (ushort)Marshal.ReadInt16(format, 14);
+        floating = tag == 3;
+        if (tag == 0xFFFE)
+        {
+            var extra = Marshal.ReadInt16(format, 16);
+            if (extra >= 22)
+            {
+                var sub = Marshal.ReadInt32(format, 24);
+                floating = sub == 3;
+            }
+        }
+        if (block <= 0) block = (floating || bits >= 32 ? 4 : 2) * Math.Max(1, channels);
     }
 
     private static bool TryInitSpeechFormat(IAudioClient audio)
@@ -987,6 +1643,32 @@ internal static class WasapiMics
         catch (Exception)
         {
             /* already released */
+        }
+    }
+
+    public static void ReadVolume(string deviceId, out float volume, out bool muted)
+    {
+        volume = -1;
+        muted = false;
+        if (string.IsNullOrEmpty(deviceId)) return;
+        try
+        {
+            var enumerator = (IMMDeviceEnumerator)new MMDeviceEnumeratorComObject();
+            IMMDevice device;
+            if (enumerator.GetDevice(deviceId, out device) < 0 || device == null) return;
+            var volumeId = new Guid("5CDF2C82-841E-4546-9722-0CF74078229A");
+            object activated;
+            if (device.Activate(ref volumeId, 23, IntPtr.Zero, out activated) < 0 || activated == null) return;
+            var endpoint = (IAudioEndpointVolume)activated;
+            float level;
+            if (endpoint.GetMasterVolumeLevelScalar(out level) >= 0) volume = level;
+            int mute;
+            if (endpoint.GetMute(out mute) >= 0) muted = mute != 0;
+            Release(activated);
+        }
+        catch (Exception)
+        {
+            volume = -1;
         }
     }
 
@@ -1131,6 +1813,7 @@ internal sealed class PcmPipe : Stream
     private byte[] current;
     private int offset;
     private int buffered;
+    private long position;
     private bool closed;
 
     public void WritePcm(byte[] data)
@@ -1161,22 +1844,67 @@ internal sealed class PcmPipe : Stream
 
     public override int Read(byte[] buffer, int start, int count)
     {
-        lock (gate)
+        if (buffer == null || count <= 0) return 0;
+        WindowsDictation.EnterPipeRead();
+        try
         {
-            while (!closed && current == null && chunks.Count == 0) Monitor.Wait(gate);
-            if (current == null)
+            WindowsDictation.NotePipeRead(count);
+            var filled = 0;
+            // The desktop recognizer treats a short read as the end of the
+            // microphone. Fill this request, and keep pulling while it waits,
+            // or a live mic stops after ready and the draft never changes.
+            while (filled < count)
             {
-                if (chunks.Count == 0) return 0;
-                current = chunks.Dequeue();
-                offset = 0;
+                lock (gate)
+                {
+                    while (filled < count)
+                    {
+                        var n = CopyLocked(buffer, start + filled, count - filled);
+                        if (n <= 0) break;
+                        filled += n;
+                    }
+                    if (filled == count) break;
+                    if (closed || WindowsDictation.PipeClosed()) break;
+                }
+                if (WindowsDictation.PipeReadExpired()) break;
+                if (!WindowsDictation.PumpPipeRead())
+                {
+                    WindowsDictation.PullCaptureOffSta();
+                    lock (gate)
+                    {
+                        if (current == null && chunks.Count == 0 && !closed && filled < count)
+                            Monitor.Wait(gate, 15);
+                    }
+                }
             }
-            var n = Math.Min(count, current.Length - offset);
-            Buffer.BlockCopy(current, offset, buffer, start, n);
-            offset += n;
-            buffered -= n;
-            if (offset >= current.Length) current = null;
-            return n;
+            if (filled > 0)
+            {
+                lock (gate) position += filled;
+                WindowsDictation.NotePipeBytes(filled);
+            }
+            return filled;
         }
+        finally
+        {
+            WindowsDictation.LeavePipeRead();
+        }
+    }
+
+    private int CopyLocked(byte[] buffer, int start, int count)
+    {
+        if (current == null)
+        {
+            if (chunks.Count == 0) return 0;
+            current = chunks.Dequeue();
+            offset = 0;
+        }
+        if (current == null || offset >= current.Length) return 0;
+        var n = Math.Min(count, current.Length - offset);
+        Buffer.BlockCopy(current, offset, buffer, start, n);
+        offset += n;
+        buffered -= n;
+        if (offset >= current.Length) current = null;
+        return n;
     }
 
     public override bool CanRead { get { return true; } }
@@ -1187,11 +1915,17 @@ internal sealed class PcmPipe : Stream
     public override long Length { get { return long.MaxValue; } }
     public override long Position
     {
-        get { return 0; }
+        get { lock (gate) return position; }
         set { }
     }
     public override void Flush() { }
-    public override long Seek(long pos, SeekOrigin origin) { return 0; }
+    public override long Seek(long pos, SeekOrigin origin)
+    {
+        // The desktop wrapper records this position when it attaches the stream.
+        // A live mic cannot rewind. Reporting the bytes already delivered keeps
+        // the recognizer from treating every read as the start of the stream.
+        lock (gate) return position;
+    }
     public override void SetLength(long value) { }
     public override void Write(byte[] buffer, int start, int count) { }
 }
@@ -1354,6 +2088,24 @@ internal interface IAudioClient
     int Reset();
     int SetEventHandle(IntPtr handle);
     int GetService(ref Guid iid, [MarshalAs(UnmanagedType.IUnknown)] out object service);
+}
+
+[ComImport, Guid("5CDF2C82-841E-4546-9722-0CF74078229A"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+internal interface IAudioEndpointVolume
+{
+    int RegisterControlChangeNotify(IntPtr notify);
+    int UnregisterControlChangeNotify(IntPtr notify);
+    int GetChannelCount(out uint count);
+    int SetMasterVolumeLevel(float levelDb, IntPtr context);
+    int SetMasterVolumeLevelScalar(float level, IntPtr context);
+    int GetMasterVolumeLevel(out float levelDb);
+    int GetMasterVolumeLevelScalar(out float level);
+    int SetChannelVolumeLevel(uint channel, float levelDb, IntPtr context);
+    int SetChannelVolumeLevelScalar(uint channel, float level, IntPtr context);
+    int GetChannelVolumeLevel(uint channel, out float levelDb);
+    int GetChannelVolumeLevelScalar(uint channel, out float level);
+    int SetMute(int mute, IntPtr context);
+    int GetMute(out int mute);
 }
 
 [ComImport, Guid("C8ADBD64-E71E-48a0-A4DE-185C395CD317"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]

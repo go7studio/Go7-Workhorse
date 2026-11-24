@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import {
   macDictationLaunch,
+  dictationHelperExit,
   dictationStartLine,
   parseDictationLine,
   windowsDictationLaunch,
@@ -63,6 +64,10 @@ type DictationHandle = {
   child: ChildProcess;
   stop: () => void;
   onLine: (line: DictationLine) => void;
+  sawReady: boolean;
+  sawTranscript: boolean;
+  reported: boolean;
+  stopped: boolean;
 };
 
 let active: DictationHandle | null = null;
@@ -99,6 +104,11 @@ export function startMacDictation(input: {
   const bootLine = input.bootLine ?? dictationStartLine(input.deviceId);
   if (helperIsLive(active)) {
     active.onLine = input.onLine;
+    if (bootLine.startsWith("start")) {
+      active.sawReady = false;
+      active.sawTranscript = false;
+      active.reported = false;
+    }
     active.child.stdin?.write(bootLine);
     return { ok: true };
   }
@@ -126,15 +136,19 @@ export function startMacDictation(input: {
     stdio: ["pipe", "pipe", "pipe"],
     ...groupSpawnOptions(input.platform ?? process.platform),
   });
-  let stopped = false;
-  let reported = false;
   const handle: DictationHandle = {
     child,
     stop: () => undefined,
     onLine: input.onLine,
+    sawReady: false,
+    sawTranscript: false,
+    reported: false,
+    stopped: false,
   };
   const report = (line: DictationLine) => {
-    if (line.type === "error") reported = true;
+    if (line.type === "error") handle.reported = true;
+    if (line.type === "ready") handle.sawReady = true;
+    if ((line.type === "partial" || line.type === "final") && line.text.trim()) handle.sawTranscript = true;
     if (line.type === "devices" && devicesWaiter) {
       const waiter = devicesWaiter;
       devicesWaiter = null;
@@ -143,8 +157,8 @@ export function startMacDictation(input: {
     handle.onLine(line);
   };
   const stop = () => {
-    if (stopped) return;
-    stopped = true;
+    if (handle.stopped) return;
+    handle.stopped = true;
     stopProcessTree(child);
   };
   handle.stop = stop;
@@ -155,8 +169,7 @@ export function startMacDictation(input: {
     /* spawn already failed */
   }
   child.on("error", () => {
-    if (stopped || reported) return;
-    reported = true;
+    if (handle.stopped || handle.reported) return;
     report({
       type: "error",
       message:
@@ -185,10 +198,17 @@ export function startMacDictation(input: {
     }
     if (active?.child === child) active = null;
     // A TCC abort exits with no code and SIGABRT. Treating that as a quiet
-    // exit left the composer on Listening with a dead meter.
-    if (stopped || reported || code === 0) return;
-    if (code === null && !signal) return;
-    report({ type: "error", message: "Speech recognition stopped before it heard anything." });
+    // exit left the composer on Listening with a dead meter. A Windows helper
+    // that prints ready and then exits 0 does the same when no words arrived.
+    const failure = dictationHelperExit({
+      stopped: handle.stopped,
+      reported: handle.reported,
+      code,
+      signal,
+      sawReady: handle.sawReady,
+      sawTranscript: handle.sawTranscript,
+    });
+    if (failure) report(failure);
   });
   return { ok: true };
 }

@@ -1029,7 +1029,6 @@ test("a ready helper that exits with no words surfaces an error and clears liste
   child.emit("close", 0, null);
   assert.equal(lines[0]?.type, "ready");
   assert.deepEqual(lines[1], { type: "error", message: DICTATION_OPENED_WITHOUT_SPEECH });
-  assert.equal(lines[1]?.openSettings, undefined);
   const composer = read("src/ui/Composer.tsx");
   assert.match(composer, /event\.type === "error"[\s\S]{0,400}setRecording\(false\)/);
   assert.match(composer, /dictationRef\.current = false/);

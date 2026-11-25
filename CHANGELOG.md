@@ -8,6 +8,14 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.7.18](https://github.com/go7studio/Go7-Workhorse/compare/v0.7.17...v0.7.18) (2026-11-25)
+
+
+### Bug Fixes
+
+* keep Windows chat dictation listening until words arrive ([223735c](https://github.com/go7studio/Go7-Workhorse/commit/223735cc87c5be673a64340226dcbf20e702e5cf))
+* typecheck the dictation exit assertion ([92f6275](https://github.com/go7studio/Go7-Workhorse/commit/92f62751acd6d00264c4bc5856fcc59dd1b6dfba))
+
 ## [0.7.17](https://github.com/go7studio/Go7-Workhorse/compare/v0.7.16...v0.7.17) (2026-11-21)
 
 
